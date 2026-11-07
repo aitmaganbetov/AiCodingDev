@@ -45,6 +45,7 @@ flowchart TD
 - Переход — условный UPDATE по `(id, version, status)` + запись `outbox_events` + `audit_events` (для пользовательских команд) в одной транзакции.
 - Недопустимый переход → `409 invalid_state_transition` (API) / исключение (воркер). Таблицы переходов ниже — исчерпывающие: всё, чего нет в таблице, запрещено.
 - Терминальные состояния не имеют исходящих переходов.
+- **Консолидированный исчерпывающий список разрешённых переходов** (включая служебные: отмена/сбой из любого нетерминального состояния, возврат из `PAUSED`/`BLOCKED` в `resume_status`, `external_action`) — [DATABASE_DESIGN.md §18.3](../database/DATABASE_DESIGN.md) (справочник `allowed_transitions`). Таблицы ниже описывают триггеры и guards; при расхождении нормативен §18.3, а расхождение — дефект документации.
 
 ### 3.1 Run
 
@@ -85,7 +86,7 @@ stateDiagram-v2
 |---|---|---|
 | CREATED | DISCOVERY | воркер принял run; репозиторий доступен |
 | DISCOVERY | PLANNED | DAG прошёл валидацию (§4.1), `plan_version++` |
-| PLANNED | AWAITING_APPROVAL | approval policy (`risk_based`: max(risk) ≥ high или L4/L5; `always`; `never` запрещён для L4/L5) |
+| PLANNED | AWAITING_APPROVAL | approval policy: `risk_based` — max(risk) ≥ high или есть задачи L4/L5; `always` — всегда; `critical_only` — утверждение плана не требуется, кроме L4/L5 (ТЗ §5: L4/L5 всегда требуют human approval); approvals критических действий требуются при любой политике |
 | PLANNED | RUNNING | approval не требуется |
 | AWAITING_APPROVAL | RUNNING | approval `PLAN_APPROVAL` = APPROVED |
 | AWAITING_APPROVAL | DISCOVERY | REJECTED с запросом перепланирования |

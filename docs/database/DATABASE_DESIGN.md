@@ -263,7 +263,7 @@ CREATE DOMAIN sse_event_type_persisted_t AS text CHECK (VALUE IN
 | `repositories.status` | `ACTIVE`, `UNREACHABLE`, `DETACHED` |
 | `worktrees.status` | `ACTIVE`, `LOCKED`, `REMOVED`, `ORPHANED` (бриф) |
 | `project_settings.security_profile` | `standard`, `hardened` |
-| `runs.approval_policy`, `project_settings.approval_policy` | `risk_based`, `always_manual` |
+| `runs.approval_policy`, `project_settings.approval_policy` | `risk_based`, `always`, `critical_only` (синхронизировано с openapi.yaml) |
 | `task_dependencies.dependency_type` | `finish` (ждать `SUCCEEDED`), `review` (зависимая задача — ревью результата), `artifact` (нужен артефакт предшественника; семантика ожидания та же, что `finish`) |
 | `task_attempts.status` | `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED` |
 | `agent_assignments.review_independence` | `not_applicable`, `independent_provider`, `same_provider_fallback`, `manual` |
@@ -294,7 +294,7 @@ CREATE DOMAIN sse_event_type_persisted_t AS text CHECK (VALUE IN
 | `documentation_sources.trust_level` | `official`, `vendor`, `community`, `internal`, `untrusted` |
 | `documentation_sources.refresh_policy` | `manual`, `daily`, `weekly`, `monthly` |
 | `documentation_snapshots.status` | `FETCHING`, `READY`, `FAILED`, `QUARANTINED`, `SUPERSEDED` |
-| `quality_gates.gate_type` | `LINT`, `TYPECHECK`, `BUILD`, `UNIT`, `INTEGRATION`, `E2E`, `SAST`, `SCA`, `SECRETS`, `MIGRATION`, `PERFORMANCE`, `REVIEW`, `COVERAGE`, `SBOM`, `IAC` (категории ТЗ §14; **синхронизировать с QUALITY_GATES.md**) |
+| `quality_gates.gate_type` | `FORMAT`, `LINT`, `TYPECHECK`, `BUILD`, `UNIT`, `INTEGRATION`, `E2E`, `SAST`, `SCA`, `SECRETS`, `IAC`, `POLICY`, `MIGRATION`, `PERF`, `REVIEW`, `COVERAGE`, `SBOM`, `SIGN`, `SCOPE` (синхронизировано с QUALITY_GATES.md §2.1, нормативный источник) |
 | `findings.source` | `gate`, `agent_review`, `manual`, `github` |
 | `artifacts.kind` | `git_diff`, `cli_raw_log`, `cli_output`, `test_report`, `coverage_report`, `scan_report`, `sbom`, `context_pack`, `checkpoint_state`, `documentation`, `knowledge`, `report`, `archive`, `other` |
 | `evidence.kind` | `command_result`, `test_report`, `scan_report`, `diff`, `review_verdict`, `manual_attestation`, `benchmark`, `agent_claim` |
@@ -559,7 +559,7 @@ CREATE TABLE project_settings (
   security_profile    text                 NOT NULL DEFAULT 'standard'
                                            CHECK (security_profile IN ('standard','hardened')),
   approval_policy     text                 NOT NULL DEFAULT 'risk_based'
-                                           CHECK (approval_policy IN ('risk_based','always_manual')),
+                                           CHECK (approval_policy IN ('risk_based','always','critical_only')),
   max_parallel_tasks  int                  NOT NULL DEFAULT 4 CHECK (max_parallel_tasks BETWEEN 1 AND 64),
   max_review_loops    int                  NOT NULL DEFAULT 3 CHECK (max_review_loops BETWEEN 0 AND 10),
   settings_version    int                  NOT NULL DEFAULT 1 CHECK (settings_version >= 1),
@@ -713,7 +713,7 @@ CREATE TABLE runs (
   quality_profile       quality_profile_t      NOT NULL,
   quality_profile_id    uuid                   NOT NULL,   -- конкретная версия профиля (snapshot)
   approval_policy       text                   NOT NULL DEFAULT 'risk_based'
-                                               CHECK (approval_policy IN ('risk_based','always_manual')),
+                                               CHECK (approval_policy IN ('risk_based','always','critical_only')),
   documentation_mode    documentation_mode_t   NOT NULL,   -- snapshot project_settings на момент создания
   policy_snapshot       jsonb                  NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(policy_snapshot) = 'object'),
   plan_version          int                    NOT NULL DEFAULT 0 CHECK (plan_version >= 0),
@@ -1917,8 +1917,8 @@ CREATE TABLE quality_gates (
   profile_id       uuid        NOT NULL,
   name             text        NOT NULL CHECK (name ~ '^[a-z0-9][a-z0-9_.-]{0,63}$'),   -- напр. 'ruff', 'pytest-unit', 'semgrep'
   gate_type        text        NOT NULL CHECK (gate_type IN
-                     ('LINT','TYPECHECK','BUILD','UNIT','INTEGRATION','E2E','SAST','SCA','SECRETS','MIGRATION',
-                      'PERFORMANCE','REVIEW','COVERAGE','SBOM','IAC')),
+                     ('FORMAT','LINT','TYPECHECK','BUILD','UNIT','INTEGRATION','E2E','SAST','SCA','SECRETS',
+                      'IAC','POLICY','MIGRATION','PERF','REVIEW','COVERAGE','SBOM','SIGN','SCOPE')),
   required         boolean     NOT NULL DEFAULT true,
   config           jsonb       NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(config) = 'object'),  -- tool, args-профиль, пороги
   applicability    jsonb       NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(applicability) = 'object'), -- языки/пути/технологии
@@ -2148,11 +2148,11 @@ CREATE TABLE standard_controls (
   clause_ref           text         NOT NULL CHECK (length(clause_ref) BETWEEN 1 AND 100),
   control_code         text         NOT NULL CHECK (control_code ~ '^[A-Za-z0-9._-]{1,64}$'),
   description          text         NOT NULL CHECK (length(description) BETWEEN 1 AND 4000),
-  verification_method  text         NOT NULL CHECK (verification_method IN ('automated','manual','hybrid')),
+  verification_method  text         NOT NULL CHECK (verification_method IN ('automated_gate','agent_review','manual','document_check')),
   default_agent_role   agent_role_t,
   default_gate_type    text         CHECK (default_gate_type IN
-                         ('LINT','TYPECHECK','BUILD','UNIT','INTEGRATION','E2E','SAST','SCA','SECRETS','MIGRATION',
-                          'PERFORMANCE','REVIEW','COVERAGE','SBOM','IAC')),
+                         ('FORMAT','LINT','TYPECHECK','BUILD','UNIT','INTEGRATION','E2E','SAST','SCA','SECRETS',
+                          'IAC','POLICY','MIGRATION','PERF','REVIEW','COVERAGE','SBOM','SIGN','SCOPE')),
   active               boolean      NOT NULL DEFAULT true,
   created_at           timestamptz  NOT NULL DEFAULT now(),
   CONSTRAINT pk_standard_controls PRIMARY KEY (id),
@@ -2711,7 +2711,7 @@ CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
 -- approvals('approval'), external_actions('external_action').
 ```
 
-Начальное содержимое `allowed_transitions` (из ТЗ §6 и Directive/Approval/Ledger FSM; **подлежит сверке с DATA_FLOW.md**, источник истины — `transitions.py`). `__new__` — допустимое начальное состояние при `INSERT`.
+Начальное содержимое `allowed_transitions` (из ТЗ §6 и Directive/Approval/Ledger FSM; сверено с DATA_FLOW.md §3 — **эта таблица является консолидированным нормативным списком переходов**; в коде источник — `transitions.py`, CI сравнивает множества). `__new__` — допустимое начальное состояние при `INSERT`.
 
 | entity | from | разрешённые to |
 |---|---|---|
@@ -2719,7 +2719,7 @@ CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
 | run | `CREATED` | `DISCOVERY`, `CANCELLED`, `FAILED` |
 | run | `DISCOVERY` | `PLANNED`, `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
 | run | `PLANNED` | `AWAITING_APPROVAL`, `RUNNING`, `DISCOVERY`, `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
-| run | `AWAITING_APPROVAL` | `RUNNING`, `PLANNED`, `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| run | `AWAITING_APPROVAL` | `RUNNING`, `PLANNED`, `DISCOVERY` (план отклонён с перепланированием), `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
 | run | `RUNNING` | `VERIFYING`, `PLANNED` (replan по поручению), `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
 | run | `VERIFYING` | `COMPLETED`, `RUNNING` (fix после FAIL gate), `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
 | run | `PAUSED` | `DISCOVERY`, `PLANNED`, `AWAITING_APPROVAL`, `RUNNING`, `VERIFYING`, `FAILED`, `CANCELLED` |
@@ -2731,16 +2731,16 @@ CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
 | task | `RUNNING` | `VERIFYING`, `RETRY_WAIT`, `BLOCKED`, `FAILED`, `CANCELLED` |
 | task | `VERIFYING` | `SUCCEEDED`, `RETRY_WAIT`, `BLOCKED`, `FAILED`, `CANCELLED` |
 | task | `RETRY_WAIT` | `READY`, `BLOCKED`, `FAILED`, `CANCELLED` |
-| task | `BLOCKED` | `PENDING`, `READY`, `FAILED`, `CANCELLED` |
+| task | `BLOCKED` | `PENDING`, `READY`, `SUCCEEDED` (только `blocked_reason=MANUAL_REVIEW` + approval APPROVED с evidence `producer=human`; guard в коде), `FAILED`, `CANCELLED` |
 | execution | `__new__` | `QUEUED` |
 | execution | `QUEUED` | `STARTING`, `CANCELLED`, `CRASHED` |
 | execution | `STARTING` | `RUNNING`, `TIMED_OUT`, `CANCELLED`, `CRASHED`, `AUTH_REQUIRED`, `RATE_LIMITED` |
 | execution | `RUNNING` | `EXITED`, `TIMED_OUT`, `CANCELLED`, `CRASHED`, `AUTH_REQUIRED`, `RATE_LIMITED` |
 | execution | `EXITED` | `COLLECTED`, `CRASHED` (результат не собран/не разобран) |
 | directive | `__new__` | `RECEIVED` |
-| directive | `RECEIVED` | `IMPACT_ANALYSIS_PENDING`, `REJECTED`, `CANCELLED`, `FAILED` |
+| directive | `RECEIVED` | `IMPACT_ANALYSIS_PENDING`, `DISPATCHED` (только `ASK`), `REJECTED`, `CANCELLED`, `FAILED` |
 | directive | `IMPACT_ANALYSIS_PENDING` | `IMPACT_READY`, `CANCELLED`, `FAILED` |
-| directive | `IMPACT_READY` | `AWAITING_CONFIRMATION`, `CONFIRMED`, `REJECTED`, `CANCELLED` |
+| directive | `IMPACT_READY` | `AWAITING_CONFIRMATION`, `CONFIRMED`, `CHECKPOINTING` (auto-confirm некритичного влияния), `REJECTED`, `CANCELLED` |
 | directive | `AWAITING_CONFIRMATION` | `CONFIRMED`, `REJECTED`, `CANCELLED` |
 | directive | `CONFIRMED` | `CHECKPOINTING`, `REPLANNING`, `DISPATCHED`, `CANCELLED`, `FAILED` |
 | directive | `CHECKPOINTING` | `REPLANNING`, `DISPATCHED`, `FAILED` |
@@ -2929,9 +2929,10 @@ CREATE POLICY p_runs_tenant ON runs
 -- Корень tenancy
 ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workspaces FORCE ROW LEVEL SECURITY;
-CREATE POLICY p_workspaces_tenant ON workspaces
-  FOR SELECT, UPDATE TO aicd_app, aicd_worker   -- (в DDL — две политики: FOR SELECT и FOR UPDATE)
+CREATE POLICY p_workspaces_select ON workspaces FOR SELECT TO aicd_app, aicd_worker
   USING (id = app_current_workspace());
+CREATE POLICY p_workspaces_update ON workspaces FOR UPDATE TO aicd_app
+  USING (id = app_current_workspace()) WITH CHECK (id = app_current_workspace());
 CREATE POLICY p_workspaces_create ON workspaces
   FOR INSERT TO aicd_app
   WITH CHECK (id = app_current_workspace() AND created_by = app_current_user());
@@ -3100,7 +3101,7 @@ CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USI
 | OQ-DB-09 | Модель ролей брифа не покрывает межарендаторные выборки воркеров | NOLOGIN `aicd_sysfn` + `sys_*` функции; S-класс (`outbox_events`, `worker_leases`) с политикой «все строки» для `aicd_worker`. Вариант усиления — отдельная роль `aicd_dispatcher` только для outbox | Утверждение (SECURITY_ARCHITECTURE.md) |
 | OQ-DB-10 | Горячая строка `runs` (`last_event_seq` по ADR-0011 + `FOR SHARE` из §18.4) | Оставлено по ADR-0011; при измеренной конкуренции — вынести счётчик в `run_event_counters(run_id, last_seq)` | Замер в P3 |
 | OQ-DB-11 | Партиционирование `agent_messages`, `run_event_log` | Не в v1 (FK/уникальность); retention пакетами | Пересмотр после нагрузочного теста P9 |
-| OQ-DB-12 | Значения `approval_policy` (в ТЗ только пример `risk_based`), default `quality_profile` | `risk_based`/`always_manual`; default профиль `strict` | Решение владельца |
+| OQ-DB-12 | Значения `approval_policy` (в ТЗ только пример `risk_based`), default `quality_profile` | `risk_based`/`always`/`critical_only` (как в openapi.yaml); default профиль `strict` | Решение владельца |
 | OQ-DB-13 | Сроки retention §20.3 | Предложения | Утверждение владельцем |
 | OQ-DB-14 | Tamper-evidence аудита | Опционально: hash-chain `prev_hash`/`row_hash` (sha256 канонического JSON строки) в P9 | Решение |
 | OQ-DB-15 | Кто управляет глобальными справочниками (`standards`, `technologies`, `agent_profiles`, `cli_installations`) — роли RBAC workspace-scoped | v1: seed-миграции + `aicd` admin CLI; API — только чтение; «platform admin» не вводится | Решение владельца |
