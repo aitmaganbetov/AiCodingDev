@@ -68,7 +68,7 @@
 ### 1.3 Tenancy и составные FK
 
 - Каждая tenant-таблица содержит `workspace_id uuid NOT NULL` (ADR-0008), даже если workspace выводим через родителя. Это даёт RLS без JOIN.
-- Каждая tenant-таблица с суррогатным `id` имеет `CONSTRAINT uq_<t>_ws_id UNIQUE (workspace_id, id)`. Дочерние таблицы ссылаются **составным FK** `(workspace_id, <parent>_id) → <parent>(workspace_id, id)` — ссылка на строку чужого workspace физически невозможна (ТЗ §7.1 «межтенантные ссылки запрещены»).
+- Каждая tenant-таблица с суррогатным `id`, на которую ссылаются другие таблицы, имеет `CONSTRAINT uq_<t>_ws_id UNIQUE (workspace_id, id)` (а где нужен инвариант «тот же run/снимок» — `UNIQUE (workspace_id, run_id, id)` / `UNIQUE (workspace_id, snapshot_id, id)`). Дочерние таблицы ссылаются **составным FK** `(workspace_id, <parent>_id) → <parent>(workspace_id, id)` — ссылка на строку чужого workspace физически невозможна (ТЗ §7.1 «межтенантные ссылки запрещены»).
 - Ссылки tenant → global (например, `cli_executions.installation_id → cli_installations`) — обычные FK.
 - Ссылки global → tenant запрещены (исключение: нет).
 - Для nullable составных FK используется `MATCH SIMPLE` (по умолчанию): при `NULL` в `<parent>_id` FK не проверяется; `workspace_id` всегда `NOT NULL`.
@@ -81,7 +81,8 @@
 ### 1.5 Временные метки, `updated_at`, optimistic locking
 
 - Изменяемые таблицы имеют `updated_at timestamptz NOT NULL DEFAULT now()` и триггер `trg_<t>_updated_at BEFORE UPDATE … EXECUTE FUNCTION trg_fn_set_updated_at()`.
-- Агрегаты с конкурентными изменениями (`runs`, `tasks`, `user_directives`, `approvals`, `project_settings`, `policies`, `workspaces`, `projects`, `external_actions`, `quality_profiles`) имеют `version bigint NOT NULL DEFAULT 0` и триггер `trg_<t>_version BEFORE UPDATE … EXECUTE FUNCTION trg_fn_enforce_version()`, который требует `NEW.version = OLD.version + 1`. Приложение выполняет `UPDATE … SET …, version = version + 1 WHERE id = :id AND version = :expected` (ADR-0007); 0 строк → `VersionConflict` (HTTP 409/412 с ETag).
+- Агрегаты с конкурентными изменениями (`runs`, `tasks`, `user_directives`, `approvals`, `project_settings`, `workspaces`, `projects`, `external_actions`) имеют `version bigint NOT NULL DEFAULT 0` и триггер `trg_<t>_version BEFORE UPDATE … EXECUTE FUNCTION trg_fn_enforce_version()`, который требует `NEW.version = OLD.version + 1`. Приложение выполняет `UPDATE … SET …, version = version + 1 WHERE id = :id AND version = :expected` (ADR-0007); 0 строк → `VersionConflict` (HTTP 409/412 с ETag).
+- `policies` и `quality_profiles` — неизменяемые версии: их `version` означает версию содержимого, а конкурентность обеспечивает `UNIQUE (…, version)` (§14.1).
 - Append-only таблицы (`audit_events`, `run_event_log`, `agent_messages`, `agent_activity_events`, `outbox_events` кроме полей публикации) не имеют `updated_at`/`version`.
 
 ### 1.6 Политика `ON DELETE`
@@ -295,7 +296,7 @@ CREATE DOMAIN sse_event_type_persisted_t AS text CHECK (VALUE IN
 | `documentation_snapshots.status` | `FETCHING`, `READY`, `FAILED`, `QUARANTINED`, `SUPERSEDED` |
 | `quality_gates.gate_type` | `LINT`, `TYPECHECK`, `BUILD`, `UNIT`, `INTEGRATION`, `E2E`, `SAST`, `SCA`, `SECRETS`, `MIGRATION`, `PERFORMANCE`, `REVIEW`, `COVERAGE`, `SBOM`, `IAC` (категории ТЗ §14; **синхронизировать с QUALITY_GATES.md**) |
 | `findings.source` | `gate`, `agent_review`, `manual`, `github` |
-| `artifacts.kind` | `git_diff`, `cli_raw_log`, `cli_output`, `test_report`, `coverage_report`, `scan_report`, `sbom`, `context_pack`, `checkpoint_state`, `documentation`, `knowledge`, `report`, `webhook_payload`, `archive`, `other` |
+| `artifacts.kind` | `git_diff`, `cli_raw_log`, `cli_output`, `test_report`, `coverage_report`, `scan_report`, `sbom`, `context_pack`, `checkpoint_state`, `documentation`, `knowledge`, `report`, `archive`, `other` |
 | `evidence.kind` | `command_result`, `test_report`, `scan_report`, `diff`, `review_verdict`, `manual_attestation`, `benchmark`, `agent_claim` |
 | `evidence.producer` | `verification_engine`, `cli_gateway`, `agent`, `user`, `github`, `system` |
 | `evidence_links.target_type` | `task`, `gate_execution`, `finding`, `compliance_result`, `test_result`, `agent_message`, `approval`, `pull_request`, `architecture_decision`, `agent_decision` |
@@ -2305,3 +2306,806 @@ CREATE UNIQUE INDEX uq_approvals_pending_subject ON approvals (workspace_id, act
 -- trg_approvals_decider_role (§18.7): decided_by — член workspace с ролью ≥ required_role (с учётом project_member_overrides).
 ```
 
+---
+
+## 15. Надёжность
+
+### 15.1 `checkpoints` (T, orchestration)
+Безопасная точка восстановления run/задачи (ТЗ §6, §8.2: «safe checkpoint» перед replan; recovery).
+
+```sql
+CREATE TABLE checkpoints (
+  id              uuid7       NOT NULL,
+  workspace_id    uuid        NOT NULL,
+  run_id          uuid        NOT NULL,
+  task_id         uuid,
+  state_version   bigint      NOT NULL CHECK (state_version >= 0),   -- runs.version (или tasks.version) на момент снимка
+  plan_version    int         NOT NULL CHECK (plan_version >= 0),
+  reason          text        NOT NULL CHECK (reason IN ('plan_approved','directive','pause','pre_external_action','periodic','recovery')),
+  state_ref       uuid        NOT NULL,        -- artifacts.id (kind='checkpoint_state'): сериализованное состояние FSM/DAG
+  worktree_id     uuid,
+  git_commit_sha  git_sha,                     -- WIP-коммит в изолированной ветке worktree, если был
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_checkpoints PRIMARY KEY (id),
+  CONSTRAINT uq_checkpoints_ws_id UNIQUE (workspace_id, id),
+  CONSTRAINT uq_checkpoints_state UNIQUE NULLS NOT DISTINCT (run_id, task_id, state_version),
+  CONSTRAINT fk_checkpoints_run  FOREIGN KEY (workspace_id, run_id) REFERENCES runs(workspace_id, id) ON DELETE RESTRICT,
+  CONSTRAINT fk_checkpoints_task FOREIGN KEY (workspace_id, run_id, task_id) REFERENCES tasks(workspace_id, run_id, id) ON DELETE RESTRICT,
+  CONSTRAINT fk_checkpoints_state FOREIGN KEY (workspace_id, state_ref) REFERENCES artifacts(workspace_id, id) ON DELETE RESTRICT,
+  CONSTRAINT fk_checkpoints_worktree FOREIGN KEY (workspace_id, worktree_id) REFERENCES worktrees(workspace_id, id) ON DELETE SET NULL (worktree_id)
+);
+CREATE INDEX ix_checkpoints_run_latest ON checkpoints (workspace_id, run_id, created_at DESC);
+```
+
+### 15.2 `outbox_events` (S, platform) — партиционирована помесячно
+Transactional outbox (ТЗ §10, §16, ADR-0002): событие вставляется в той же транзакции, что и переход состояния.
+
+```sql
+CREATE TABLE outbox_events (
+  id                uuid7       NOT NULL,
+  workspace_id      uuid,       -- NULL для системных событий (provider.health_changed)
+  run_id            uuid,       -- для маршрутизации в run_event_log
+  aggregate_type    text        NOT NULL CHECK (aggregate_type ~ '^[a-z][a-z0-9_]{0,63}$'),
+  aggregate_id      uuid        NOT NULL,
+  event_type        text        NOT NULL CHECK (event_type ~ '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'),
+  schema_version    text        NOT NULL DEFAULT '1.0' CHECK (schema_version ~ '^\d+\.\d+$'),
+  payload           jsonb       NOT NULL CHECK (jsonb_typeof(payload) = 'object' AND octet_length(payload::text) <= 65536),
+  correlation_id    uuid,
+  causation_id      uuid,
+  traceparent       text        CHECK (traceparent ~ '^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'),  -- W3C
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  available_at      timestamptz NOT NULL DEFAULT now(),   -- backoff при ошибке публикации
+  published_at      timestamptz,
+  publish_attempts  int         NOT NULL DEFAULT 0 CHECK (publish_attempts >= 0),
+  last_error        text        CHECK (length(last_error) <= 2000),
+  CONSTRAINT pk_outbox_events PRIMARY KEY (id, created_at),
+  CONSTRAINT ck_outbox_events_run_ws CHECK (run_id IS NULL OR workspace_id IS NOT NULL)
+) PARTITION BY RANGE (created_at);
+CREATE INDEX ix_outbox_events_unpublished ON outbox_events (available_at, id) WHERE published_at IS NULL;   -- партиальный
+CREATE INDEX ix_outbox_events_aggregate ON outbox_events (aggregate_type, aggregate_id, created_at);
+-- trg_outbox_events_guard: BEFORE UPDATE — изменяемы только published_at, publish_attempts, last_error, available_at.
+```
+Диспетчер (`worker-outbox`): `SELECT … WHERE published_at IS NULL AND available_at <= now() ORDER BY available_at, id LIMIT :n FOR UPDATE SKIP LOCKED` → для событий с `run_id` вставка в `run_event_log` (§15.6) → публикация в Redis/Dramatiq и pub/sub → `published_at = now()`; всё, кроме вызова Redis, — в одной транзакции. Сбой после публикации и до commit даёт повторную доставку (at-least-once) — потребители идемпотентны через `processed_events`. FK намеренно отсутствуют (высокий оборот, партиционирование, системная таблица).
+
+### 15.3 `processed_events` (G, platform) — **дополнение к ТЗ**
+Дедупликация идемпотентных потребителей outbox-событий (ТЗ §10, §16). Для ACP используется `message_deliveries`.
+
+```sql
+CREATE TABLE processed_events (
+  consumer      text        NOT NULL CHECK (consumer ~ '^[a-z0-9_.:-]{1,128}$'),   -- имя Dramatiq-актора/обработчика
+  event_id      uuid        NOT NULL,
+  processed_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_processed_events PRIMARY KEY (consumer, event_id)
+);
+CREATE INDEX ix_processed_events_retention ON processed_events (processed_at);
+```
+Потребитель в одной транзакции: `INSERT … ON CONFLICT DO NOTHING` → 0 строк = уже обработано, выход; иначе — побочные эффекты в БД + commit. Таблица глобальная (без `workspace_id`): содержит только UUID событий без tenant-данных; доступ — только `aicd_worker`.
+
+### 15.4 `worker_leases` (S, platform)
+Аренды ресурсов с fencing token (ТЗ §6, §16, ADR-0007).
+
+```sql
+CREATE SEQUENCE worker_lease_fencing_seq AS bigint START 1 INCREMENT 1 NO CYCLE;
+
+CREATE TABLE worker_leases (
+  id              uuid7       NOT NULL,
+  resource_type   text        NOT NULL CHECK (resource_type IN
+                    ('task','run','cli_execution','indexing_job','external_action','outbox_partition','recovery')),
+  resource_id     uuid        NOT NULL,
+  workspace_id    uuid,       -- трассировка/контекст; NULL для системных ресурсов
+  worker_id       text        NOT NULL CHECK (worker_id ~ '^[A-Za-z0-9._:-]{1,200}$'),   -- host:process:uuid
+  worker_host_id  uuid,
+  fencing_token   bigint      NOT NULL,
+  acquired_at     timestamptz NOT NULL DEFAULT now(),
+  heartbeat_at    timestamptz NOT NULL DEFAULT now(),
+  lease_until     timestamptz NOT NULL,
+  released_at     timestamptz,
+  CONSTRAINT pk_worker_leases PRIMARY KEY (id),
+  CONSTRAINT uq_worker_leases_resource UNIQUE (resource_type, resource_id),
+  CONSTRAINT fk_worker_leases_host FOREIGN KEY (worker_host_id) REFERENCES worker_hosts(id) ON DELETE SET NULL,
+  CONSTRAINT ck_worker_leases_until CHECK (lease_until > acquired_at),
+  CONSTRAINT ck_worker_leases_fencing CHECK (fencing_token > 0)
+);
+CREATE INDEX ix_worker_leases_active_expiry ON worker_leases (lease_until) WHERE released_at IS NULL;   -- reaper
+CREATE INDEX ix_worker_leases_worker ON worker_leases (worker_id) WHERE released_at IS NULL;
+-- trg_worker_leases_fencing_monotonic (§18.6).
+```
+Захват/перезахват (атомарно, единственный писатель токена — sequence):
+
+```sql
+INSERT INTO worker_leases (id, resource_type, resource_id, workspace_id, worker_id, worker_host_id,
+                           fencing_token, acquired_at, heartbeat_at, lease_until)
+VALUES (:id, 'task', :task_id, :ws, :worker_id, :host_id,
+        nextval('worker_lease_fencing_seq'), now(), now(), now() + make_interval(secs => :ttl))
+ON CONFLICT (resource_type, resource_id) DO UPDATE
+   SET worker_id = EXCLUDED.worker_id, worker_host_id = EXCLUDED.worker_host_id,
+       fencing_token = EXCLUDED.fencing_token, acquired_at = now(), heartbeat_at = now(),
+       lease_until = EXCLUDED.lease_until, released_at = NULL
+ WHERE worker_leases.released_at IS NOT NULL OR worker_leases.lease_until < now()
+RETURNING fencing_token;   -- 0 строк: ресурс арендован другим воркером
+```
+Heartbeat: `UPDATE worker_leases SET heartbeat_at = now(), lease_until = now() + :ttl WHERE resource_type = :t AND resource_id = :r AND fencing_token = :token AND released_at IS NULL` — 0 строк = аренда потеряна (`LEASE_LOST`), воркер обязан прекратить запись результатов. Запись результатов защищается токеном: `UPDATE tasks … WHERE id = :id AND version = :v AND lease_fencing_token = :token`; `cli_executions.fencing_token`, `task_attempts.fencing_token`, `external_actions.fencing_token` фиксируют, под каким токеном выполнялась работа (recovery различает «старого» и «нового» владельца).
+
+### 15.5 `external_actions` (T, orchestration) — **дополнение к ТЗ**
+Ledger побочных эффектов (ADR-0012; ТЗ §6 «повтор не должен повторять подтверждённые внешние действия», AC-09).
+
+```sql
+CREATE TABLE external_actions (
+  id               uuid7       NOT NULL,
+  workspace_id     uuid        NOT NULL,
+  run_id           uuid,
+  task_id          uuid,
+  action_type      text        NOT NULL CHECK (action_type IN
+                     ('git_push','branch_delete','pr_create','pr_update','pr_merge','pr_comment','migration_apply','docs_download','production_deploy')),
+  idempotency_key  sha256_hex  NOT NULL,     -- sha256(run_id, task_id, action_type, target, plan_version) — ADR-0012
+  target           text        NOT NULL CHECK (length(target) BETWEEN 1 AND 1024),   -- 'owner/repo#branch', URL источника и т.п.
+  is_destructive   boolean     NOT NULL DEFAULT false,
+  status           text        NOT NULL DEFAULT 'PLANNED' CHECK (status IN ('PLANNED','EXECUTING','CONFIRMED','FAILED','COMPENSATED')),
+  approval_id      uuid,
+  request          jsonb       NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(request) = 'object'),
+  request_hash     sha256_hex  NOT NULL,     -- сверяется с approvals.subject_hash
+  result           jsonb       CHECK (result IS NULL OR jsonb_typeof(result) = 'object'),
+  external_ref     text        CHECK (length(external_ref) <= 1024),   -- PR URL/номер, SHA push, id snapshot
+  fencing_token    bigint,
+  attempt_count    int         NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  last_error       text        CHECK (length(last_error) <= 4000),
+  planned_at       timestamptz NOT NULL DEFAULT now(),
+  executing_at     timestamptz,
+  confirmed_at     timestamptz,
+  failed_at        timestamptz,
+  compensated_at   timestamptz,
+  version          bigint      NOT NULL DEFAULT 0,
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_external_actions PRIMARY KEY (id),
+  CONSTRAINT uq_external_actions_ws_id UNIQUE (workspace_id, id),
+  CONSTRAINT uq_external_actions_idempotency_key UNIQUE (idempotency_key),
+  CONSTRAINT fk_external_actions_run  FOREIGN KEY (workspace_id, run_id) REFERENCES runs(workspace_id, id) ON DELETE RESTRICT,
+  CONSTRAINT fk_external_actions_task FOREIGN KEY (workspace_id, run_id, task_id) REFERENCES tasks(workspace_id, run_id, id) ON DELETE RESTRICT,
+  CONSTRAINT fk_external_actions_approval FOREIGN KEY (workspace_id, approval_id) REFERENCES approvals(workspace_id, id) ON DELETE RESTRICT,
+  CONSTRAINT ck_external_actions_approval_required CHECK (
+      (action_type NOT IN ('pr_merge','production_deploy') AND NOT (action_type = 'migration_apply' AND is_destructive))
+      OR approval_id IS NOT NULL),
+  CONSTRAINT ck_external_actions_executing CHECK (
+      ((status IN ('EXECUTING','CONFIRMED','COMPENSATED')) <= (executing_at IS NOT NULL AND fencing_token IS NOT NULL))
+      AND (status <> 'PLANNED' OR executing_at IS NULL)),     -- FAILED возможен и до исполнения (отказ в approval)
+  CONSTRAINT ck_external_actions_confirmed CHECK ((status IN ('CONFIRMED','COMPENSATED')) <= (confirmed_at IS NOT NULL)),
+  CONSTRAINT ck_external_actions_failed CHECK ((status = 'FAILED') = (failed_at IS NOT NULL))
+);
+CREATE INDEX ix_external_actions_reconcile ON external_actions (status, updated_at) WHERE status IN ('PLANNED','EXECUTING');
+CREATE INDEX ix_external_actions_run ON external_actions (workspace_id, run_id) WHERE run_id IS NOT NULL;
+-- trg_external_actions_transition (§18.3); trg_external_actions_approval_gate (§18.7):
+--   переход в EXECUTING при approval_id IS NOT NULL требует approvals.status='APPROVED',
+--   approvals.subject_hash = NEW.request_hash и (expires_at IS NULL OR expires_at > now()).
+```
+
+### 15.6 `run_event_log` (T, platform) — **дополнение к ТЗ**
+Долговременный журнал SSE-событий run (ADR-0011; AC-08: переподключение по `Last-Event-ID` без дублей). Пишется только outbox-диспетчером.
+
+```sql
+CREATE TABLE run_event_log (
+  workspace_id    uuid                       NOT NULL,
+  run_id          uuid                       NOT NULL,
+  seq             bigint                     NOT NULL CHECK (seq >= 1),     -- SSE id
+  event_id        uuid                       NOT NULL,                      -- = outbox_events.id
+  event_type      sse_event_type_persisted_t NOT NULL,
+  schema_version  text                       NOT NULL DEFAULT '1.0' CHECK (schema_version ~ '^\d+\.\d+$'),
+  task_id         uuid,
+  payload         jsonb                      NOT NULL CHECK (jsonb_typeof(payload) = 'object' AND octet_length(payload::text) <= 32768),
+  occurred_at     timestamptz                NOT NULL,                      -- время доменного события
+  created_at      timestamptz                NOT NULL DEFAULT now(),
+  CONSTRAINT pk_run_event_log PRIMARY KEY (run_id, seq),
+  CONSTRAINT uq_run_event_log_event_id UNIQUE (event_id),
+  CONSTRAINT fk_run_event_log_run FOREIGN KEY (workspace_id, run_id) REFERENCES runs(workspace_id, id) ON DELETE RESTRICT
+);
+CREATE INDEX ix_run_event_log_ws_run ON run_event_log (workspace_id, run_id, seq);
+-- trg_run_event_log_append_only: BEFORE UPDATE OR DELETE → trg_fn_append_only() (retention — только aicd_maintenance, §20).
+```
+Выдача `seq` (ADR-0011): в транзакции диспетчера `UPDATE runs SET last_event_seq = last_event_seq + 1 WHERE id = :run_id RETURNING last_event_seq` (строчная блокировка run сериализует выдачу); `INSERT … ON CONFLICT (event_id) DO NOTHING` делает повторную обработку того же outbox-события безопасной. Обновление `last_event_seq` не считается изменением агрегата: триггер `trg_runs_version` объявлен как `BEFORE UPDATE OF <все колонки, кроме last_event_seq и updated_at>`, поэтому `version`/ETag run не меняется от потока событий. `heartbeat` не персистится (домен `sse_event_type_persisted_t`).
+
+---
+
+## 16. GitHub
+
+### 16.1 `github_installations` (T, integrations_github) — **дополнение к ТЗ**
+Установка GitHub App, привязанная к workspace. Приватный ключ App и webhook secret в БД не хранятся (секрет-хранилище окружения, ТЗ §7.1).
+
+```sql
+CREATE TABLE github_installations (
+  id                    uuid7       NOT NULL,
+  workspace_id          uuid        NOT NULL,
+  installation_id       bigint      NOT NULL CHECK (installation_id > 0),
+  account_login         text        NOT NULL CHECK (account_login ~ '^[A-Za-z0-9-]{1,39}$'),
+  account_type          text        NOT NULL CHECK (account_type IN ('user','organization')),
+  repository_selection  text        NOT NULL DEFAULT 'selected' CHECK (repository_selection IN ('all','selected')),
+  permissions           jsonb       NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(permissions) = 'object'),
+  status                text        NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','SUSPENDED','REVOKED')),
+  installed_by          uuid,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_github_installations PRIMARY KEY (id),
+  CONSTRAINT uq_github_installations_ws_id UNIQUE (workspace_id, id),
+  CONSTRAINT uq_github_installations_installation_id UNIQUE (installation_id),
+  CONSTRAINT fk_github_installations_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_github_installations_installed_by FOREIGN KEY (installed_by) REFERENCES users(id) ON DELETE SET NULL
+);
+```
+`UNIQUE (installation_id)` глобален намеренно: одна установка GitHub App не может обслуживать два workspace (иначе вебхук нельзя однозначно отнести к арендатору).
+
+### 16.2 `github_webhook_deliveries` (G, integrations_github) — **дополнение к ТЗ**
+Приём вебхуков: проверка подписи и дедупликация по `X-GitHub-Delivery` (ТЗ §15). Глобальная, т.к. workspace определяется только после проверки подписи и разрешения `installation_id` (`sys_resolve_installation_workspace`, §19.5).
+
+```sql
+CREATE TABLE github_webhook_deliveries (
+  id                   uuid7       NOT NULL,
+  delivery_guid        uuid        NOT NULL,       -- X-GitHub-Delivery
+  event                text        NOT NULL CHECK (event ~ '^[a-z_]{1,64}$'),
+  action               text        CHECK (action ~ '^[a-z_]{1,64}$'),
+  installation_id      bigint,
+  signature_valid      boolean     NOT NULL,
+  payload_sha256       sha256_hex  NOT NULL,
+  payload_storage_key  text        CHECK (payload_storage_key ~ '^(s3|file)://[A-Za-z0-9._/-]{1,1024}$'),  -- глобальный префикс webhooks/
+  status               text        NOT NULL DEFAULT 'RECEIVED' CHECK (status IN ('RECEIVED','REJECTED','PROCESSED','IGNORED','FAILED')),
+  error                text        CHECK (length(error) <= 2000),
+  received_at          timestamptz NOT NULL DEFAULT now(),
+  processed_at         timestamptz,
+  CONSTRAINT pk_github_webhook_deliveries PRIMARY KEY (id),
+  CONSTRAINT uq_github_webhook_deliveries_guid UNIQUE (delivery_guid),
+  CONSTRAINT ck_gwd_signature CHECK (signature_valid OR (status = 'REJECTED' AND payload_storage_key IS NULL)),
+  CONSTRAINT ck_gwd_processed CHECK ((status IN ('PROCESSED','IGNORED','FAILED')) = (processed_at IS NOT NULL))
+);
+CREATE INDEX ix_gwd_pending ON github_webhook_deliveries (received_at) WHERE status = 'RECEIVED';
+```
+Невалидная подпись → строка `REJECTED` без сохранения payload (защита от заполнения хранилища); глобальной FK на `github_installations` нет (запрет global → tenant ссылок).
+
+### 16.3 `pull_requests` (T, integrations_github) — **дополнение к ТЗ**
+
+```sql
+CREATE TABLE pull_requests (
+  id                        uuid7       NOT NULL,
+  workspace_id              uuid        NOT NULL,
+  repository_id             uuid        NOT NULL,
+  run_id                    uuid,
+  create_action_id          uuid,       -- external_actions (pr_create)
+  merge_action_id           uuid,       -- external_actions (pr_merge)
+  pr_number                 int         NOT NULL CHECK (pr_number > 0),
+  head_branch               text        NOT NULL CHECK (length(head_branch) BETWEEN 1 AND 255),
+  base_branch               text        NOT NULL CHECK (length(base_branch) BETWEEN 1 AND 255),
+  head_sha                  git_sha     NOT NULL,
+  state                     text        NOT NULL CHECK (state IN ('OPEN','CLOSED','MERGED')),
+  url                       text        NOT NULL CHECK (url ~ '^https://'),
+  merged_commit_sha         git_sha,
+  created_at                timestamptz NOT NULL DEFAULT now(),
+  updated_at                timestamptz NOT NULL DEFAULT now(),
+  merged_at                 timestamptz,
+  closed_at                 timestamptz,
+  CONSTRAINT pk_pull_requests PRIMARY KEY (id),
+  CONSTRAINT uq_pull_requests_ws_id UNIQUE (workspace_id, id),
+  CONSTRAINT uq_pull_requests_number UNIQUE (repository_id, pr_number),
+  CONSTRAINT fk_pull_requests_repository FOREIGN KEY (workspace_id, repository_id) REFERENCES repositories(workspace_id, id) ON DELETE RESTRICT,
+  CONSTRAINT fk_pull_requests_run FOREIGN KEY (workspace_id, run_id) REFERENCES runs(workspace_id, id) ON DELETE SET NULL (run_id),
+  CONSTRAINT fk_pull_requests_create_action FOREIGN KEY (workspace_id, create_action_id) REFERENCES external_actions(workspace_id, id) ON DELETE RESTRICT,
+  CONSTRAINT fk_pull_requests_merge_action FOREIGN KEY (workspace_id, merge_action_id) REFERENCES external_actions(workspace_id, id) ON DELETE RESTRICT,
+  CONSTRAINT ck_pull_requests_merged CHECK ((state = 'MERGED') = (merged_at IS NOT NULL AND merged_commit_sha IS NOT NULL)),
+  CONSTRAINT ck_pull_requests_closed CHECK (state <> 'CLOSED' OR closed_at IS NOT NULL)
+);
+CREATE INDEX ix_pull_requests_run ON pull_requests (workspace_id, run_id) WHERE run_id IS NOT NULL;
+CREATE INDEX ix_pull_requests_open ON pull_requests (workspace_id, repository_id) WHERE state = 'OPEN';
+```
+`state = 'MERGED'` может появиться и из вебхука (merge человеком в GitHub) — тогда `merge_action_id IS NULL`; merge **платформой** возможен только через `external_actions(pr_merge)` с approval (AC-13).
+
+---
+
+## 17. Наблюдаемость и аудит
+
+### 17.1 `audit_events` (M, platform) — партиционирована помесячно, append-only
+Журнал аудита (ТЗ §15, §23: каждое поручение, решение, approval, запуск CLI и gate имеет traceable event). `workspace_id IS NULL` — события вне workspace (вход, смена пароля, операции оператора).
+
+```sql
+CREATE TABLE audit_events (
+  id             uuid7       NOT NULL,
+  workspace_id   uuid,
+  actor_type     text        NOT NULL CHECK (actor_type IN ('user','agent','system','github')),
+  actor_id       uuid,        -- users.id для user; NULL для system/github
+  actor_role     text,        -- workspace_role пользователя или agent_role агента на момент действия
+  action         text        NOT NULL CHECK (action ~ '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'),   -- 'approval.decided', 'cli.execution.started'
+  resource_type  text        NOT NULL CHECK (resource_type ~ '^[a-z][a-z0-9_]{0,63}$'),
+  resource_id    uuid,
+  outcome        text        NOT NULL DEFAULT 'success' CHECK (outcome IN ('success','denied','failure')),
+  request_id     uuid,
+  correlation_id uuid,
+  traceparent    text,
+  ip             inet,
+  metadata       jsonb       NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(metadata) = 'object' AND octet_length(metadata::text) <= 16384),
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT pk_audit_events PRIMARY KEY (id, created_at),
+  CONSTRAINT ck_audit_events_actor CHECK (actor_type <> 'user' OR actor_id IS NOT NULL)
+) PARTITION BY RANGE (created_at);
+CREATE INDEX ix_audit_events_ws_time ON audit_events (workspace_id, created_at DESC);
+CREATE INDEX ix_audit_events_resource ON audit_events (resource_type, resource_id, created_at DESC);
+CREATE INDEX ix_audit_events_actor ON audit_events (actor_id, created_at DESC) WHERE actor_id IS NOT NULL;
+-- REVOKE UPDATE, DELETE, TRUNCATE ON audit_events FROM PUBLIC, aicd_app, aicd_worker;
+-- trg_audit_events_append_only: BEFORE UPDATE OR DELETE → trg_fn_append_only();  (§18.5)
+```
+FK отсутствуют намеренно: аудит должен переживать удаление/псевдонимизацию субъектов и не блокировать retention других таблиц. `metadata` проходит redaction до записи (ТЗ §16).
+
+### 17.2 Метрики и представления
+Метрики ТЗ §16 (run success rate, verified completion rate, gate failures, retry count, provider availability, task latency, context pack size, index freshness, agent message count, queue lag, approval wait time) вычисляются из таблиц-источников через read-only представления `v_*` модулей-владельцев (MODULE_BOUNDARIES §2 п.6), например `v_run_outcomes`, `v_task_latency`, `v_approval_wait`, `v_index_freshness`. Отдельных таблиц агрегатов в v1 нет; при необходимости — материализованные представления с `REFRESH … CONCURRENTLY` (решение после измерений, ТЗ §23). `usage_metrics` (§8.7) — единственная таблица «сырых» метрик исполнения.
+
+---
+
+## 18. Инварианты, обеспечиваемые БД
+
+Принцип: доменная логика (FSM, guard-условия, RBAC) живёт в коде модулей (ADR-0007); БД — **второй, независимый рубеж**, который не даёт сохранить состояние, нарушающее ключевые инварианты, даже при ошибке в коде, гонке воркеров или ручном вмешательстве. Нарушение → исключение с SQLSTATE, который `platform` маппит в доменную ошибку.
+
+### 18.1 Зависимости задач только внутри одного run (ТЗ §7.3)
+
+1. **Декларативно:** `task_dependencies.run_id` входит в оба составных FK `(workspace_id, run_id, task_id|depends_on_task_id) → tasks(workspace_id, run_id, id)` (§7.3). Межrun-ссылка не проходит FK.
+2. **Защитный триггер** (требование ТЗ «отдельная проверка/триггер»; страхует от будущей миграции, ослабившей FK):
+
+```sql
+CREATE FUNCTION trg_fn_task_dependencies_same_run() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF (SELECT count(*) FROM tasks
+       WHERE id IN (NEW.task_id, NEW.depends_on_task_id)
+         AND run_id = NEW.run_id AND workspace_id = NEW.workspace_id) <> 2 THEN
+    RAISE EXCEPTION 'task dependency must link tasks of the same run %', NEW.run_id USING ERRCODE = '23514';
+  END IF;
+  -- сериализация изменений плана run (см. 18.2)
+  PERFORM 1 FROM runs WHERE id = NEW.run_id FOR NO KEY UPDATE;
+  -- утверждённый план неизменяем: replan создаёт новую plan_version
+  IF EXISTS (SELECT 1 FROM tasks t JOIN runs r ON r.id = t.run_id
+              WHERE t.id = NEW.task_id AND r.approved_plan_version IS NOT NULL
+                AND t.plan_version <= r.approved_plan_version) THEN
+    RAISE EXCEPTION 'dependencies of an approved plan version are immutable' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_task_dependencies_same_run BEFORE INSERT OR UPDATE ON task_dependencies
+  FOR EACH ROW EXECUTE FUNCTION trg_fn_task_dependencies_same_run();
+```
+
+### 18.2 DAG без циклов (ТЗ §6, §7.3, AC-02)
+
+**Транзакционная процедура утверждения плана** (`orchestration.plans.approve(run_id, plan_version, expected_run_version)`), уровень изоляции `READ COMMITTED`:
+
+1. `SELECT … FROM runs WHERE id = :run_id FOR UPDATE` — блокировка строки run. Все мутации плана (вставка задач/рёбер планировщиком, replan) берут ту же блокировку (`FOR NO KEY UPDATE` в триггере 18.1), поэтому граф во время проверки не меняется. Это дешевле и детерминированнее, чем `SERIALIZABLE` (не нужны повторы на `40001`, которые к тому же защищают только от других `SERIALIZABLE`-транзакций).
+2. Проверить `runs.version = :expected_run_version`, `status IN ('PLANNED','AWAITING_APPROVAL')`, `plan_version = :plan_version`.
+3. **Приложение:** загрузить вершины/рёбра версии плана и выполнить алгоритм Кана; при цикле вернуть `422 dag_cycle_detected` с путём цикла (понятная ошибка для UI).
+4. **БД (контрольная проверка тем же запросом, что и в constraint trigger):**
+
+```sql
+WITH RECURSIVE walk(start_id, cur_id) AS (
+    SELECT d.task_id, d.depends_on_task_id
+      FROM task_dependencies d WHERE d.run_id = :run_id
+  UNION ALL
+    SELECT w.start_id, d.depends_on_task_id
+      FROM walk w JOIN task_dependencies d ON d.task_id = w.cur_id AND d.run_id = :run_id
+) CYCLE cur_id SET is_cycle USING path
+SELECT EXISTS (SELECT 1 FROM walk WHERE start_id = cur_id OR is_cycle) AS has_cycle;
+```
+
+5. `UPDATE runs SET approved_plan_version = :plan_version, status = …, version = version + 1`; задачи без незавершённых зависимостей → `READY`; `outbox_events` (`run.state_changed`, `task.state_changed`); commit.
+
+**Constraint trigger как постоянная гарантия:** `trg_task_dependencies_acyclic` — `CONSTRAINT TRIGGER AFTER INSERT OR UPDATE ON task_dependencies DEFERRABLE INITIALLY DEFERRED FOR EACH ROW`; функция выполняет запрос п.4 для `NEW.run_id` один раз на run в транзакции (отметка через `set_config('aicd.dag_checked.' || NEW.run_id, '1', true)`), при цикле — `RAISE … ERRCODE '23514'` и откат всей транзакции. Стоимость O(V·E) на план приемлема для планов в десятки–сотни задач; измерить в P3.
+
+### 18.3 Валидация переходов состояний
+
+**Выбор:** гибрид — **основная** валидация в коде (`orchestration/transitions.py` + guard-функции, переход как `UPDATE … WHERE status = :old AND version = :expected`, ADR-0007) **плюс** защитный триггер в БД по справочнику `allowed_transitions`.
+**Обоснование:** (1) переходы выполняют несколько процессов (`api`, `worker-orchestrator`, `worker-exec`, `worker-verify`, reconciler) — ошибка в любом из них не должна оставить запись в невозможном состоянии; (2) справочник — данные, генерируемые из того же `transitions.py`, поэтому двойного ручного сопровождения нет (CI-тест сравнивает множества); (3) стоимость — один индексный lookup на `UPDATE OF status`. Альтернатива «только CHECK» не выражает переходы (CHECK видит лишь новую строку), альтернатива «только код» не даёт defence-in-depth, требуемый ТЗ §6 «запрещать невалидные переходы».
+
+```sql
+CREATE FUNCTION trg_fn_check_transition() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_entity text := TG_ARGV[0];
+        v_from   text := CASE WHEN TG_OP = 'INSERT' THEN '__new__' ELSE OLD.status END;
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN RETURN NEW; END IF;
+  IF NOT EXISTS (SELECT 1 FROM allowed_transitions
+                  WHERE entity = v_entity AND from_status = v_from AND to_status = NEW.status) THEN
+    RAISE EXCEPTION 'invalid % transition: % -> %', v_entity, v_from, NEW.status USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
+  FOR EACH ROW EXECUTE FUNCTION trg_fn_check_transition('run');
+-- аналогично: tasks('task'), cli_executions('execution'), user_directives('directive'),
+-- approvals('approval'), external_actions('external_action').
+```
+
+Начальное содержимое `allowed_transitions` (из ТЗ §6 и Directive/Approval/Ledger FSM; **подлежит сверке с DATA_FLOW.md**, источник истины — `transitions.py`). `__new__` — допустимое начальное состояние при `INSERT`.
+
+| entity | from | разрешённые to |
+|---|---|---|
+| run | `__new__` | `CREATED` |
+| run | `CREATED` | `DISCOVERY`, `CANCELLED`, `FAILED` |
+| run | `DISCOVERY` | `PLANNED`, `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| run | `PLANNED` | `AWAITING_APPROVAL`, `RUNNING`, `DISCOVERY`, `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| run | `AWAITING_APPROVAL` | `RUNNING`, `PLANNED`, `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| run | `RUNNING` | `VERIFYING`, `PLANNED` (replan по поручению), `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| run | `VERIFYING` | `COMPLETED`, `RUNNING` (fix после FAIL gate), `PAUSED`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| run | `PAUSED` | `DISCOVERY`, `PLANNED`, `AWAITING_APPROVAL`, `RUNNING`, `VERIFYING`, `FAILED`, `CANCELLED` |
+| run | `BLOCKED` | `DISCOVERY`, `PLANNED`, `AWAITING_APPROVAL`, `RUNNING`, `VERIFYING`, `PAUSED`, `FAILED`, `CANCELLED` |
+| task | `__new__` | `PENDING` |
+| task | `PENDING` | `READY`, `BLOCKED`, `CANCELLED` |
+| task | `READY` | `LEASED`, `PENDING` (новая зависимость при replan), `BLOCKED`, `CANCELLED` |
+| task | `LEASED` | `RUNNING`, `READY` (аренда потеряна до старта), `RETRY_WAIT`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| task | `RUNNING` | `VERIFYING`, `RETRY_WAIT`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| task | `VERIFYING` | `SUCCEEDED`, `RETRY_WAIT`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| task | `RETRY_WAIT` | `READY`, `BLOCKED`, `FAILED`, `CANCELLED` |
+| task | `BLOCKED` | `PENDING`, `READY`, `FAILED`, `CANCELLED` |
+| execution | `__new__` | `QUEUED` |
+| execution | `QUEUED` | `STARTING`, `CANCELLED`, `CRASHED` |
+| execution | `STARTING` | `RUNNING`, `TIMED_OUT`, `CANCELLED`, `CRASHED`, `AUTH_REQUIRED`, `RATE_LIMITED` |
+| execution | `RUNNING` | `EXITED`, `TIMED_OUT`, `CANCELLED`, `CRASHED`, `AUTH_REQUIRED`, `RATE_LIMITED` |
+| execution | `EXITED` | `COLLECTED`, `CRASHED` (результат не собран/не разобран) |
+| directive | `__new__` | `RECEIVED` |
+| directive | `RECEIVED` | `IMPACT_ANALYSIS_PENDING`, `REJECTED`, `CANCELLED`, `FAILED` |
+| directive | `IMPACT_ANALYSIS_PENDING` | `IMPACT_READY`, `CANCELLED`, `FAILED` |
+| directive | `IMPACT_READY` | `AWAITING_CONFIRMATION`, `CONFIRMED`, `REJECTED`, `CANCELLED` |
+| directive | `AWAITING_CONFIRMATION` | `CONFIRMED`, `REJECTED`, `CANCELLED` |
+| directive | `CONFIRMED` | `CHECKPOINTING`, `REPLANNING`, `DISPATCHED`, `CANCELLED`, `FAILED` |
+| directive | `CHECKPOINTING` | `REPLANNING`, `DISPATCHED`, `FAILED` |
+| directive | `REPLANNING` | `DISPATCHED`, `FAILED` |
+| directive | `DISPATCHED` | `ACKNOWLEDGED`, `FAILED` |
+| directive | `ACKNOWLEDGED` | `COMPLETED`, `FAILED` |
+| approval | `__new__` | `PENDING` |
+| approval | `PENDING` | `APPROVED`, `REJECTED`, `EXPIRED`, `CANCELLED` |
+| external_action | `__new__` | `PLANNED` |
+| external_action | `PLANNED` | `EXECUTING`, `FAILED` |
+| external_action | `EXECUTING` | `CONFIRMED`, `FAILED` (только после сверки с внешней системой) |
+| external_action | `FAILED` | `EXECUTING` (повтор после reconciliation, `attempt_count + 1`) |
+| external_action | `CONFIRMED` | `COMPENSATED` |
+
+Терминальные состояния (нет исходящих строк): run `COMPLETED/FAILED/CANCELLED`; task `SUCCEEDED/FAILED/CANCELLED`; execution `COLLECTED/TIMED_OUT/CANCELLED/CRASHED/AUTH_REQUIRED/RATE_LIMITED`; directive `COMPLETED/REJECTED/CANCELLED/FAILED`; approval — все, кроме `PENDING`; external_action `COMPENSATED`. Дополнительно `trg_runs_resume_guard`: выход из `PAUSED`/`BLOCKED` в нетерминальное состояние допустим только в `resume_status` (или `PAUSED` из `BLOCKED`).
+
+### 18.4 `COMPLETED` только при успешных обязательных gates и выполненной approval policy (ТЗ §6, §14, AC-11)
+
+```sql
+CREATE FUNCTION trg_fn_runs_completion_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.status = 'COMPLETED' AND OLD.status <> 'COMPLETED' THEN
+    -- 1) все задачи актуального плана успешны (заменённые replan'ом — CANCELLED + superseded_at)
+    IF EXISTS (SELECT 1 FROM tasks t WHERE t.run_id = NEW.id AND t.superseded_at IS NULL
+                AND t.status <> 'SUCCEEDED') THEN
+      RAISE EXCEPTION 'run %: not all tasks SUCCEEDED', NEW.id USING ERRCODE = '23514';
+    END IF;
+    -- 2) каждый актуальный обязательный gate: PASS или обоснованный NOT_APPLICABLE (SKIPPED ≠ PASS)
+    IF EXISTS (SELECT 1 FROM gate_executions g WHERE g.run_id = NEW.id AND g.superseded_at IS NULL
+                AND g.required AND g.status NOT IN ('PASS','NOT_APPLICABLE')) THEN
+      RAISE EXCEPTION 'run %: required gates not passed', NEW.id USING ERRCODE = '23514';
+    END IF;
+    -- 3) хотя бы одна проверка реально выполнена (нельзя завершить run «пустой» верификацией)
+    IF NOT EXISTS (SELECT 1 FROM gate_executions g WHERE g.run_id = NEW.id AND g.superseded_at IS NULL
+                    AND g.status = 'PASS') THEN
+      RAISE EXCEPTION 'run %: no PASS gate execution', NEW.id USING ERRCODE = '23514';
+    END IF;
+    -- 4) нет незакрытых approvals; утверждённый план существует
+    IF EXISTS (SELECT 1 FROM approvals a WHERE a.run_id = NEW.id AND a.status = 'PENDING')
+       OR NEW.approved_plan_version IS NULL THEN
+      RAISE EXCEPTION 'run %: approval policy not satisfied', NEW.id USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_runs_completion_guard BEFORE UPDATE OF status ON runs
+  FOR EACH ROW EXECUTE FUNCTION trg_fn_runs_completion_guard();
+```
+
+Дополнительно `trg_tasks_success_guard`: задача → `SUCCEEDED` только если все её актуальные обязательные `gate_executions` в `PASS/NOT_APPLICABLE` и нет ни одного `FAIL/ERROR/PENDING/RUNNING`; `trg_gate_executions_evidence_verified`: `PASS` требует `evidence.verification_status = 'VERIFIED'` (exit code 0 / слова агента не дают PASS, ТЗ §9, §14). Блокирующие пороги находок (например, «нет OPEN critical») — из `quality_profiles.definition`, проверяются Verification Engine и выражаются как `FAIL` соответствующего gate, а не отдельным триггером.
+
+**Гонки.** Писатели `tasks.status`, `gate_executions` и `approvals` в начале транзакции берут `SELECT 1 FROM runs WHERE id = :run_id FOR SHARE` (триггеры `trg_*_lock_run_share`); переход run в `COMPLETED` выполняет `UPDATE runs` (блокировка `FOR NO KEY UPDATE`), которая конфликтует с `FOR SHARE`. Поэтому новый провальный gate не может «проскочить» между проверкой и commit: либо он закоммичен до проверки (и виден её запросам — в `READ COMMITTED` каждый запрос PL/pgSQL берёт свежий снимок), либо ждёт и после commit run видит его терминальным — и отклоняется: `trg_*_lock_run_share` после получения `FOR SHARE` проверяет, что run не находится в `COMPLETED/FAILED/CANCELLED` (запись результатов в завершённый run запрещена).
+
+### 18.5 Append-only `audit_events` (ТЗ §15)
+
+1. `REVOKE UPDATE, DELETE, TRUNCATE ON audit_events FROM PUBLIC, aicd_app, aicd_worker;` — `GRANT INSERT, SELECT` только.
+2. `trg_audit_events_append_only BEFORE UPDATE OR DELETE … EXECUTE FUNCTION trg_fn_append_only()` — страхует и от владельца (кроме `DETACH PARTITION`, см. 3).
+3. Удаление возможно только целыми партициями ролью `aicd_maintenance` после экспорта в архив (§20.2), с записью события `audit.partition_archived` (sha256 архива) в **новую** партицию.
+4. Предложение (§22): hash-chain (`prev_hash`, `row_hash`) для tamper-evidence.
+
+Та же схема (REVOKE + триггер) — для `run_event_log`, `agent_messages`, `agent_activity_events`.
+
+### 18.6 Монотонность fencing token
+
+- Единственный источник токенов — `worker_lease_fencing_seq` (`nextval` не откатывается и строго возрастает в пределах кластера).
+- Триггер на `worker_leases`:
+
+```sql
+CREATE FUNCTION trg_fn_worker_leases_fencing() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.fencing_token < OLD.fencing_token THEN
+    RAISE EXCEPTION 'fencing token must not decrease' USING ERRCODE = '23514';
+  END IF;
+  IF (NEW.worker_id IS DISTINCT FROM OLD.worker_id OR (OLD.released_at IS NOT NULL AND NEW.released_at IS NULL))
+     AND NEW.fencing_token <= OLD.fencing_token THEN
+    RAISE EXCEPTION 'lease re-acquisition requires a new fencing token' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_worker_leases_fencing_monotonic BEFORE UPDATE ON worker_leases
+  FOR EACH ROW EXECUTE FUNCTION trg_fn_worker_leases_fencing();
+```
+- Аналогичный триггер на `tasks.lease_fencing_token` (не убывает). Восстановление из бэкапа: после PITR sequence продвигается `setval(… , max(fencing_token) + 1_000_000)` (runbook) — иначе возможен повтор токенов.
+
+### 18.7 Approvals и опасные действия (ТЗ §15, AC-13)
+
+- `ck_approvals_four_eyes` — запрашивающий человек не может утвердить сам (кроме явно разрешённого single-member режима, аудируется).
+- `trg_approvals_decider_role`: `decided_by` должен быть членом workspace проекта с рангом роли (с учётом `project_member_overrides`) ≥ `required_role`. Матрица «action_type → required_role» — из брифа (reviewer: `MANUAL_REVIEW`, `SELF_REVIEW_FALLBACK`; developer: `PLAN_APPROVAL`, `DOCS_DOWNLOAD`; admin: `MERGE`, `DESTRUCTIVE_MIGRATION`, `DATA_DELETION`, `CRITICAL_DIRECTIVE`, `LOCAL_EXECUTION_FALLBACK`; owner: `PRODUCTION_DEPLOY`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`); `required_role` заполняет приложение, CHECK-функция `approval_min_role(action_type)` в триггере запрещает занижение.
+- `ck_external_actions_approval_required` + `trg_external_actions_approval_gate` — `pr_merge`, `production_deploy`, деструктивный `migration_apply` не могут перейти в `EXECUTING` без `APPROVED`, не истёкшего approval с `subject_hash = request_hash`.
+
+### 18.8 Независимость ревью (ТЗ §4)
+
+```sql
+CREATE FUNCTION trg_fn_agent_assignments_independence() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_reviewed_provider text;
+BEGIN
+  IF NEW.review_independence = 'independent_provider' THEN
+    SELECT provider INTO v_reviewed_provider FROM task_attempts WHERE id = NEW.reviewed_attempt_id;
+    IF v_reviewed_provider IS NULL OR v_reviewed_provider = NEW.provider THEN
+      RAISE EXCEPTION 'review is not independent: same provider %', NEW.provider USING ERRCODE = '23514';
+    END IF;
+  ELSIF NEW.review_independence = 'same_provider_fallback' AND NOT EXISTS (
+      SELECT 1 FROM approvals a JOIN task_attempts ta ON ta.id = NEW.reviewed_attempt_id
+       WHERE a.task_id = ta.task_id AND a.action_type = 'SELF_REVIEW_FALLBACK' AND a.status = 'APPROVED') THEN
+    RAISE EXCEPTION 'same-provider review requires SELF_REVIEW_FALLBACK approval' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+```
+
+### 18.9 Отсутствие секретов (ТЗ §7.1, §15)
+
+- Ни одна таблица не содержит колонок для секретов; допустимы только хэши (`password_hash`, `token_hash`, `csrf_token_hash`) и ссылки (`credential_volume_ref`, `*_ref`).
+- **Schema-lint в CI** (§21.4): запрещены имена колонок по шаблону `(secret|password|passwd|api_?key|private_?key|access_?token|refresh_?token|cookie|credential)` кроме allowlist (`password_hash`, `password_changed_at`, `token_hash`, `csrf_token_hash`, `credential_volume_ref`, `fencing_token`, `lease_fencing_token`, `token_budget`, `token_estimate`).
+- Текстовые поля из внешних источников (`failure_message`, `last_error`, `detail`, `command`, `body`, `payload`, `metadata`) проходят `security.redact()` до записи; тест «secret canary» (ТЗ §20 Security) вставляет известный фиктивный токен в вывод CLI и проверяет его отсутствие во всех таблицах и логах.
+- Настройки PostgreSQL: `log_statement = 'ddl'`, `log_parameter_max_length = 0`, `log_parameter_max_length_on_error = 0` — значения параметров запросов не попадают в журнал СУБД.
+
+### 18.10 Членство
+
+- `trg_workspace_members_last_owner` (deferred constraint trigger): после UPDATE/DELETE в workspace со статусом `ACTIVE` остаётся ≥ 1 `owner`.
+- `trg_project_member_overrides_downgrade_only`: роль переопределения строго ниже роли в workspace; при понижении роли в workspace переопределения, ставшие «не ниже», удаляются тем же триггером.
+
+### 18.11 Полиморфные ссылки
+
+`knowledge_chunks(source_type, source_id)`, `evidence_links(target_type, target_id)`, `audit_events(resource_type, resource_id)` не имеют FK. Для первых двух — триггер `BEFORE INSERT`, проверяющий существование цели **в том же workspace** динамическим запросом по `target_type` (таблица соответствий `target_type → таблица` в коде функции); для `audit_events` проверки нет намеренно (аудит переживает субъект). Ночная задача `maint_check_polymorphic_refs` сообщает о «висячих» ссылках после retention.
+
+### 18.12 Лимиты размеров jsonb/текста
+
+| Колонка | Лимит | Основание |
+|---|---|---|
+| `agent_messages.payload` | `octet_length(payload::text) <= 32768` | ТЗ §10 (≤ 32 KiB) |
+| `agent_activity_events.payload`, `run_event_log.payload` | ≤ 32768 | ТЗ §8.3 «ограничивать по размеру» |
+| `chat_messages.body` | ≤ 32768 байт | то же |
+| `outbox_events.payload` | ≤ 65536 | крупные данные — только refs |
+| `audit_events.metadata` | ≤ 16384 | — |
+| `idempotency_keys.response` | ≤ 65536 | — |
+
+### 18.13 Tenancy
+
+- Составные FK `(workspace_id, …)` для всех tenant → tenant ссылок (§1.3); глобальные таблицы не ссылаются на tenant.
+- `trg_<t>_immutable_ws` запрещает менять `workspace_id`.
+- M-таблицы (`policies`, `quality_profiles`, `quality_gates`) проверяют scope триггерами: tenant-строка может ссылаться на global или на строку своего workspace, global — только на global.
+
+---
+
+## 19. Row Level Security
+
+### 19.1 Роли БД
+
+| Роль | LOGIN | BYPASSRLS | Назначение | Права |
+|---|---|---|---|---|
+| `aicd_migrator` | да | нет | владелец схемы `aicd`; только Alembic (DDL, seed-данные справочников) | owner объектов; RLS на него действует (`FORCE`) |
+| `aicd_app` | да | **нет** | процесс `api` | DML на tenant/M-таблицы по GRANT; `SELECT` на справочники; `INSERT` в `outbox_events`, `audit_events`, `idempotency_keys`; нет доступа к `worker_leases`, `processed_events`, `cli_*` (кроме `SELECT` для `/providers`) |
+| `aicd_worker` | да | **нет** | `worker-*` процессы | DML на tenant-таблицы своего домена; полный доступ к S-таблицам (`outbox_events`, `worker_leases`) и `processed_events`; запись в `cli_installations`, `cli_sessions`, `provider_health`, `worker_hosts` |
+| `aicd_maintenance` | да | **да** | только задачи retention/архивирования/purge/backup через `aicd` admin CLI | каждое использование аудируется (§19.6) |
+| `aicd_sysfn` | **нет** | да | владелец `SECURITY DEFINER` функций `sys_*` (§19.5) — **дополнение к брифу** | `SELECT` только на колонки, нужные функциям |
+
+Схема приложения — `aicd`; `search_path = aicd` задаётся на ролях; `PUBLIC` лишён `CREATE` на схеме и всех прав на таблицы.
+
+### 19.2 Установка контекста
+
+`packages/platform` — `db.transaction(ctx)` в начале **каждой** транзакции:
+
+```sql
+SELECT set_config('app.workspace_id', :workspace_id, true),   -- true = SET LOCAL: действует до конца транзакции
+       set_config('app.user_id',      :user_id,      true),   -- '' для системных акторов
+       set_config('app.actor_type',   :actor_type,   true);   -- 'user' | 'agent' | 'system'
+```
+
+- `SET LOCAL` совместим с пулингом соединений в режиме transaction (PgBouncer): контекст не «протекает» в чужую транзакцию.
+- API устанавливает `app.workspace_id` **только после** проверки членства и RBAC (`identity.api.authorize`); идентификатор workspace берётся из ресурса запроса (`project_id` → `workspace_id`) через `SECURITY DEFINER`-функцию `sys_resolve_project_workspace(project_id)`, которая возвращает workspace только если `app.user_id` — его член.
+- Воркеры: каждое сообщение Dramatiq/outbox несёт `workspace_id`; воркер открывает транзакцию с этим контекстом. Межарендаторные выборки (планировщик, reaper) — только через `sys_*` функции, возвращающие идентификаторы, после чего работа идёт в контексте конкретного workspace.
+- Без контекста `app_current_workspace()` = `NULL` → tenant-строки невидимы и не вставляются (fail-closed).
+
+### 19.3 Политики
+
+```sql
+-- Шаблон для каждой T-таблицы (пример: runs)
+ALTER TABLE runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE runs FORCE ROW LEVEL SECURITY;
+CREATE POLICY p_runs_tenant ON runs
+  FOR ALL TO aicd_app, aicd_worker
+  USING (workspace_id = app_current_workspace())
+  WITH CHECK (workspace_id = app_current_workspace());
+
+-- Корень tenancy
+ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspaces FORCE ROW LEVEL SECURITY;
+CREATE POLICY p_workspaces_tenant ON workspaces
+  FOR SELECT, UPDATE TO aicd_app, aicd_worker   -- (в DDL — две политики: FOR SELECT и FOR UPDATE)
+  USING (id = app_current_workspace());
+CREATE POLICY p_workspaces_create ON workspaces
+  FOR INSERT TO aicd_app
+  WITH CHECK (id = app_current_workspace() AND created_by = app_current_user());
+-- API при создании генерирует UUIDv7, устанавливает его как контекст и вставляет workspace + owner-членство в одной транзакции.
+
+-- M-таблица (global + tenant): чтение global-строк разрешено, запись — только своих
+ALTER TABLE policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE policies FORCE ROW LEVEL SECURITY;
+CREATE POLICY p_policies_read ON policies FOR SELECT TO aicd_app, aicd_worker
+  USING (workspace_id IS NULL OR workspace_id = app_current_workspace());
+CREATE POLICY p_policies_write ON policies FOR INSERT TO aicd_app
+  WITH CHECK (workspace_id = app_current_workspace());
+CREATE POLICY p_policies_update ON policies FOR UPDATE TO aicd_app
+  USING (workspace_id = app_current_workspace()) WITH CHECK (workspace_id = app_current_workspace());
+-- То же для quality_profiles, quality_gates.
+
+-- idempotency_keys: строки workspace или «без workspace» самого пользователя
+CREATE POLICY p_idempotency_keys ON idempotency_keys FOR ALL TO aicd_app
+  USING (workspace_id = app_current_workspace()
+         OR (workspace_id IS NULL AND user_id = app_current_user()))
+  WITH CHECK (workspace_id = app_current_workspace()
+         OR (workspace_id IS NULL AND user_id = app_current_user()));
+
+-- audit_events: читать — только свой workspace; писать — свой workspace или глобальные события
+CREATE POLICY p_audit_events_read ON audit_events FOR SELECT TO aicd_app
+  USING (workspace_id = app_current_workspace());
+CREATE POLICY p_audit_events_insert ON audit_events FOR INSERT TO aicd_app, aicd_worker
+  WITH CHECK (workspace_id IS NULL OR workspace_id = app_current_workspace());
+
+-- S-таблицы: api только вставляет события своего workspace; воркеры видят все строки
+ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE outbox_events FORCE ROW LEVEL SECURITY;
+CREATE POLICY p_outbox_events_app_insert ON outbox_events FOR INSERT TO aicd_app
+  WITH CHECK (workspace_id = app_current_workspace());
+CREATE POLICY p_outbox_events_worker ON outbox_events FOR ALL TO aicd_worker
+  USING (true) WITH CHECK (workspace_id IS NULL OR workspace_id = app_current_workspace()
+                           OR current_setting('app.actor_type', true) = 'system');
+CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USING (true) WITH CHECK (true);
+```
+
+Партиционированные таблицы: политики задаются на родителе; `GRANT` — только на родителя (прямой доступ к партициям отозван), на каждой партиции также `ENABLE`+`FORCE ROW LEVEL SECURITY` с той же политикой (создаётся процедурой создания партиций).
+
+### 19.4 Классификация таблиц
+
+| Класс | Таблицы | RLS |
+|---|---|---|
+| **T** tenant | `workspace_members`, `project_member_overrides`, `projects`, `project_settings`, `repositories`, `worktrees`, `project_technologies`, `runs`, `tasks`, `task_dependencies`, `task_attempts`, `agent_assignments`, `routing_decisions`, `cli_executions`, `usage_metrics`, `agent_messages`, `message_deliveries`, `agent_decisions`, `chat_threads`, `chat_messages`, `user_directives`, `directive_impacts`, `directive_acknowledgements`, `agent_activity_events`, `code_index_snapshots`, `code_files`, `code_symbols`, `code_dependencies`, `knowledge_chunks`, `retrieval_queries`, `retrieval_results`, `context_packs`, `indexing_jobs`, `knowledge_entries`, `architecture_decisions`, `documentation_sources`, `documentation_snapshots`, `documentation_sections`, `artifacts`, `gate_executions`, `test_results`, `findings`, `evidence`, `evidence_links`, `project_controls`, `compliance_results`, `approvals`, `checkpoints`, `external_actions`, `run_event_log`, `github_installations`, `pull_requests` + корень `workspaces` | `workspace_id = app_current_workspace()` (для `workspaces` — `id`) |
+| **M** mixed | `policies`, `quality_profiles`, `quality_gates`, `idempotency_keys`, `audit_events` | чтение global + своё, запись своё (§19.3) |
+| **S** system | `outbox_events`, `worker_leases` | `aicd_worker` — все строки; `aicd_app` — только INSERT своего workspace в outbox, к leases доступа нет |
+| **G** global | `users`, `user_credentials`, `user_sessions`, `cli_providers`, `agent_profiles`, `allowed_transitions`, `standards`, `standard_controls`, `technologies`, `technology_versions`, `worker_hosts`, `cli_installations`, `cli_sessions`, `provider_health`, `github_webhook_deliveries`, `processed_events` | RLS не включается; доступ ограничен GRANT: справочники — `SELECT` для app/worker, запись — миграции/`aicd` CLI; `user_credentials`/`user_sessions` — только `aicd_app` (модуль identity); `provider_health`/`cli_*` — запись `aicd_worker`, чтение `aicd_app` (UI провайдеров: admin) |
+
+Тест схемы (§21.4) проверяет: каждая таблица с колонкой `workspace_id` имеет `relrowsecurity AND relforcerowsecurity` и ≥ 1 политику; ни одна таблица не попала одновременно в G и не имеет `workspace_id`-колонки.
+
+### 19.5 `SECURITY DEFINER` функции межарендаторного доступа
+
+Владелец — `aicd_sysfn` (NOLOGIN, BYPASSRLS); `SET search_path = pg_catalog, aicd`; `REVOKE EXECUTE … FROM PUBLIC`; `GRANT EXECUTE` точечно. Возвращают только идентификаторы.
+
+| Функция | Кому | Возвращает |
+|---|---|---|
+| `sys_list_user_workspaces()` | `aicd_app` | `(workspace_id, role)` для `app_current_user()` — список «мои workspace» (бриф) |
+| `sys_resolve_project_workspace(project_id uuid)` | `aicd_app` | `workspace_id`, если `app_current_user()` — член; иначе `NULL` |
+| `sys_resolve_installation_workspace(installation_id bigint)` | `aicd_worker` | `workspace_id` установки GitHub App (после проверки подписи вебхука) |
+| `sys_schedulable_workspaces(limit int)` | `aicd_worker` | workspace с `READY`-задачами, наступившими `RETRY_WAIT`, истекающими `PENDING` approvals, активными directives |
+| `sys_login_lookup(email text)` | `aicd_app` | `user_id` и признак активности для аутентификации (глобальная таблица, но функция централизует rate-limited lookup) |
+
+### 19.6 Обход RLS для обслуживания
+
+- `aicd_maintenance` используется **только** командами `aicd maintenance …` (retention, archive, purge workspace, проверки целостности) и `pg_dump` для бэкапа; подключение разрешено `pg_hba.conf` только с хоста оператора/джоба.
+- Каждая сессия начинается с `SELECT maint_begin(:job, :reason)` — функция пишет `audit_events(actor_type='system', action='maintenance.session_started')`; без этого вызова триггеры `trg_*_append_only` и retention-функции отклоняют операции (`current_setting('aicd.maint_session', true)` проверяется в функциях обслуживания).
+- `log_statement = 'all'` для роли `aicd_maintenance` (`ALTER ROLE … SET log_statement = 'all'`), параметры не логируются (§18.9).
+- `aicd_migrator` не обходит RLS: data-миграции, затрагивающие tenant-данные, выполняются пакетами по workspace с установкой контекста либо через `aicd_maintenance` с явной пометкой в миграции.
+
+### 19.7 Тесты RLS
+
+Для каждой T/M/S-таблицы автоматически (параметризованный тест по `information_schema`): два workspace A/B; под `aicd_app` и `aicd_worker` с контекстом A — `SELECT/UPDATE/DELETE` строк B возвращают 0 строк, `INSERT` с `workspace_id = B` падает с `42501`; без контекста — 0 строк; составной FK на родителя из B падает. Отдельно — `sys_*` функции не возвращают данных чужих пользователей. Это реализация AC-12 на уровне БД.
+
+---
+
+## 20. Retention, архивирование, партиционирование
+
+### 20.1 Партиционирование
+
+| Таблица | Схема | Обоснование |
+|---|---|---|
+| `agent_activity_events` | `RANGE (occurred_at)`, месяц | наибольший объём (вывод CLI), нет входящих FK, retention удалением партиций без `VACUUM`-нагрузки |
+| `audit_events` | `RANGE (created_at)`, месяц | append-only, долгое хранение, архив целыми партициями |
+| `outbox_events` | `RANGE (created_at)`, месяц | высокий оборот, опубликованные строки удаляются партициями; без FK |
+| `agent_messages` | **не** партиционируется в v1 | входящие FK (`message_deliveries`, `reply_to_id`, `chat_messages`, `agent_decisions`, `directive_acknowledgements`) потребовали бы ключ партиции во всех уникальных ключах; объём ограничен (≤ 32 KiB, на run); retention — вместе с архивом run |
+| `run_event_log` | **не** партиционируется в v1 | PK `(run_id, seq)` и `UNIQUE (event_id)` пришлось бы расширить ключом партиции; удаление — пакетами по run (§20.2). Пересмотреть после замеров (§22) |
+
+Партиции создаёт задача `maint_ensure_partitions` (ежедневно) на 3 месяца вперёд; `DEFAULT`-партиция не создаётся (иначе `ATTACH` требует её сканирования); алерт, если впереди < 2 партиций. Имена: `<table>_y2027m01`.
+
+### 20.2 Механика
+
+- **Архив перед удалением:** данные экспортируются в NDJSON (gzip) в object storage (`archive/<workspace_id>/<table>/<period>.ndjson.gz`), sha256 фиксируется в `artifacts(kind='archive', retention_class='archive')` и `audit_events`. Для глобальных партиций `audit_events` — архив по месяцу целиком (несколько workspace в одном файле, доступ только оператору).
+- **Партиционированные таблицы:** `ALTER TABLE … DETACH PARTITION … CONCURRENTLY` → экспорт → `DROP TABLE`.
+- **Непартиционированные:** удаление пакетами (`DELETE … WHERE ctid = ANY(…) LIMIT`-эквивалент по 5–10 тыс. строк) ролью `aicd_maintenance` с паузами; `RESTRICT`-FK не позволяют удалить то, на что ещё ссылаются evidence/approvals.
+- **Архив run:** терминальный run старше порога → экспорт пакета (`agent_messages`, `message_deliveries`, `chat_*`, `run_event_log`, `retrieval_*`, `directive_*`) в один artifact → удаление детальных строк. **Не удаляются:** `runs`, `tasks`, `task_attempts`, `gate_executions`, `test_results`, `findings`, `evidence`, `evidence_links`, `compliance_results`, `approvals`, `external_actions`, `pull_requests`, `agent_decisions` (трассировка ТЗ §13, §23 «аудит»).
+
+### 20.3 Сроки хранения по умолчанию (**предложение**, настраивается `policies(policy_type='retention')`, утверждает владелец)
+
+| Данные | Хранение online | Действие по истечении |
+|---|---|---|
+| `agent_activity_events` | 90 дней | архив партиции → drop |
+| `run_event_log` | 30 дней после терминального статуса run | удаление (SSE-replay не нужен); копия — в архиве run |
+| `agent_messages`, `message_deliveries`, `chat_threads`, `chat_messages`, `user_directives`/`directive_*` | 365 дней после терминального статуса run | архив run → удаление (кроме `user_directives`, которые остаются как трасса, но `chat_messages.body` заменяется ссылкой на архив) |
+| `audit_events` | 400 дней | архив партиции (рекомендуется object lock/WORM bucket) → drop; без архива удаление запрещено |
+| `outbox_events` | опубликованные — 2 полных месяца | drop партиции, только если в ней 0 неопубликованных; алерт на неопубликованные старше 15 мин |
+| `processed_events` | 30 дней | удаление (окно > максимального окна повторной доставки Dramatiq) |
+| `idempotency_keys` | до `expires_at` (24 ч) | удаление ежечасно |
+| `user_sessions` | 30 дней после `expires_at`/`revoked_at` | удаление |
+| `provider_health` | 30 дней | удаление (агрегаты — в Prometheus) |
+| `github_webhook_deliveries` | 30 дней (+ payload-объекты) | удаление |
+| `code_index_snapshots` (+ `code_files`/`code_symbols`/`code_dependencies`/`knowledge_chunks` каскадом) | последние 5 `READY` на репозиторий + все, на которые ссылаются `context_packs` неархивированных run; `FAILED`/`SUPERSEDED` — 7 дней | удаление |
+| `documentation_snapshots` | `SUPERSEDED` — 90 дней, если не используются | удаление |
+| `artifacts` по `retention_class` | `ephemeral` 7 дн.; `cli_raw_log` (sensitive) 30 дн.; `standard` 180 дн.; `evidence`/`archive` — без автоудаления | удаление объекта и строки, если нет FK-ссылок |
+| `usage_metrics` | 365 дней | удаление |
+
+---
+
+## 21. Стратегия миграций
+
+### 21.1 Инструмент и организация
+- Alembic, каталог `infrastructure/migrations/` (ТЗ §21); миграции пишутся явно (`op.execute`/операции Alembic). `autogenerate` используется только как **проверка дрейфа** моделей и схемы в CI (`alembic check`), не как источник миграций.
+- Линейная история: CI проверяет `alembic heads` = 1. Имя ревизии: `YYYYMMDD_HHMM_<slug>`.
+- Таблицы создаются в порядке зависимостей; FK на таблицу из более поздней фазы (например, `repositories → github_installations`, `project_settings → policies`, `tasks/approvals → …`) добавляется `ALTER TABLE … ADD CONSTRAINT … NOT VALID` + `VALIDATE CONSTRAINT` в миграции, создающей целевую таблицу. Распределение по фазам: P1 — IAM, projects, platform-таблицы (`outbox_events`, `audit_events`, `idempotency_keys`, `artifacts`, `processed_events`, `allowed_transitions`); P2 — CLI, `worker_hosts`, `worktrees`; P3 — orchestration, approvals, policies, checkpoints, leases, ledger, `run_event_log`; P4 — ACP/chat/directives; P5 — code intelligence, документация; P6 — quality/evidence/standards; P8 — GitHub.
+- Seed-данные (`cli_providers`, `agent_profiles`, `allowed_transitions`, глобальные `quality_profiles`/`quality_gates`/`policies`, каталог `standards`/`standard_controls`) — отдельные data-миграции с идемпотентным `INSERT … ON CONFLICT DO UPDATE`.
+
+### 21.2 Expand / contract
+Несовместимые изменения выполняются в несколько релизов: **expand** (добавить колонку/таблицу nullable или с default, двойная запись, backfill пакетами) → переключение чтения в коде → **contract** (удаление старого) не ранее следующего релиза. Пример переименования колонки: `ADD new` → триггер/код двойной записи → backfill → чтение из `new` → `DROP old`. Правила безопасности онлайн-миграций:
+- `SET lock_timeout = '5s'`, `statement_timeout` на миграцию; повтор при таймауте блокировки.
+- Индексы — `CREATE INDEX CONCURRENTLY` (в autocommit-блоке Alembic); на партиционированных — по партициям + `ATTACH`.
+- Ограничения — `ADD CONSTRAINT … NOT VALID` + `VALIDATE CONSTRAINT` отдельным шагом.
+- Расширение перечисления — `ALTER DOMAIN … ADD CONSTRAINT … NOT VALID` → `VALIDATE` → `DROP` старого ограничения (§1.4); сужение — только contract-фазой после проверки отсутствия значений.
+- Никаких `ADD COLUMN … DEFAULT <volatile>` и прочих перезаписей больших таблиц в одной транзакции.
+
+### 21.3 Обратимость
+Каждая миграция реализует `downgrade()`. Если откат невозможен без потери данных (удаление колонки с данными, необратимое преобразование), миграция помечается `irreversible = True` и в docstring содержит обоснование и план восстановления (из бэкапа / из архива); CI отклоняет миграцию с `downgrade()`, бросающим исключение, без такой пометки (ТЗ §7.1).
+
+### 21.4 Тесты миграций (CI, PostgreSQL 17 в контейнере)
+1. `upgrade head` на пустой БД; `downgrade base`; «лестница»: для каждой ревизии `upgrade → downgrade → upgrade`.
+2. Seeded-БД: фикстура с двумя workspace и представительными данными на ревизии N−1 → `upgrade` → проверки сохранности/backfill.
+3. Schema-lint: именование (`pk_/fk_/uq_/ck_/ix_`), все FK-колонки покрыты индексом (с ведущими колонками), каждая таблица с `workspace_id` — `ENABLE`+`FORCE RLS` и политика (§19.4), запрет секретных имён колонок (§18.9), значения доменов перечислений совпадают с `packages/contracts` enums (генерируются из README §3), каждая таблица принадлежит ровно одному модулю (`OWNED_TABLES`, MODULE_BOUNDARIES §5), `allowed_transitions` = `transitions.py`.
+4. RLS-тесты (§19.7) и тесты инвариантов (§18: цикл в DAG, межrun-зависимость, COMPLETED без PASS, самоутверждение, независимость ревью, убывание fencing token, UPDATE `audit_events`) — negative tests.
+5. `alembic check` — отсутствие дрейфа.
+
+### 21.5 Dry-run и выкатка (ТЗ §16)
+- `aicd migrate --dry-run`: генерация SQL (`alembic upgrade --sql`) для ревью + прогон на восстановленной копии последнего бэкапа (staging) с замером длительности и блокировок; отчёт прикладывается к релизу.
+- Перед `upgrade` в production — обязательный свежий бэкап и проверка его восстановимости (runbook P9).
+- Миграции выполняет отдельный job под `aicd_migrator` до запуска новых версий процессов; совместимость N/N−1 обеспечивается expand/contract.
+
+---
+
+## 22. Предлагаемые дополнения / открытые вопросы
+
+| ID | Вопрос / предложение | Решение в этом документе | Требует |
+|---|---|---|---|
+| OQ-DB-01 | Локальные перечисления §3.2 отсутствуют в README §3 | Значения предложены здесь | Внести в README §3 (или признать локальными) |
+| OQ-DB-02 | ADR-0007 описывает FSM только в коде | Добавлен защитный слой `allowed_transitions` + триггер (§18.3); переходы **сверить с DATA_FLOW.md** | Утверждение архитектора; синхронизация списков |
+| OQ-DB-03 | Семантика `findings.source_gate_id` в ТЗ | = `quality_gates.id` (определение); запуск — `gate_execution_id`; согласованность составным FK | Подтверждение |
+| OQ-DB-04 | `user_directives.impact_status` (ТЗ) дублирует `status`? | Хранит агрегат `directive_impact_type`; ход обработки — `status` | Подтверждение или переименование в `impact_type` |
+| OQ-DB-05 | Документационный кэш: глобальный (ТЗ §12 «централизованно») или per-workspace | В v1 per-workspace (изоляция, разные решения DOCS_DOWNLOAD, защита от отравления кэша); дедупликация объектов по sha256 на уровне хранилища | Решение владельца |
+| OQ-DB-06 | `cli_sessions` глобальные (бриф) — риск смешения контекста арендаторов | Запрет переиспользования сессии между workspace в CLI Gateway; альтернатива — сделать таблицу tenant | Решение архитектора |
+| OQ-DB-07 | Права уровня проекта (ТЗ §15) | `project_member_overrides`, только понижение (бриф) | Подтверждение |
+| OQ-DB-08 | `COMPLETED` требует ≥ 1 `PASS` gate — как быть с run `AUDIT`/`DOCUMENT` без кода | Профили обязаны содержать всегда применимый gate (например, `REVIEW`) | Подтверждение (QUALITY_GATES.md) |
+| OQ-DB-09 | Модель ролей брифа не покрывает межарендаторные выборки воркеров | NOLOGIN `aicd_sysfn` + `sys_*` функции; S-класс (`outbox_events`, `worker_leases`) с политикой «все строки» для `aicd_worker`. Вариант усиления — отдельная роль `aicd_dispatcher` только для outbox | Утверждение (SECURITY_ARCHITECTURE.md) |
+| OQ-DB-10 | Горячая строка `runs` (`last_event_seq` по ADR-0011 + `FOR SHARE` из §18.4) | Оставлено по ADR-0011; при измеренной конкуренции — вынести счётчик в `run_event_counters(run_id, last_seq)` | Замер в P3 |
+| OQ-DB-11 | Партиционирование `agent_messages`, `run_event_log` | Не в v1 (FK/уникальность); retention пакетами | Пересмотр после нагрузочного теста P9 |
+| OQ-DB-12 | Значения `approval_policy` (в ТЗ только пример `risk_based`), default `quality_profile` | `risk_based`/`always_manual`; default профиль `strict` | Решение владельца |
+| OQ-DB-13 | Сроки retention §20.3 | Предложения | Утверждение владельцем |
+| OQ-DB-14 | Tamper-evidence аудита | Опционально: hash-chain `prev_hash`/`row_hash` (sha256 канонического JSON строки) в P9 | Решение |
+| OQ-DB-15 | Кто управляет глобальными справочниками (`standards`, `technologies`, `agent_profiles`, `cli_installations`) — роли RBAC workspace-scoped | v1: seed-миграции + `aicd` admin CLI; API — только чтение; «platform admin» не вводится | Решение владельца |
+| OQ-DB-16 | Конфигурация FTS | `simple` (смешанный ru/en); альтернатива — две колонки `russian`/`english` | Решение после пилотных данных |
+| OQ-DB-17 | Значения `gate_type` | Предложены по ТЗ §14 в формате `QG-<TYPE>` | Синхронизировать с QUALITY_GATES.md |
+| OQ-DB-18 | `sender_role = 'orchestrator'`, `recipient_role = 'user'` расширяют `agent_role` в ACP | Добавлены CHECK-ом таблицы | Синхронизировать с AGENT_COMMUNICATION_PROTOCOL.md |
+| OQ-DB-19 | Отступления от полей каталога ТЗ | `approvals.run_id` nullable + `project_id`; `artifacts.project_id` nullable; `routing_decisions` без `task_attempt_id` (связь через `task_attempts.routing_decision_id`); `agent_decisions.decided_by` → `decided_by_type/role/user_id`; `user_directives.target` → типизированные колонки; `chat_messages.sender_id` + `sender_role`; `agent_activity_events` PK `(id, occurred_at)` из-за партиционирования | Подтверждение |
+| OQ-DB-20 | Добавленные таблицы вне брифа | `project_member_overrides`, `allowed_transitions`, `code_files` | Подтверждение |
