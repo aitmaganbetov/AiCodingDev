@@ -1,0 +1,3776 @@
+# AiCodingDev REST API v1 — Phase 0 contract. Источник правил: docs/api/API_DESIGN.md.
+openapi: 3.1.0
+info:
+  title: AiCodingDev Internal REST API
+  version: 1.0.0-phase0
+  description: 'Phase 0 контракт (ТЗ §8). Правила — docs/api/API_DESIGN.md. Операции с x-tz-addition: true — дополнения к таблице ТЗ §8. Ничего
+    не реализовано; спецификация переносится в packages/contracts/ в Phase 1 (ADR-0013).'
+  license: {name: Proprietary, identifier: LicenseRef-Proprietary}
+jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
+servers:
+- {url: /api/v1}
+security:
+- cookieAuth: []
+  csrfHeader: []
+tags:
+- {name: auth}
+- {name: health}
+- {name: workspaces}
+- {name: projects}
+- {name: runs}
+- {name: chat}
+- {name: tasks}
+- {name: evidence}
+- {name: quality}
+- {name: providers}
+- {name: approvals}
+- {name: documentation}
+- {name: audit}
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      summary: Вход локальной учётной записью [дополнение к ТЗ]
+      tags: [auth]
+      description: 'Без X-CSRF-Token: защита login-CSRF через проверку Origin/Sec-Fetch-Site. Ротация session id. Неверные данные ⇒ 401 без указания,
+        что именно неверно. Лимит 10/мин на IP и блокировка аккаунта после 5 неудач (locked_until).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LoginRequest'}
+      responses:
+        '200':
+          description: Сессия создана
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionInfo'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Set-Cookie: {$ref: '#/components/headers/SetCookie'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security: []
+      x-required-permission: public
+      x-audit-action: auth.login
+      x-tz-addition: true
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Выход (отзыв сессии) [дополнение к ТЗ]
+      tags: [auth]
+      responses:
+        '204':
+          description: Сессия отозвана; cookies очищены
+          headers:
+            Set-Cookie: {$ref: '#/components/headers/SetCookie'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: authenticated
+      x-audit-action: auth.logout
+      x-tz-addition: true
+  /auth/session:
+    get:
+      operationId: getSession
+      summary: Текущая сессия, CSRF-токен и членства [дополнение к ТЗ]
+      tags: [auth]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionInfo'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: authenticated
+      x-audit-action: none
+      x-tz-addition: true
+  /health/live:
+    get:
+      operationId: healthLive
+      summary: Liveness [дополнение к ТЗ]
+      tags: [health]
+      security: []
+      servers:
+      - {url: /, description: Health-эндпоинты вне /api/v1}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HealthStatus'}
+      x-required-permission: public
+      x-audit-action: none
+      x-tz-addition: true
+  /health/ready:
+    get:
+      operationId: healthReady
+      summary: Readiness [дополнение к ТЗ]
+      tags: [health]
+      security: []
+      servers:
+      - {url: /, description: Health-эндпоинты вне /api/v1}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HealthStatus'}
+        '503':
+          description: Не готов
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HealthStatus'}
+      x-required-permission: public
+      x-audit-action: none
+      x-tz-addition: true
+  /workspaces:
+    get:
+      operationId: listWorkspaces
+      summary: Workspaces текущего пользователя
+      tags: [workspaces]
+      parameters:
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkspacePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: authenticated
+      x-audit-action: none
+    post:
+      operationId: createWorkspace
+      summary: Создать workspace (создатель становится owner)
+      tags: [workspaces]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WorkspaceCreateRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Workspace'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: workspace:create
+      x-audit-action: workspace.create
+  /workspaces/{workspace_id}/members:
+    get:
+      operationId: listMembers
+      summary: Участники workspace [дополнение к ТЗ]
+      tags: [workspaces]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceId'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MemberPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: member:read
+      x-audit-action: none
+      x-tz-addition: true
+    post:
+      operationId: addMember
+      summary: Добавить участника [дополнение к ТЗ]
+      tags: [workspaces]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/WorkspaceId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MemberCreateRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Member'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: member:manage
+      x-audit-action: member.add
+      x-tz-addition: true
+  /workspaces/{workspace_id}/members/{user_id}:
+    patch:
+      operationId: updateMember
+      summary: Изменить роль участника [дополнение к ТЗ]
+      tags: [workspaces]
+      description: Понижение последнего owner ⇒ 409 last_owner.
+      parameters:
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/WorkspaceId'}
+      - {$ref: '#/components/parameters/UserId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MemberUpdateRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Member'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: member:manage
+      x-audit-action: member.role_change
+      x-tz-addition: true
+    delete:
+      operationId: removeMember
+      summary: Удалить участника [дополнение к ТЗ]
+      tags: [workspaces]
+      parameters:
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/WorkspaceId'}
+      - {$ref: '#/components/parameters/UserId'}
+      responses:
+        '204': {description: 'Удалён; его сессии теряют доступ к workspace, SSE закрываются'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: member:manage
+      x-audit-action: member.remove
+      x-tz-addition: true
+  /projects:
+    get:
+      operationId: listProjects
+      summary: Проекты workspace
+      tags: [projects]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: status
+        in: query
+        schema: {$ref: '#/components/schemas/ProjectStatus'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+    post:
+      operationId: createProject
+      summary: Создать проект
+      tags: [projects]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProjectCreateRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: project:create
+      x-audit-action: project.create
+  /projects/{project_id}:
+    get:
+      operationId: getProject
+      summary: Проект и настройки
+      tags: [projects]
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+    patch:
+      operationId: updateProject
+      summary: Изменить метаданные/настройки
+      tags: [projects]
+      parameters:
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/ProjectId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProjectUpdateRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: project:update
+      x-audit-action: project.update
+  /projects/{project_id}/repositories:
+    get:
+      operationId: listRepositories
+      summary: Репозитории проекта [дополнение к ТЗ]
+      tags: [projects]
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RepositoryPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
+    post:
+      operationId: attachRepository
+      summary: Привязать репозиторий
+      tags: [projects]
+      description: Валидирует путь/URL, регистрирует репозиторий и ставит indexing_job (асинхронно).
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProjectId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RepositoryAttachRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Repository'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: repository:attach
+      x-audit-action: repository.attach
+  /projects/{project_id}/technologies:
+    get:
+      operationId: listTechnologies
+      summary: Определённый стек
+      tags: [projects]
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TechnologyPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+  /projects/{project_id}/documentation-policy:
+    get:
+      operationId: getDocumentationPolicy
+      summary: Режим документации
+      tags: [projects]
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentationPolicy'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+    patch:
+      operationId: updateDocumentationPolicy
+      summary: Изменить OFF/SMART/STRICT
+      tags: [projects]
+      description: ETag основан на project_settings.settings_version. Действует для новых runs и следующих context packs; уже выданные context
+        packs не меняются.
+      parameters:
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/ProjectId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DocumentationPolicyUpdateRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentationPolicy'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: project:update
+      x-audit-action: project.documentation_policy.update
+  /runs:
+    get:
+      operationId: listRuns
+      summary: Список runs [дополнение к ТЗ]
+      tags: [runs]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: project_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: status
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/RunStatus'}
+        description: Повторяемый параметр
+      - name: mode
+        in: query
+        schema: {$ref: '#/components/schemas/RunMode'}
+      - name: created_after
+        in: query
+        schema: {type: string, format: date-time}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+      x-tz-addition: true
+    post:
+      operationId: createRun
+      summary: Создать run
+      tags: [runs]
+      description: 'Workspace определяется по project_id. Недоступность провайдеров не мешает созданию: задачи уйдут в BLOCKED (PROVIDER_UNAVAILABLE/AUTH_REQUIRED).'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RunCreateRequest'}
+      responses:
+        '201':
+          description: Created (ТЗ §8.1)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunCreated'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: run:create
+      x-audit-action: run.create
+  /runs/{run_id}:
+    get:
+      operationId: getRun
+      summary: Состояние run
+      tags: [runs]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Run'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+  /runs/{run_id}/tasks:
+    get:
+      operationId: getRunTasks
+      summary: DAG и статусы задач
+      tags: [runs]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - name: status
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/TaskStatus'}
+      - name: agent_role
+        in: query
+        schema: {$ref: '#/components/schemas/AgentRole'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskGraph'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+  /runs/{run_id}/pause:
+    post:
+      operationId: pauseRun
+      summary: Приостановить (через safe checkpoint)
+      tags: [runs]
+      description: Недопустимый переход FSM ⇒ 409 invalid_state_transition. Повтор той же команды с новым ключом при уже целевом статусе ⇒ 202
+        (no-op).
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatchOptional'}
+      - {$ref: '#/components/parameters/RunId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommandBody'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunCommandAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: run:control
+      x-audit-action: run.pause_requested
+  /runs/{run_id}/resume:
+    post:
+      operationId: resumeRun
+      summary: Продолжить
+      tags: [runs]
+      description: Недопустимый переход FSM ⇒ 409 invalid_state_transition. Повтор той же команды с новым ключом при уже целевом статусе ⇒ 202
+        (no-op).
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatchOptional'}
+      - {$ref: '#/components/parameters/RunId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommandBody'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunCommandAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: run:control
+      x-audit-action: run.resume_requested
+  /runs/{run_id}/cancel:
+    post:
+      operationId: cancelRun
+      summary: Отменить
+      tags: [runs]
+      description: Недопустимый переход FSM ⇒ 409 invalid_state_transition. Повтор той же команды с новым ключом при уже целевом статусе ⇒ 202
+        (no-op).
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatchOptional'}
+      - {$ref: '#/components/parameters/RunId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommandBody'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunCommandAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: run:control
+      x-audit-action: run.cancel_requested
+  /runs/{run_id}/events:
+    get:
+      operationId: streamRunEvents
+      summary: SSE-поток событий run
+      tags: [runs]
+      description: 'Повторная отправка событий из run_event_log с seq > Last-Event-ID, затем live. Проверка доступа при подключении и каждые 60
+        с / при событии смены членства. Лимиты: 5 соединений на пользователя, max lifetime 30 мин.'
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - name: Last-Event-ID
+        in: header
+        schema: {type: string, pattern: '^[0-9]+$'}
+        description: seq последнего полученного события
+      - name: after_seq
+        in: query
+        schema: {type: integer, minimum: 0}
+        description: Альтернатива Last-Event-ID для первичного подключения; заголовок имеет приоритет
+      - name: types
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/SseEventType'}
+        description: Фильтр типов (heartbeat всегда)
+      - name: task_id
+        in: query
+        schema: {type: string, format: uuid}
+        description: Фильтр по задаче
+      responses:
+        '200':
+          description: 'text/event-stream. Кадры: `id: <seq>`, `event: <type>`, `data: <SseEnvelope JSON>`; heartbeat каждые 15 с; `retry: 3000`.'
+          content:
+            text/event-stream:
+              schema: {type: string}
+              x-sse-event-schema: {$ref: '#/components/schemas/SseEvent'}
+              example: 'id: 42
+
+                event: task.state_changed
+
+                data: {"event_id":"...","run_id":"...","seq":42,"type":"task.state_changed","timestamp":"2026-11-08T09:00:00Z","schema_version":"1.0","payload":{}}
+
+
+                '
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+            X-Accel-Buffering:
+              schema: {type: string, const: 'no'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '410':
+          description: 410 replay_window_exceeded — запрошенный seq вне хранения; перечитать состояние REST и переподключиться с after_seq=последний
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: sse.connect
+  /runs/{run_id}/activity:
+    get:
+      operationId: getRunActivity
+      summary: История событий
+      tags: [runs]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - name: task_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: event_type
+        in: query
+        schema: {type: string}
+      - name: after_seq
+        in: query
+        schema: {type: integer}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ActivityPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+  /runs/{run_id}/chat:
+    get:
+      operationId: getRunChat
+      summary: Лента Live Agent Chat (потоки как фильтры)
+      tags: [chat]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - name: stream
+        in: query
+        schema: {$ref: '#/components/schemas/ChatStream'}
+        description: all_agents по умолчанию
+      - name: role
+        in: query
+        schema: {$ref: '#/components/schemas/AgentRole'}
+        description: Обязателен при stream=role
+      - name: task_id
+        in: query
+        schema: {type: string, format: uuid}
+        description: Обязателен при stream=task
+      - name: thread_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: q
+        in: query
+        schema: {type: string, maxLength: 200}
+        description: Полнотекстовый поиск
+      - name: item_type
+        in: query
+        schema:
+          type: array
+          items: {type: string}
+      - name: order
+        in: query
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: chat:read
+      x-audit-action: none
+  /runs/{run_id}/chat/messages:
+    post:
+      operationId: postChatMessage
+      summary: Сообщение пользователя (комментарий)
+      tags: [chat]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/RunId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatMessageCreateRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatMessage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: chat:write
+      x-audit-action: chat.message.create
+  /runs/{run_id}/directives:
+    get:
+      operationId: listDirectives
+      summary: Поручения run [дополнение к ТЗ]
+      tags: [chat]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - name: status
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/DirectiveStatus'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DirectivePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: chat:read
+      x-audit-action: none
+      x-tz-addition: true
+    post:
+      operationId: createDirective
+      summary: Поручение/исправление
+      tags: [chat]
+      description: Право зависит от directive_type (см. API_DESIGN §5). APPROVE/REJECT дополнительно проверяют право на решение по action_type
+        approval.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/RunId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DirectiveCreateRequest'}
+      responses:
+        '202':
+          description: Accepted (ТЗ §8.2)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DirectiveAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: directive:create
+      x-audit-action: directive.submit
+      x-permission-depends-on: directive_type
+      x-permission-rules:
+        reviewer: [ASK, REVIEW, APPROVE, REJECT]
+        developer: all
+        admin: all
+        owner: all
+        viewer: []
+  /runs/{run_id}/directives/{directive_id}:
+    get:
+      operationId: getDirective
+      summary: Обработка поручения
+      tags: [chat]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - {$ref: '#/components/parameters/DirectiveId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Directive'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: chat:read
+      x-audit-action: none
+  /runs/{run_id}/directives/{directive_id}/confirm:
+    post:
+      operationId: confirmDirective
+      summary: Подтвердить impact preview [дополнение к ТЗ]
+      tags: [chat]
+      description: Только из AWAITING_CONFIRMATION; автор поручения или admin/owner. Критические — через approval CRITICAL_DIRECTIVE.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/RunId'}
+      - {$ref: '#/components/parameters/DirectiveId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommandBody'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Directive'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: directive:confirm
+      x-audit-action: directive.confirm
+      x-tz-addition: true
+  /runs/{run_id}/directives/{directive_id}/cancel:
+    post:
+      operationId: cancelDirective
+      summary: Отозвать поручение до dispatch [дополнение к ТЗ]
+      tags: [chat]
+      description: Допустимо до DISPATCHED; иначе 409 invalid_state_transition.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/RunId'}
+      - {$ref: '#/components/parameters/DirectiveId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommandBody'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Directive'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: directive:confirm
+      x-audit-action: directive.cancel
+      x-tz-addition: true
+  /tasks/{task_id}:
+    get:
+      operationId: getTask
+      summary: Задача и критерии
+      tags: [tasks]
+      parameters:
+      - {$ref: '#/components/parameters/TaskId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Task'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+  /tasks/{task_id}/attempts:
+    get:
+      operationId: listTaskAttempts
+      summary: Попытки задачи [дополнение к ТЗ]
+      tags: [tasks]
+      parameters:
+      - {$ref: '#/components/parameters/TaskId'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskAttemptPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+      x-tz-addition: true
+  /tasks/{task_id}/messages:
+    get:
+      operationId: listTaskMessages
+      summary: ACP-сообщения задачи
+      tags: [tasks]
+      parameters:
+      - {$ref: '#/components/parameters/TaskId'}
+      - name: type
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/AcpMessageType'}
+      - name: correlation_id
+        in: query
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AcpMessagePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+  /tasks/{task_id}/evidence:
+    get:
+      operationId: listTaskEvidence
+      summary: Доказательства задачи
+      tags: [tasks]
+      parameters:
+      - {$ref: '#/components/parameters/TaskId'}
+      - name: verification_status
+        in: query
+        schema: {$ref: '#/components/schemas/EvidenceVerificationStatus'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidencePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: evidence:read
+      x-audit-action: none
+  /evidence/{evidence_id}:
+    get:
+      operationId: getEvidence
+      summary: Evidence [дополнение к ТЗ]
+      tags: [evidence]
+      parameters:
+      - {$ref: '#/components/parameters/EvidenceId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Evidence'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: evidence:read
+      x-audit-action: none
+      x-tz-addition: true
+  /artifacts/{artifact_id}/download:
+    get:
+      operationId: downloadArtifact
+      summary: Скачать artifact (редирект на подписанный URL) [дополнение к ТЗ]
+      tags: [evidence]
+      description: kind=raw_cli_log требует artifact:download_raw (admin/owner). Для file-адаптера — потоковая отдача через API (200 application/octet-stream).
+      parameters:
+      - {$ref: '#/components/parameters/ArtifactId'}
+      responses:
+        '302':
+          description: Location — подписанный URL объектного хранилища, TTL 60 с, одноразовый Content-Disposition=attachment
+          headers:
+            Location: {$ref: '#/components/headers/Location'}
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: artifact:download
+      x-audit-action: artifact.download
+      x-tz-addition: true
+  /runs/{run_id}/quality:
+    get:
+      operationId: getRunQuality
+      summary: Gates, findings, verdict
+      tags: [quality]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/QualityReport'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: quality:read
+      x-audit-action: none
+  /runs/{run_id}/compliance:
+    get:
+      operationId: getRunCompliance
+      summary: Матрица контролей
+      tags: [quality]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - name: standard_code
+        in: query
+        schema: {type: string}
+      - name: status
+        in: query
+        schema: {$ref: '#/components/schemas/ComplianceStatus'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CompliancePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: quality:read
+      x-audit-action: none
+  /runs/{run_id}/report:
+    get:
+      operationId: getRunReport
+      summary: Отчёт run
+      tags: [quality]
+      description: Content negotiation по Accept.
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      responses:
+        '200':
+          description: OK
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunReport'}
+            text/markdown:
+              schema: {type: string}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: quality:read
+      x-audit-action: none
+  /providers:
+    get:
+      operationId: listProviders
+      summary: 'Codex/Claude: health и capabilities'
+      tags: [providers]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProviderList'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: provider:read
+      x-audit-action: none
+  /providers/{provider_id}/probe:
+    post:
+      operationId: probeProvider
+      summary: Перепроверить установку/доступ
+      tags: [providers]
+      description: Асинхронно на worker-exec. Не выполняет login и не принимает credentials. Лимит 6/час на workspace.
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProbeAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: provider:probe
+      x-audit-action: provider.probe_requested
+  /providers/{provider_id}/settings:
+    patch:
+      operationId: updateProviderSettings
+      summary: Безопасные настройки провайдера
+      tags: [providers]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProviderSettingsUpdateRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProviderSettings'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: provider:settings
+      x-audit-action: provider.settings.update
+  /approvals:
+    get:
+      operationId: listApprovals
+      summary: Ожидающие подтверждения
+      tags: [approvals]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: status
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/ApprovalStatus'}
+        description: По умолчанию PENDING
+      - name: run_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: action_type
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/ApprovalActionType'}
+      - name: decidable_by_me
+        in: query
+        schema: {type: boolean}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApprovalPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: approval:read
+      x-audit-action: none
+  /approvals/{approval_id}:
+    get:
+      operationId: getApproval
+      summary: Подтверждение [дополнение к ТЗ]
+      tags: [approvals]
+      parameters:
+      - {$ref: '#/components/parameters/ApprovalId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Approval'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: approval:read
+      x-audit-action: none
+      x-tz-addition: true
+  /approvals/{approval_id}/decision:
+    post:
+      operationId: decideApproval
+      summary: Approve/reject
+      tags: [approvals]
+      description: Право зависит от action_type (API_DESIGN §5.3); four-eyes ⇒ 403 four_eyes_violation; не PENDING ⇒ 409 invalid_state_transition.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/ApprovalId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ApprovalDecisionRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Approval'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: approval:decide
+      x-audit-action: approval.decide
+      x-permission-depends-on: action_type
+  /documentation/sources:
+    get:
+      operationId: listDocumentationSources
+      summary: Источники документации
+      tags: [documentation]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: technology_version_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: enabled
+        in: query
+        schema: {type: boolean}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentationSourcePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: documentation:read
+      x-audit-action: none
+    post:
+      operationId: registerDocumentationSource
+      summary: Зарегистрировать источник
+      tags: [documentation]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DocumentationSourceCreateRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentationSource'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: documentation:register
+      x-audit-action: documentation_source.register
+  /documentation/sources/{source_id}/refresh:
+    post:
+      operationId: refreshDocumentationSource
+      summary: Обновить кэш
+      tags: [documentation]
+      description: Явный запрос человека с правом = согласие на загрузку (вне run). Создаёт external_actions(PLANNED); загрузка SSRF-safe в отдельной
+        очереди. Источник disabled ⇒ 409.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/SourceId'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RefreshAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      x-required-permission: documentation:refresh
+      x-audit-action: documentation_source.refresh_requested
+  /audit-events:
+    get:
+      operationId: listAuditEvents
+      summary: Журнал аудита
+      tags: [audit]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: actor_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: action
+        in: query
+        schema: {type: string}
+      - name: resource_type
+        in: query
+        schema: {type: string}
+      - name: resource_id
+        in: query
+        schema: {type: string}
+      - name: from
+        in: query
+        schema: {type: string, format: date-time}
+      - name: to
+        in: query
+        schema: {type: string, format: date-time}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuditEventPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+      security:
+      - cookieAuth: []
+      x-required-permission: audit:read
+      x-audit-action: audit.query
+components:
+  securitySchemes:
+    cookieAuth: {type: apiKey, in: cookie, name: aicd_session, description: 'Серверная сессия (ADR-0009), HttpOnly, Secure, SameSite=Strict'}
+    csrfHeader: {type: apiKey, in: header, name: X-CSRF-Token, description: Double-submit CSRF token; обязателен для POST/PATCH/PUT/DELETE}
+  parameters:
+    WorkspaceHeader:
+      name: X-Workspace-Id
+      in: header
+      required: true
+      schema: {type: string, format: uuid}
+      description: Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8, maxLength: 255, pattern: '^[A-Za-z0-9._:-]+$'}
+      description: Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user).
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: {type: string, example: '"v12"'}
+      description: Сильный ETag текущей версии. Отсутствует ⇒ 428, не совпадает ⇒ 412.
+    IfMatchOptional:
+      name: If-Match
+      in: header
+      required: false
+      schema: {type: string}
+      description: Необязательный ETag run для защиты от устаревшего UI.
+    Cursor:
+      name: cursor
+      in: query
+      schema: {type: string, maxLength: 1024}
+      description: Opaque cursor из next_cursor
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    WorkspaceId:
+      name: workspace_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    DirectiveId:
+      name: directive_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ProviderId:
+      name: provider_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ApprovalId:
+      name: approval_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    SourceId:
+      name: source_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    EvidenceId:
+      name: evidence_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ArtifactId:
+      name: artifact_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  headers:
+    ETag:
+      description: Сильный ETag "v<version>"
+      schema: {type: string}
+    Location:
+      description: URI созданного ресурса
+      schema: {type: string}
+    RateLimitLimit:
+      description: Квота окна
+      schema: {type: integer}
+    RateLimitRemaining:
+      description: Остаток квоты
+      schema: {type: integer}
+    RateLimitReset:
+      description: Секунд до сброса окна
+      schema: {type: integer}
+    RetryAfter:
+      description: Секунд до повтора
+      schema: {type: integer}
+    IdempotencyReplayed:
+      description: true — ответ воспроизведён из idempotency-хранилища
+      schema: {type: boolean}
+    SetCookie:
+      description: aicd_session (HttpOnly; Secure; SameSite=Strict; Path=/api) и aicd_csrf (Secure; SameSite=Strict; не HttpOnly)
+      schema: {type: string}
+  responses:
+    BadRequest:
+      description: 400 malformed_request | idempotency_key_missing
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Unauthorized:
+      description: 401 unauthenticated | session_expired
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Forbidden:
+      description: 403 forbidden | csrf_failed | four_eyes_violation | policy_denied
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    NotFound:
+      description: 404 not_found (включая чужой workspace — защита от перечисления)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Conflict:
+      description: 409 conflict | version_mismatch | invalid_state_transition | idempotency_key_in_flight | last_owner
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    PreconditionFailed:
+      description: 412 precondition_failed (If-Match не совпал)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+      headers:
+        ETag: {$ref: '#/components/headers/ETag'}
+    PreconditionRequired:
+      description: 428 precondition_required (нет If-Match)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Unprocessable:
+      description: 422 validation_error | idempotency_key_reuse | invalid_cursor
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    TooManyRequests:
+      description: 429 rate_limited
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+      headers:
+        RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+        RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+        RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+    ServiceUnavailable:
+      description: 503 provider_unavailable | service_unavailable
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+  schemas:
+    RunMode:
+      type: string
+      enum: [CREATE, DEVELOP, DEBUG, AUDIT, MODERNIZE, SECURITY, OPTIMIZE, TEST, MAINTAIN, DOCUMENT, REVIEW]
+      description: Каноническое перечисление (docs/README.md §3).
+    RunStatus:
+      type: string
+      enum: [CREATED, DISCOVERY, PLANNED, AWAITING_APPROVAL, RUNNING, VERIFYING, COMPLETED, PAUSED, BLOCKED, FAILED, CANCELLED]
+      description: Каноническое перечисление (docs/README.md §3).
+    TaskStatus:
+      type: string
+      enum: [PENDING, READY, LEASED, RUNNING, VERIFYING, SUCCEEDED, BLOCKED, RETRY_WAIT, FAILED, CANCELLED]
+      description: Каноническое перечисление (docs/README.md §3).
+    TaskBlockedReason:
+      type: string
+      enum: [APPROVAL_REQUIRED, PROVIDER_UNAVAILABLE, AUTH_REQUIRED, DIRECTIVE_REPLAN, RUN_PAUSED, DOCS_REQUIRED, MANUAL_REVIEW, REVIEW_LOOP_EXHAUSTED,
+        DEPENDENCY_FAILED]
+      description: Каноническое перечисление (docs/README.md §3).
+    ExecutionStatus:
+      type: string
+      enum: [QUEUED, STARTING, RUNNING, EXITED, COLLECTED, TIMED_OUT, CANCELLED, CRASHED, AUTH_REQUIRED, RATE_LIMITED]
+      description: Каноническое перечисление (docs/README.md §3).
+    CliErrorCode:
+      type: string
+      enum: [CLI_NOT_INSTALLED, AUTH_REQUIRED, RATE_LIMITED, TIMEOUT, SANDBOX_DENIED, PROCESS_FAILED, OUTPUT_PARSE_ERROR, UNSUPPORTED_VERSION,
+        CANCELLED]
+      description: Каноническое перечисление (docs/README.md §3).
+    FailureCategory:
+      type: string
+      enum: [CLI_NOT_INSTALLED, AUTH_REQUIRED, RATE_LIMITED, TIMEOUT, SANDBOX_DENIED, PROCESS_FAILED, OUTPUT_PARSE_ERROR, UNSUPPORTED_VERSION,
+        CANCELLED, GATE_FAILED, REVIEW_REJECTED, LEASE_LOST, WORKER_CRASH, POLICY_DENIED, INTERNAL_ERROR]
+      description: Каноническое перечисление (docs/README.md §3).
+    CliProvider:
+      type: string
+      enum: [codex, claude]
+      description: Каноническое перечисление (docs/README.md §3).
+    AgentRole:
+      type: string
+      enum: [requirements, architect, planner, developer, reviewer, security, qa, database, performance, devops, maintenance, documentation]
+      description: Каноническое перечисление (docs/README.md §3).
+    ComplexityLevel:
+      type: string
+      enum: [L1, L2, L3, L4, L5]
+      description: Каноническое перечисление (docs/README.md §3). В API передаётся как строка L1..L5; в БД — tasks.complexity smallint 1..5.
+    RiskLevel:
+      type: string
+      enum: [low, medium, high, critical]
+      description: Каноническое перечисление (docs/README.md §3).
+    WorkspaceRole:
+      type: string
+      enum: [owner, admin, developer, reviewer, viewer]
+      description: Каноническое перечисление (docs/README.md §3).
+    AcpMessageType:
+      type: string
+      enum: [TASK_ASSIGN, HANDOFF, QUESTION, ANSWER, REVIEW_REQUEST, FINDING, FIX_REQUEST, EVIDENCE_SUBMITTED, DECISION_PROPOSAL, DECISION_RECORDED,
+        BLOCKED, TASK_COMPLETED]
+      description: Каноническое перечисление (docs/README.md §3).
+    DirectiveType:
+      type: string
+      enum: [ASK, NEW_TASK, CHANGE_REQUEST, STOP, PAUSE, RESUME, REVIEW, APPROVE, REJECT]
+      description: Каноническое перечисление (docs/README.md §3).
+    DirectiveStatus:
+      type: string
+      enum: [RECEIVED, IMPACT_ANALYSIS_PENDING, IMPACT_READY, AWAITING_CONFIRMATION, CONFIRMED, CHECKPOINTING, REPLANNING, DISPATCHED, ACKNOWLEDGED,
+        COMPLETED, REJECTED, CANCELLED, FAILED]
+      description: Каноническое перечисление (docs/README.md §3).
+    DirectiveImpactType:
+      type: string
+      enum: [NONE, CONTEXT_ONLY, REPLAN_REQUIRED, TASK_CANCEL, TASK_ADD, RESTART_REQUIRED]
+      description: Каноническое перечисление (docs/README.md §3).
+    ApprovalActionType:
+      type: string
+      enum: [PLAN_APPROVAL, MERGE, PRODUCTION_DEPLOY, DESTRUCTIVE_MIGRATION, DATA_DELETION, SECRET_CHANGE, UNRESTRICTED_NETWORK, DOCS_DOWNLOAD,
+        CRITICAL_DIRECTIVE, MANUAL_REVIEW, SELF_REVIEW_FALLBACK, LOCAL_EXECUTION_FALLBACK]
+      description: Каноническое перечисление (docs/README.md §3).
+    ApprovalStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED]
+      description: Каноническое перечисление (docs/README.md §3).
+    DocumentationMode:
+      type: string
+      enum: ['OFF', SMART, STRICT]
+      description: Каноническое перечисление (docs/README.md §3).
+    QualityProfile:
+      type: string
+      enum: [basic, strict, critical]
+      description: Каноническое перечисление (docs/README.md §3).
+    GateExecutionStatus:
+      type: string
+      enum: [PENDING, RUNNING, PASS, FAIL, ERROR, SKIPPED, NOT_APPLICABLE]
+      description: Каноническое перечисление (docs/README.md §3).
+    ComplianceStatus:
+      type: string
+      enum: [PASS, FAIL, NOT_APPLICABLE, UNVERIFIED, MANUAL_REVIEW]
+      description: Каноническое перечисление (docs/README.md §3).
+    FindingSeverity:
+      type: string
+      enum: [info, low, medium, high, critical]
+      description: Каноническое перечисление (docs/README.md §3).
+    FindingStatus:
+      type: string
+      enum: [OPEN, ACKNOWLEDGED, FIXED, VERIFIED_FIXED, FALSE_POSITIVE, ACCEPTED_RISK]
+      description: Каноническое перечисление (docs/README.md §3).
+    EvidenceVerificationStatus:
+      type: string
+      enum: [PENDING, VERIFIED, REJECTED, UNVERIFIED]
+      description: Каноническое перечисление (docs/README.md §3).
+    AuthStatus:
+      type: string
+      enum: [UNKNOWN, AUTHENTICATED, AUTH_REQUIRED, EXPIRED, ERROR]
+      description: Каноническое перечисление (docs/README.md §3).
+    ProviderAvailability:
+      type: string
+      enum: [AVAILABLE, DEGRADED, RATE_LIMITED, UNAVAILABLE]
+      description: Каноническое перечисление (docs/README.md §3).
+    NormalizedCliEvent:
+      type: string
+      enum: [started, output, tool_event, artifact, warning, finished]
+      description: Каноническое перечисление (docs/README.md §3).
+    SseEventType:
+      type: string
+      enum: [run.state_changed, task.state_changed, agent.message, cli.output, directive.impact_ready, directive.state_changed, approval.requested,
+        approval.decided, gate.completed, run.completed, chat.message, heartbeat]
+      description: Каноническое перечисление (docs/README.md §3).
+    RepositoryProvider:
+      type: string
+      enum: [local, github]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    ChatStream:
+      type: string
+      enum: [all_agents, codex, claude, role, task, approvals]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    ChatSenderType:
+      type: string
+      enum: [user, agent, system]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    ChatMessageKind:
+      type: string
+      enum: [text, directive, agent_relay, system_notice]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    DirectiveTargetType:
+      type: string
+      enum: [run, role, task, approval]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    DirectiveImpactStatus:
+      type: string
+      enum: [PENDING, READY, NOT_REQUIRED, FAILED]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    DirectiveAckStatus:
+      type: string
+      enum: [PENDING, DELIVERED, ACKNOWLEDGED, FAILED]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    ArtifactKind:
+      type: string
+      enum: [git_diff, test_report, scan_report, sbom, context_pack, cli_output, raw_cli_log, run_report, other]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    DocumentationSourceType:
+      type: string
+      enum: [url, file, git]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    DocumentationTrustLevel:
+      type: string
+      enum: [official, internal, community]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    DocumentationRefreshPolicy:
+      type: string
+      enum: [manual, scheduled]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    ProjectStatus:
+      type: string
+      enum: [ACTIVE, ARCHIVED]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    CompatibilityStatus:
+      type: string
+      enum: [SUPPORTED, UNTESTED, UNSUPPORTED]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    ApplicabilityStatus:
+      type: string
+      enum: [APPLICABLE, NOT_APPLICABLE, PENDING_REVIEW]
+      x-proposed-enum: true
+      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+    Problem:
+      type: object
+      properties:
+        type: {type: string, format: uri, description: 'URI типа проблемы, напр. urn:aicd:problem:not_found'}
+        title: {type: string}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string}
+        instance: {type: string, description: 'Путь запроса или urn:aicd:request:<request_id>'}
+        code:
+          type: string
+          description: Машиночитаемый код (последний сегмент type)
+          enum: [malformed_request, validation_error, invalid_cursor, idempotency_key_missing, unauthenticated, session_expired, csrf_failed,
+            forbidden, four_eyes_violation, policy_denied, not_found, conflict, version_mismatch, invalid_state_transition, idempotency_key_in_flight,
+            last_owner, replay_window_exceeded, precondition_failed, payload_too_large, unsupported_media_type, idempotency_key_reuse, precondition_required,
+            rate_limited, internal_error, provider_unavailable, service_unavailable]
+        request_id: {type: string, description: Корреляционный ID (W3C trace-id)}
+        errors:
+          type: array
+          items: {$ref: '#/components/schemas/FieldError'}
+        current_version: {type: integer, description: Для version_mismatch/precondition_failed}
+        current_status: {type: string, description: Для invalid_state_transition}
+        retry_after_seconds: {type: integer}
+      required: [type, title, status, code]
+      description: RFC 7807 application/problem+json
+    FieldError:
+      type: object
+      properties:
+        pointer: {type: string, description: JSON Pointer на поле запроса}
+        code: {type: string}
+        message: {type: string}
+      required: [pointer, code]
+    UserRef:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        display_name: {type: string}
+      required: [id, display_name]
+    Links:
+      type: object
+      additionalProperties: {type: string}
+      description: Ссылки на связанные ресурсы (относительные URI)
+    CommandBody:
+      type: object
+      properties:
+        reason: {type: string, maxLength: 2000}
+      additionalProperties: false
+      description: Необязательное тело команд pause/resume/cancel/confirm/cancel-directive.
+    LoginRequest:
+      type: object
+      properties:
+        email: {type: string, format: email, maxLength: 320}
+        password: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+      required: [email, password]
+      additionalProperties: false
+    WorkspaceMembership:
+      type: object
+      properties:
+        workspace_id: {type: string, format: uuid}
+        slug: {type: string}
+        name: {type: string}
+        role: {$ref: '#/components/schemas/WorkspaceRole'}
+      required: [workspace_id, slug, name, role]
+    SessionInfo:
+      type: object
+      properties:
+        user:
+          type: object
+          properties:
+            id: {type: string, format: uuid}
+            email: {type: string, format: email}
+            display_name: {type: string}
+          required: [id, email, display_name]
+        csrf_token: {type: string, description: Значение для заголовка X-CSRF-Token (также в cookie aicd_csrf)}
+        expires_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        idle_expires_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        workspaces:
+          type: array
+          items: {$ref: '#/components/schemas/WorkspaceMembership'}
+      required: [user, csrf_token, expires_at, workspaces]
+    Workspace:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        slug: {type: string}
+        role: {$ref: '#/components/schemas/WorkspaceRole'}
+        settings: {type: object}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, name, slug, role, created_at]
+    WorkspaceCreateRequest:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        slug: {type: string, pattern: '^[a-z0-9][a-z0-9-]{1,62}$'}
+      required: [name, slug]
+      additionalProperties: false
+    WorkspacePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Workspace'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Workspace (cursor pagination).
+    Member:
+      type: object
+      properties:
+        user: {$ref: '#/components/schemas/UserRef'}
+        email: {type: string, format: email}
+        role: {$ref: '#/components/schemas/WorkspaceRole'}
+        joined_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+      required: [user, email, role, joined_at, version]
+    MemberPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Member'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Member (cursor pagination).
+    MemberCreateRequest:
+      type: object
+      properties:
+        email: {type: string, format: email}
+        role: {$ref: '#/components/schemas/WorkspaceRole'}
+      required: [email, role]
+      additionalProperties: false
+      description: Добавляет существующего локального пользователя. Приглашения по email — вне v1.
+    MemberUpdateRequest:
+      type: object
+      properties:
+        role: {$ref: '#/components/schemas/WorkspaceRole'}
+      required: [role]
+      additionalProperties: false
+    Project:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        workspace_id: {type: string, format: uuid}
+        name: {type: string}
+        description:
+          type: [string, 'null']
+        status: {$ref: '#/components/schemas/ProjectStatus'}
+        settings: {$ref: '#/components/schemas/ProjectSettings'}
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        updated_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, workspace_id, name, status, settings, version, created_at, updated_at]
+    ProjectSettings:
+      type: object
+      properties:
+        documentation_mode: {$ref: '#/components/schemas/DocumentationMode'}
+        quality_profile: {$ref: '#/components/schemas/QualityProfile'}
+        routing_policy_id:
+          type: [string, 'null']
+          format: uuid
+        security_profile:
+          type: [string, 'null']
+        settings_version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+      required: [documentation_mode, quality_profile, settings_version]
+    ProjectPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Project'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Project (cursor pagination).
+    ProjectCreateRequest:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 4000}
+        documentation_mode: {$ref: '#/components/schemas/DocumentationMode'}
+        quality_profile: {$ref: '#/components/schemas/QualityProfile'}
+      required: [name]
+      additionalProperties: false
+      description: workspace берётся из X-Workspace-Id. По умолчанию documentation_mode=SMART, quality_profile=strict.
+    ProjectUpdateRequest:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        description:
+          type: [string, 'null']
+          maxLength: 4000
+        status: {$ref: '#/components/schemas/ProjectStatus'}
+        quality_profile: {$ref: '#/components/schemas/QualityProfile'}
+        routing_policy_id:
+          type: [string, 'null']
+          format: uuid
+      additionalProperties: false
+      description: JSON merge-patch семантика (application/json). Требует If-Match.
+      minProperties: 1
+    Repository:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        provider: {$ref: '#/components/schemas/RepositoryProvider'}
+        remote_url:
+          type: [string, 'null']
+        default_branch: {type: string}
+        local_root_ref:
+          type: [string, 'null']
+        last_synced_at:
+          type: [string, 'null']
+          format: date-time
+        latest_index_snapshot:
+          oneOf:
+          - type: object
+            properties:
+              snapshot_id: {type: string, format: uuid}
+              commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+              status: {type: string}
+            required: [snapshot_id, commit_sha, status]
+          - {type: 'null'}
+      required: [id, project_id, provider, default_branch]
+    RepositoryPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Repository'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Repository (cursor pagination).
+    RepositoryAttachRequest:
+      type: object
+      properties:
+        provider: {$ref: '#/components/schemas/RepositoryProvider'}
+        remote_url: {type: string, maxLength: 2048, description: 'Для github: https://github.com/<owner>/<repo>'}
+        local_path: {type: string, maxLength: 4096, description: 'Для local: путь внутри разрешённых корней (allowlist); иначе 422'}
+        default_branch: {type: string, maxLength: 255}
+      required: [provider]
+      additionalProperties: false
+      description: provider=local требует local_path; provider=github требует remote_url и установленный GitHub App.
+    Technology:
+      type: object
+      properties:
+        technology_id: {type: string, format: uuid}
+        name: {type: string}
+        ecosystem: {type: string}
+        technology_version_id: {type: string, format: uuid}
+        version_label: {type: string}
+        support_status:
+          type: [string, 'null']
+        detected_from:
+          type: [string, 'null']
+        confirmed_by:
+          oneOf:
+          - {$ref: '#/components/schemas/UserRef'}
+          - {type: 'null'}
+      required: [technology_id, name, ecosystem, technology_version_id, version_label]
+    TechnologyPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Technology'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Technology (cursor pagination).
+    DocumentationPolicy:
+      type: object
+      properties:
+        project_id: {type: string, format: uuid}
+        documentation_mode: {$ref: '#/components/schemas/DocumentationMode'}
+        settings_version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+      required: [project_id, documentation_mode, settings_version]
+    DocumentationPolicyUpdateRequest:
+      type: object
+      properties:
+        documentation_mode: {$ref: '#/components/schemas/DocumentationMode'}
+      required: [documentation_mode]
+      additionalProperties: false
+    RunRouting:
+      type: object
+      properties:
+        strategy:
+          type: string
+          enum: [adaptive, fixed]
+          default: adaptive
+        allowed_providers:
+          type: array
+          items: {$ref: '#/components/schemas/CliProvider'}
+          minItems: 1
+          uniqueItems: true
+      required: [strategy]
+      additionalProperties: false
+    RunCreateRequest:
+      type: object
+      properties:
+        project_id: {type: string, format: uuid}
+        mode: {$ref: '#/components/schemas/RunMode'}
+        objective: {type: string, minLength: 1, maxLength: 20000}
+        routing: {$ref: '#/components/schemas/RunRouting'}
+        quality_profile: {$ref: '#/components/schemas/QualityProfile'}
+        approval_policy:
+          type: string
+          enum: [risk_based, always, critical_only]
+          default: risk_based
+      required: [project_id, mode, objective]
+      additionalProperties: false
+      description: 'ТЗ §8.1. repository_id не передаётся: в v1 проект с одним репозиторием (иначе 422) — см. API_DESIGN.md §19.'
+    RunCreated:
+      type: object
+      properties:
+        run_id: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/RunStatus'}
+        event_stream: {type: string, example: '/api/v1/runs/{run_id}/events'}
+      required: [run_id, status, event_stream]
+      description: ТЗ §8.1, 201 Created
+    RunSummary:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        workspace_id: {type: string, format: uuid}
+        mode: {$ref: '#/components/schemas/RunMode'}
+        objective: {type: string}
+        status: {$ref: '#/components/schemas/RunStatus'}
+        blocked_reason:
+          oneOf:
+          - {$ref: '#/components/schemas/TaskBlockedReason'}
+          - {type: 'null'}
+        requested_by: {$ref: '#/components/schemas/UserRef'}
+        quality_profile: {$ref: '#/components/schemas/QualityProfile'}
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+      required: [id, project_id, workspace_id, mode, objective, status, requested_by, quality_profile, version, created_at]
+    Run:
+      allOf:
+      - {$ref: '#/components/schemas/RunSummary'}
+      - type: object
+        properties:
+          repository_id: {type: string, format: uuid}
+          base_commit_sha:
+            type: [string, 'null']
+            pattern: ^[0-9a-f]{40}([0-9a-f]{24})?$
+          approval_policy: {type: string}
+          plan_version: {type: integer}
+          routing:
+            type: object
+            properties:
+              strategy: {type: string}
+              allowed_providers:
+                type: array
+                items: {$ref: '#/components/schemas/CliProvider'}
+          task_counts:
+            type: object
+            additionalProperties: {type: integer}
+            description: task_status → count
+          pending_approvals: {type: integer}
+          updated_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+          links: {$ref: '#/components/schemas/Links'}
+    RunPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RunSummary'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница RunSummary (cursor pagination).
+    RunCommandAccepted:
+      type: object
+      properties:
+        run_id: {type: string, format: uuid}
+        command:
+          type: string
+          enum: [pause, resume, cancel]
+        status: {$ref: '#/components/schemas/RunStatus'}
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+        accepted_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [run_id, command, status, version, accepted_at]
+      description: '202: команда принята; фактический переход (через safe checkpoint) публикуется событием run.state_changed.'
+    TaskSummary:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        agent_role: {$ref: '#/components/schemas/AgentRole'}
+        title: {type: string}
+        status: {$ref: '#/components/schemas/TaskStatus'}
+        blocked_reason:
+          oneOf:
+          - {$ref: '#/components/schemas/TaskBlockedReason'}
+          - {type: 'null'}
+        complexity: {$ref: '#/components/schemas/ComplexityLevel'}
+        risk_level: {$ref: '#/components/schemas/RiskLevel'}
+        current_provider:
+          oneOf:
+          - {$ref: '#/components/schemas/CliProvider'}
+          - {type: 'null'}
+        attempt_count: {type: integer}
+        max_attempts: {type: integer}
+        depends_on:
+          type: array
+          items: {type: string, format: uuid}
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+        updated_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, run_id, agent_role, title, status, complexity, risk_level, attempt_count, max_attempts, depends_on, version, updated_at]
+    TaskDependency:
+      type: object
+      properties:
+        task_id: {type: string, format: uuid}
+        depends_on_task_id: {type: string, format: uuid}
+        dependency_type: {type: string}
+      required: [task_id, depends_on_task_id, dependency_type]
+    TaskGraph:
+      type: object
+      properties:
+        run_id: {type: string, format: uuid}
+        plan_version: {type: integer}
+        tasks:
+          type: array
+          items: {$ref: '#/components/schemas/TaskSummary'}
+        edges:
+          type: array
+          items: {$ref: '#/components/schemas/TaskDependency'}
+        next_cursor:
+          type: [string, 'null']
+      required: [run_id, plan_version, tasks, edges, next_cursor]
+      description: DAG run. Для run с >200 задач — постраничная выдача tasks (edges — только для задач страницы).
+    Task:
+      allOf:
+      - {$ref: '#/components/schemas/TaskSummary'}
+      - type: object
+        properties:
+          instructions: {type: string}
+          acceptance_criteria:
+            type: array
+            items: {type: string}
+          review_loop_count: {type: integer}
+          next_attempt_at:
+            type: [string, 'null']
+            format: date-time
+          timeout_seconds: {type: integer}
+          created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+          links: {$ref: '#/components/schemas/Links'}
+    TaskAttempt:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        task_id: {type: string, format: uuid}
+        attempt_no: {type: integer, minimum: 1}
+        status: {type: string, description: Статус попытки (task_status на момент завершения)}
+        provider:
+          oneOf:
+          - {$ref: '#/components/schemas/CliProvider'}
+          - {type: 'null'}
+        agent_role: {$ref: '#/components/schemas/AgentRole'}
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+        failure_category:
+          oneOf:
+          - {$ref: '#/components/schemas/FailureCategory'}
+          - {type: 'null'}
+        executions:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string, format: uuid}
+              status: {$ref: '#/components/schemas/ExecutionStatus'}
+              exit_code:
+                type: [integer, 'null']
+              failure_category:
+                oneOf:
+                - {$ref: '#/components/schemas/FailureCategory'}
+                - {type: 'null'}
+              output_artifact_id:
+                type: [string, 'null']
+                format: uuid
+              started_at:
+                type: [string, 'null']
+                format: date-time
+              finished_at:
+                type: [string, 'null']
+                format: date-time
+            required: [id, status]
+        routing_reason:
+          type: [string, 'null']
+      required: [id, task_id, attempt_no, status, agent_role]
+    TaskAttemptPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TaskAttempt'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница TaskAttempt (cursor pagination).
+    AcpMessage:
+      type: object
+      properties:
+        message_id: {type: string, format: uuid}
+        protocol: {type: string, const: acp/1.0}
+        run_id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        from:
+          type: object
+          properties:
+            role: {$ref: '#/components/schemas/AgentRole'}
+            provider:
+              oneOf:
+              - {$ref: '#/components/schemas/CliProvider'}
+              - {type: 'null'}
+          required: [role]
+        to:
+          type: object
+          properties:
+            role: {$ref: '#/components/schemas/AgentRole'}
+          required: [role]
+        type: {$ref: '#/components/schemas/AcpMessageType'}
+        correlation_id:
+          type: [string, 'null']
+          format: uuid
+        reply_to_id:
+          type: [string, 'null']
+          format: uuid
+        schema_version: {type: string}
+        payload: {type: object, description: Типизированный payload ACP (AGENT_COMMUNICATION_PROTOCOL.md); ≤ 32 KiB}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [message_id, protocol, run_id, from, to, type, schema_version, payload, created_at]
+    AcpMessagePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/AcpMessage'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница AcpMessage (cursor pagination).
+    ArtifactRef:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        kind: {$ref: '#/components/schemas/ArtifactKind'}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        size_bytes: {type: integer}
+        mime_type: {type: string}
+        download_url: {type: string, description: '/api/v1/artifacts/{id}/download'}
+      required: [id, kind, sha256, size_bytes, mime_type, download_url]
+    Evidence:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        kind: {type: string}
+        producer: {type: string, description: verification engine / gate id; не агент}
+        verification_status: {$ref: '#/components/schemas/EvidenceVerificationStatus'}
+        commit_sha:
+          type: [string, 'null']
+          pattern: ^[0-9a-f]{40}([0-9a-f]{24})?$
+        command:
+          type: [string, 'null']
+        exit_code:
+          type: [integer, 'null']
+        environment: {type: object}
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+        artifact: {$ref: '#/components/schemas/ArtifactRef'}
+        links:
+          type: array
+          items:
+            type: object
+            properties:
+              target_type: {type: string}
+              target_id: {type: string, format: uuid}
+              relation: {type: string}
+            required: [target_type, target_id, relation]
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, run_id, kind, producer, verification_status, artifact, created_at]
+      description: 'AC-14: commit, command, exit code, время, checksum.'
+    EvidencePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Evidence'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Evidence (cursor pagination).
+    GateExecution:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        gate_id: {type: string, format: uuid}
+        gate_type: {type: string}
+        required: {type: boolean}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        status: {$ref: '#/components/schemas/GateExecutionStatus'}
+        evidence_id:
+          type: [string, 'null']
+          format: uuid
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+      required: [id, gate_id, gate_type, required, status]
+    Finding:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        gate_execution_id:
+          type: [string, 'null']
+          format: uuid
+        severity: {$ref: '#/components/schemas/FindingSeverity'}
+        rule_id: {type: string}
+        file_path:
+          type: [string, 'null']
+        line:
+          type: [integer, 'null']
+        status: {$ref: '#/components/schemas/FindingStatus'}
+        evidence_id:
+          type: [string, 'null']
+          format: uuid
+      required: [id, severity, rule_id, status]
+    QualityReport:
+      type: object
+      properties:
+        run_id: {type: string, format: uuid}
+        quality_profile: {$ref: '#/components/schemas/QualityProfile'}
+        verdict:
+          type: string
+          enum: [PENDING, RUNNING, PASS, FAIL, ERROR]
+          description: Агрегат по обязательным gates (подмножество gate_execution_status). SKIPPED обязательного gate ⇒ не PASS.
+        gate_executions:
+          type: array
+          items: {$ref: '#/components/schemas/GateExecution'}
+        findings_summary:
+          type: object
+          additionalProperties: {type: integer}
+          description: finding_severity → count открытых
+        findings:
+          type: array
+          items: {$ref: '#/components/schemas/Finding'}
+          maxItems: 200
+        findings_total: {type: integer}
+      required: [run_id, quality_profile, verdict, gate_executions, findings_summary, findings, findings_total]
+      description: findings усечены до 200 (сортировка по severity desc); полный список — в отчёте/artifact.
+    ComplianceRow:
+      type: object
+      properties:
+        control_id: {type: string, format: uuid}
+        standard_code: {type: string}
+        edition: {type: string}
+        clause_ref: {type: string}
+        control_code: {type: string}
+        applicability: {$ref: '#/components/schemas/ApplicabilityStatus'}
+        agent_role:
+          oneOf:
+          - {$ref: '#/components/schemas/AgentRole'}
+          - {type: 'null'}
+        status: {$ref: '#/components/schemas/ComplianceStatus'}
+        evidence_id:
+          type: [string, 'null']
+          format: uuid
+        reviewed_by:
+          oneOf:
+          - {$ref: '#/components/schemas/UserRef'}
+          - {type: 'null'}
+        checked_at:
+          type: [string, 'null']
+          format: date-time
+      required: [control_id, standard_code, edition, clause_ref, control_code, applicability, status]
+    CompliancePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ComplianceRow'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+        summary:
+          type: object
+          additionalProperties: {type: integer}
+          description: compliance_status → count
+        disclaimer: {type: string, description: Автоматические проверки не являются официальной сертификацией (ТЗ §13)}
+      required: [items, next_cursor]
+      description: Страница ComplianceRow (cursor pagination).
+    RunReport:
+      type: object
+      properties:
+        run: {$ref: '#/components/schemas/Run'}
+        quality: {$ref: '#/components/schemas/QualityReport'}
+        compliance_summary:
+          type: object
+          additionalProperties: {type: integer}
+        tasks:
+          type: array
+          items: {$ref: '#/components/schemas/TaskSummary'}
+        approvals:
+          type: array
+          items: {$ref: '#/components/schemas/Approval'}
+        evidence:
+          type: array
+          items: {$ref: '#/components/schemas/Evidence'}
+        external_actions:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string, format: uuid}
+              action_type: {type: string}
+              status:
+                type: string
+                enum: [PLANNED, EXECUTING, CONFIRMED, FAILED, COMPENSATED]
+              external_ref:
+                type: [string, 'null']
+            required: [id, action_type, status]
+        generated_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        report_artifact:
+          oneOf:
+          - {$ref: '#/components/schemas/ArtifactRef'}
+          - {type: 'null'}
+      required: [run, quality, tasks, approvals, evidence, generated_at]
+    ActivityEvent:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        execution_id:
+          type: [string, 'null']
+          format: uuid
+        event_type: {type: string}
+        payload: {type: object}
+        occurred_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, run_id, event_type, payload, occurred_at]
+    ActivityPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ActivityEvent'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница ActivityEvent (cursor pagination).
+    ChatThread:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        scope:
+          type: string
+          enum: [run, role, task]
+          x-proposed-enum: true
+        target_role:
+          oneOf:
+          - {$ref: '#/components/schemas/AgentRole'}
+          - {type: 'null'}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        created_by:
+          oneOf:
+          - {$ref: '#/components/schemas/UserRef'}
+          - {type: 'null'}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, run_id, scope, created_at]
+    ChatItem:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        item_type:
+          type: string
+          enum: [chat_message, agent_message, directive, approval, cli_excerpt, system_event]
+        thread_id:
+          type: [string, 'null']
+          format: uuid
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        sender_type: {$ref: '#/components/schemas/ChatSenderType'}
+        sender:
+          type: object
+          properties:
+            user:
+              oneOf:
+              - {$ref: '#/components/schemas/UserRef'}
+              - {type: 'null'}
+            role:
+              oneOf:
+              - {$ref: '#/components/schemas/AgentRole'}
+              - {type: 'null'}
+            provider:
+              oneOf:
+              - {$ref: '#/components/schemas/CliProvider'}
+              - {type: 'null'}
+        recipient_role:
+          oneOf:
+          - {$ref: '#/components/schemas/AgentRole'}
+          - {type: 'null'}
+        message_kind: {$ref: '#/components/schemas/ChatMessageKind'}
+        body: {type: string, description: Санитизированный текст (секреты редактированы)}
+        acp_type:
+          oneOf:
+          - {$ref: '#/components/schemas/AcpMessageType'}
+          - {type: 'null'}
+        directive_id:
+          type: [string, 'null']
+          format: uuid
+        directive_status:
+          oneOf:
+          - {$ref: '#/components/schemas/DirectiveStatus'}
+          - {type: 'null'}
+        approval_id:
+          type: [string, 'null']
+          format: uuid
+        approval_status:
+          oneOf:
+          - {$ref: '#/components/schemas/ApprovalStatus'}
+          - {type: 'null'}
+        mentions:
+          type: array
+          items: {$ref: '#/components/schemas/AgentRole'}
+        refs:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [diff, evidence, test_report, artifact, finding, task]
+              id: {type: string, format: uuid}
+              href: {type: string}
+            required: [type, id]
+        source_event_id:
+          type: [string, 'null']
+          format: uuid
+        seq:
+          type: [integer, 'null']
+          description: run_event_log seq, для связи с SSE
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, item_type, sender_type, message_kind, body, created_at]
+      description: Элемент единой ленты Live Agent Chat (проекция chat_messages, agent_messages, user_directives, approvals, выдержек CLI).
+    ChatPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ChatItem'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+        threads:
+          type: array
+          items: {$ref: '#/components/schemas/ChatThread'}
+      required: [items, next_cursor]
+      description: Страница ChatItem (cursor pagination).
+    ChatMessageCreateRequest:
+      type: object
+      properties:
+        body: {type: string, minLength: 1, maxLength: 8000}
+        thread_id: {type: string, format: uuid}
+        mentions:
+          type: array
+          items: {$ref: '#/components/schemas/AgentRole'}
+          maxItems: 12
+          uniqueItems: true
+      required: [body]
+      additionalProperties: false
+      description: Комментарий без влияния на исполнение; агентам НЕ доставляется. Для воздействия — POST /directives.
+    ChatMessage:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        thread_id: {type: string, format: uuid}
+        sender_type: {$ref: '#/components/schemas/ChatSenderType'}
+        sender_id:
+          type: [string, 'null']
+          format: uuid
+        body: {type: string}
+        message_kind: {$ref: '#/components/schemas/ChatMessageKind'}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, thread_id, sender_type, body, message_kind, created_at]
+    DirectiveTarget:
+      type: object
+      properties:
+        type: {$ref: '#/components/schemas/DirectiveTargetType'}
+        role: {$ref: '#/components/schemas/AgentRole'}
+        task_id: {type: string, format: uuid}
+        approval_id: {type: string, format: uuid}
+      required: [type]
+      additionalProperties: false
+      description: type=role ⇒ role обязателен; task ⇒ task_id; approval ⇒ approval_id; run ⇒ без доп. полей.
+    DirectiveCreateRequest:
+      type: object
+      properties:
+        target: {$ref: '#/components/schemas/DirectiveTarget'}
+        directive_type: {$ref: '#/components/schemas/DirectiveType'}
+        message: {type: string, minLength: 1, maxLength: 8000}
+        expected_run_version: {type: integer, format: int64, minimum: 0, description: Несовпадение с runs.version ⇒ 409 version_mismatch}
+        requires_impact_preview: {type: boolean, default: true}
+      required: [target, directive_type, message, expected_run_version]
+      additionalProperties: false
+      description: ТЗ §8.2
+    DirectiveAccepted:
+      type: object
+      properties:
+        directive_id: {type: string, format: uuid}
+        status: {$ref: '#/components/schemas/DirectiveStatus'}
+        chat_message_id: {type: string, format: uuid}
+        status_url: {type: string}
+      required: [directive_id, status]
+      description: ТЗ §8.2, 202 Accepted. status обычно IMPACT_ANALYSIS_PENDING. 202 ≠ доставлено ≠ выполнено.
+    DirectiveImpact:
+      type: object
+      properties:
+        task_id: {type: string, format: uuid}
+        impact_type: {$ref: '#/components/schemas/DirectiveImpactType'}
+        resolution:
+          type: [string, 'null']
+      required: [task_id, impact_type]
+    DirectiveAck:
+      type: object
+      properties:
+        recipient_role: {$ref: '#/components/schemas/AgentRole'}
+        status: {$ref: '#/components/schemas/DirectiveAckStatus'}
+        acknowledged_at:
+          type: [string, 'null']
+          format: date-time
+      required: [recipient_role, status]
+    Directive:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        chat_message_id: {type: string, format: uuid}
+        target:
+          type: object
+          properties:
+            type: {$ref: '#/components/schemas/DirectiveTargetType'}
+            role: {$ref: '#/components/schemas/AgentRole'}
+            task_id: {type: string, format: uuid}
+            approval_id: {type: string, format: uuid}
+          required: [type]
+        directive_type: {$ref: '#/components/schemas/DirectiveType'}
+        message: {type: string}
+        status: {$ref: '#/components/schemas/DirectiveStatus'}
+        impact_status: {$ref: '#/components/schemas/DirectiveImpactStatus'}
+        impacts:
+          type: array
+          items: {$ref: '#/components/schemas/DirectiveImpact'}
+        requires_confirmation: {type: boolean}
+        approval_id:
+          type: [string, 'null']
+          format: uuid
+        delivery:
+          type: object
+          properties:
+            state:
+              type: string
+              enum: [NOT_DISPATCHED, DISPATCHED, PARTIALLY_ACKNOWLEDGED, ACKNOWLEDGED]
+            acknowledgements:
+              type: array
+              items: {$ref: '#/components/schemas/DirectiveAck'}
+          required: [state, acknowledgements]
+          description: 'Доставка (delivered): агенты получили и подтвердили поручение.'
+        completion:
+          type: object
+          properties:
+            state:
+              type: string
+              enum: [NOT_STARTED, IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+            resulting_task_ids:
+              type: array
+              items: {type: string, format: uuid}
+            completed_at:
+              type: [string, 'null']
+              format: date-time
+          required: [state, resulting_task_ids]
+          description: 'Выполнение (completed): связанные задачи завершены и проверены. Отлично от delivery.'
+        submitted_by: {$ref: '#/components/schemas/UserRef'}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        updated_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+      required: [id, run_id, target, directive_type, message, status, impact_status, impacts, requires_confirmation, delivery, completion, submitted_by,
+        created_at, version]
+    DirectivePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Directive'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Directive (cursor pagination).
+    ProviderInstallation:
+      type: object
+      properties:
+        installation_id: {type: string, format: uuid}
+        host: {type: string, description: hostname worker_hosts}
+        detected_version:
+          type: [string, 'null']
+        compatibility: {$ref: '#/components/schemas/CompatibilityStatus'}
+        auth_status: {$ref: '#/components/schemas/AuthStatus'}
+        availability: {$ref: '#/components/schemas/ProviderAvailability'}
+        capabilities: {type: object, description: Результат feature detection (probe)}
+        last_error_category:
+          oneOf:
+          - {$ref: '#/components/schemas/CliErrorCode'}
+          - {type: 'null'}
+        checked_at:
+          type: [string, 'null']
+          format: date-time
+      required: [installation_id, host, compatibility, auth_status, availability, capabilities]
+      description: Никаких credentials, путей к credential store, токенов, cookies, env.
+    ProviderSettings:
+      type: object
+      properties:
+        enabled: {type: boolean}
+        max_parallel_sessions: {type: integer, minimum: 0, maximum: 64}
+        default_timeout_seconds: {type: integer, minimum: 60, maximum: 14400}
+        allowed_roles:
+          type: array
+          items: {$ref: '#/components/schemas/AgentRole'}
+          uniqueItems: true
+        settings_version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+      required: [enabled, max_parallel_sessions, default_timeout_seconds, allowed_roles, settings_version]
+      description: Workspace-scoped настройки использования провайдера (хранятся в policies, policy_type=provider_settings).
+    Provider:
+      type: object
+      properties:
+        provider_id: {type: string, format: uuid}
+        code: {$ref: '#/components/schemas/CliProvider'}
+        display_name: {type: string}
+        enabled_globally: {type: boolean}
+        installations:
+          type: array
+          items: {$ref: '#/components/schemas/ProviderInstallation'}
+        workspace_settings: {$ref: '#/components/schemas/ProviderSettings'}
+      required: [provider_id, code, display_name, enabled_globally, installations, workspace_settings]
+    ProviderList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Provider'}
+          maxItems: 2
+      required: [items]
+      description: 'Не пагинируется: ровно ≤2 провайдера.'
+    ProviderSettingsUpdateRequest:
+      type: object
+      properties:
+        enabled: {type: boolean}
+        max_parallel_sessions: {type: integer, minimum: 0, maximum: 64}
+        default_timeout_seconds: {type: integer, minimum: 60, maximum: 14400}
+        allowed_roles:
+          type: array
+          items: {$ref: '#/components/schemas/AgentRole'}
+          uniqueItems: true
+      additionalProperties: false
+      description: Любые иные поля (binary_path, credentials, env, token...) ⇒ 422.
+      minProperties: 1
+    ProbeAccepted:
+      type: object
+      properties:
+        provider_id: {type: string, format: uuid}
+        probe_request_id: {type: string, format: uuid}
+        accepted_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        status_url: {type: string}
+      required: [provider_id, probe_request_id, accepted_at, status_url]
+    Approval:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        workspace_id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        action_type: {$ref: '#/components/schemas/ApprovalActionType'}
+        status: {$ref: '#/components/schemas/ApprovalStatus'}
+        risk_level: {$ref: '#/components/schemas/RiskLevel'}
+        summary: {type: string}
+        context: {type: object, description: 'Детали действия (diff ref, migration plan, target branch...) без секретов'}
+        requested_by:
+          type: object
+          properties:
+            actor_type:
+              type: string
+              enum: [user, agent, system]
+            user:
+              oneOf:
+              - {$ref: '#/components/schemas/UserRef'}
+              - {type: 'null'}
+            role:
+              oneOf:
+              - {$ref: '#/components/schemas/AgentRole'}
+              - {type: 'null'}
+          required: [actor_type]
+        decided_by:
+          oneOf:
+          - {$ref: '#/components/schemas/UserRef'}
+          - {type: 'null'}
+        decision_reason:
+          type: [string, 'null']
+        can_decide: {type: boolean, description: Может ли текущий пользователь принять решение (RBAC + four-eyes)}
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        decided_at:
+          type: [string, 'null']
+          format: date-time
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+      required: [id, workspace_id, run_id, action_type, status, risk_level, summary, requested_by, can_decide, created_at, version]
+    ApprovalPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Approval'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Approval (cursor pagination).
+    ApprovalDecisionRequest:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: [APPROVED, REJECTED]
+        reason: {type: string, maxLength: 4000}
+      required: [decision]
+      additionalProperties: false
+      description: reason обязателен для REJECTED и для critical-действий (валидация 422).
+    DocumentationSource:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        workspace_id: {type: string, format: uuid}
+        technology_version_id: {type: string, format: uuid}
+        source_type: {$ref: '#/components/schemas/DocumentationSourceType'}
+        uri_or_file_ref: {type: string}
+        trust_level: {$ref: '#/components/schemas/DocumentationTrustLevel'}
+        license_info:
+          type: [string, 'null']
+        refresh_policy: {$ref: '#/components/schemas/DocumentationRefreshPolicy'}
+        enabled: {type: boolean}
+        latest_snapshot:
+          oneOf:
+          - type: object
+            properties:
+              id: {type: string, format: uuid}
+              content_hash: {type: string}
+              fetched_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+              status: {type: string}
+            required: [id, fetched_at, status]
+          - {type: 'null'}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, workspace_id, technology_version_id, source_type, uri_or_file_ref, trust_level, refresh_policy, enabled, created_at]
+    DocumentationSourcePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/DocumentationSource'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница DocumentationSource (cursor pagination).
+    DocumentationSourceCreateRequest:
+      type: object
+      properties:
+        technology_version_id: {type: string, format: uuid}
+        source_type: {$ref: '#/components/schemas/DocumentationSourceType'}
+        uri_or_file_ref: {type: string, maxLength: 2048, description: 'https-URL (SSRF-проверка при загрузке), git URL или ссылка на загруженный
+            artifact'}
+        trust_level: {$ref: '#/components/schemas/DocumentationTrustLevel'}
+        license_info: {type: string, maxLength: 2000}
+        refresh_policy: {$ref: '#/components/schemas/DocumentationRefreshPolicy'}
+        enabled: {type: boolean, default: true}
+      required: [technology_version_id, source_type, uri_or_file_ref, trust_level]
+      additionalProperties: false
+      description: Регистрация НЕ загружает содержимое.
+    RefreshAccepted:
+      type: object
+      properties:
+        source_id: {type: string, format: uuid}
+        external_action_id: {type: string, format: uuid}
+        status:
+          type: string
+          enum: [QUEUED]
+        accepted_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [source_id, external_action_id, status, accepted_at]
+    AuditEvent:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        workspace_id: {type: string, format: uuid}
+        actor_type:
+          type: string
+          enum: [user, agent, system]
+        actor_id:
+          type: [string, 'null']
+          format: uuid
+        action: {type: string}
+        resource_type: {type: string}
+        resource_id: {type: string}
+        metadata: {type: object, description: 'request_id, ip (усечённый), outcome, idempotency_key hash; без секретов'}
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [id, workspace_id, actor_type, action, resource_type, resource_id, metadata, created_at]
+    AuditEventPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/AuditEvent'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница AuditEvent (cursor pagination).
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, fail]
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, fail]
+          description: postgres, redis, object_storage, migrations — только статус, без деталей
+      required: [status]
+    SseEnvelope:
+      type: object
+      properties:
+        event_id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        seq: {type: integer, format: int64, minimum: 1}
+        type: {$ref: '#/components/schemas/SseEventType'}
+        timestamp: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        schema_version: {type: string, const: '1.0'}
+        payload: {type: object}
+      required: [event_id, run_id, seq, type, timestamp, schema_version, payload]
+      description: 'data: каждого SSE-события (кроме heartbeat). id: = seq.'
+      discriminator:
+        propertyName: type
+        mapping: {run.state_changed: '#/components/schemas/SseRunStateChanged', task.state_changed: '#/components/schemas/SseTaskStateChanged',
+          agent.message: '#/components/schemas/SseAgentMessage', cli.output: '#/components/schemas/SseCliOutput', directive.impact_ready: '#/components/schemas/SseDirectiveImpactReady',
+          directive.state_changed: '#/components/schemas/SseDirectiveStateChanged', approval.requested: '#/components/schemas/SseApprovalRequested',
+          approval.decided: '#/components/schemas/SseApprovalDecided', gate.completed: '#/components/schemas/SseGateCompleted', run.completed: '#/components/schemas/SseRunCompleted',
+          chat.message: '#/components/schemas/SseChatMessage'}
+    RunStateChangedPayload:
+      type: object
+      properties:
+        from_status: {$ref: '#/components/schemas/RunStatus'}
+        to_status: {$ref: '#/components/schemas/RunStatus'}
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+        blocked_reason:
+          oneOf:
+          - {$ref: '#/components/schemas/TaskBlockedReason'}
+          - {type: 'null'}
+        reason:
+          type: [string, 'null']
+      required: [from_status, to_status, version]
+    TaskStateChangedPayload:
+      type: object
+      properties:
+        task_id: {type: string, format: uuid}
+        agent_role: {$ref: '#/components/schemas/AgentRole'}
+        from_status: {$ref: '#/components/schemas/TaskStatus'}
+        to_status: {$ref: '#/components/schemas/TaskStatus'}
+        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+        attempt_no:
+          type: [integer, 'null']
+        provider:
+          oneOf:
+          - {$ref: '#/components/schemas/CliProvider'}
+          - {type: 'null'}
+        blocked_reason:
+          oneOf:
+          - {$ref: '#/components/schemas/TaskBlockedReason'}
+          - {type: 'null'}
+        failure_category:
+          oneOf:
+          - {$ref: '#/components/schemas/FailureCategory'}
+          - {type: 'null'}
+      required: [task_id, agent_role, from_status, to_status, version]
+    AgentMessagePayload:
+      type: object
+      properties:
+        message_id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        type: {$ref: '#/components/schemas/AcpMessageType'}
+        from:
+          type: object
+          properties:
+            role: {$ref: '#/components/schemas/AgentRole'}
+            provider:
+              oneOf:
+              - {$ref: '#/components/schemas/CliProvider'}
+              - {type: 'null'}
+          required: [role]
+        to:
+          type: object
+          properties:
+            role: {$ref: '#/components/schemas/AgentRole'}
+          required: [role]
+        correlation_id:
+          type: [string, 'null']
+          format: uuid
+        reply_to_id:
+          type: [string, 'null']
+          format: uuid
+        summary: {type: string, maxLength: 2000}
+        truncated: {type: boolean}
+      required: [message_id, type, from, to, summary, truncated]
+      description: Полный payload — GET /tasks/{task_id}/messages.
+    CliOutputPayload:
+      type: object
+      properties:
+        execution_id: {type: string, format: uuid}
+        task_id: {type: string, format: uuid}
+        provider: {$ref: '#/components/schemas/CliProvider'}
+        agent_role: {$ref: '#/components/schemas/AgentRole'}
+        normalized_event: {$ref: '#/components/schemas/NormalizedCliEvent'}
+        stream:
+          type: string
+          enum: [stdout, stderr, normalized]
+        chunk_index: {type: integer, minimum: 0}
+        text: {type: string, maxLength: 8192, description: ≤ 8 KiB UTF-8 после редактирования секретов}
+        redactions: {type: integer, minimum: 0}
+        truncated: {type: boolean}
+        dropped_chunks: {type: integer, minimum: 0}
+        artifact_id:
+          type: [string, 'null']
+          format: uuid
+      required: [execution_id, task_id, provider, normalized_event, chunk_index, text, redactions, truncated]
+    DirectiveImpactReadyPayload:
+      type: object
+      properties:
+        directive_id: {type: string, format: uuid}
+        impacts:
+          type: array
+          items: {$ref: '#/components/schemas/DirectiveImpact'}
+        max_impact: {$ref: '#/components/schemas/DirectiveImpactType'}
+        requires_confirmation: {type: boolean}
+        approval_id:
+          type: [string, 'null']
+          format: uuid
+      required: [directive_id, impacts, max_impact, requires_confirmation]
+    DirectiveStateChangedPayload:
+      type: object
+      properties:
+        directive_id: {type: string, format: uuid}
+        from_status: {$ref: '#/components/schemas/DirectiveStatus'}
+        to_status: {$ref: '#/components/schemas/DirectiveStatus'}
+        acknowledgement:
+          oneOf:
+          - {$ref: '#/components/schemas/DirectiveAck'}
+          - {type: 'null'}
+      required: [directive_id, from_status, to_status]
+    ApprovalRequestedPayload:
+      type: object
+      properties:
+        approval_id: {type: string, format: uuid}
+        action_type: {$ref: '#/components/schemas/ApprovalActionType'}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        risk_level: {$ref: '#/components/schemas/RiskLevel'}
+        summary: {type: string}
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+      required: [approval_id, action_type, risk_level, summary]
+    ApprovalDecidedPayload:
+      type: object
+      properties:
+        approval_id: {type: string, format: uuid}
+        action_type: {$ref: '#/components/schemas/ApprovalActionType'}
+        status: {$ref: '#/components/schemas/ApprovalStatus'}
+        decided_by:
+          oneOf:
+          - {$ref: '#/components/schemas/UserRef'}
+          - {type: 'null'}
+      required: [approval_id, action_type, status]
+    GateCompletedPayload:
+      type: object
+      properties:
+        gate_execution_id: {type: string, format: uuid}
+        gate_type: {type: string}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        required: {type: boolean}
+        status: {$ref: '#/components/schemas/GateExecutionStatus'}
+        evidence_id:
+          type: [string, 'null']
+          format: uuid
+        findings_count: {type: integer}
+      required: [gate_execution_id, gate_type, required, status, findings_count]
+    RunCompletedPayload:
+      type: object
+      properties:
+        final_status:
+          type: string
+          enum: [COMPLETED, FAILED, CANCELLED]
+        verdict:
+          type: string
+          enum: [PENDING, RUNNING, PASS, FAIL, ERROR]
+        report_url: {type: string}
+      required: [final_status, verdict, report_url]
+      description: Терминальное событие run (COMPLETED/FAILED/CANCELLED); после него сервер закрывает поток.
+    ChatMessagePayload:
+      type: object
+      properties:
+        item: {$ref: '#/components/schemas/ChatItem'}
+      required: [item]
+    SseRunStateChanged:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: run.state_changed}
+          payload: {$ref: '#/components/schemas/RunStateChangedPayload'}
+    SseTaskStateChanged:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: task.state_changed}
+          payload: {$ref: '#/components/schemas/TaskStateChangedPayload'}
+    SseAgentMessage:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: agent.message}
+          payload: {$ref: '#/components/schemas/AgentMessagePayload'}
+    SseCliOutput:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: cli.output}
+          payload: {$ref: '#/components/schemas/CliOutputPayload'}
+    SseDirectiveImpactReady:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: directive.impact_ready}
+          payload: {$ref: '#/components/schemas/DirectiveImpactReadyPayload'}
+    SseDirectiveStateChanged:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: directive.state_changed}
+          payload: {$ref: '#/components/schemas/DirectiveStateChangedPayload'}
+    SseApprovalRequested:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: approval.requested}
+          payload: {$ref: '#/components/schemas/ApprovalRequestedPayload'}
+    SseApprovalDecided:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: approval.decided}
+          payload: {$ref: '#/components/schemas/ApprovalDecidedPayload'}
+    SseGateCompleted:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: gate.completed}
+          payload: {$ref: '#/components/schemas/GateCompletedPayload'}
+    SseRunCompleted:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: run.completed}
+          payload: {$ref: '#/components/schemas/RunCompletedPayload'}
+    SseChatMessage:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: chat.message}
+          payload: {$ref: '#/components/schemas/ChatMessagePayload'}
+    SseHeartbeat:
+      type: object
+      properties:
+        type: {const: heartbeat}
+        timestamp: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        last_seq: {type: integer, format: int64}
+      required: [type, timestamp, last_seq]
+      description: 'Каждые 15 с; без id: (не сдвигает Last-Event-ID).'
+    SseEvent:
+      oneOf:
+      - {$ref: '#/components/schemas/SseRunStateChanged'}
+      - {$ref: '#/components/schemas/SseTaskStateChanged'}
+      - {$ref: '#/components/schemas/SseAgentMessage'}
+      - {$ref: '#/components/schemas/SseCliOutput'}
+      - {$ref: '#/components/schemas/SseDirectiveImpactReady'}
+      - {$ref: '#/components/schemas/SseDirectiveStateChanged'}
+      - {$ref: '#/components/schemas/SseApprovalRequested'}
+      - {$ref: '#/components/schemas/SseApprovalDecided'}
+      - {$ref: '#/components/schemas/SseGateCompleted'}
+      - {$ref: '#/components/schemas/SseRunCompleted'}
+      - {$ref: '#/components/schemas/SseChatMessage'}
+      - {$ref: '#/components/schemas/SseHeartbeat'}
+      description: 'Значение поля data: SSE-кадра. event: = type.'
