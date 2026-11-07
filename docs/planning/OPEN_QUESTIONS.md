@@ -23,6 +23,20 @@
 | OQ-15 | **Coverage ≥ 85% «core»** — состав core-модулей. | (a) `orchestration`, `collaboration`, `cli_adapters`, `verification`, `security`, `identity`; (b) все | (a); исключения фиксируются в `coverage-exceptions.yaml` с обоснованием | P6, P9 |
 | OQ-16 | **Объём «12 агентов» в одном run:** все роли не обязательно участвуют в каждом run. | Пайплайн по режиму (AGENT_ROLES.md) | Роли включаются шаблоном режима + уровнем L | P4 |
 | OQ-17 | **Дата ТЗ 2026-11-08** позже текущей даты репозитория (2026-11-07) — информационно, не влияет. | — | — | — |
+| OQ-18 | **Минимальные роли для approvals, не заданные ТЗ:** `DATA_DELETION`, `LOCAL_EXECUTION_FALLBACK`, `CRITICAL_DIRECTIVE`. | — | `owner`, `owner`, `admin` соответственно; все три — four-eyes (API_DESIGN §RBAC, SECURITY_ARCHITECTURE §11) | P3 |
+| OQ-19 | **`requested_by` у approvals, созданных агентом.** | (a) автор run; (b) системный актор | (a): автор run не может сам утвердить MERGE своего run (four-eyes); исключение — OQ-10 | P3 |
+| OQ-20 | **Права записи Git из runner:** общий `.git` с хуками/конфигом — вектор отравления (TH-11). | (a) `.git` ro + отдельный object dir, коммит делает платформа; (b) отдельный клон на задачу | (a), подтвердить spike P2-01 | P2 |
+| OQ-21 | **Подтверждение директивы:** в ТЗ §8.2 есть шаг confirm, но нет эндпоинта. | Добавлены `POST /runs/{id}/directives/{did}/confirm` и `/cancel` | Принять | P3 |
+| OQ-22 | **`repository_id` в `POST /runs`** отсутствует в ТЗ §8.1; проект может иметь несколько репозиториев. | (a) необязательное поле, 422 при неоднозначности; (b) один репозиторий на проект в v1 | (a) | P3 |
+| OQ-23 | **Провайдеры CLI — глобальные (на хост), RBAC — на workspace.** Кто управляет probe/settings? | (a) admin workspace, настройки в `policies` workspace; (b) отдельная роль instance-admin | (a) в v1, (b) — P2 | P2 |
+| OQ-24 | **Подписка одного оператора используется многими пользователями/workspaces** (TH-40) — вопрос условий провайдеров. | Связан с OQ-01 | Владелец подтверждает допустимость; иначе — один workspace на установку CLI | P2 |
+| OQ-25 | **Смысл `PRODUCTION_DEPLOY` в v1**, где у платформы нет production-кредов. | (a) только генерация PR/артефактов деплоя + approval; (b) исключить из v1 | (a) | P8 |
+| OQ-26 | **Поведение без независимого ревьюера по профилям:** basic — self-review с approval (метка `self_review`); strict — ручное ревью; critical — ожидание 24 ч → ручное ревью, независимое ревью уже с L2. | — | Принять (ROUTING_POLICY, QUALITY_GATES) | P4 |
+| OQ-27 | **`AUTH_REQUIRED`**: задача BLOCKED; переключение на другой провайдер — только при `failover_on_auth_required=true`. `RATE_LIMITED` не расходует `max_attempts`, только временной бюджет. | — | Принять | P4 |
+| OQ-28 | **Ожидание ответа на QUESTION** не имеет состояния в Task FSM. | (a) новый `blocked_reason=AWAITING_ANSWER`; (b) RETRY_WAIT | (a) — аддитивное расширение перечисления | P4 |
+| OQ-29 | **Консолидация «Предлагаемых дополнений»** перечислений из документов protocols/agents/api/security/database (`acp_participant`, `acp_rejection_code`, `chat_thread_scope`, `chat_message_kind`, `chat_sender_type`, `directive_ack_status`, `review_independence`, `cli_compatibility_status`, `gate_type`, `artifact_kind`, `repository_provider`, `approval_policy`, `audit actor_type` и др.) в `docs/README.md §3`. | — | Внести в README в задаче P1-03 при переносе контрактов в `packages/contracts` после утверждения | P1 |
+
+**Остаточные риски после всех контролей (THREAT_MODEL):** TH-01 prompt injection через файлы репозитория, включая читаемые самим CLI `AGENTS.md`/`CLAUDE.md` (высокий); TH-13 кража кредов CLI внутри runner; TH-12 эксфильтрация через разрешённые эндпоинты провайдера.
 
 ## 2. Реестр технических рисков
 
