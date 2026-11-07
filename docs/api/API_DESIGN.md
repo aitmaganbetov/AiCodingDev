@@ -180,8 +180,8 @@ flowchart LR
 |---|---|
 | `MANUAL_REVIEW`, `SELF_REVIEW_FALLBACK` | `reviewer` |
 | `PLAN_APPROVAL`, `DOCS_DOWNLOAD` | `developer` |
-| `MERGE`, `DESTRUCTIVE_MIGRATION`, `CRITICAL_DIRECTIVE`, `LOCAL_EXECUTION_FALLBACK` | `admin` |
-| `PRODUCTION_DEPLOY`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `DATA_DELETION` | `owner` |
+| `MERGE`, `DESTRUCTIVE_MIGRATION`, `CRITICAL_DIRECTIVE` | `admin` |
+| `PRODUCTION_DEPLOY`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `DATA_DELETION`, `LOCAL_EXECUTION_FALLBACK` | `owner` |
 
 Иерархия ролей: `owner ⊃ admin ⊃ developer ⊃ reviewer ⊃ viewer` для решений по approvals (reviewer-типы могут решать и вышестоящие роли).
 
@@ -482,7 +482,7 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 3. `idempotency_keys`: `UNIQUE NULLS NOT DISTINCT (workspace_id, user_id, key)` + поля `state`, `lease_until`.
 4. Run без `repository_id` в ТЗ §8.1: в v1 при нескольких репозиториях в проекте `POST /runs` ⇒ `422` (`errors[].code=repository_ambiguous`). Предлагается необязательное поле `repository_id` в `RunCreateRequest` (аддитивно, v1.1).
 5. Провайдеры: `cli_providers`/`cli_installations` глобальны, а RBAC — по workspace. Решение: probe/settings требуют `admin` в workspace из `X-Workspace-Id`; settings хранятся per-workspace в `policies`; probe влияет на общий `provider_health` (общая инсталляция). В мульти-командной инсталляции может потребоваться отдельная роль инстанс-администратора (нет в ТЗ).
-6. Права, не заданные явно в брифе: `DATA_DELETION` → `owner`; `CRITICAL_DIRECTIVE`, `LOCAL_EXECUTION_FALLBACK` → `admin`; создание проектов и привязка репозиториев → `admin` (не `developer`); регистрация источников документации → `admin`, refresh → `developer`.
+6. Права, не заданные явно в брифе: `DATA_DELETION`, `LOCAL_EXECUTION_FALLBACK` → `owner`; `CRITICAL_DIRECTIVE` → `admin` (согласовано с SECURITY_ARCHITECTURE §11, OQ-18); создание проектов и привязка репозиториев → `admin` (не `developer`); регистрация источников документации → `admin`, refresh → `developer`.
 7. Refresh документации вне run: явный запрос пользователя с правом считается согласием на загрузку — approval `DOCS_DOWNLOAD` не создаётся (в `approvals` `run_id` обязателен по ТЗ §7.2). `DOCS_DOWNLOAD` используется для загрузок, инициированных агентами в рамках run (режим `SMART`).
 8. Новые коды ошибок/статусы: `410 replay_window_exceeded` для SSE вместо нового типа события (`sse_event_type` не расширяется).
 9. `run.completed` трактуется как терминальное событие для `COMPLETED`/`FAILED`/`CANCELLED` (поле `final_status`).
