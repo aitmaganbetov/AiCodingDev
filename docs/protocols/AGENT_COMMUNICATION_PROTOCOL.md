@@ -163,18 +163,18 @@ flowchart LR
   "additionalProperties": false,
   "required": ["task_id", "attempt_no", "title", "objective", "acceptance_criteria", "complexity", "risk_level", "provider", "context_pack_ref", "instruction_template_version", "permissions"],
   "properties": {
-    "task_id": {"$ref": "common.schema.json#/$defs/uuid"},
+    "task_id": {"$ref": "../common.schema.json#/$defs/uuid"},
     "attempt_no": {"type": "integer", "minimum": 1, "maximum": 10},
-    "title": {"$ref": "common.schema.json#/$defs/text_short"},
-    "objective": {"$ref": "common.schema.json#/$defs/text_long"},
+    "title": {"$ref": "../common.schema.json#/$defs/text_short"},
+    "objective": {"$ref": "../common.schema.json#/$defs/text_long"},
     "acceptance_criteria": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string", "maxLength": 2000}},
     "complexity": {"enum": ["L1", "L2", "L3", "L4", "L5"]},
     "risk_level": {"enum": ["low", "medium", "high", "critical"]},
-    "provider": {"$ref": "common.schema.json#/$defs/provider"},
-    "routing_decision_id": {"$ref": "common.schema.json#/$defs/uuid"},
-    "context_pack_ref": {"$ref": "common.schema.json#/$defs/ref"},
+    "provider": {"$ref": "../common.schema.json#/$defs/provider"},
+    "routing_decision_id": {"$ref": "../common.schema.json#/$defs/uuid"},
+    "context_pack_ref": {"$ref": "../common.schema.json#/$defs/ref"},
     "instruction_template_version": {"type": "string", "pattern": "^[a-z_]+@[0-9]+\\.[0-9]+\\.[0-9]+$"},
-    "input_refs": {"$ref": "common.schema.json#/$defs/refs"},
+    "input_refs": {"$ref": "../common.schema.json#/$defs/refs"},
     "permissions": {
       "type": "object", "additionalProperties": false,
       "required": ["write_scope", "network"],
@@ -201,13 +201,13 @@ flowchart LR
   "required": ["handoff_kind", "summary", "artifact_refs"],
   "properties": {
     "handoff_kind": {"enum": ["requirements_ready", "architecture_ready", "plan_ready", "implementation_ready", "migration_ready", "analysis_ready", "test_plan_ready", "pipeline_ready", "other"]},
-    "summary": {"$ref": "common.schema.json#/$defs/text_long"},
-    "artifact_refs": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "common.schema.json#/$defs/ref"}},
-    "commit_sha": {"$ref": "common.schema.json#/$defs/commit_sha"},
+    "summary": {"$ref": "../common.schema.json#/$defs/text_long"},
+    "artifact_refs": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "../common.schema.json#/$defs/ref"}},
+    "commit_sha": {"$ref": "../common.schema.json#/$defs/commit_sha"},
     "plan_version": {"type": "integer", "minimum": 1, "description": "обязателен для plan_ready"},
     "open_questions": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 2000}},
     "assumptions": {"type": "array", "maxItems": 50, "items": {"type": "string", "maxLength": 1000}},
-    "next_role_hint": {"$ref": "common.schema.json#/$defs/agent_role"}
+    "next_role_hint": {"$ref": "../common.schema.json#/$defs/agent_role"}
   },
   "allOf": [
     {"if": {"properties": {"handoff_kind": {"const": "plan_ready"}}}, "then": {"required": ["plan_version"]}}
@@ -226,11 +226,11 @@ flowchart LR
   "additionalProperties": false,
   "required": ["question", "question_kind", "blocking"],
   "properties": {
-    "question": {"$ref": "common.schema.json#/$defs/text_long"},
+    "question": {"$ref": "../common.schema.json#/$defs/text_long"},
     "question_kind": {"enum": ["clarification", "missing_context", "decision_needed", "docs_permission", "user_ask"]},
     "blocking": {"type": "boolean", "description": "true — задача отправителя не может продолжаться без ответа"},
     "options": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 500}},
-    "context_refs": {"$ref": "common.schema.json#/$defs/refs"},
+    "context_refs": {"$ref": "../common.schema.json#/$defs/refs"},
     "answer_deadline": {"type": "string", "format": "date-time"}
   }
 }
@@ -247,10 +247,10 @@ flowchart LR
   "additionalProperties": false,
   "required": ["answer"],
   "properties": {
-    "answer": {"$ref": "common.schema.json#/$defs/text_long"},
+    "answer": {"$ref": "../common.schema.json#/$defs/text_long"},
     "selected_option": {"type": "string", "maxLength": 500},
     "confidence": {"enum": ["confirmed", "assumption", "unknown"]},
-    "evidence_refs": {"$ref": "common.schema.json#/$defs/refs"}
+    "evidence_refs": {"$ref": "../common.schema.json#/$defs/refs"}
   }
 }
 ```
@@ -267,15 +267,15 @@ flowchart LR
   "required": ["review_kind", "diff_ref", "commit_sha", "scope_summary", "acceptance_criteria", "loop_iteration"],
   "properties": {
     "review_kind": {"enum": ["code", "security", "test", "migration", "architecture", "documentation", "performance"]},
-    "diff_ref": {"$ref": "common.schema.json#/$defs/ref"},
-    "commit_sha": {"$ref": "common.schema.json#/$defs/commit_sha"},
-    "scope_summary": {"$ref": "common.schema.json#/$defs/text_long"},
-    "changed_files": {"type": "array", "maxItems": 500, "items": {"$ref": "common.schema.json#/$defs/file_path"}},
+    "diff_ref": {"$ref": "../common.schema.json#/$defs/ref"},
+    "commit_sha": {"$ref": "../common.schema.json#/$defs/commit_sha"},
+    "scope_summary": {"$ref": "../common.schema.json#/$defs/text_long"},
+    "changed_files": {"type": "array", "maxItems": 500, "items": {"$ref": "../common.schema.json#/$defs/file_path"}},
     "acceptance_criteria": {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}},
     "review_focus": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 500}},
     "loop_iteration": {"type": "integer", "minimum": 1, "maximum": 10},
-    "resolved_finding_refs": {"$ref": "common.schema.json#/$defs/refs"},
-    "gate_refs": {"$ref": "common.schema.json#/$defs/refs"}
+    "resolved_finding_refs": {"$ref": "../common.schema.json#/$defs/refs"},
+    "gate_refs": {"$ref": "../common.schema.json#/$defs/refs"}
   }
 }
 ```
@@ -291,16 +291,16 @@ flowchart LR
   "additionalProperties": false,
   "required": ["title", "severity", "category", "description", "blocking", "evidence_refs"],
   "properties": {
-    "finding_id": {"$ref": "common.schema.json#/$defs/uuid", "description": "findings.id, присваивается Orchestrator при сохранении"},
-    "title": {"$ref": "common.schema.json#/$defs/text_short"},
-    "severity": {"$ref": "common.schema.json#/$defs/severity"},
+    "finding_id": {"$ref": "../common.schema.json#/$defs/uuid", "description": "findings.id, присваивается Orchestrator при сохранении"},
+    "title": {"$ref": "../common.schema.json#/$defs/text_short"},
+    "severity": {"$ref": "../common.schema.json#/$defs/severity"},
     "category": {"enum": ["correctness", "security", "performance", "maintainability", "test_gap", "requirement_gap", "documentation", "standards", "migration_safety"]},
     "rule_id": {"type": "string", "maxLength": 200, "description": "CWE-xxx, ASVS-ссылка, внутреннее правило"},
-    "description": {"$ref": "common.schema.json#/$defs/text_long"},
-    "file": {"$ref": "common.schema.json#/$defs/file_path"},
+    "description": {"$ref": "../common.schema.json#/$defs/text_long"},
+    "file": {"$ref": "../common.schema.json#/$defs/file_path"},
     "line": {"type": "integer", "minimum": 1},
     "blocking": {"type": "boolean"},
-    "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"$ref": "common.schema.json#/$defs/ref"}},
+    "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"$ref": "../common.schema.json#/$defs/ref"}},
     "control_refs": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 200}}
   }
 }
@@ -319,13 +319,13 @@ flowchart LR
   "additionalProperties": false,
   "required": ["finding", "severity", "file", "evidence_refs", "requested_action", "loop_iteration"],
   "properties": {
-    "finding": {"$ref": "common.schema.json#/$defs/text_short"},
-    "severity": {"$ref": "common.schema.json#/$defs/severity"},
-    "file": {"anyOf": [{"$ref": "common.schema.json#/$defs/file_path"}, {"type": "null"}]},
+    "finding": {"$ref": "../common.schema.json#/$defs/text_short"},
+    "severity": {"$ref": "../common.schema.json#/$defs/severity"},
+    "file": {"anyOf": [{"$ref": "../common.schema.json#/$defs/file_path"}, {"type": "null"}]},
     "line": {"type": "integer", "minimum": 1},
-    "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"$ref": "common.schema.json#/$defs/ref"}},
-    "requested_action": {"$ref": "common.schema.json#/$defs/text_long"},
-    "finding_refs": {"$ref": "common.schema.json#/$defs/refs"},
+    "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"$ref": "../common.schema.json#/$defs/ref"}},
+    "requested_action": {"$ref": "../common.schema.json#/$defs/text_long"},
+    "finding_refs": {"$ref": "../common.schema.json#/$defs/refs"},
     "loop_iteration": {"type": "integer", "minimum": 1, "maximum": 10},
     "regression_test_required": {"type": "boolean"}
   }
@@ -352,15 +352,15 @@ Evidence, поданное агентом, сохраняется с `evidence.v
         "required": ["kind", "artifact_ref", "sha256"],
         "properties": {
           "kind": {"enum": ["git_diff", "test_report", "benchmark", "analysis_report", "review_report", "migration_plan", "rollback_plan", "adr", "diagram", "requirements_doc", "threat_model", "documentation", "other"]},
-          "artifact_ref": {"$ref": "common.schema.json#/$defs/ref"},
+          "artifact_ref": {"$ref": "../common.schema.json#/$defs/ref"},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "commit_sha": {"$ref": "common.schema.json#/$defs/commit_sha"},
+          "commit_sha": {"$ref": "../common.schema.json#/$defs/commit_sha"},
           "command": {"type": "string", "maxLength": 2000, "description": "команда, которую агент заявляет выполненной; не доверяется, гейт перезапускает"},
           "description": {"type": "string", "maxLength": 2000}
         }
       }
     },
-    "claims": {"type": "array", "maxItems": 50, "items": {"$ref": "common.schema.json#/$defs/claim"}}
+    "claims": {"type": "array", "maxItems": 50, "items": {"$ref": "../common.schema.json#/$defs/claim"}}
   }
 }
 ```
@@ -377,7 +377,7 @@ Evidence, поданное агентом, сохраняется с `evidence.v
   "required": ["decision_type", "title", "options", "recommended_option", "rationale", "requires_human_approval"],
   "properties": {
     "decision_type": {"enum": ["architecture", "technology_choice", "scope_change", "plan_change", "risk_acceptance", "data_model", "api_contract", "other"]},
-    "title": {"$ref": "common.schema.json#/$defs/text_short"},
+    "title": {"$ref": "../common.schema.json#/$defs/text_short"},
     "options": {
       "type": "array", "minItems": 1, "maxItems": 6,
       "items": {
@@ -392,10 +392,10 @@ Evidence, поданное агентом, сохраняется с `evidence.v
       }
     },
     "recommended_option": {"type": "string", "pattern": "^[a-z0-9_-]{1,40}$"},
-    "rationale": {"$ref": "common.schema.json#/$defs/text_long"},
-    "evidence_refs": {"$ref": "common.schema.json#/$defs/refs"},
+    "rationale": {"$ref": "../common.schema.json#/$defs/text_long"},
+    "evidence_refs": {"$ref": "../common.schema.json#/$defs/refs"},
     "requires_human_approval": {"type": "boolean", "description": "Orchestrator может только повысить до true по policy"},
-    "adr_draft_ref": {"$ref": "common.schema.json#/$defs/ref"}
+    "adr_draft_ref": {"$ref": "../common.schema.json#/$defs/ref"}
   }
 }
 ```
@@ -411,7 +411,7 @@ Evidence, поданное агентом, сохраняется с `evidence.v
   "additionalProperties": false,
   "required": ["decision_id", "decision_type", "outcome", "decided_by", "rationale"],
   "properties": {
-    "decision_id": {"$ref": "common.schema.json#/$defs/uuid", "description": "agent_decisions.id"},
+    "decision_id": {"$ref": "../common.schema.json#/$defs/uuid", "description": "agent_decisions.id"},
     "decision_type": {"enum": ["architecture", "technology_choice", "scope_change", "plan_change", "risk_acceptance", "data_model", "api_contract", "review_verdict", "routing", "other"]},
     "outcome": {"enum": ["accepted", "rejected", "superseded"]},
     "chosen_option": {"type": "string", "pattern": "^[a-z0-9_-]{1,40}$"},
@@ -420,7 +420,7 @@ Evidence, поданное агентом, сохраняется с `evidence.v
       "required": ["type"],
       "properties": {
         "type": {"enum": ["user", "policy"]},
-        "user_id": {"$ref": "common.schema.json#/$defs/uuid"},
+        "user_id": {"$ref": "../common.schema.json#/$defs/uuid"},
         "policy_version": {"type": "string", "maxLength": 100}
       },
       "allOf": [
@@ -428,10 +428,10 @@ Evidence, поданное агентом, сохраняется с `evidence.v
         {"if": {"properties": {"type": {"const": "policy"}}}, "then": {"required": ["policy_version"]}}
       ]
     },
-    "approval_id": {"$ref": "common.schema.json#/$defs/uuid"},
-    "rationale": {"$ref": "common.schema.json#/$defs/text_long"},
-    "evidence_refs": {"$ref": "common.schema.json#/$defs/refs"},
-    "adr_ref": {"$ref": "common.schema.json#/$defs/ref"}
+    "approval_id": {"$ref": "../common.schema.json#/$defs/uuid"},
+    "rationale": {"$ref": "../common.schema.json#/$defs/text_long"},
+    "evidence_refs": {"$ref": "../common.schema.json#/$defs/refs"},
+    "adr_ref": {"$ref": "../common.schema.json#/$defs/ref"}
   }
 }
 ```
@@ -450,12 +450,12 @@ Evidence, поданное агентом, сохраняется с `evidence.v
   "required": ["reason", "detail", "needed_from"],
   "properties": {
     "reason": {"enum": ["APPROVAL_REQUIRED", "PROVIDER_UNAVAILABLE", "AUTH_REQUIRED", "DIRECTIVE_REPLAN", "RUN_PAUSED", "DOCS_REQUIRED", "MANUAL_REVIEW", "REVIEW_LOOP_EXHAUSTED", "DEPENDENCY_FAILED"]},
-    "detail": {"$ref": "common.schema.json#/$defs/text_long"},
+    "detail": {"$ref": "../common.schema.json#/$defs/text_long"},
     "needed_from": {"enum": ["user", "operator", "role", "external"]},
-    "needed_role": {"$ref": "common.schema.json#/$defs/agent_role"},
+    "needed_role": {"$ref": "../common.schema.json#/$defs/agent_role"},
     "unblock_condition": {"type": "string", "maxLength": 2000},
-    "approval_id": {"$ref": "common.schema.json#/$defs/uuid"},
-    "evidence_refs": {"$ref": "common.schema.json#/$defs/refs"}
+    "approval_id": {"$ref": "../common.schema.json#/$defs/uuid"},
+    "evidence_refs": {"$ref": "../common.schema.json#/$defs/refs"}
   }
 }
 ```
@@ -475,12 +475,12 @@ Evidence, поданное агентом, сохраняется с `evidence.v
   "additionalProperties": false,
   "required": ["summary", "claims", "artifact_refs"],
   "properties": {
-    "summary": {"$ref": "common.schema.json#/$defs/text_long"},
-    "claims": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"$ref": "common.schema.json#/$defs/claim"}},
-    "artifact_refs": {"$ref": "common.schema.json#/$defs/refs"},
-    "commit_sha": {"$ref": "common.schema.json#/$defs/commit_sha"},
+    "summary": {"$ref": "../common.schema.json#/$defs/text_long"},
+    "claims": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"$ref": "../common.schema.json#/$defs/claim"}},
+    "artifact_refs": {"$ref": "../common.schema.json#/$defs/refs"},
+    "commit_sha": {"$ref": "../common.schema.json#/$defs/commit_sha"},
     "review_verdict": {"enum": ["approved", "changes_requested", "rejected"], "description": "обязателен для задач reviewer/security"},
-    "open_finding_refs": {"$ref": "common.schema.json#/$defs/refs"},
+    "open_finding_refs": {"$ref": "../common.schema.json#/$defs/refs"},
     "follow_ups": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 1000}}
   }
 }
@@ -611,13 +611,13 @@ sequenceDiagram
   O->>U: DECISION_PROPOSAL в чат (+ approval при requires_human_approval)
   O->>PL: TASK_ASSIGN (inbox: HANDOFF)
   PL-->>O: HANDOFF plan_ready (plan artifact, plan_version=1) + TASK_COMPLETED
-  O->>O: DAG validation (cycles, refs, roles) в одной tx; run PLANNED
+  O->>O: DAG validation (cycles, refs, roles) в одной tx, run PLANNED
   alt policy требует PLAN_APPROVAL
-    O->>U: approval.requested PLAN_APPROVAL; run AWAITING_APPROVAL
+    O->>U: approval.requested PLAN_APPROVAL, run AWAITING_APPROVAL
     U->>O: approve
     O->>AR: DECISION_RECORDED (plan_change accepted, decided_by user)
   end
-  O->>O: run RUNNING; задачи без зависимостей → READY
+  O->>O: run RUNNING, задачи без зависимостей → READY
 ```
 
 ### 9.2 Develop → review → fix
@@ -632,10 +632,10 @@ sequenceDiagram
   D-->>O: EVIDENCE_SUBMITTED (git_diff) + REVIEW_REQUEST → reviewer (loop_iteration=1) + TASK_COMPLETED
   O->>V: запуск обязательных гейтов на commit SHA
   V-->>O: gate.completed (lint, unit…)
-  O->>R: TASK_ASSIGN (review task, review_independence=independent; inbox: REVIEW_REQUEST)
+  O->>R: TASK_ASSIGN (review task, review_independence=independent, inbox: REVIEW_REQUEST)
   R-->>O: FINDING (high) + FIX_REQUEST → developer (reply_to REVIEW_REQUEST, loop_iteration=1) + TASK_COMPLETED (changes_requested)
-  O->>O: review_loop_count=1 ≤ 3; задача developer → READY (новая попытка)
-  O->>D: TASK_ASSIGN (attempt 2; inbox: FIX_REQUEST, FINDING)
+  O->>O: review_loop_count=1 ≤ 3, задача developer → READY (новая попытка)
+  O->>D: TASK_ASSIGN (attempt 2, inbox: FIX_REQUEST, FINDING)
   D-->>O: REVIEW_REQUEST (loop_iteration=2, resolved_finding_refs)
   O->>R: TASK_ASSIGN (inbox: REVIEW_REQUEST)
   R-->>O: TASK_COMPLETED (approved)
@@ -652,16 +652,16 @@ sequenceDiagram
   participant O as Orchestrator
   participant A as architect
   participant U as User
-  D-->>O: QUESTION → architect (blocking=true, correlation=c1); попытка завершается
-  O->>O: validate; задача developer → RETRY_WAIT (next_attempt_at = NULL до ответа)
+  D-->>O: QUESTION → architect (blocking=true, correlation=c1), попытка завершается
+  O->>O: validate, задача developer → RETRY_WAIT (next_attempt_at = NULL до ответа)
   alt у architect есть задача в run
-    O->>A: TASK_ASSIGN (короткая consult-задача; inbox: QUESTION)
+    O->>A: TASK_ASSIGN (короткая consult-задача, inbox: QUESTION)
     A-->>O: ANSWER (reply_to=QUESTION, correlation=c1)
   else эскалация
     O->>U: QUESTION в чат (stream Role/Task)
     U->>O: ANSWER (from user, reply_to=QUESTION)
   end
-  O->>D: TASK_ASSIGN (новая попытка; inbox: QUESTION+ANSWER)
+  O->>D: TASK_ASSIGN (новая попытка, inbox: QUESTION+ANSWER)
 ```
 
 Задача, отправившая blocking-вопрос, переводится в `BLOCKED` с причиной `MANUAL_REVIEW`, если адресат — `user`, и в `RETRY_WAIT` (`next_attempt_at = NULL` до ответа, попытка не расходует `max_attempts`), если адресат — агентская роль; ожидание ответа ограничено `answer_deadline` (по умолчанию 24 ч), после чего вопрос эскалируется пользователю. Канонического значения «ожидает ответа» нет — предложено `AWAITING_ANSWER` (раздел 11).
@@ -675,11 +675,11 @@ sequenceDiagram
   participant U as User (Mission Control)
   S-->>O: BLOCKED (reason=DOCS_REQUIRED, needed_from=user)
   O->>O: policy: documentation_mode=SMART → нужен DOCS_DOWNLOAD
-  O->>O: 1 tx: task BLOCKED(DOCS_REQUIRED); approvals(DOCS_DOWNLOAD, PENDING); outbox
-  O->>U: BLOCKED → user (approval_id) ; SSE approval.requested, task.state_changed, chat.message (Approvals stream)
+  O->>O: 1 tx: task BLOCKED(DOCS_REQUIRED), approvals(DOCS_DOWNLOAD, PENDING), outbox
+  O->>U: BLOCKED → user (approval_id), SSE approval.requested, task.state_changed, chat.message (Approvals stream)
   alt approve
     U->>O: POST /approvals/{id}/decision approve
-    O->>O: external_actions(docs download) PLANNED→…→CONFIRMED; task READY
+    O->>O: external_actions(docs download) PLANNED→…→CONFIRMED, task READY
     O->>S: TASK_ASSIGN (новая попытка, inbox: DECISION_RECORDED)
   else reject
     U->>O: reject

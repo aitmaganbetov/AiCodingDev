@@ -23,7 +23,7 @@ flowchart LR
   OB --> D[worker-outbox dispatcher]
   D -->|Dramatiq| W1[orchestrator / verify / index consumers]
   D -->|"1 tx: run_event_log(seq) + published_at"| REL[(run_event_log)]
-  D -->|PUBLISH run:{run_id} wake-up| PS[(Redis pub/sub)]
+  D -->|"PUBLISH run:{run_id} wake-up"| PS[(Redis pub/sub)]
   PS --> API[api SSE handler]
   REL --> API
   API -->|"id: seq"| B[Browser]
