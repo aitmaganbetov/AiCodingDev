@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from aicd_orchestration import checkpoints, directives, plans, retry, store
+from aicd_orchestration.dag import PlannedTask, critical_path_lengths
 from aicd_orchestration.planner import template_plan
 from aicd_platform import context, leases
 from aicd_platform.artifacts import ArtifactStore
@@ -301,17 +302,7 @@ class Orchestrator:
                     extra={"blocked_reason": blocked[0]["blocked_reason"]},
                 )
                 return []
-            ready = (
-                (
-                    await conn.execute(
-                        text("SELECT id FROM tasks WHERE run_id = :r AND status = 'READY' ORDER BY created_at"),
-                        {"r": run_id},
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            return list(ready)
+            return await _dispatchable(conn, run)
 
     # ---------- task execution ----------
     async def execute_task(self, task_id: uuid.UUID, ws: uuid.UUID) -> None:
@@ -324,6 +315,11 @@ class Orchestrator:
             if run is None:  # pragma: no cover — FK гарантирует существование run
                 return
             if run["status"] != "RUNNING":
+                return
+            # Лимит параллелизма и приоритет критического пути (DATA_FLOW §4.2) — под блокировкой run,
+            # т.к. сообщения exec приходят на любые READY-задачи; лишние остаются READY до освобождения слота.
+            await _run_row(conn, task["run_id"], lock=True)
+            if task_id not in await _dispatchable(conn, run):
                 return
             allowed = list(run["policy_snapshot"].get("routing", {}).get("allowed_providers", ["codex", "claude"]))
             try:
@@ -585,6 +581,51 @@ async def _cancel_open_tasks(conn: AsyncConnection, run_id: uuid.UUID) -> None:
     )
     for task_id in open_ids:
         await store.transition_task(conn, task_id, "CANCELLED", reason="run_terminated")
+
+
+DEFAULT_MAX_PARALLEL_TASKS = 4
+
+
+async def _dispatchable(conn: AsyncConnection, run: dict[str, Any]) -> list[uuid.UUID]:
+    """READY-задачи, которые можно запускать сейчас: по убыванию длины критического пути, не больше свободных
+    слотов `limits.max_parallel_tasks` из policy snapshot run (DATA_FLOW §4.2)."""
+    rows = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT id, task_key, agent_role, complexity, status, created_at FROM tasks"
+                    " WHERE run_id = :r AND superseded_at IS NULL"
+                ),
+                {"r": run["id"]},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    edges = (
+        await conn.execute(
+            text(
+                "SELECT t.task_key, p.task_key FROM task_dependencies d JOIN tasks t ON t.id = d.task_id"
+                " JOIN tasks p ON p.id = d.depends_on_task_id WHERE d.run_id = :r AND t.superseded_at IS NULL"
+                " AND p.superseded_at IS NULL"
+            ),
+            {"r": run["id"]},
+        )
+    ).all()
+    deps: dict[str, list[str]] = {}
+    for child, parent in edges:
+        deps.setdefault(child, []).append(parent)
+    priority = critical_path_lengths(
+        [PlannedTask(r["task_key"], r["agent_role"], r["complexity"], tuple(deps.get(r["task_key"], ()))) for r in rows]
+    )
+    limit = int(
+        (run["policy_snapshot"] or {}).get("limits", {}).get("max_parallel_tasks") or DEFAULT_MAX_PARALLEL_TASKS
+    )
+    active = sum(1 for r in rows if r["status"] in ("LEASED", "RUNNING", "VERIFYING"))
+    ready = sorted(
+        (r for r in rows if r["status"] == "READY"), key=lambda r: (-priority[r["task_key"]], r["created_at"], r["id"])
+    )
+    return [r["id"] for r in ready[: max(limit - active, 0)]]
 
 
 async def fail_attempt(

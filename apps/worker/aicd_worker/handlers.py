@@ -99,7 +99,10 @@ async def _route(rt: Runtime, event: dict[str, Any], event_id: uuid.UUID, run_id
         if task_id is not None:
             await rt.dispatch_execution(execution_message(task_id, ws, event_id))
             return "execute_task"
-    await orch.tick(run_id, ws)
+    # tick возвращает READY-задачи, для которых освободился слот параллелизма (они уже были READY и
+    # нового события READY не получат) — ставим их в exec; повторная постановка безопасна (execute_task идемпотентен).
+    for ready_id in await orch.tick(run_id, ws):
+        await rt.dispatch_execution(execution_message(ready_id, ws, event_id))
     return "tick"
 
 
