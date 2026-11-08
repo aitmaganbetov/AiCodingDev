@@ -21,7 +21,7 @@ from typing import Any
 from aicd_platform.redaction import redact_text
 from aicd_verification.findings import Finding, make_finding, normalize_severity
 
-SECRET_CWE = "CWE-798"  # Use of Hard-coded Credentials
+HARDCODED_CREDENTIALS_CWE = "CWE-798"  # Use of Hard-coded Credentials
 _CWE_RE = re.compile(r"CWE-(\d{1,5})", re.IGNORECASE)
 
 
@@ -72,6 +72,10 @@ def _rel(path: Any) -> str:
     return text.lstrip("/")
 
 
+def _obj(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _int(value: Any) -> int | None:
     try:
         number = int(value)
@@ -111,8 +115,8 @@ def parse_semgrep(text: str, *, gate: str = "semgrep-sast", rule_prefix: str = "
         rule = str(item.get("check_id") or "unknown")
         if rule_prefix and rule.startswith(rule_prefix):
             rule = rule[len(rule_prefix) :]
-        extra = item.get("extra") if isinstance(item.get("extra"), dict) else {}
-        meta = extra.get("metadata") if isinstance(extra.get("metadata"), dict) else {}
+        extra = _obj(item.get("extra"))
+        meta = _obj(extra.get("metadata"))
         severity = meta.get("aicd-severity") or extra.get("severity")
         message = str(extra.get("message") or rule)
         path = _rel(item.get("path"))
@@ -161,7 +165,7 @@ def parse_gitleaks(text: str, *, gate: str = "gitleaks-secrets") -> ParsedReport
                 line=line,
                 # Значение секрета в отпечаток не входит (gitleaks уже отдаёт REDACTED).
                 snippet=f"{rule}@{path}:{line}",
-                cwe_id=SECRET_CWE,
+                cwe_id=HARDCODED_CREDENTIALS_CWE,
             )
         )
     return ParsedReport(tuple(findings), {"leaks": len(findings)})
@@ -235,7 +239,7 @@ def parse_trivy(text: str, *, gate: str) -> ParsedReport:
                     file_path=target,
                     line=line,
                     snippet=f"{rule}@{target}:{line}",
-                    cwe_id=SECRET_CWE,
+                    cwe_id=HARDCODED_CREDENTIALS_CWE,
                 )
             )
     summary = {
@@ -508,20 +512,29 @@ def classify_cosign(exit_code: int, stderr: str | None) -> tuple[str, str]:
 _TRIVY_SECRET_FIELDS = ("Match", "Code")
 
 
+def _redact_values(node: Any) -> Any:
+    if isinstance(node, str):
+        return redact_text(node)
+    if isinstance(node, list):
+        return [_redact_values(v) for v in node]
+    if isinstance(node, dict):
+        return {k: _redact_values(v) for k, v in node.items()}
+    return node
+
+
 def redact_report(tool: str, text: str) -> str:
-    """Отчёт для artifact: у секретов Trivy удаляются `Match`/`Code` (частично маскированы
-    инструментом), затем общий `redact_text` платформы по всему тексту."""
-    if tool == "trivy":
-        try:
-            data = json.loads(text)
-        except ValueError:
-            return redact_text(text)
-        if isinstance(data, dict):
-            for result in data.get("Results") or []:
-                for sec in (result or {}).get("Secrets") or []:
-                    if isinstance(sec, dict):
-                        for key in _TRIVY_SECRET_FIELDS:
-                            if key in sec:
-                                sec[key] = "[REDACTED]"
-            text = json.dumps(data, ensure_ascii=False, indent=1)
-    return redact_text(text)
+    """Отчёт для artifact. JSON редактируется по строковым значениям (структура и валидность JSON
+    сохраняются; у секретов Trivy `Match`/`Code` удаляются целиком — инструмент маскирует их лишь
+    частично); не-JSON — общий `redact_text` платформы."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return redact_text(text)
+    if tool == "trivy" and isinstance(data, dict):
+        for result in data.get("Results") or []:
+            for sec in (result or {}).get("Secrets") or []:
+                if isinstance(sec, dict):
+                    for key in _TRIVY_SECRET_FIELDS:
+                        if key in sec:
+                            sec[key] = "[REDACTED]"
+    return json.dumps(_redact_values(data), ensure_ascii=False)

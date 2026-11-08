@@ -1123,7 +1123,9 @@ def write_inputs(definition: SecurityGateDef, ctx: GateContext, input_dir: Path)
         target.chmod(0o644)
 
 
-async def _execute(runner: SandboxRunner, spec: ContainerSpec, timeout: int) -> tuple[int | None, bytes, bytes, bool]:
+async def _execute(
+    runner: SandboxRunner, spec: ContainerSpec, limit_seconds: int
+) -> tuple[int | None, bytes, bytes, bool]:
     proc = await runner.start(spec)
     out, err = bytearray(), bytearray()
     limit = spec.limits.max_output_bytes
@@ -1136,7 +1138,7 @@ async def _execute(runner: SandboxRunner, spec: ContainerSpec, timeout: int) -> 
         return await proc.wait()
 
     try:
-        return await asyncio.wait_for(collect(), timeout=timeout), bytes(out), bytes(err), False
+        return await asyncio.wait_for(collect(), timeout=limit_seconds), bytes(out), bytes(err), False
     except TimeoutError:
         with contextlib.suppress(Exception):
             await proc.terminate(grace_seconds=5.0)

@@ -19,6 +19,7 @@ import secrets
 import shutil
 import string
 import subprocess
+import tarfile
 import zipfile
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -63,7 +64,13 @@ def ensure_image(image: images.PinnedImage) -> None:
         return
     if image is images.OSV_SCANNER:
         res = docker_cli(
-            "build", "-q", "-f", str(OSV_DOCKERFILE), "-t", f"{image.repository}:{image.tag}", str(OSV_DOCKERFILE.parent)
+            "build",
+            "-q",
+            "-f",
+            str(OSV_DOCKERFILE),
+            "-t",
+            f"{image.repository}:{image.tag}",
+            str(OSV_DOCKERFILE.parent),
         )
         assert res.returncode == 0, res.stderr
         inspect = docker_cli("image", "inspect", image.ref)
@@ -177,7 +184,16 @@ async def test_semgrep_clean_passes_and_basic_profile_threshold(runner: DockerSa
 async def test_semgrep_broken_config_is_error(runner: DockerSandboxRunner, area: Path) -> None:
     ensure_image(images.SEMGREP)
     repo = make_repo(area, "semgrep/clean")
-    argv = ("semgrep", "scan", "--config", "/aicd-input/missing.yml", "--metrics=off", "--json", "--quiet", "/workspace")
+    argv = (
+        "semgrep",
+        "scan",
+        "--config",
+        "/aicd-input/missing.yml",
+        "--metrics=off",
+        "--json",
+        "--quiet",
+        "/workspace",
+    )
     result = await sg.run_security_gate(runner, "semgrep-sast", request(area, repo), argv=argv)
     assert result.verdict.status == "ERROR"
 
@@ -396,7 +412,7 @@ def cosign_setup(area: Path, name: str = "cosign-keys") -> tuple[Path, str]:
     keys = area / name
     keys.mkdir()
     keys.chmod(0o777)
-    base = ["run", "--rm", "--network", "none", "--read-only", "--user", "10001:10001", "--tmpfs", "/tmp"]
+    base = ["run", "--rm", "--network", "none", "--read-only", "--user", "10001:10001", "--tmpfs", "/tmp"]  # noqa: S108
     base += ["-e", "HOME=/tmp", "-e", "COSIGN_PASSWORD=", "-w", "/keys", "-v", f"{keys}:/keys"]
     res = docker_cli(*base, images.COSIGN.ref, "generate-key-pair")
     assert res.returncode == 0, res.stderr
@@ -427,7 +443,9 @@ async def test_cosign_verifies_blob_offline_and_rejects_tampering(runner: Docker
     shutil.copy(keys / "release-notes.txt", repo / "dist" / "release-notes.txt")
     shutil.copy(keys / "release-notes.txt.sigstore.json", repo / "dist" / "release-notes.txt.sigstore.json")
     _readable(repo)
-    subject = sg.SignatureSubject("blob", "release-notes", "dist/release-notes.txt", "dist/release-notes.txt.sigstore.json")
+    subject = sg.SignatureSubject(
+        "blob", "release-notes", "dist/release-notes.txt", "dist/release-notes.txt.sigstore.json"
+    )
     policy = sg.SigningPolicy(pub, (subject,))
     verdict, results = await sg.run_signature_gate(runner, policy, request(area, repo))
     assert verdict.status == "PASS", [r.verdict for r in results]
@@ -453,7 +471,8 @@ async def test_cosign_unsigned_image_layout_is_not_pass(runner: DockerSandboxRun
     layout.mkdir(parents=True)
     tarball = area / "image.tar"
     assert docker_cli("save", "-o", str(tarball), images.PYTHON_BENCH.ref).returncode == 0
-    subprocess.run(["tar", "-xf", str(tarball), "-C", str(layout)], check=True)
+    with tarfile.open(tarball) as tar:
+        tar.extractall(layout, filter="data")
     _readable(req.input_dir)
     policy = sg.SigningPolicy(pub, (sg.SignatureSubject("image", "python", "alpine"),))
     verdict, results = await sg.run_signature_gate(runner, policy, req)

@@ -5,7 +5,7 @@ import subprocess
 
 
 def run(args: list[str]) -> int:
-    return subprocess.run(args, check=False).returncode  # noqa: S603
+    return subprocess.run(args, check=False).returncode
 
 
 def parse(text: str) -> object:
