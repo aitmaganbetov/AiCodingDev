@@ -412,7 +412,7 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 
 Тот же санитайзер применяется к `agent.message.summary`, `ChatItem.body`, ACP payload при отображении, `Problem.detail` и `audit_events.metadata`. Ложные срабатывания допустимы, пропуски — дефект безопасности (тест-канарейки, §18).
 
-**Скачивание artifacts** (`GET /artifacts/{artifact_id}/download`, доп.): после RBAC-проверки — `302` на подписанный URL MinIO с TTL **60 с**, `response-content-disposition=attachment`, `Cache-Control: no-store`; для file-адаптера — потоковая отдача через API. Каждое скачивание аудируется (`artifact.download`). URL подписывается для одного объекта и не раскрывает учётные данные хранилища.
+**Скачивание artifacts** (`GET /artifacts/{artifact_id}/download`, доп.): после RBAC-проверки (`cli_raw_log` — дополнительно `artifact:download_raw`) содержимое отдаётся **потоком через API** для любого адаптера хранилища: `200 application/octet-stream`, `Content-Disposition: attachment`, `Cache-Control: no-store`, проверка sha256 на лету. Редирект `302` на подписанный URL MinIO не используется: SPA читает artifacts через `fetch`, а CSP разрешает только `connect-src 'self'` (решение Phase 7, OQ-44). Чужой, истёкший или отсутствующий в хранилище artifact — `404`. Каждое скачивание аудируется (`artifact.download`).
 
 ## 15. Провайдеры CLI (ТЗ §8, ADR-0003, ADR-0010)
 

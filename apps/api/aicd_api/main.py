@@ -13,6 +13,7 @@ from aicd_api.middleware import BodyLimitMiddleware, request_context_middleware
 from aicd_api.ratelimit import RateLimiter
 from aicd_api.routers import (
     approvals,
+    artifacts,
     audit,
     auth,
     chat,
@@ -90,6 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         chat.router,
         events.router,
         audit.router,
+        artifacts.router,
     ):
         app.include_router(router, prefix=API_PREFIX)
     return app

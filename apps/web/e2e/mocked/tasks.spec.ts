@@ -196,16 +196,14 @@ function seed(api: MockApi, opts: { failTask?: boolean } = {}) {
 }
 
 /**
- * downloadArtifact: контракт объявляет только 302 на подписанный URL, но Playwright не перехватывает
- * запрос, следующий за редиректом из route.fulfill. Поэтому здесь — режим file-адаптера из описания
- * операции (потоковая отдача через API); 200 в контракте не объявлен — см. отчёт (API gap).
+ * downloadArtifact: потоковая отдача через API (200 application/octet-stream, как в контракте).
  * Маршрут регистрируется после MockApi.install и имеет приоритет.
  */
 async function serveArtifacts(page: Page): Promise<string[]> {
   const fetched: string[] = [];
   await page.route('**/api/v1/artifacts/*/download', async (route) => {
     fetched.push(route.request().url());
-    await route.fulfill({ status: 200, contentType: 'text/x-diff; charset=utf-8', headers: { 'Cache-Control': 'no-store' }, body: DIFF });
+    await route.fulfill({ status: 200, contentType: 'application/octet-stream', headers: { 'Cache-Control': 'no-store', 'Content-Disposition': 'attachment; filename="git_diff.diff"' }, body: DIFF });
   });
   return fetched;
 }

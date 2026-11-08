@@ -1618,14 +1618,18 @@ paths:
   /artifacts/{artifact_id}/download:
     get:
       operationId: downloadArtifact
-      summary: Скачать artifact (редирект на подписанный URL) [дополнение к ТЗ]
+      summary: Скачать artifact потоком через API [дополнение к ТЗ]
       tags: [evidence]
-      description: kind=raw_cli_log требует artifact:download_raw (admin/owner). Для file-адаптера — потоковая отдача через API (200 application/octet-stream).
+      description: >-
+        Содержимое отдаётся потоком через API для любого адаптера хранилища (200 application/octet-stream):
+        CSP SPA разрешает только connect-src 'self', поэтому редирект на подписанный URL другого origin не
+        используется. kind=cli_raw_log требует artifact:download_raw (admin/owner). Чужой, истёкший или
+        отсутствующий в хранилище artifact — 404. Поток проверяется по sha256; при расхождении передача обрывается.
       parameters:
       - {$ref: '#/components/parameters/ArtifactId'}
       responses:
         '200':
-          description: Содержимое artifact потоком через API (file-адаптер хранилища), Content-Disposition=attachment
+          description: Содержимое artifact потоком через API, Content-Disposition=attachment
           content:
             application/octet-stream:
               schema: {type: string, contentMediaType: application/octet-stream}
@@ -1638,12 +1642,6 @@ paths:
             RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
             RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
             RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
-        '302':
-          description: Location — подписанный URL объектного хранилища, TTL 60 с, одноразовый Content-Disposition=attachment
-          headers:
-            Location: {$ref: '#/components/headers/Location'}
-            Cache-Control:
-              schema: {type: string, const: no-store}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}

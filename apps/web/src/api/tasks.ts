@@ -52,8 +52,8 @@ export const tasksApi = {
   },
 
   /**
-   * Текст артефакта (git_diff) через downloadArtifact: 302 на подписанный URL (fetch следует
-   * редиректу) либо потоковая отдача API. Содержимое — недоверенные данные, только как текст.
+   * Текст артефакта (git_diff) через downloadArtifact: потоковая отдача API (same-origin, CSP
+   * connect-src 'self'). Содержимое — недоверенные данные, только как текст.
    */
   async artifactText(artifactId: string, signal?: AbortSignal): Promise<string> {
     let res: Response;

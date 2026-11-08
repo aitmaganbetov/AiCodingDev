@@ -684,8 +684,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Скачать artifact (редирект на подписанный URL) [дополнение к ТЗ]
-         * @description kind=raw_cli_log требует artifact:download_raw (admin/owner). Для file-адаптера — потоковая отдача через API (200 application/octet-stream).
+         * Скачать artifact потоком через API [дополнение к ТЗ]
+         * @description Содержимое отдаётся потоком через API для любого адаптера хранилища (200 application/octet-stream): CSP SPA разрешает только connect-src 'self', поэтому редирект на подписанный URL другого origin не используется. kind=cli_raw_log требует artifact:download_raw (admin/owner). Чужой, истёкший или отсутствующий в хранилище artifact — 404. Поток проверяется по sha256; при расхождении передача обрывается.
          */
         get: operations["downloadArtifact"];
         put?: never;
@@ -4790,7 +4790,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Содержимое artifact потоком через API (file-адаптер хранилища), Content-Disposition=attachment */
+            /** @description Содержимое artifact потоком через API, Content-Disposition=attachment */
             200: {
                 headers: {
                     /** @description attachment; filename="<безопасное имя>" */
@@ -4804,15 +4804,6 @@ export interface operations {
                 content: {
                     "application/octet-stream": string;
                 };
-            };
-            /** @description Location — подписанный URL объектного хранилища, TTL 60 с, одноразовый Content-Disposition=attachment */
-            302: {
-                headers: {
-                    Location: components["headers"]["Location"];
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

@@ -52,7 +52,7 @@ export const qualityApi = {
   },
 };
 
-/** Ссылка скачивания artifact (GET /artifacts/{id}/download → 302 на подписанный URL). */
+/** Ссылка скачивания artifact (GET /artifacts/{id}/download — потоковая отдача через API). */
 export function artifactDownloadHref(artifactId: string): string {
   return `${API_BASE}/artifacts/${seg(artifactId)}/download`;
 }
