@@ -119,15 +119,19 @@ def _smart(need: DocNeed, *, blocking: bool) -> DocDecision:
         return DocDecision(DocAction.DOWNLOAD, "approval DOCS_DOWNLOAD утверждён", blocking=blocking)
     if need.approval is ApprovalState.PENDING:
         return DocDecision(
-            DocAction.WAIT_APPROVAL, "approval DOCS_DOWNLOAD ожидает решения", blocking=blocking,
+            DocAction.WAIT_APPROVAL,
+            "approval DOCS_DOWNLOAD ожидает решения",
+            blocking=blocking,
             approval_action_type=DOCS_DOWNLOAD,
-        )  # fmt: skip
+        )
     if need.approval in (ApprovalState.REJECTED, ApprovalState.EXPIRED, ApprovalState.CANCELLED):
         return DocDecision(DocAction.SKIP, f"approval DOCS_DOWNLOAD: {need.approval.value}")
     return DocDecision(
-        DocAction.REQUEST_APPROVAL, "нет снимка — требуется approval DOCS_DOWNLOAD", blocking=blocking,
+        DocAction.REQUEST_APPROVAL,
+        "нет снимка — требуется approval DOCS_DOWNLOAD",
+        blocking=blocking,
         approval_action_type=DOCS_DOWNLOAD,
-    )  # fmt: skip
+    )
 
 
 def decide(mode: DocumentationMode | str, need: DocNeed) -> DocDecision:
@@ -147,18 +151,24 @@ def decide(mode: DocumentationMode | str, need: DocNeed) -> DocDecision:
         return DocDecision(DocAction.DOWNLOAD, "STRICT: утверждённый источник не загружен", blocking=True)
     if need.approval is ApprovalState.PENDING:
         return DocDecision(
-            DocAction.WAIT_APPROVAL, "STRICT: approval DOCS_DOWNLOAD ожидает решения", blocking=True,
+            DocAction.WAIT_APPROVAL,
+            "STRICT: approval DOCS_DOWNLOAD ожидает решения",
+            blocking=True,
             approval_action_type=DOCS_DOWNLOAD,
-        )  # fmt: skip
+        )
     if need.approval in (ApprovalState.REJECTED, ApprovalState.EXPIRED, ApprovalState.CANCELLED):
         return DocDecision(
-            DocAction.BLOCK, f"STRICT: approval DOCS_DOWNLOAD {need.approval.value}", blocking=True,
+            DocAction.BLOCK,
+            f"STRICT: approval DOCS_DOWNLOAD {need.approval.value}",
+            blocking=True,
             outcome="MANUAL_REVIEW",
-        )  # fmt: skip
+        )
     return DocDecision(
-        DocAction.REQUEST_APPROVAL, "STRICT: источник не утверждён — требуется approval DOCS_DOWNLOAD",
-        blocking=True, approval_action_type=DOCS_DOWNLOAD,
-    )  # fmt: skip
+        DocAction.REQUEST_APPROVAL,
+        "STRICT: источник не утверждён — требуется approval DOCS_DOWNLOAD",
+        blocking=True,
+        approval_action_type=DOCS_DOWNLOAD,
+    )
 
 
 def docs_download_subject(source_id: uuid.UUID, uri: str) -> dict[str, Any]:

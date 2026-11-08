@@ -7,6 +7,7 @@ import io
 import stat
 import tarfile
 import zipfile
+from collections.abc import Sequence
 
 import pytest
 
@@ -22,7 +23,7 @@ from aicd_code_intelligence.docs.content import process_content, split_sections
 from aicd_code_intelligence.docs.html_text import html_to_text
 
 
-def _zip(entries: list[tuple[str | zipfile.ZipInfo, bytes]]) -> bytes:
+def _zip(entries: Sequence[tuple[str | zipfile.ZipInfo, bytes]]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name, data in entries:
@@ -47,7 +48,9 @@ def _tar(members: list[tarfile.TarInfo], datas: list[bytes] | None = None, *, gz
 
 
 def test_zip_documents_extracted_and_others_skipped() -> None:
-    data = _zip([("docs/a.md", b"# A\n"), ("docs/b.html", b"<h1>B</h1>"), ("bin/tool.exe", b"MZ"), ("inner.zip", b"PK")])
+    data = _zip(
+        [("docs/a.md", b"# A\n"), ("docs/b.html", b"<h1>B</h1>"), ("bin/tool.exe", b"MZ"), ("inner.zip", b"PK")]
+    )
     contents = extract_zip(data)
     assert [m.path for m in contents.members] == ["docs/a.md", "docs/b.html"]
     assert set(contents.skipped) == {"bin/tool.exe", "inner.zip"}, "вложенный архив не распаковывается"
@@ -156,7 +159,12 @@ def test_tar_traversal_absolute_and_links_rejected() -> None:
     fifo.type = tarfile.FIFOTYPE
     dev = tarfile.TarInfo("dev.md")
     dev.type = tarfile.CHRTYPE
-    for member, code in ((sym, "ARCHIVE_LINK"), (hard, "ARCHIVE_LINK"), (fifo, "ARCHIVE_SPECIAL"), (dev, "ARCHIVE_SPECIAL")):
+    for member, code in (
+        (sym, "ARCHIVE_LINK"),
+        (hard, "ARCHIVE_LINK"),
+        (fifo, "ARCHIVE_SPECIAL"),
+        (dev, "ARCHIVE_SPECIAL"),
+    ):
         with pytest.raises(ArchiveRejectedError) as exc:
             extract_tar(_tar([member]))
         assert exc.value.code == code
@@ -196,7 +204,10 @@ def test_archive_sections_and_license() -> None:
     data = _zip(
         [
             ("LICENSE", b"Apache License\nVersion 2.0, January 2004\n"),
-            ("docs/intro.md", b"Intro text\n\n# Install\n\npip install x\n\n```\n# not a heading\n```\n## Usage\nrun\n"),
+            (
+                "docs/intro.md",
+                b"Intro text\n\n# Install\n\npip install x\n\n```\n# not a heading\n```\n## Usage\nrun\n",
+            ),
         ]
     )
     doc = process_content("application/zip", data)
@@ -245,8 +256,19 @@ def test_html_sanitization() -> None:
     assert result.title == "API Guide" and result.license_hint == "CC-BY-4.0"
     assert "# Install" in md and "`pip install demo`" in md and "- one" in md and "code   block" in md
     assert "(https://docs.example.com/next)" in md and "half visible" in md
-    for bad in ("alert", "INJECTED-SCRIPT", "IFRAME-TEXT", "FORM-TEXT", "FORM-VALUE", "javascript:", "data:text",
-                "steal", "OBJECT-TEXT", "SVG-TEXT", "body{}"):  # fmt: skip
+    for bad in (
+        "alert",
+        "INJECTED-SCRIPT",
+        "IFRAME-TEXT",
+        "FORM-TEXT",
+        "FORM-VALUE",
+        "javascript:",
+        "data:text",
+        "steal",
+        "OBJECT-TEXT",
+        "SVG-TEXT",
+        "body{}",
+    ):
         assert bad not in md, bad
     for hidden in ("Ignore previous instructions", "HIDDEN-ATTR", "ARIA-HIDDEN", "ZERO-FONT"):
         assert hidden not in md, hidden

@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -34,7 +35,7 @@ from aicd_security.ssrf import (
 BLOCKED_IPS = [
     "127.0.0.1",
     "127.255.255.254",
-    "0.0.0.0",
+    "0.0.0.0",  # noqa: S104 — адрес из таблицы denylist, не bind
     "10.1.2.3",
     "172.16.0.1",
     "172.31.255.255",
@@ -268,8 +269,8 @@ async def test_dns_failure() -> None:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    routes: dict[str, tuple[int, dict[str, str], bytes]] = {}
-    hosts: list[str] = []
+    routes: ClassVar[dict[str, tuple[int, dict[str, str], bytes]]] = {}
+    hosts: ClassVar[list[str]] = []
 
     def do_GET(self) -> None:
         self.hosts.append(self.headers.get("Host", ""))
@@ -282,7 +283,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format: str, *args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 — сигнатура базового класса
         return
 
 
@@ -311,7 +312,10 @@ def _test_fetcher(port: int, **overrides: object) -> SsrfFetcher:
 async def test_default_policy_blocks_local_server(http_server: int) -> None:
     _Handler.routes["/ok"] = (200, {"Content-Type": "text/plain"}, b"hello")
     resolver = SequenceResolver({"docs.example.com": [["127.0.0.1"]]})
-    for policy in (SsrfPolicy(), SsrfPolicy(allowed_schemes=frozenset({"http"}), allowed_ports=frozenset({http_server}))):
+    for policy in (
+        SsrfPolicy(),
+        SsrfPolicy(allowed_schemes=frozenset({"http"}), allowed_ports=frozenset({http_server})),
+    ):
         with pytest.raises(SsrfBlockedError):
             await SsrfFetcher(policy, resolver=resolver).fetch(f"http://docs.example.com:{http_server}/ok")
     with pytest.raises(SsrfBlockedError):

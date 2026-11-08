@@ -24,17 +24,55 @@ from typing import Final
 
 _DROP: Final = frozenset(
     {
-        "script", "style", "iframe", "object", "embed", "form", "noscript", "template", "svg", "math",
-        "canvas", "button", "select", "textarea", "frame", "frameset", "applet", "audio", "video",
+        "script",
+        "style",
+        "iframe",
+        "object",
+        "embed",
+        "form",
+        "noscript",
+        "template",
+        "svg",
+        "math",
+        "canvas",
+        "button",
+        "select",
+        "textarea",
+        "frame",
+        "frameset",
+        "applet",
+        "audio",
+        "video",
     }
-)  # fmt: skip
+)
 _VOID: Final = frozenset(
     {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 )
 _BLOCK: Final = frozenset(
-    {"p", "div", "section", "article", "main", "header", "footer", "nav", "aside", "table", "tr", "ul", "ol",
-     "dl", "dt", "dd", "blockquote", "figure", "figcaption", "details", "summary"}
-)  # fmt: skip
+    {
+        "p",
+        "div",
+        "section",
+        "article",
+        "main",
+        "header",
+        "footer",
+        "nav",
+        "aside",
+        "table",
+        "tr",
+        "ul",
+        "ol",
+        "dl",
+        "dt",
+        "dd",
+        "blockquote",
+        "figure",
+        "figcaption",
+        "details",
+        "summary",
+    }
+)
 _HEADINGS: Final = {f"h{i}": i for i in range(1, 7)}
 _HIDDEN_STYLE = re.compile(
     r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?![.\d]*[1-9])|opacity\s*:\s*0(?![.\d]*[1-9])",

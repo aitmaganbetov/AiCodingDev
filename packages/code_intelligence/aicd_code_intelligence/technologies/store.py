@@ -53,6 +53,11 @@ async def _version_id(conn: AsyncConnection, technology_id: uuid.UUID, label: st
     return vid
 
 
+async def ensure_technology_version(conn: AsyncConnection, ecosystem: str, name: str, version_label: str) -> uuid.UUID:
+    """id версии технологии из G-справочника (создаётся при отсутствии; роль `aicd_worker`)."""
+    return await _version_id(conn, await _technology_id(conn, ecosystem, name), version_label)
+
+
 async def persist_detection(
     conn: AsyncConnection,
     *,
@@ -71,8 +76,7 @@ async def persist_detection(
     )
     ids: list[uuid.UUID] = []
     for item in detected:
-        tid = await _technology_id(conn, item.ecosystem, item.name)
-        vid = await _version_id(conn, tid, item.version_label)
+        vid = await ensure_technology_version(conn, item.ecosystem, item.name, item.version_label)
         await conn.execute(
             text(
                 "INSERT INTO project_technologies (workspace_id, project_id, technology_version_id, detected_from,"
