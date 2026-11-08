@@ -50,6 +50,8 @@ jobs:
         run: uv run lint-imports --no-cache
       - name: Deny-gate SDK AI-провайдеров (ТЗ §1)
         run: uv run python scripts/check_no_ai_sdk.py
+      - name: Drift-check моделей контрактов (gen_contract_models --check)
+        run: uv run python scripts/gen_contract_models.py --check
       - name: Traceability (требования → задачи)
         run: uv run python scripts/traceability.py --report traceability.md
       - name: Tests (unit, contract, migrations, RLS, integration, security)
@@ -88,6 +90,45 @@ jobs:
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e
+
+  # P1-18: breaking-change detection контракта против базовой ветки PR (oasdiff, падение на ERR).
+  # Пересмотр severity — по API_DESIGN §16: клиенты обязаны терпеть новые значения enum в ответах,
+  # поэтому расширение/открытие enum ответа — INFO, а не ERR. Остальные проверки — по умолчанию.
+  contract-breaking:
+    if: github.event_name == 'pull_request' && github.base_ref != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      OASDIFF_IMAGE: tufin/oasdiff:v1.35.0
+      SPEC: packages/contracts/openapi.yaml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Базовая версия контракта (${{ github.base_ref }})
+        id: base
+        run: |
+          mkdir -p "$RUNNER_TEMP/oasdiff"
+          if git cat-file -e "origin/${{ github.base_ref }}:$SPEC" 2>/dev/null; then
+            git show "origin/${{ github.base_ref }}:$SPEC" > "$RUNNER_TEMP/oasdiff/base.yaml"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "В базовой ветке нет $SPEC — сравнивать не с чем"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+          cp "$SPEC" "$RUNNER_TEMP/oasdiff/revision.yaml"
+          printf '%s\n' \
+            'response-property-enum-value-added INFO' \
+            'response-property-became-not-enum INFO' > "$RUNNER_TEMP/oasdiff/severity.txt"
+      - name: oasdiff breaking (fail on ERR)
+        if: steps.base.outputs.present == 'true'
+        run: |
+          # Сначала читаемый отчёт в лог, затем аннотации PR с падением на ERR.
+          docker run --rm -v "$RUNNER_TEMP/oasdiff:/specs:ro" "$OASDIFF_IMAGE" \
+            breaking /specs/base.yaml /specs/revision.yaml --severity-levels /specs/severity.txt
+          docker run --rm -v "$RUNNER_TEMP/oasdiff:/specs:ro" "$OASDIFF_IMAGE" \
+            breaking /specs/base.yaml /specs/revision.yaml \
+            --fail-on ERR --severity-levels /specs/severity.txt --format githubactions
 
   security:
     runs-on: ubuntu-24.04

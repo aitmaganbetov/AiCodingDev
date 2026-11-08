@@ -1,0 +1,5 @@
+# Compatibility matrix официальных CLI (CLI_ADAPTER_CONTRACT §5.3, ADR-0003).
+# Строки добавляются ТОЛЬКО по результатам probe и real-cli-smoke@1 на реальных установках
+# (P2-01, P2-13) с сохранённым evidence. До этого любая версия считается UNTESTED.
+schema_version: 1
+entries: []

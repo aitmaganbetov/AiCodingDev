@@ -2736,7 +2736,7 @@ CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
 | execution | `QUEUED` | `STARTING`, `CANCELLED`, `CRASHED` |
 | execution | `STARTING` | `RUNNING`, `TIMED_OUT`, `CANCELLED`, `CRASHED`, `AUTH_REQUIRED`, `RATE_LIMITED` |
 | execution | `RUNNING` | `EXITED`, `TIMED_OUT`, `CANCELLED`, `CRASHED`, `AUTH_REQUIRED`, `RATE_LIMITED` |
-| execution | `EXITED` | `COLLECTED`, `CRASHED` (результат не собран/не разобран) |
+| execution | `EXITED` | `COLLECTED`, `CRASHED` (результат не собран/не разобран), `AUTH_REQUIRED`, `RATE_LIMITED` (классификация после выхода, CLI_ADAPTER_CONTRACT §9) |
 | directive | `__new__` | `RECEIVED` |
 | directive | `RECEIVED` | `IMPACT_ANALYSIS_PENDING`, `DISPATCHED` (только `ASK`), `REJECTED`, `CANCELLED`, `FAILED` |
 | directive | `IMPACT_ANALYSIS_PENDING` | `IMPACT_READY`, `CANCELLED`, `FAILED` |

@@ -121,7 +121,7 @@ test('error state with retry; session expiry redirects to login', async ({ page,
   await login(page, api);
 
   const error = page.getByTestId('error-state');
-  await expect(error).toContainText('Слишком много запросов');
+  await expect(error).toContainText('Внутренняя ошибка сервера');
   await expect(error).toContainText('0af7651916cd43dd8448eb211c80319c');
   await expectNoSeriousA11yViolations(page, 'projects error');
   await error.getByRole('button', { name: 'Повторить' }).click();

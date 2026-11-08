@@ -1,0 +1,16 @@
+# Кандидаты allowlist эндпоинтов провайдеров (SC-NET-01). СТАТУС: НЕ ПОДТВЕРЖДЕНО.
+# TO BE CONFIRMED BY P2-01 PROBE: реальные хосты, к которым обращаются официальные CLI
+# (вход, API, телеметрия/обновления, которые можно отключить), фиксируются probe в
+# docs/compatibility (P2-01). До подтверждения ни один хост отсюда не активирован —
+# активный список: allowlist.d/allowed-hosts.txt.
+status: unconfirmed
+confirmed_by: null   # ссылка на результат P2-01 probe
+classes:
+  runner-codex:
+    candidates: []   # заполняется по результатам probe P2-01 (Codex CLI)
+  runner-claude:
+    candidates: []   # заполняется по результатам probe P2-01 (Claude Code CLI)
+  verify:
+    candidates: []   # verification-контейнеры — без сети (SECURITY_ARCHITECTURE §7.3)
+  github-adapter:
+    candidates: []   # SC-NET-01 упоминает github.com / api.github.com — подтвердить в P5

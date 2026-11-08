@@ -12,7 +12,7 @@ from redis.asyncio import Redis
 from aicd_api import errors
 from aicd_api.middleware import BodyLimitMiddleware, request_context_middleware
 from aicd_api.ratelimit import RateLimiter
-from aicd_api.routers import audit, auth, health, projects, workspaces
+from aicd_api.routers import audit, auth, health, projects, providers, workspaces
 from aicd_api.state import AppState
 from aicd_platform.artifacts import ArtifactStore, FileSystemArtifactStore, S3ArtifactStore
 from aicd_platform.config import Settings, get_settings
@@ -75,6 +75,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.middleware("http")(request_context_middleware)
     app.add_middleware(BodyLimitMiddleware)
     errors.install(app)
-    for router in (health.router, auth.router, workspaces.router, projects.router, audit.router):
+    for router in (health.router, auth.router, workspaces.router, projects.router, providers.router, audit.router):
         app.include_router(router, prefix=API_PREFIX)
     return app

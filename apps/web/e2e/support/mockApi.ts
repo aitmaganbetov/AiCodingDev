@@ -68,8 +68,8 @@ export class MockApi {
   workspaces: S['Workspace'][] = [];
   projects = new Map<string, S['Project'][]>();
   /**
-   * Сколько следующих GET /projects ответить ошибкой. Используется 429: 500/503 в
-   * контракте для listProjects не объявлены (см. README, «Замечания к контракту»).
+   * Сколько следующих GET /projects ответить ошибкой 500 internal_error (объявлена в контракте
+   * для всех операций; клиент её не повторяет автоматически — повтор только кнопкой).
    */
   failProjectsTimes = 0;
   /** Следующий запрос (кроме auth) ответит 401 session_expired. */
@@ -231,7 +231,7 @@ export class MockApi {
         if (!ws) return problem(404, 'not_found');
         if (this.failProjectsTimes > 0) {
           this.failProjectsTimes -= 1;
-          return { ...problem(429, 'rate_limited', { retry_after_seconds: 1 }), headers: { 'Retry-After': '1' } };
+          return problem(500, 'internal_error');
         }
         return { status: 200, body: this.page(this.projects.get(ws.id) ?? [], url.searchParams.get('cursor')) };
       }

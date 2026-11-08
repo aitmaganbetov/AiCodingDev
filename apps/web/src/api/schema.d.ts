@@ -1062,10 +1062,12 @@ export interface components {
             /** @description Путь запроса или urn:aicd:request:<request_id> */
             instance?: string;
             /**
-             * @description Машиночитаемый код (последний сегмент type)
-             * @enum {string}
+             * @description Машиночитаемый код (последний сегмент type). Открытый набор: клиент обязан обрабатывать неизвестный код как общую ошибку по HTTP-статусу (API_DESIGN.md §6, §16). Известные на момент версии коды — в x-known-codes.
+             * @example validation_error
+             * @example not_found
+             * @example internal_error
              */
-            code: "malformed_request" | "validation_error" | "invalid_cursor" | "idempotency_key_missing" | "unauthenticated" | "session_expired" | "csrf_failed" | "forbidden" | "four_eyes_violation" | "policy_denied" | "not_found" | "conflict" | "version_mismatch" | "invalid_state_transition" | "idempotency_key_in_flight" | "last_owner" | "replay_window_exceeded" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reuse" | "precondition_required" | "rate_limited" | "internal_error" | "provider_unavailable" | "service_unavailable";
+            code: string;
             /** @description Корреляционный ID (W3C trace-id) */
             request_id?: string;
             errors?: components["schemas"]["FieldError"][];
@@ -1076,7 +1078,13 @@ export interface components {
             retry_after_seconds?: number;
         };
         FieldError: {
-            /** @description JSON Pointer на поле запроса */
+            /**
+             * @description Расположение ошибочного значения. Для тела запроса — JSON Pointer (RFC 6901) относительно корня тела: "/name", "/items/0/slug"; "" — тело целиком. Для параметров — "query:<имя>" (напр. "query:limit") или "header:<имя>" (напр. "header:Idempotency-Key").
+             * @example /name
+             * @example /items/0/slug
+             * @example query:limit
+             * @example header:Idempotency-Key
+             */
             pointer: string;
             code: string;
             message?: string;
@@ -1143,6 +1151,7 @@ export interface components {
         };
         WorkspaceCreateRequest: {
             name: string;
+            /** @description 2–63 символа: a-z, 0-9 и дефис, без дефиса в начале и конце (подмножество CHECK БД workspaces.slug). */
             slug: string;
         };
         /** @description Страница Workspace (cursor pagination). */
@@ -2086,7 +2095,7 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
             /** @enum {string} */
-            actor_type: "user" | "agent" | "system";
+            actor_type: "user" | "agent" | "system" | "github";
             /** Format: uuid */
             actor_id?: string | null;
             action: string;
@@ -2479,6 +2488,15 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
+        /** @description 500 internal_error (непредвиденная ошибка; в теле только общий текст и request_id) */
+        InternalError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
         /** @description 503 provider_unavailable | service_unavailable */
         ServiceUnavailable: {
             headers: {
@@ -2563,10 +2581,13 @@ export interface operations {
                     "application/json": components["schemas"]["SessionInfo"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     logout: {
@@ -2589,6 +2610,8 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getSession: {
@@ -2614,8 +2637,9 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     healthLive: {
@@ -2636,6 +2660,8 @@ export interface operations {
                     "application/json": components["schemas"]["HealthStatus"];
                 };
             };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     healthReady: {
@@ -2656,6 +2682,7 @@ export interface operations {
                     "application/json": components["schemas"]["HealthStatus"];
                 };
             };
+            500: components["responses"]["InternalError"];
             /** @description Не готов */
             503: {
                 headers: {
@@ -2696,6 +2723,8 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createWorkspace: {
@@ -2735,6 +2764,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listMembers: {
@@ -2769,6 +2800,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     addMember: {
@@ -2811,6 +2844,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     removeMember: {
@@ -2842,6 +2877,8 @@ export interface operations {
             412: components["responses"]["PreconditionFailed"];
             428: components["responses"]["PreconditionRequired"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     updateMember: {
@@ -2884,6 +2921,8 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listProjects: {
@@ -2920,6 +2959,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createProject: {
@@ -2962,6 +3003,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getProject: {
@@ -2993,6 +3036,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     updateProject: {
@@ -3033,6 +3078,8 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listRepositories: {
@@ -3067,6 +3114,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     attachRepository: {
@@ -3109,6 +3158,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listTechnologies: {
@@ -3143,6 +3194,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getDocumentationPolicy: {
@@ -3174,6 +3227,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     updateDocumentationPolicy: {
@@ -3214,6 +3269,8 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listRuns: {
@@ -3254,6 +3311,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createRun: {
@@ -3293,6 +3352,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getRun: {
@@ -3324,6 +3385,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getRunTasks: {
@@ -3360,6 +3423,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     pauseRun: {
@@ -3403,6 +3468,8 @@ export interface operations {
             412: components["responses"]["PreconditionFailed"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     resumeRun: {
@@ -3446,6 +3513,8 @@ export interface operations {
             412: components["responses"]["PreconditionFailed"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     cancelRun: {
@@ -3489,6 +3558,8 @@ export interface operations {
             412: components["responses"]["PreconditionFailed"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     streamRunEvents: {
@@ -3542,6 +3613,8 @@ export interface operations {
             };
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getRunActivity: {
@@ -3579,6 +3652,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getRunChat: {
@@ -3624,6 +3699,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     postChatMessage: {
@@ -3666,6 +3743,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listDirectives: {
@@ -3701,6 +3780,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     createDirective: {
@@ -3741,6 +3822,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getDirective: {
@@ -3773,6 +3856,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     confirmDirective: {
@@ -3818,6 +3903,8 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     cancelDirective: {
@@ -3863,6 +3950,8 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getTask: {
@@ -3894,6 +3983,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listTaskAttempts: {
@@ -3928,6 +4019,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listTaskMessages: {
@@ -3964,6 +4057,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listTaskEvidence: {
@@ -3999,6 +4094,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getEvidence: {
@@ -4029,6 +4126,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     downloadArtifact: {
@@ -4056,6 +4155,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getRunQuality: {
@@ -4086,6 +4187,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getRunCompliance: {
@@ -4122,6 +4225,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getRunReport: {
@@ -4153,6 +4258,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listProviders: {
@@ -4184,6 +4291,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     probeProvider: {
@@ -4222,6 +4331,7 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -4265,6 +4375,8 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listApprovals: {
@@ -4305,6 +4417,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getApproval: {
@@ -4336,6 +4450,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     decideApproval: {
@@ -4381,6 +4497,8 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listDocumentationSources: {
@@ -4418,6 +4536,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     registerDocumentationSource: {
@@ -4460,6 +4580,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     refreshDocumentationSource: {
@@ -4496,6 +4618,8 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listAuditEvents: {
@@ -4537,6 +4661,8 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
 }

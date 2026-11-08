@@ -9,12 +9,20 @@ from pathlib import Path
 import psycopg
 import pytest
 
+import aicd_cli_adapters
 import aicd_identity
+import aicd_orchestration
 import aicd_platform
 import aicd_projects
 from tests.support import db as testdb
 
-MODULES = {"platform": aicd_platform, "identity": aicd_identity, "projects": aicd_projects}
+MODULES = {
+    "platform": aicd_platform,
+    "identity": aicd_identity,
+    "projects": aicd_projects,
+    "cli_adapters": aicd_cli_adapters,
+    "orchestration": aicd_orchestration,
+}
 ROOT = Path(__file__).resolve().parents[2]
 
 

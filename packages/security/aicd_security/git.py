@@ -37,6 +37,11 @@ def _git_binary() -> str:
     return path
 
 
+def run_git(repo: Path, *args: str, timeout: float = 60.0) -> str:
+    """Публичная обёртка для доверенных операций платформы (worktree, diff); те же меры изоляции."""
+    return _run(repo, *args, timeout=timeout)
+
+
 def _run(repo: Path, *args: str, timeout: float = 10.0) -> str:
     env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
     env.update(
@@ -66,14 +71,17 @@ def _run(repo: Path, *args: str, timeout: float = 10.0) -> str:
         argv, capture_output=True, text=True, timeout=timeout, env=env, check=False
     )
     if proc.returncode != 0:
-        raise GitRepositoryError("каталог не является корректным Git-репозиторием")
-    return proc.stdout.strip()
+        raise GitRepositoryError(f"git {args[0] if args else ''} завершился с ошибкой")
+    return proc.stdout.rstrip("\n")
 
 
 def inspect_repository(path: Path) -> GitRepoInfo:
     if not path.is_dir():
         raise GitRepositoryError("каталог не существует")
-    is_bare = _run(path, "rev-parse", "--is-bare-repository") == "true"
+    try:
+        is_bare = _run(path, "rev-parse", "--is-bare-repository") == "true"
+    except GitRepositoryError as exc:
+        raise GitRepositoryError("каталог не является корректным Git-репозиторием") from exc
     top = path if is_bare else Path(_run(path, "rev-parse", "--show-toplevel"))
     if os.path.realpath(top) != os.path.realpath(path):
         raise GitRepositoryError("путь должен указывать на корень репозитория")

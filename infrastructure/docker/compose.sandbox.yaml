@@ -1,0 +1,95 @@
+# Sandbox-инфраструктура исполнения CLI (P2-07/P2-08, ADR-0010, SECURITY_ARCHITECTURE §7, §17).
+# Подключается поверх базового профиля:
+#   docker compose -f infrastructure/docker/compose.yaml -f infrastructure/docker/compose.sandbox.yaml up -d
+#
+# Сети:
+#   aicd-sandbox    — internal: true; сюда worker-exec создаёт runner-контейнеры (ContainerSpec.network).
+#                     Прямого выхода в интернет и внешнего DNS нет; единственный путь наружу —
+#                     egress-proxy (HTTPS_PROXY=http://egress-proxy:3128) по allowlist.
+#   aicd-egress     — обычная bridge-сеть только для egress-proxy (исходящий трафик к allowlist).
+#   aicd-docker-ctl — internal: true; доступ к docker-socket-proxy только для worker-exec/worker-verify
+#                     (появятся в P2/P3; `api` к этой сети не подключается никогда).
+#
+# Имена сетей фиксированы (`name:`), т.к. runner-контейнеры создаются через Docker API, а не compose.
+# Подсеть aicd-sandbox синхронизирована с `acl sandbox_src` в egress-proxy/squid.conf.
+
+services:
+  egress-proxy:
+    # Squid 6.10 (Ubuntu OCI image), pinned по digest. Allowlist-forward-proxy: только CONNECT :443
+    # к точным именам из egress-proxy/allowlist.d/allowed-hosts.txt (пусто по умолчанию = deny all).
+    image: ubuntu/squid:6.10-24.10_beta@sha256:c9f5212b147a766529c7b026e2bebed37b998d33d0066b658596af5eba7cc65c
+    entrypoint: ["/usr/sbin/squid"]
+    command: ["-N", "-f", "/etc/squid/aicd/squid.conf"]
+    user: proxy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp, /var/run/squid, /var/spool/squid, /var/log/squid]
+    volumes:
+      - ./egress-proxy:/etc/squid/aicd:ro
+    networks:
+      sandbox:
+        aliases: [egress-proxy]
+      egress: {}
+    mem_limit: 256m
+    pids_limit: 256
+    restart: unless-stopped
+
+  docker-socket-proxy:
+    # Фильтрация ТОЛЬКО по HTTP-методу и префиксу пути (HAProxy); тело запросов НЕ проверяется.
+    # Поэтому каждое тело POST /containers/create проверяет линтер
+    # aicd_security.container_policy.lint_container_config до отправки (SC-SBX-05, Q-5),
+    # body-filtering прокси (OPA authz) — P9.
+    # Разрешено: GET /_ping, /version; все методы на /containers/** (create/start/logs/wait/stop/
+    # kill/json/delete — всё, что использует DockerSandboxRunner; attach не используется).
+    # Запрещено (403): images (включая pull: POST /images/create), build, exec/{id}/start, networks,
+    # volumes, info, events, system, swarm, secrets, configs, plugins, services, nodes, tasks, session.
+    # Остаточный риск префикса /containers/**: доступны POST /containers/{id}/exec (создание exec;
+    # его запуск /exec/{id}/start запрещён), /containers/{id}/archive, /update, /attach.
+    image: tecnativa/docker-socket-proxy:v0.4.1@sha256:3400c429c5f9e1b21d62130fb93b16e2e772d4fb7695bd52fc2b743800b9fe9e
+    environment:
+      DISABLE_IPV6: "1"
+      LOG_LEVEL: info
+      CONTAINERS: "1"
+      POST: "1"
+      PING: "1"
+      VERSION: "1"
+      EVENTS: "0"
+      INFO: "0"
+      IMAGES: "0"
+      NETWORKS: "0"
+      VOLUMES: "0"
+      EXEC: "0"
+      BUILD: "0"
+      SYSTEM: "0"
+    volumes:
+      # :ro на файле сокета НЕ ограничивает API (запись в сокет = вызов API); ограничение — фильтр выше.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/run, /tmp, /var/lib/haproxy]
+    networks:
+      docker-ctl:
+        aliases: [docker-socket-proxy]
+    mem_limit: 128m
+    pids_limit: 128
+    restart: unless-stopped
+    # Порт на хост не публикуется. worker-exec: AICD_DOCKER_URL=http://docker-socket-proxy:2375
+
+networks:
+  sandbox:
+    name: aicd-sandbox
+    internal: true
+    driver: bridge
+    # enable_icc=false не используется: он блокирует и путь runner → egress-proxy на том же bridge.
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  egress:
+    name: aicd-egress
+    driver: bridge
+  docker-ctl:
+    name: aicd-docker-ctl
+    internal: true
+    driver: bridge

@@ -50,10 +50,13 @@ paths:
             RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
             RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
             Set-Cookie: {$ref: '#/components/headers/SetCookie'}
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security: []
       x-required-permission: public
       x-audit-action: auth.login
@@ -71,6 +74,8 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: authenticated
       x-audit-action: auth.logout
       x-tz-addition: true
@@ -91,8 +96,9 @@ paths:
             RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: authenticated
@@ -112,6 +118,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/HealthStatus'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: public
       x-audit-action: none
       x-tz-addition: true
@@ -129,6 +137,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/HealthStatus'}
+        '500': {$ref: '#/components/responses/InternalError'}
         '503':
           description: Не готов
           content:
@@ -159,6 +168,8 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: authenticated
@@ -193,6 +204,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: workspace:create
       x-audit-action: workspace.create
   /workspaces/{workspace_id}/members:
@@ -219,6 +232,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: member:read
@@ -256,6 +271,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: member:manage
       x-audit-action: member.add
       x-tz-addition: true
@@ -293,6 +310,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '428': {$ref: '#/components/responses/PreconditionRequired'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: member:manage
       x-audit-action: member.role_change
       x-tz-addition: true
@@ -313,6 +332,8 @@ paths:
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '428': {$ref: '#/components/responses/PreconditionRequired'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: member:manage
       x-audit-action: member.remove
       x-tz-addition: true
@@ -343,6 +364,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: project:read
@@ -379,6 +402,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: project:create
       x-audit-action: project.create
   /projects/{project_id}:
@@ -404,6 +429,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: project:read
@@ -438,6 +465,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '428': {$ref: '#/components/responses/PreconditionRequired'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: project:update
       x-audit-action: project.update
   /projects/{project_id}/repositories:
@@ -464,6 +493,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: project:read
@@ -502,6 +533,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: repository:attach
       x-audit-action: repository.attach
   /projects/{project_id}/technologies:
@@ -528,6 +561,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: project:read
@@ -555,6 +590,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: project:read
@@ -591,6 +628,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '428': {$ref: '#/components/responses/PreconditionRequired'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: project:update
       x-audit-action: project.documentation_policy.update
   /runs:
@@ -632,6 +671,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: run:read
@@ -668,6 +709,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: run:create
       x-audit-action: run.create
   /runs/{run_id}:
@@ -693,6 +736,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: run:read
@@ -729,6 +774,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: run:read
@@ -768,6 +815,8 @@ paths:
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: run:control
       x-audit-action: run.pause_requested
   /runs/{run_id}/resume:
@@ -805,6 +854,8 @@ paths:
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: run:control
       x-audit-action: run.resume_requested
   /runs/{run_id}/cancel:
@@ -842,6 +893,8 @@ paths:
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: run:control
       x-audit-action: run.cancel_requested
   /runs/{run_id}/events:
@@ -901,6 +954,8 @@ paths:
               schema: {$ref: '#/components/schemas/Problem'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: run:read
@@ -938,6 +993,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: run:read
@@ -996,6 +1053,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: chat:read
@@ -1033,6 +1092,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: chat:write
       x-audit-action: chat.message.create
   /runs/{run_id}/directives:
@@ -1064,6 +1125,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: chat:read
@@ -1101,6 +1164,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: directive:create
       x-audit-action: directive.submit
       x-permission-depends-on: directive_type
@@ -1134,6 +1199,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: chat:read
@@ -1174,6 +1241,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '428': {$ref: '#/components/responses/PreconditionRequired'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: directive:confirm
       x-audit-action: directive.confirm
       x-tz-addition: true
@@ -1213,6 +1282,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '428': {$ref: '#/components/responses/PreconditionRequired'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: directive:confirm
       x-audit-action: directive.cancel
       x-tz-addition: true
@@ -1239,6 +1310,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: run:read
@@ -1267,6 +1340,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: run:read
@@ -1304,6 +1379,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: run:read
@@ -1335,6 +1412,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: evidence:read
@@ -1361,6 +1440,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: evidence:read
@@ -1386,6 +1467,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: artifact:download
@@ -1413,6 +1496,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: quality:read
@@ -1447,6 +1532,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: quality:read
@@ -1476,6 +1563,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: quality:read
@@ -1502,6 +1591,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: provider:read
@@ -1534,6 +1625,7 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: provider:probe
       x-audit-action: provider.probe_requested
@@ -1569,6 +1661,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '428': {$ref: '#/components/responses/PreconditionRequired'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: provider:settings
       x-audit-action: provider.settings.update
   /approvals:
@@ -1612,6 +1706,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: approval:read
@@ -1639,6 +1735,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: approval:read
@@ -1680,6 +1778,8 @@ paths:
         '422': {$ref: '#/components/responses/Unprocessable'}
         '428': {$ref: '#/components/responses/PreconditionRequired'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: approval:decide
       x-audit-action: approval.decide
       x-permission-depends-on: action_type
@@ -1713,6 +1813,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: documentation:read
@@ -1749,6 +1851,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: documentation:register
       x-audit-action: documentation_source.register
   /documentation/sources/{source_id}/refresh:
@@ -1779,6 +1883,8 @@ paths:
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: documentation:refresh
       x-audit-action: documentation_source.refresh_requested
   /audit-events:
@@ -1823,6 +1929,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/Unprocessable'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
       security:
       - cookieAuth: []
       x-required-permission: audit:read
@@ -1998,6 +2106,11 @@ components:
         RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
         RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
         Retry-After: {$ref: '#/components/headers/RetryAfter'}
+    InternalError:
+      description: 500 internal_error (непредвиденная ошибка; в теле только общий текст и request_id)
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
     ServiceUnavailable:
       description: 503 provider_unavailable | service_unavailable
       content:
@@ -2209,8 +2322,10 @@ components:
         instance: {type: string, description: 'Путь запроса или urn:aicd:request:<request_id>'}
         code:
           type: string
-          description: Машиночитаемый код (последний сегмент type)
-          enum: [malformed_request, validation_error, invalid_cursor, idempotency_key_missing, unauthenticated, session_expired, csrf_failed,
+          description: 'Машиночитаемый код (последний сегмент type). Открытый набор: клиент обязан обрабатывать неизвестный код как общую
+            ошибку по HTTP-статусу (API_DESIGN.md §6, §16). Известные на момент версии коды — в x-known-codes.'
+          examples: [validation_error, not_found, internal_error]
+          x-known-codes: [malformed_request, validation_error, invalid_cursor, idempotency_key_missing, unauthenticated, session_expired, csrf_failed,
             forbidden, four_eyes_violation, policy_denied, not_found, conflict, version_mismatch, invalid_state_transition, idempotency_key_in_flight,
             last_owner, replay_window_exceeded, precondition_failed, payload_too_large, unsupported_media_type, idempotency_key_reuse, precondition_required,
             rate_limited, internal_error, provider_unavailable, service_unavailable]
@@ -2226,7 +2341,11 @@ components:
     FieldError:
       type: object
       properties:
-        pointer: {type: string, description: JSON Pointer на поле запроса}
+        pointer:
+          type: string
+          description: 'Расположение ошибочного значения. Для тела запроса — JSON Pointer (RFC 6901) относительно корня тела: "/name",
+            "/items/0/slug"; "" — тело целиком. Для параметров — "query:<имя>" (напр. "query:limit") или "header:<имя>" (напр. "header:Idempotency-Key").'
+          examples: [/name, /items/0/slug, 'query:limit', 'header:Idempotency-Key']
         code: {type: string}
         message: {type: string}
       required: [pointer, code]
@@ -2292,7 +2411,8 @@ components:
       type: object
       properties:
         name: {type: string, minLength: 1, maxLength: 200}
-        slug: {type: string, pattern: '^[a-z0-9][a-z0-9-]{1,62}$'}
+        slug: {type: string, pattern: '^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$', description: '2–63 символа: a-z, 0-9 и дефис, без дефиса в начале и
+            конце (подмножество CHECK БД workspaces.slug).'}
       required: [name, slug]
       additionalProperties: false
     WorkspacePage:
@@ -3452,7 +3572,7 @@ components:
         workspace_id: {type: string, format: uuid}
         actor_type:
           type: string
-          enum: [user, agent, system]
+          enum: [user, agent, system, github]
         actor_id:
           type: [string, 'null']
           format: uuid

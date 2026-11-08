@@ -50,26 +50,26 @@
 | P1-15 | Artifact store: FS + S3/MinIO адаптеры, sha256, presigned download с TTL | FR-QG-05 | P1-06 | P0 | Integration-тест обоих адаптеров | DONE |
 | P1-16 | Cross-tenant negative test suite (API + RLS) | FR-IAM-05, NFR-ISO-01 | P1-11 | P0 | Все тесты отрицательны (доступ запрещён) | DONE |
 | P1-17 | Документы ТЗ §21: `data-model.md`, `state-machines.md`, `permissions-matrix.md` (ссылки на нормативные разделы), каркас `docs/runbooks/` | NFR-MAINT-01 | P0-10 | P1 | Ссылки валидны (link-check в CI) | DONE |
-| P1-18 | `oasdiff breaking` в CI против спецификации целевой ветки; генерация Pydantic-моделей из JSON Schema (`datamodel-code-generator`) для CLI/ACP/событий (перенесено из P1-03: потребители появляются в P2) | FR-API-04, NFR-MAINT-01 | P1-03 | P0 | CI блокирует ломающее изменение контракта; сгенерированные модели без расхождений | TODO |
+| P1-18 | `oasdiff breaking` в CI против спецификации целевой ветки; генерация Pydantic-моделей из JSON Schema (`datamodel-code-generator`) для CLI/ACP/событий (перенесено из P1-03: потребители появляются в P2) | FR-API-04, NFR-MAINT-01 | P1-03 | P0 | CI блокирует ломающее изменение контракта; сгенерированные модели без расхождений | DONE |
 
 ## Phase 2 — CLI Integration
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P2-01 | **Spike:** probe реальных Codex/Claude CLI на Linux — noninteractive режимы, машинный вывод, хранение авторизации, взаимодействие со встроенным sandbox CLI; compat matrix v0; подтверждение/правка ADR-0010 | FR-CLI-04, RISK-02/03 | P0-10 (OQ-01, OQ-03) | P0 | Отчёт spike + compat matrix + обновлённый ADR | TODO |
-| P2-02 | Миграции: `cli_providers`, `worker_hosts`, `cli_installations`, `cli_sessions`, `cli_executions`, `provider_health`, `usage_metrics`, `worktrees` | FR-CLI-02 | P1-08 | P0 | Migration + RLS-тесты | TODO |
-| P2-03 | `CLIExecutor` Protocol, модели контракта, нормализованные события и таксономия ошибок | FR-CLI-02, FR-CLI-03, FR-CLI-05 | P1-03 | P0 | Contract-тесты JSON Schema request/result | TODO |
-| P2-04 | `FakeCLIExecutor` со сценариями: success, timeout, auth required, rate limited, crash, parse error, большая выдача | FR-CLI-09 | P2-03 | P0 | Используется всеми последующими integration-тестами | TODO |
-| P2-05 | Codex adapter: probe, check_auth, command profiles по compat matrix, парсер, usage если доступно | FR-CLI-01, FR-CLI-04, FR-CLI-07 | P2-01, P2-03 | P0 | Contract-тесты на sanitized фикстурах; opt-in smoke | TODO |
-| P2-06 | Claude Code adapter (аналогично P2-05) | FR-CLI-01, FR-CLI-04, FR-CLI-07 | P2-01, P2-03 | P0 | То же | TODO |
-| P2-07 | Runner-образы (сборка у пользователя, pinned, SBOM), builder контейнерной спецификации (`security`), docker-socket-proxy | FR-SBX-02, FR-SBX-03, OQ-12 | P2-01 | P0 | `docker inspect` подтверждает cap-drop, read-only, limits | TODO |
-| P2-08 | Egress proxy + сети compose (`sandbox` internal) + allowlist провайдеров | FR-SBX-02 | P2-07 | P0 | Тест: исходящее соединение на неразрешённый хост блокируется | TODO |
-| P2-09 | Worktree manager: create/lock/remove, ветки `aicd/...`, обнаружение осиротевших, path guard | FR-SBX-01 | P2-02 | P0 | Integration-тесты на временном репозитории | TODO |
-| P2-10 | Жизненный цикл процесса: timeout, cancel, kill дерева, heartbeat, raw log → artifact, redaction, лимиты вывода | FR-CLI-05, FR-CLI-06, NFR-SEC-02 | P2-04, P1-15 | P0 | Тесты: timeout → `TIMED_OUT`, секрет в выводе не попадает в события | TODO |
-| P2-11 | `worker-exec` gateway: очередь, лимиты параллелизма на установку, Execution FSM | FR-ORCH-03 | P2-10 | P0 | Integration с Fake: все исходы FSM | TODO |
-| P2-12 | Providers API: `GET /providers`, `POST /providers/{id}/probe`, `PATCH /providers/{id}/settings`, периодические health probes | FR-CLI-10 | P2-05, P2-06 | P0 | API-тесты + RBAC; кредов нет в ответах | TODO |
-| P2-13 | Opt-in suite с реальными CLI (`pytest -m real_cli`), документированный запуск | FR-CLI-09, NFR-TEST-01 | P2-05, P2-06 | P0 | Протокол запуска на машине с подписками (evidence) | TODO |
-| P2-14 | Security-тесты sandbox: запись вне worktree, сеть, отсутствие кредов в verification-контейнерах, отсутствие privileged | FR-SBX-02, FR-AGENT-04 | P2-08, P2-09 | P0 | Все попытки отклонены | TODO |
+| P2-01 | **Spike:** probe реальных Codex/Claude CLI на Linux — noninteractive режимы, машинный вывод, хранение авторизации, взаимодействие со встроенным sandbox CLI; compat matrix v0; подтверждение/правка ADR-0010 | FR-CLI-04, RISK-02/03 | P0-10 (OQ-01, OQ-03) | P0 | Отчёт spike + compat matrix + обновлённый ADR | BLOCKED |
+| P2-02 | Миграции: `cli_providers`, `worker_hosts`, `cli_installations`, `cli_sessions`, `cli_executions`, `provider_health`, `usage_metrics`, `worktrees` | FR-CLI-02 | P1-08 | P0 | Migration + RLS-тесты | DONE |
+| P2-03 | `CLIExecutor` Protocol, модели контракта, нормализованные события и таксономия ошибок | FR-CLI-02, FR-CLI-03, FR-CLI-05 | P1-03 | P0 | Contract-тесты JSON Schema request/result | DONE |
+| P2-04 | `FakeCLIExecutor` со сценариями: success, timeout, auth required, rate limited, crash, parse error, большая выдача | FR-CLI-09 | P2-03 | P0 | Используется всеми последующими integration-тестами | DONE |
+| P2-05 | Codex adapter: probe, check_auth, command profiles по compat matrix, парсер, usage если доступно | FR-CLI-01, FR-CLI-04, FR-CLI-07 | P2-01, P2-03 | P0 | Contract-тесты на sanitized фикстурах; opt-in smoke | BLOCKED |
+| P2-06 | Claude Code adapter (аналогично P2-05) | FR-CLI-01, FR-CLI-04, FR-CLI-07 | P2-01, P2-03 | P0 | То же | BLOCKED |
+| P2-07 | Runner-образы (сборка у пользователя, pinned, SBOM), builder контейнерной спецификации (`security`), docker-socket-proxy | FR-SBX-02, FR-SBX-03, OQ-12 | P2-01 | P0 | `docker inspect` подтверждает cap-drop, read-only, limits | IN_PROGRESS |
+| P2-08 | Egress proxy + сети compose (`sandbox` internal) + allowlist провайдеров | FR-SBX-02 | P2-07 | P0 | Тест: исходящее соединение на неразрешённый хост блокируется | DONE |
+| P2-09 | Worktree manager: create/lock/remove, ветки `aicd/...`, обнаружение осиротевших, path guard | FR-SBX-01 | P2-02 | P0 | Integration-тесты на временном репозитории | DONE |
+| P2-10 | Жизненный цикл процесса: timeout, cancel, kill дерева, heartbeat, raw log → artifact, redaction, лимиты вывода | FR-CLI-05, FR-CLI-06, NFR-SEC-02 | P2-04, P1-15 | P0 | Тесты: timeout → `TIMED_OUT`, секрет в выводе не попадает в события | DONE |
+| P2-11 | `worker-exec` gateway: очередь, лимиты параллелизма на установку, Execution FSM | FR-ORCH-03 | P2-10 | P0 | Integration с Fake: все исходы FSM | DONE |
+| P2-12 | Providers API: `GET /providers`, `POST /providers/{id}/probe`, `PATCH /providers/{id}/settings`, периодические health probes | FR-CLI-10 | P2-05, P2-06 | P0 | API-тесты + RBAC; кредов нет в ответах | IN_PROGRESS |
+| P2-13 | Opt-in suite с реальными CLI (`pytest -m real_cli`), документированный запуск | FR-CLI-09, NFR-TEST-01 | P2-05, P2-06 | P0 | Протокол запуска на машине с подписками (evidence) | BLOCKED |
+| P2-14 | Security-тесты sandbox: запись вне worktree, сеть, отсутствие кредов в verification-контейнерах, отсутствие privileged | FR-SBX-02, FR-AGENT-04 | P2-08, P2-09 | P0 | Все попытки отклонены | DONE |
 
 ## Phase 3 — Core Orchestrator
 
@@ -227,3 +227,27 @@
 | P1-17 | DONE | `docs/architecture/{data-model,state-machines,permissions-matrix}.md`, `docs/runbooks/*` | `tests/contract/test_docs_links.py` → все относительные ссылки разрешаются |
 
 **Итог прогона Python-тестов:** `uv run pytest --cov` → **299 passed**, покрытие 88% (branch), из них с реальными PostgreSQL 17, Redis и S3.
+
+### P1-18 и Phase 2 — CLI Integration без реальных CLI (2026-11-08)
+
+Решение владельца: Phase 2 в части, не требующей реальных CLI; P2-01, P2-05, P2-06, P2-13 ждут машину с установленными и авторизованными Codex CLI и Claude Code CLI.
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P1-18 | DONE | `packages/contracts/openapi.yaml`, `scripts/gen_contract_models.py`, `packages/contracts/aicd_contracts/generated/**`, `.github/workflows/ci.yml`, `apps/web/**` | OQ-31 закрыт: 500/503 у всех 55 операций, `Problem.code` открытая строка, описан `FieldError.pointer`, slug = правило API/БД, `actor_type` + `github`, getSession без 422, login + 400; `openapi_spec_validator` → valid; `gen_contract_models.py --check` → OK; oasdiff (tufin/oasdiff v1.35.0) против HEAD с severity-файлом → 0 error, 1 warning; web: check:api, typecheck, lint, build, 29 unit, 6 E2E — passed |
+| P2-01 | BLOCKED | — | Нужна машина с официальными CLI и выполненным оператором login (OQ-01, OQ-03) |
+| P2-02 | DONE | `infrastructure/migrations/versions/0002_cli_gateway.py` | 9 объектов (worker_hosts, cli_providers+seed, cli_installations, cli_sessions, worktrees, cli_executions, provider_health, usage_metrics, allowed_transitions), RLS, `sys_active_executions`; upgrade/downgrade/upgrade, RLS-инварианты, владение таблицами — passed. FK на runs/tasks/task_attempts — в миграции P3 |
+| P2-03 | DONE | `packages/cli_adapters/aicd_cli_adapters/{models,executor,errors,profiles,compat,output}.py`, `packages/contracts/cli-compatibility.yaml` | Модели — из JSON Schema; argv только из allowlist-плейсхолдеров, `<candidate-…>` не исполняется, ключи AI API в env → отказ; matrix пуста до P2-01 (любая версия UNTESTED); `tests/unit/test_cli_core.py` passed |
+| P2-04 | DONE | `aicd_cli_adapters/fake/**` | Реальный процесс-эмулятор, 13 сценариев; `tests/integration/test_fake_adapter.py` → 17 passed (результат валиден по схеме; exit 0 → `verification: pending`; claims без evidence; ошибки нормализованы; wall/idle timeout; отмена с эскалацией до SIGKILL; идемпотентность; редакция секретов в событиях и raw log; лимит вывода; allowlist env) |
+| P2-05 / P2-06 | BLOCKED | — | Общий `SubprocessCLIAdapter` готов; нужны подтверждённые probe флаги, парсер вывода и сигнатуры ошибок реальных CLI (P2-01) |
+| P2-07 | IN_PROGRESS | `packages/security/aicd_security/{container_policy,docker_runner,sandbox}.py` | Политика контейнера + линтер (51 запрещённая конфигурация), `DockerSandboxRunner` через Engine API: non-root 10001, CapEff=0, NoNewPrivs, seccomp, read-only rootfs, limits, OOM, timeout, удаление контейнера — 75 тестов против Docker 29.9.2; адаптер исполняет Fake CLI в runner-контейнере (`tests/security/test_adapter_in_sandbox.py`). **Остаток:** runner-образы с официальными CLI (pinned, SBOM) — после P2-01 |
+| P2-08 | DONE | `infrastructure/docker/egress-proxy/**`, `infrastructure/docker/compose.sandbox.yaml` | Squid (ubuntu/squid 6.10): только CONNECT:443 к хостам allowlist, IP-литералы/приватные адреса/HTTP/поддомены → 403; docker-socket-proxy: 12 запрещённых эндпоинтов → 403. Allowlist провайдеров пуст до P2-01 |
+| P2-09 | DONE | `packages/orchestration/aicd_orchestration/worktrees.py`, `packages/security/aicd_security/git.py` | Ветка `aicd/<run>/<task>` от полного SHA; хук репозитория не исполняется; diff (вкл. новые файлы) и WIP-коммит платформой; orphans; пути вне корня отклоняются — `tests/integration/test_worktrees.py` passed |
+| P2-10 | DONE | `packages/security/aicd_security/local_runner.py`, `aicd_cli_adapters/output.py` | Группа процессов, SIGTERM → grace → SIGKILL (включая потомков), чистое окружение, redaction, лимит raw log — `tests/integration/test_local_runner.py` passed |
+| P2-11 | DONE | `aicd_cli_adapters/gateway.py` | Execution FSM в БД с fencing token (устаревший токен отклонён, недопустимый переход отклонён триггером), лимит параллелизма учитывает все workspace, артефакты с sha256, diff от платформы, usage `not_exposed_by_cli`, повтор доставки не запускает процесс — `tests/integration/test_gateway.py` 8 passed. Очередь заданий — P3 |
+| P2-12 | IN_PROGRESS | `aicd_cli_adapters/registry.py`, `apps/api/aicd_api/routers/providers.py` | `GET /providers` по контракту, без учётных данных; запись probe/health — `tests/integration/test_providers.py` passed. **Остаток:** `POST /providers/{id}/probe` и `PATCH …/settings` требуют очереди (P3-03) и таблицы policies (P3-01); до этого `workspace_settings` — значения по умолчанию (1 сессия, OQ-01) |
+| P2-13 | BLOCKED | — | Opt-in набор с реальными CLI — после P2-01 |
+| P2-14 | DONE | `tests/security/test_sandbox.py`, `tests/security/test_adapter_in_sandbox.py` | Запись вне worktree, сеть, секреты хоста, docker.sock, privileged — отклонены/недоступны |
+
+**Итог:** `uv run pytest --cov` → **421 passed** (PostgreSQL 17, Redis, S3-совместимый RustFS, Docker), покрытие 88%; ruff, mypy --strict (117 файлов), import-linter (4 контракта), deny-gate (123 py / 498 js пакетов) — без замечаний.
+
