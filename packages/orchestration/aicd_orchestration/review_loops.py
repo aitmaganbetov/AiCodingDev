@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -34,21 +35,34 @@ class ReviewLoopEscalator:
         review_loop_count: int,
         max_review_loops: int,
     ) -> uuid.UUID | None:
-        row = (
-            (
-                await conn.execute(
-                    text(
-                        "SELECT t.status, t.risk_level, r.project_id FROM tasks t JOIN runs r ON r.id = t.run_id"
-                        " WHERE t.id = :t AND t.run_id = :r FOR UPDATE OF t"
-                    ),
-                    {"t": task_id, "r": run_id},
+        async def load(tid: uuid.UUID) -> dict[str, Any] | None:
+            found = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT t.id, t.status, t.risk_level, r.project_id FROM tasks t JOIN runs r ON r.id = t.run_id"
+                            " WHERE t.id = :t AND t.run_id = :r FOR UPDATE OF t"
+                        ),
+                        {"t": tid, "r": run_id},
+                    )
                 )
+                .mappings()
+                .first()
             )
-            .mappings()
-            .first()
-        )
+            return dict(found) if found else None
+
+        row = await load(task_id)
+        if row is not None and row["status"] not in _BLOCKABLE:
+            # Реализация уже завершена (цикл идёт новыми fix-задачами): блокируется задача ревью, отправившая
+            # FIX_REQUEST сверх лимита — run не продолжится без решения человека.
+            sender = (
+                await conn.execute(text("SELECT task_id FROM agent_messages WHERE id = :m"), {"m": fix_request_id})
+            ).scalar_one_or_none()
+            if sender is not None:
+                row = await load(sender) or row
         if row is None:
             return None
+        task_id = row["id"]
         if row["status"] in _BLOCKABLE:
             await store.transition_task(
                 conn,

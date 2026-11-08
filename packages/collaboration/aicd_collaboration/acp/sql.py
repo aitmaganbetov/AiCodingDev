@@ -62,10 +62,11 @@ def _task(row: Any) -> TaskInfo:
         blocked_reason=m["blocked_reason"],
         review_loop_count=int(m["review_loop_count"]),
         max_review_loops=int(m["max_review_loops"]),
+        origin_task_id=m["origin_task_id"],
     )
 
 
-_TASK_COLUMNS = "id, run_id, agent_role, status, blocked_reason, review_loop_count, max_review_loops"
+_TASK_COLUMNS = "id, run_id, agent_role, status, blocked_reason, review_loop_count, max_review_loops, origin_task_id"
 
 
 class SqlFacts:

@@ -532,6 +532,29 @@ async def test_fourth_fix_request_exhausts_review_loop(world: World) -> None:
     assert code_of(fifth) == "LOOP_LIMIT"
 
 
+async def test_loop_counter_follows_origin_chain_of_fix_tasks(world: World) -> None:
+    """Fix-задача цикла (origin_task_id → исходная реализация) не обнуляет счётчик: лимит считается по корню."""
+    root = world.tasks["developer"]
+    world.facts.tasks[root] = replace(world.facts.tasks[root], status="SUCCEEDED", review_loop_count=3)
+    fix_task, fix_attempt = uuid7(), uuid7()
+    world.facts.tasks[fix_task] = TaskInfo(fix_task, world.run.id, "developer", "RUNNING", origin_task_id=root)
+    world.facts.active_attempts[fix_attempt] = fix_task
+    world.tasks["developer"], world.attempts["developer"] = fix_task, fix_attempt  # REVIEW_REQUEST от fix-задачи
+    rr = await review_cycle(world)
+    result = await world.evaluate(
+        "reviewer",
+        {
+            "to": {"role": "developer"},
+            "type": "FIX_REQUEST",
+            "reply_to_id": str(rr.message_id),
+            "payload": valid_payload("FIX_REQUEST", loop_iteration=4),
+        },
+        correlation_id=rr.correlation_id,
+    )
+    assert isinstance(result, pipeline.Evaluation) and result.loop_exhausted is not None
+    assert result.loop_exhausted.task_id == root and result.loop_exhausted.review_loop_count == 3
+
+
 async def test_raised_task_limit_allows_more_loops(world: World) -> None:
     t = world.tasks["developer"]
     world.facts.tasks[t] = replace(world.facts.tasks[t], review_loop_count=3, max_review_loops=4)

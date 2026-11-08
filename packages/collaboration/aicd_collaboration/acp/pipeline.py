@@ -483,6 +483,14 @@ async def _check_limits(
     task = await facts.task_in_run(run_id, impl_task_id)
     if task is None:
         return None, None
+    # Fix-задачи циклов (origin_task_id) не обнуляют счётчик: считаем по исходной реализации цепочки.
+    seen = {task.id}
+    while task.origin_task_id is not None and task.origin_task_id not in seen:
+        origin = await facts.task_in_run(run_id, task.origin_task_id)
+        if origin is None:
+            break
+        seen.add(origin.id)
+        task = origin
     if task.status == "BLOCKED" and task.blocked_reason == "REVIEW_LOOP_EXHAUSTED":
         raise _deny(RejectionCode.LOOP_LIMIT, "limit.review_loop_exhausted", f"{task.review_loop_count} циклов")
     max_loops = task.max_review_loops if task.max_review_loops >= 1 else limits.max_review_loops

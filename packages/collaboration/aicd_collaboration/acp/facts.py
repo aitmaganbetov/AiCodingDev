@@ -32,6 +32,7 @@ class TaskInfo:
     blocked_reason: str | None = None
     review_loop_count: int = 0
     max_review_loops: int = 3
+    origin_task_id: uuid.UUID | None = None  # fix/re-review задачи ссылаются на исходную реализацию
 
 
 @dataclass(frozen=True)
