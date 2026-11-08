@@ -386,12 +386,15 @@ def test_agent_profiles_global_policy(database: testdb.TestDatabase) -> None:
             " VALUES (%s, NULL, 'review', %s, 1, '{}'), (%s, %s, 'review', 'default', 1, '{}')",
             (global_policy, f"p-{global_policy.hex[-8:]}", ws_policy, tenant.workspace_id),
         )
-        profile = uuid7()
-        conn.execute(
+        # Одна строка на роль: профиль мог уже создать sync (общая тестовая БД) — upsert; транзакция откатывается.
+        row = conn.execute(
             "INSERT INTO agent_profiles (id, role, instruction_template_version, policy_profile_id, allowed_tools)"
-            " VALUES (%s, 'documentation', '1.0.0', %s, %s)",
-            (profile, global_policy, json.dumps(["read"])),
-        )
+            " VALUES (%s, 'documentation', '1.0.0', %s, %s) ON CONFLICT ON CONSTRAINT uq_agent_profiles_role"
+            " DO UPDATE SET policy_profile_id = EXCLUDED.policy_profile_id RETURNING id",
+            (uuid7(), global_policy, json.dumps(["read"])),
+        ).fetchone()
+        assert row is not None
+        profile = row[0]
         with pytest.raises(psycopg.errors.CheckViolation, match="global"):
             with conn.transaction():
                 conn.execute("UPDATE agent_profiles SET policy_profile_id = %s WHERE id = %s", (ws_policy, profile))
