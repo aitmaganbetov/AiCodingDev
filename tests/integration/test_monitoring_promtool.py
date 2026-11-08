@@ -43,7 +43,7 @@ ALERTMANAGER = _image("alertmanager")
 def _run(image: str, entrypoint: str, *args: str, root: Path = MONITORING) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
-            "docker", "run", "--rm", "--network", "none", "--read-only",
+            "docker", "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp",
             "-v", f"{root}:/monitoring:ro", "-w", "/monitoring",
             "--entrypoint", entrypoint, image, *args,
         ],
