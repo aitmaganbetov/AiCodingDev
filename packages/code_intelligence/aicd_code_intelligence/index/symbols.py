@@ -184,7 +184,7 @@ def _signature(content: bytes, node: Node, body: Node | None) -> str:
     raw = content[node.start_byte : end].decode("utf-8", "replace")
     if body is None:
         raw = raw.split("\n", 1)[0]
-    return raw.rstrip().rstrip(":{").rstrip()
+    return raw.rstrip().rstrip(":{;").rstrip()
 
 
 def _block_comment_doc(content: bytes, node: Node) -> str | None:
@@ -502,6 +502,9 @@ def _javascript(content: bytes, root: Node, path: str, is_test: bool, b: _Builde
                 add_decl(decl, child, [], True)
         elif is_test and child.type == "expression_statement":
             test_call(child, [])
+        elif child.type == "ambient_declaration":  # TS `declare function/class …`
+            for inner in child.named_children:
+                add_decl(inner, child, [], False)
         else:
             add_decl(child, child, [], False)
 
@@ -957,7 +960,7 @@ def _json_top_keys(text: str) -> list[tuple[str, int, int]]:
                 expecting_key = True
         elif ch in "}]":
             if depth == 1 and current is not None:
-                result.append((current[0], current[1], line if ch == "}" and last_value_line < line else last_value_line))
+                result.append((current[0], current[1], last_value_line))
                 current = None
             depth -= 1
             last_value_line = line

@@ -230,7 +230,7 @@ def _parse_numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
     try:
         return ipaddress.IPv4Address(socket.inet_aton(host))
     except OSError:
-        return ipaddress.IPv4Address("0.0.0.0")  # числовая, но некорректная форма — всё равно отказ
+        return ipaddress.IPv4Address(0)  # числовая, но некорректная форма — всё равно отказ
 
 
 def validate_hostname(host: str, policy: SsrfPolicy) -> str | IPAddress:
@@ -407,11 +407,17 @@ class ProxyTransport:
         url = httpx.URL(scheme=target.scheme, host=target.host, port=target.port).copy_with(
             raw_path=target.raw_path.encode("ascii", "strict")
         )
-        async with httpx.AsyncClient(
-            proxy=self._proxy, verify=self._verify, trust_env=False, follow_redirects=False, timeout=_timeout(policy)
-        ) as client:
-            async with client.stream("GET", url, headers=dict(headers)) as response:
-                yield response
+        async with (
+            httpx.AsyncClient(
+                proxy=self._proxy,
+                verify=self._verify,
+                trust_env=False,
+                follow_redirects=False,
+                timeout=_timeout(policy),
+            ) as client,
+            client.stream("GET", url, headers=dict(headers)) as response,
+        ):
+            yield response
 
 
 # --- MIME ---------------------------------------------------------------------------------------

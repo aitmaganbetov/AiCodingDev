@@ -1,0 +1,80 @@
+{
+  "schema.sql": {
+    "language": "sql",
+    "symbols": [
+      {
+        "name": "schema.sql",
+        "qualified_name": "schema.sql",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 22,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "users",
+        "qualified_name": "users",
+        "kind": "type",
+        "start_line": 3,
+        "end_line": 6,
+        "signature": "CREATE TABLE users",
+        "doc": null
+      },
+      {
+        "name": "app.audit_log",
+        "qualified_name": "app.audit_log",
+        "kind": "type",
+        "start_line": 8,
+        "end_line": 8,
+        "signature": "CREATE TABLE app.audit_log",
+        "doc": null
+      },
+      {
+        "name": "ix_users_note",
+        "qualified_name": "ix_users_note",
+        "kind": "other",
+        "start_line": 10,
+        "end_line": 10,
+        "signature": "CREATE UNIQUE INDEX ix_users_note",
+        "doc": null
+      },
+      {
+        "name": "app.touch",
+        "qualified_name": "app.touch",
+        "kind": "function",
+        "start_line": 12,
+        "end_line": 17,
+        "signature": "CREATE OR REPLACE FUNCTION app.touch",
+        "doc": null
+      },
+      {
+        "name": "mood",
+        "qualified_name": "mood",
+        "kind": "enum",
+        "start_line": 19,
+        "end_line": 19,
+        "signature": "CREATE TYPE mood",
+        "doc": null
+      },
+      {
+        "name": "Report View",
+        "qualified_name": "Report View",
+        "kind": "type",
+        "start_line": 20,
+        "end_line": 20,
+        "signature": "CREATE MATERIALIZED VIEW Report View",
+        "doc": null
+      },
+      {
+        "name": "trg_touch",
+        "qualified_name": "trg_touch",
+        "kind": "other",
+        "start_line": 21,
+        "end_line": 21,
+        "signature": "CREATE TRIGGER trg_touch",
+        "doc": null
+      }
+    ],
+    "imports": []
+  }
+}

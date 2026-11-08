@@ -1,0 +1,71 @@
+{
+  "package.json": {
+    "language": "json",
+    "symbols": [
+      {
+        "name": "package.json",
+        "qualified_name": "package.json",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 10,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "name",
+        "qualified_name": "name",
+        "kind": "variable",
+        "start_line": 2,
+        "end_line": 2,
+        "signature": "\"name\":",
+        "doc": null
+      },
+      {
+        "name": "version",
+        "qualified_name": "version",
+        "kind": "variable",
+        "start_line": 3,
+        "end_line": 3,
+        "signature": "\"version\":",
+        "doc": null
+      },
+      {
+        "name": "scripts",
+        "qualified_name": "scripts",
+        "kind": "variable",
+        "start_line": 4,
+        "end_line": 7,
+        "signature": "\"scripts\":",
+        "doc": null
+      },
+      {
+        "name": "keywords",
+        "qualified_name": "keywords",
+        "kind": "variable",
+        "start_line": 8,
+        "end_line": 8,
+        "signature": "\"keywords\":",
+        "doc": null
+      },
+      {
+        "name": "nested",
+        "qualified_name": "nested",
+        "kind": "variable",
+        "start_line": 9,
+        "end_line": 9,
+        "signature": "\"nested\":",
+        "doc": null
+      },
+      {
+        "name": "inline",
+        "qualified_name": "inline",
+        "kind": "variable",
+        "start_line": 9,
+        "end_line": 9,
+        "signature": "\"inline\":",
+        "doc": null
+      }
+    ],
+    "imports": []
+  }
+}

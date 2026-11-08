@@ -17,11 +17,13 @@ from aicd_api.routers import (
     auth,
     chat,
     directives,
+    documentation,
     events,
     health,
     projects,
     providers,
     runs,
+    technologies,
     workspaces,
 )
 from aicd_api.state import AppState
@@ -73,6 +75,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         auth.router,
         workspaces.router,
         projects.router,
+        technologies.router,
+        documentation.router,
         providers.router,
         runs.router,
         approvals.router,

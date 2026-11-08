@@ -1,0 +1,23 @@
+[
+  ["imports", "php/src/Models/User.php", "php/src/Support/Str.php", "App\\Support\\Str"],
+  ["imports", "php/src/Models/User.php", null, "Illuminate\\Database\\Eloquent\\Model"],
+  ["imports", "php/src/bootstrap.php", "php/src/Support/Str.php", "file:./Support/Str.php"],
+  ["imports", "php/src/bootstrap.php", null, "file:vendor/autoload.php"],
+  ["imports", "php/tests/UserTest.php", "php/src/Models/User.php", "App\\Models\\User"],
+  ["imports", "php/tests/UserTest.php", null, "PHPUnit\\Framework\\TestCase"],
+  ["imports", "src/app/service.py", null, "requests"],
+  ["imports", "src/app/service.py", "src/app/util.py", "app.util.helper"],
+  ["imports", "src/app/service.py", "src/app/models.py", ".models.User"],
+  ["imports", "src/app/util.py", "src/app/models.py", ".models"],
+  ["imports", "tests/test_service.py", "src/app/service.py", "app.service.make"],
+  ["imports", "web/src/api.test.ts", "web/src/api.ts", "./api"],
+  ["imports", "web/src/api.ts", null, "react"],
+  ["imports", "web/src/api.ts", "web/src/http.ts", "./http.js"],
+  ["imports", "web/src/api.ts", "web/src/types/index.ts", "./types"],
+  ["imports", "web/src/api.ts", null, "./nope"],
+  ["imports", "web/src/legacy.js", "web/src/http.ts", "./http"],
+  ["tests", "php/tests/UserTest.php", "php/src/Models/User.php", null],
+  ["tests", "tests/test_models.py", "src/app/models.py", null],
+  ["tests", "tests/test_service.py", "src/app/service.py", null],
+  ["tests", "web/src/api.test.ts", "web/src/api.ts", null]
+]

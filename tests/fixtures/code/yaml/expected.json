@@ -1,0 +1,71 @@
+{
+  "config.yaml": {
+    "language": "yaml",
+    "symbols": [
+      {
+        "name": "config.yaml",
+        "qualified_name": "config.yaml",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 12,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "name",
+        "qualified_name": "name",
+        "kind": "variable",
+        "start_line": 2,
+        "end_line": 2,
+        "signature": "name:",
+        "doc": null
+      },
+      {
+        "name": "services",
+        "qualified_name": "services",
+        "kind": "variable",
+        "start_line": 3,
+        "end_line": 6,
+        "signature": "services:",
+        "doc": null
+      },
+      {
+        "name": "anchors",
+        "qualified_name": "anchors",
+        "kind": "variable",
+        "start_line": 7,
+        "end_line": 8,
+        "signature": "anchors:",
+        "doc": null
+      },
+      {
+        "name": "copy",
+        "qualified_name": "copy",
+        "kind": "variable",
+        "start_line": 9,
+        "end_line": 9,
+        "signature": "copy:",
+        "doc": null
+      },
+      {
+        "name": "unsafe",
+        "qualified_name": "unsafe",
+        "kind": "variable",
+        "start_line": 10,
+        "end_line": 10,
+        "signature": "unsafe:",
+        "doc": null
+      },
+      {
+        "name": "second_doc",
+        "qualified_name": "second_doc",
+        "kind": "variable",
+        "start_line": 12,
+        "end_line": 12,
+        "signature": "second_doc:",
+        "doc": null
+      }
+    ],
+    "imports": []
+  }
+}
