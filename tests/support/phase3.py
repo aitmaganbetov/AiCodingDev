@@ -44,9 +44,9 @@ def build_orchestrator(
 
     def factory(*, provider: str, installation_id: Any, gateway: ExecutionGateway, worktree_root: Path) -> Any:
         return FakeCLIExecutor(
-            provider=provider,
+            provider="claude" if provider == "claude" else "codex",
             scenario=scenario,
-            runner=LocalProcessRunner(),  # type: ignore[arg-type]
+            runner=LocalProcessRunner(),
             artifact_sink=gateway.store_artifact,
             worktree_path=worktree_resolver(worktree_root),
             env_source={"PATH": os.environ["PATH"]},
