@@ -1,10 +1,20 @@
-import { AreaPlaceholderPage } from '../pages/AreaPlaceholderPage';
+import { lazy } from 'react';
+import { RequirePermission } from '../auth/RequirePermission';
 import type { AreaModule } from './types';
 
-/** P7-08 Task Detail (diff viewer, evidence). Контекстный экран run — без пункта меню. */
+const TaskDetailPage = lazy(() => import('../features/tasks/TaskDetailPage'));
+
+/** P7-08 Task Detail (попытки, события/логи, diff viewer на Monaco — лениво, evidence). Контекстный экран run — без пункта меню. */
 export const tasksArea: AreaModule = {
   id: 'tasks',
   workspaceRoutes: [
-    { path: 'projects/:projectId/runs/:runId/tasks/:taskId', element: <AreaPlaceholderPage titleKey="tasks.title" /> },
+    {
+      path: 'projects/:projectId/runs/:runId/tasks/:taskId',
+      element: (
+        <RequirePermission permission="run:read">
+          <TaskDetailPage />
+        </RequirePermission>
+      ),
+    },
   ],
 };

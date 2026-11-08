@@ -37,6 +37,9 @@ test('login → workspace → projects list (pagination) → create project', as
   await page.getByLabel('Пароль').fill(PASSWORD);
   await page.getByRole('button', { name: 'Войти' }).click();
 
+  // После входа — Dashboard (P7-03); проекты открываются из боковой навигации.
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда Альфа' })).toBeFocused();
+  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Проекты', exact: true }).click();
   const heading = page.getByRole('heading', { level: 1, name: 'Проекты · Команда Альфа' });
   await expect(heading).toBeFocused();
   const list = page.getByRole('list', { name: 'Список проектов' });
@@ -117,8 +120,11 @@ test('no workspaces → create workspace (client + server validation) → empty 
 test('error state with retry; session expiry redirects to login', async ({ page, api }) => {
   const ws = api.addWorkspace('Команда', 'team', 'owner');
   api.addProject(ws.id, 'Сервис');
-  api.failProjectsTimes = 1;
   await login(page, api);
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Последние запуски' })).toBeVisible();
+  api.failProjectsTimes = 1;
+  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Проекты', exact: true }).click();
 
   const error = page.getByTestId('error-state');
   await expect(error).toContainText('Внутренняя ошибка сервера');
@@ -140,6 +146,7 @@ test('role-aware UI: viewer does not see "Создать проект"', async (
   const ws = api.addWorkspace('Только чтение', 'ro', 'viewer');
   api.addProject(ws.id, 'Проект');
   await login(page, api);
+  await page.goto(`/w/${ws.id}/projects`);
   await expect(page.getByRole('list', { name: 'Список проектов' }).getByRole('listitem')).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'Создать проект' })).toHaveCount(0);
   await page.goto(`/w/${ws.id}/projects/new`);
@@ -163,7 +170,7 @@ test('keyboard-only: login, skip link, switch workspace, create project, logout'
   await page.keyboard.type(PASSWORD);
   await page.keyboard.press('Enter');
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Проекты · Альфа' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Альфа' })).toBeFocused();
 
   // Skip link — первый элемент в порядке табуляции.
   // Точка начала последовательной навигации — начало документа (как после загрузки страницы).
@@ -188,8 +195,13 @@ test('keyboard-only: login, skip link, switch workspace, create project, logout'
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: /Бета/ })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('heading', { level: 1, name: 'Проекты · Бета' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Бета' })).toBeFocused();
   await expect(switcher).toHaveAttribute('aria-expanded', 'false');
+
+  // К проектам — сочетанием «g, затем p».
+  await page.keyboard.press('g');
+  await page.keyboard.press('p');
+  await expect(page.getByRole('heading', { level: 1, name: 'Проекты · Бета' })).toBeFocused();
 
   // Создание проекта: только Tab/стрелки/Enter.
   const createLink = page.getByRole('link', { name: 'Создать проект' }).first();
@@ -239,6 +251,10 @@ test('responsive at 360px: no horizontal scroll, controls reachable', async ({ p
   await page.getByLabel('Электронная почта').fill(api.user.email);
   await page.getByLabel('Пароль').fill(PASSWORD);
   await page.getByRole('button', { name: 'Войти' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /^Обзор/ })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await expectNoSeriousA11yViolations(page, 'dashboard 360px');
+  await page.goto(`/w/${ws.id}/projects`);
   await expect(page.getByRole('list', { name: 'Список проектов' }).getByRole('listitem')).toHaveCount(1);
   await expectNoHorizontalScroll(page);
   await expectNoSeriousA11yViolations(page, 'projects 360px');

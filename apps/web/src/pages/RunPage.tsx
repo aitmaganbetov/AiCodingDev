@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { TFunction } from 'i18next';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -15,9 +15,11 @@ import { formatDate } from '../lib/format';
 import { can } from '../lib/permissions';
 import { problemMessage } from '../lib/problem';
 import { useCurrentWorkspace } from '../workspace';
+import { RunNav } from '../features/runs/RunNav';
+import { useRunTasks } from '../features/runs/useRunTasks';
 import { WorkspaceNotFound } from './NotFoundPage';
 
-export const TASKS_PAGE_SIZE = 200;
+export { TASKS_PAGE_SIZE } from '../features/runs/useRunTasks';
 
 /** События, после которых состояние run/задач в REST могло измениться. */
 const RUN_STATE_EVENTS = new Set(['run.state_changed', 'run.completed', 'approval.requested', 'approval.decided']);
@@ -192,7 +194,17 @@ function RunControls({ run }: { run: Run }) {
   );
 }
 
-function TasksTable({ runId, tasks, planVersion }: { runId: string; tasks: TaskSummary[]; planVersion: number }) {
+function TasksTable({
+  runId,
+  tasks,
+  planVersion,
+  taskHref,
+}: {
+  runId: string;
+  tasks: TaskSummary[];
+  planVersion: number;
+  taskHref: (taskId: string) => string;
+}) {
   const { t } = useTranslation();
   const titles = useMemo(() => new Map(tasks.map((x) => [x.id, x.title])), [tasks]);
   if (tasks.length === 0) return <p className="text-fg-muted">{t('run.tasksEmpty')}</p>;
@@ -212,7 +224,11 @@ function TasksTable({ runId, tasks, planVersion }: { runId: string; tasks: TaskS
         <tbody>
           {tasks.map((task) => (
             <tr key={task.id} className="border-t border-border align-top" data-task-id={task.id}>
-              <th scope="row" className="px-3 py-2 font-medium">{task.title}</th>
+              <th scope="row" className="px-3 py-2 font-medium">
+                <Link to={taskHref(task.id)} className="link">
+                  {task.title}
+                </Link>
+              </th>
               <td className="px-3 py-2">{enumLabel(t, 'agent_role', task.agent_role)}</td>
               <td className="px-3 py-2">
                 <StatusBadge kind="task" status={task.status} />
@@ -234,17 +250,9 @@ function TasksTable({ runId, tasks, planVersion }: { runId: string; tasks: TaskS
   );
 }
 
-function RunTasks({ runId }: { runId: string }) {
+function RunTasks({ runId, taskHref }: { runId: string; taskHref: (taskId: string) => string }) {
   const { t } = useTranslation();
-  const query = useInfiniteQuery({
-    queryKey: runKeys.tasks(runId),
-    queryFn: ({ pageParam, signal }) =>
-      runsApi.tasks(runId, { limit: TASKS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => last.next_cursor ?? undefined,
-  });
-  const tasks = query.data?.pages.flatMap((p) => p.tasks) ?? [];
-  const planVersion = query.data?.pages[0]?.plan_version ?? 0;
+  const { query, tasks, planVersion } = useRunTasks(runId);
   return (
     <section aria-labelledby="run-tasks-title" className="mb-6">
       <h2 id="run-tasks-title" className="mb-3 text-lg font-semibold">
@@ -256,7 +264,7 @@ function RunTasks({ runId }: { runId: string }) {
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (
         <>
-          <TasksTable runId={runId} tasks={tasks} planVersion={planVersion} />
+          <TasksTable runId={runId} tasks={tasks} planVersion={planVersion} taskHref={taskHref} />
           {query.hasNextPage || query.isFetchNextPageError ? (
             <LoadMore
               shown={tasks.length}
@@ -377,6 +385,11 @@ export function RunPage() {
     [queryClient, runId],
   );
 
+  const taskHref = useCallback(
+    (taskId: string) => `/w/${workspaceId ?? ''}/projects/${projectId}/runs/${runId}/tasks/${taskId}`,
+    [workspaceId, projectId, runId],
+  );
+
   if (!workspaceId || !membership) return <WorkspaceNotFound />;
   const title = run.data
     ? t('run.title', { mode: t(`enums.run_mode.${run.data.mode}`, { defaultValue: run.data.mode }) })
@@ -389,6 +402,7 @@ export function RunPage() {
           {t('runs.backToRuns')}
         </Link>
       </PageHeading>
+      <RunNav workspaceId={workspaceId} projectId={projectId} runId={runId} />
       {run.isPending ? (
         <LoadingState label={t('run.loading')} />
       ) : run.isError ? (
@@ -397,7 +411,7 @@ export function RunPage() {
         <>
           <RunHeader run={run.data} />
           {can(membership.role, 'run:control') ? <RunControls run={run.data} /> : null}
-          <RunTasks runId={runId} />
+          <RunTasks runId={runId} taskHref={taskHref} />
         </>
       )}
       {runId && !run.isError ? <EventFeed key={runId} runId={runId} isTerminal={isTerminal} taskTitle={taskTitle} /> : null}

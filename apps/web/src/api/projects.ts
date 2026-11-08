@@ -1,4 +1,4 @@
-/** Проекты (X-Workspace-Id для коллекции, API_DESIGN §4). */
+/** Проекты, репозитории и стек (X-Workspace-Id для коллекции, API_DESIGN §4). */
 import { request, seg, type JsonBody, type JsonResponse, type Query, type Schemas } from './client';
 
 export type Project = Schemas['Project'];
@@ -7,10 +7,20 @@ export type DocumentationMode = Schemas['DocumentationMode'];
 export type QualityProfile = Schemas['QualityProfile'];
 export type ProjectCreateRequest = JsonBody<'createProject'>;
 export type ListProjectsQuery = Query<'listProjects'>;
+export type Repository = Schemas['Repository'];
+export type RepositoryProvider = Schemas['RepositoryProvider'];
+export type RepositoryAttachRequest = JsonBody<'attachRepository'>;
+export type Technology = Schemas['Technology'];
+export type ListRepositoriesQuery = Query<'listRepositories'>;
+export type ListTechnologiesQuery = Query<'listTechnologies'>;
 
 export const projectKeys = {
   list: (workspaceId: string) => ['projects', workspaceId] as const,
+  /** Первая страница для сводок (Dashboard, селекторы проекта): префикс list → общая инвалидация. */
+  summary: (workspaceId: string) => ['projects', workspaceId, 'summary'] as const,
   detail: (projectId: string) => ['project', projectId] as const,
+  repositories: (projectId: string) => ['project', projectId, 'repositories'] as const,
+  technologies: (projectId: string) => ['project', projectId, 'technologies'] as const,
 };
 
 export const projectsApi = {
@@ -24,5 +34,18 @@ export const projectsApi = {
 
   get(projectId: string, signal?: AbortSignal): Promise<JsonResponse<'getProject', 200>> {
     return request({ method: 'GET', path: `/projects/${seg(projectId)}`, signal });
+  },
+
+  repositories(projectId: string, query: ListRepositoriesQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listRepositories', 200>> {
+    return request({ method: 'GET', path: `/projects/${seg(projectId)}/repositories`, query, signal });
+  },
+
+  /** 201: репозиторий зарегистрирован, индексация поставлена в очередь (асинхронно). */
+  attachRepository(projectId: string, body: RepositoryAttachRequest, idempotencyKey: string): Promise<JsonResponse<'attachRepository', 201>> {
+    return request({ method: 'POST', path: `/projects/${seg(projectId)}/repositories`, body, idempotencyKey });
+  },
+
+  technologies(projectId: string, query: ListTechnologiesQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listTechnologies', 200>> {
+    return request({ method: 'GET', path: `/projects/${seg(projectId)}/technologies`, query, signal });
   },
 };

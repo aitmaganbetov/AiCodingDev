@@ -17,8 +17,11 @@ const SECTIONS = [
 ];
 
 /** Заглушки «в разработке»: разделы меню + контекстные экраны run (чат, задача). */
+/** Разделы, реализованные экранами (axe — в их собственных spec); остальные пока заглушки. */
+const IMPLEMENTED = new Set(['projects', 'dashboard', 'knowledge', 'providers', 'settings', 'audit']);
+
 const PLACEHOLDERS = [
-  ...SECTIONS.filter((s) => s.path !== 'projects').map((s) => ({ path: s.path, title: s.name === 'Запуски' ? 'Запуски' : s.name })),
+  ...SECTIONS.filter((s) => !IMPLEMENTED.has(s.path)).map((s) => ({ path: s.path, title: s.name === 'Запуски' ? 'Запуски' : s.name })),
   { path: 'projects/p-1/runs/r-1/chat', title: 'Live Agent Chat' },
   { path: 'projects/p-1/runs/r-1/tasks/t-1', title: 'Задача' },
 ];
@@ -87,7 +90,7 @@ test('keyboard-only: skip link, sidebar in tab order, Enter opens a section, sho
 }) => {
   const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
   await login(page, api);
-  await expect(page.getByRole('heading', { level: 1, name: 'Проекты · Команда Альфа' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда Альфа' })).toBeFocused();
 
   await focusDocumentStart(page);
   await page.keyboard.press('Tab');
@@ -144,8 +147,9 @@ test('keyboard-only: skip link, sidebar in tab order, Enter opens a section, sho
 test('mobile (360px): navigation drawer is a keyboard-accessible dialog; no horizontal scroll', async ({ page, api }) => {
   await page.setViewportSize({ width: 360, height: 740 });
   const ws = api.addWorkspace('Очень длинное название рабочего пространства команды', 'long', 'owner');
+  api.route('GET', '/api/v1/providers', 'listProviders', () => ({ status: 200, body: { items: [] } }));
   await login(page, api);
-  await expect(page.getByRole('heading', { level: 1, name: /^Проекты/ })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: /^Обзор/ })).toBeFocused();
   await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeHidden();
   await expectNoHorizontalScroll(page);
 

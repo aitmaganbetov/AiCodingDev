@@ -37,7 +37,8 @@ describe('routes registry', () => {
   });
 
   it('home path is the area with the highest priority', () => {
-    expect(workspaceHomePath()).toBe('projects');
-    expect(workspaceHomePath([...AREAS, { id: 'x', home: { path: 'dashboard', priority: 10 } }])).toBe('dashboard');
+    expect(workspaceHomePath()).toBe('dashboard');
+    expect(workspaceHomePath(AREAS.filter((a) => a.id !== 'dashboard'))).toBe('projects');
+    expect(workspaceHomePath([...AREAS, { id: 'x', home: { path: 'x', priority: 100 } }])).toBe('x');
   });
 });

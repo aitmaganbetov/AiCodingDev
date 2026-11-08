@@ -32,13 +32,22 @@ function ProjectCard({ project }: { project: Project }) {
         <dt className="text-fg-muted">{t('common.createdAt')}</dt>
         <dd>{formatDate(project.created_at, i18n.language)}</dd>
       </dl>
-      <Link
-        to={`/w/${project.workspace_id}/projects/${project.id}/runs`}
-        className="self-start font-medium text-accent-soft-fg underline"
-        aria-label={t('projects.runsLinkLabel', { name: project.name })}
-      >
-        {t('projects.runsLink')}
-      </Link>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        <Link
+          to={`/w/${project.workspace_id}/projects/${project.id}`}
+          className="font-medium text-accent-soft-fg underline"
+          aria-label={t('projects.openLinkLabel', { name: project.name })}
+        >
+          {t('projects.openLink')}
+        </Link>
+        <Link
+          to={`/w/${project.workspace_id}/projects/${project.id}/runs`}
+          className="font-medium text-accent-soft-fg underline"
+          aria-label={t('projects.runsLinkLabel', { name: project.name })}
+        >
+          {t('projects.runsLink')}
+        </Link>
+      </div>
     </li>
   );
 }

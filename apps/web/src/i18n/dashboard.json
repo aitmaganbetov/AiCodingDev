@@ -1,5 +1,46 @@
 {
   "dashboard": {
-    "title": "Обзор"
+    "title": "Обзор",
+    "pageTitle": "Обзор · {{workspace}}",
+    "loading": "Загрузка обзора…",
+    "runsError": "Не удалось загрузить запуски",
+    "unknownProject": "Проект недоступен",
+    "openRun": "Открыть run",
+    "toApprovals": "К одобрениям",
+    "toProviders": "К CLI-провайдерам",
+    "countMore": "{{count}}+",
+    "sampleHint_one": "по последнему {{count}} запуску",
+    "sampleHint_few": "по последним {{count}} запускам",
+    "sampleHint_many": "по последним {{count}} запускам",
+    "sampleHint_other": "по последним {{count}} запускам",
+    "stat": {
+      "projects": "Проекты",
+      "active": "Идут сейчас",
+      "attention": "Требуют внимания",
+      "failed": "Завершились с ошибкой"
+    },
+    "noProjectsTitle": "Проектов пока нет",
+    "noProjectsDescription": "Создайте проект и привяжите репозиторий, чтобы запустить первый run.",
+    "noProjectsReadOnly": "Создавать проекты могут владелец и администраторы рабочего пространства.",
+    "createProject": "Создать проект",
+    "attentionTitle": "Требуют внимания",
+    "attentionEmpty": "Нет запусков, ожидающих одобрения, заблокированных или приостановленных.",
+    "activeTitle": "Идут сейчас",
+    "activeEmpty": "Сейчас нет выполняющихся запусков.",
+    "recentTitle": "Последние запуски",
+    "recentEmpty": "Запусков пока нет.",
+    "col": {
+      "objective": "Цель",
+      "project": "Проект",
+      "mode": "Режим",
+      "status": "Статус",
+      "created": "Создан"
+    },
+    "quickLinks": "Быстрые переходы",
+    "link": {
+      "projects": "Все проекты",
+      "approvals": "Одобрения",
+      "providers": "CLI-провайдеры"
+    }
   }
 }

@@ -1,5 +1,214 @@
 {
   "quality": {
-    "title": "Evidence и качество"
+    "title": "Evidence и качество",
+    "indexDescription": "Выберите запуск, чтобы увидеть вердикт quality gates, находки, evidence и отчёт. Вердикт выносит Verification Engine по сохранённым результатам проверок, а не по словам агента.",
+    "runTitle": "Качество запуска",
+    "loading": "Загрузка сводки качества…",
+    "notRecorded": "не записано",
+    "openRun": "Открыть run",
+    "openCompliance": "Матрица соответствия",
+    "verdict": "Вердикт",
+    "verdictHint": {
+      "PASS": "Все обязательные gates пройдены.",
+      "FAIL": "Обязательный gate не пройден.",
+      "ERROR": "Проверка не выполнена (ошибка) — это не PASS.",
+      "PENDING": "Проверки ещё не запускались.",
+      "RUNNING": "Проверки выполняются."
+    },
+    "profile": "Профиль качества",
+    "requiredGates": "Обязательные gates",
+    "requiredGatesValue": "пройдено {{passed}} из {{total}}",
+    "openFindings": "Открытые находки",
+    "noOpenFindings": "нет",
+    "findingsTotal": "Всего находок",
+    "findingsByStatus": "По статусам",
+    "notPassTitle": "Пропущенные и ошибочные проверки не считаются пройденными",
+    "notPassDescription": "SKIPPED и ERROR обязательного gate не равны PASS: {{gates}}.",
+    "tabs": {
+      "label": "Разделы качества запуска",
+      "gates": "Quality gates",
+      "findings": "Находки",
+      "evidence": "Evidence",
+      "report": "Отчёт"
+    },
+    "live": {
+      "connecting": "Подключение живых обновлений…",
+      "open": "Живые обновления включены.",
+      "reconnecting": "Связь потеряна, переподключение…",
+      "closed": "Живые обновления не нужны: run завершён.",
+      "failed": "Живые обновления недоступны.",
+      "queued": "Ожидание свободного потока событий (не более 5 одновременно)…",
+      "paused": "Обновления приостановлены, пока вкладка неактивна.",
+      "offline": "Нет сети — обновления возобновятся при подключении.",
+      "reconnect": "Переподключить"
+    },
+    "gate": {
+      "caption": "Выполнения quality gates",
+      "empty": "Gates ещё не выполнялись.",
+      "type": "Gate",
+      "required": "Обязательность",
+      "requiredYes": "Обязательный",
+      "requiredNo": "Необязательный",
+      "status": "Статус",
+      "countsAsPass": "Засчитан как пройден",
+      "countsYes": "Да",
+      "countsNo": {
+        "SKIPPED": "Нет — пропущен (SKIPPED ≠ PASS)",
+        "ERROR": "Нет — ошибка выполнения (ERROR ≠ PASS)",
+        "FAIL": "Нет — не пройден",
+        "NOT_APPLICABLE": "Не требуется — неприменим",
+        "PENDING": "Нет — ожидает",
+        "RUNNING": "Нет — выполняется"
+      },
+      "countsNoDefault": "Нет",
+      "reason": "Код / причина",
+      "commit": "Commit",
+      "finished": "Завершён",
+      "evidence": "Evidence",
+      "openEvidence": "Открыть evidence",
+      "noEvidence": "нет evidence"
+    },
+    "finding": {
+      "pageTitle": "Находка",
+      "loading": "Загрузка находок…",
+      "caption": "Находки запуска",
+      "empty": "Находок с такими условиями нет.",
+      "filters": "Фильтры находок",
+      "any": "Любой",
+      "severity": "Критичность",
+      "title": "Описание",
+      "rule": "Правило",
+      "status": "Статус",
+      "location": "Файл",
+      "cwe": "CWE",
+      "source": "Источник",
+      "controls": "Контроли",
+      "fixedIn": "Исправлено в commit",
+      "evidence": "Evidence",
+      "createdAt": "Обнаружена",
+      "resolvedBy": "Решение принял",
+      "resolutionReason": "Обоснование решения",
+      "run": "Запуск",
+      "backToRun": "К качеству запуска"
+    },
+    "transition": {
+      "title": "Решение по находке",
+      "group": "Доступные решения",
+      "engineOnly": "Статус выставляет Verification Engine: ручных переходов из него нет.",
+      "noRole": "У вашей роли нет права принимать решения по этой находке.",
+      "someNeedAdmin": "Принять риск может только администратор или владелец.",
+      "noVersion": "Сервер не вернул версию находки — решение недоступно. Обновите страницу.",
+      "profileBlocked": "Профиль critical: критическую находку нельзя принять как риск.",
+      "profileUnknown": "Не удалось загрузить профиль качества запуска — ограничения профиля проверит сервер.",
+      "dialogTitle": "Перевести в «{{status}}»",
+      "reason": "Обоснование",
+      "reasonHint": "Обязательно. Записывается в историю решений и аудит.",
+      "done": "Находка переведена в «{{status}}»",
+      "to": {
+        "OPEN": "Открыть повторно",
+        "ACKNOWLEDGED": "Подтвердить",
+        "FALSE_POSITIVE": "Ложное срабатывание",
+        "ACCEPTED_RISK": "Принять риск"
+      },
+      "hint": {
+        "OPEN": "Находка снова станет открытой, прежнее решение будет снято.",
+        "ACKNOWLEDGED": "Находка признана и требует исправления.",
+        "FALSE_POSITIVE": "Находка не является дефектом. Укажите, почему.",
+        "ACCEPTED_RISK": "Риск принимается осознанно. Решение видно в отчёте run и аудите."
+      }
+    },
+    "evidence": {
+      "pageTitle": "Evidence",
+      "gateTitle": "Evidence quality gates",
+      "gateEmpty": "У выполненных gates нет evidence.",
+      "taskTitle": "Evidence задач",
+      "task": "Задача",
+      "chooseTask": "Выберите задачу",
+      "chooseTaskHint": "Выберите задачу, чтобы увидеть её evidence.",
+      "loading": "Загрузка evidence…",
+      "caption": "Evidence задачи",
+      "empty": "У задачи нет evidence с такими условиями.",
+      "kind": "Вид",
+      "producer": "Источник (не агент)",
+      "verification": "Проверка",
+      "notVerified": "Evidence не подтверждено Verification Engine — его нельзя считать доказательством прохождения.",
+      "incompleteTitle": "В evidence не хватает данных (AC-14)",
+      "complete": "Evidence полное: commit, команда, exit code, время, окружение и checksum артефакта.",
+      "execution": "Выполнение проверки",
+      "commit": "Commit",
+      "command": "Команда",
+      "exitCode": "Exit code",
+      "startedAt": "Начало",
+      "finishedAt": "Окончание",
+      "createdAt": "Записано",
+      "environment": "Окружение",
+      "artifact": "Артефакт",
+      "artifactKind": "Тип артефакта",
+      "sha256": "SHA-256",
+      "size": "Размер",
+      "mime": "MIME-тип",
+      "download": "Скачать артефакт",
+      "downloadForbidden": "Скачивание сырого лога CLI доступно только администратору или владельцу.",
+      "links": "Связи"
+    },
+    "report": {
+      "description": "Полный отчёт run: run, задачи, gates, находки, evidence, подтверждения и матрица соответствия (JSON).",
+      "download": "Скачать отчёт (JSON)",
+      "ready": "Отчёт сформирован:",
+      "artifact": "Сохранённый отчёт",
+      "artifactDownload": "Скачать сохранённый артефакт отчёта"
+    },
+    "runs": {
+      "title": "Запуски",
+      "listLabel": "Запуски рабочего пространства",
+      "loading": "Загрузка запусков…",
+      "emptyTitle": "Запусков пока нет",
+      "emptyDescription": "Отчёты о качестве появятся после первого запуска в одном из проектов.",
+      "openQuality": "Качество и evidence"
+    },
+    "enums": {
+      "gate_status": {
+        "PENDING": "Ожидает",
+        "RUNNING": "Выполняется",
+        "PASS": "Пройден",
+        "FAIL": "Не пройден",
+        "ERROR": "Ошибка (не PASS)",
+        "SKIPPED": "Пропущен (не PASS)",
+        "NOT_APPLICABLE": "Неприменим"
+      },
+      "severity": {
+        "critical": "Критическая",
+        "high": "Высокая",
+        "medium": "Средняя",
+        "low": "Низкая",
+        "info": "Информация"
+      },
+      "risk": {
+        "critical": "Риск: критический",
+        "high": "Риск: высокий",
+        "medium": "Риск: средний",
+        "low": "Риск: низкий"
+      },
+      "finding_status": {
+        "OPEN": "Открыта",
+        "ACKNOWLEDGED": "Подтверждена",
+        "FIXED": "Исправлена",
+        "VERIFIED_FIXED": "Исправление подтверждено",
+        "FALSE_POSITIVE": "Ложное срабатывание",
+        "ACCEPTED_RISK": "Риск принят"
+      },
+      "finding_source": {
+        "gate": "Quality gate",
+        "agent_review": "Ревью агента",
+        "manual": "Вручную",
+        "github": "GitHub"
+      },
+      "verification": {
+        "PENDING": "Ожидает проверки",
+        "VERIFIED": "Подтверждено",
+        "REJECTED": "Отклонено",
+        "UNVERIFIED": "Не подтверждено"
+      }
+    }
   }
 }

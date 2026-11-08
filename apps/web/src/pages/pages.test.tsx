@@ -29,18 +29,19 @@ describe('auth', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Неверная электронная почта или пароль.');
   });
 
-  it('logs in and lands on the projects of the first workspace', async () => {
+  it('logs in and lands on the dashboard of the first workspace', async () => {
     const user = userEvent.setup();
     const { calls } = mockFetch({
       'GET /api/v1/auth/session': () => problem(401, 'unauthenticated'),
       'POST /api/v1/auth/login': () => json(200, session('owner')),
       'GET /api/v1/projects': () => json(200, { items: [project(1)], next_cursor: null }),
+      'GET /api/v1/runs': () => json(200, { items: [], next_cursor: null }),
     });
     renderApp('/login');
     await user.type(await screen.findByLabelText('Электронная почта'), 'anna@example.com');
     await user.type(screen.getByLabelText('Пароль'), 'secret{Enter}');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Проекты · Команда 1' })).toBeInTheDocument();
-    expect(await screen.findByText('Проект 1')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Обзор · Команда 1' })).toBeInTheDocument();
+    expect(await screen.findByText('Последние запуски', { selector: 'h2' })).toBeInTheDocument();
     const list = calls.find((c) => c.url.pathname === '/api/v1/projects');
     expect(list?.headers.get('X-Workspace-Id')).toBe(WS_ID);
   });

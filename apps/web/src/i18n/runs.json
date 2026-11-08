@@ -19,7 +19,20 @@
     "status": "Статус",
     "createdAt": "Создан",
     "projectNotFound": "Проект не найден или у вас нет к нему доступа — запуск не создан.",
-    "allTitle": "Запуски"
+    "allTitle": "Запуски",
+    "executor": "{{role}} · {{provider}}",
+    "nav": {
+      "label": "Разделы run",
+      "overview": "Обзор",
+      "graph": "Граф задач",
+      "chat": "Live Agent Chat"
+    },
+    "enums": {
+      "provider": {
+        "codex": "Codex",
+        "claude": "Claude"
+      }
+    }
   },
   "run": {
     "title": "Run · {{mode}}",
@@ -97,5 +110,40 @@
     "approvalDecided": "{{action}}: {{status}}",
     "runCompleted": "Итог: {{status}}; обязательные проверки {{passed}} из {{total}}",
     "seq": "№ {{seq}}"
+  },
+  "runGraph": {
+    "title": "Граф задач",
+    "planVersion": "План v{{version}}",
+    "emptyTitle": "Граф пока пуст",
+    "executors": "Сейчас выполняют",
+    "executorsEmpty": "Активных исполнителей нет.",
+    "viewLabel": "Вид графа",
+    "view": {
+      "graph": "Граф",
+      "list": "Список"
+    },
+    "hint": "{{tasks}} задач, {{edges}} зависимостей. Узел ведёт в карточку задачи; для навигации с клавиатуры и скринридера удобнее вид «Список».",
+    "loadingCanvas": "Загрузка графа…",
+    "loadingMore": "Загрузка остальных задач…",
+    "canvasLabel": "Граф задач run",
+    "tableCaption": "Задачи run и их зависимости",
+    "col": {
+      "executor": "Исполнитель"
+    },
+    "noExecutor": "—",
+    "edge": "«{{from}}» → «{{to}}»",
+    "node": {
+      "executor": "Исполняет: {{executor}}",
+      "attempts": "Попыток: {{count}} из {{max}}"
+    },
+    "controls": {
+      "label": "Управление масштабом",
+      "zoomIn": "Увеличить",
+      "zoomOut": "Уменьшить",
+      "fitView": "Показать весь граф",
+      "interactive": "Переключить интерактивность",
+      "minimap": "Мини-карта",
+      "handle": "Точка связи"
+    }
   }
 }

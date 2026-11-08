@@ -1,0 +1,28 @@
+/* React Flow на токенах дизайн-системы (светлая/тёмная тема — через CSS-переменные). */
+.aicd-graph .react-flow {
+  --xy-background-color: rgb(var(--color-surface));
+  --xy-edge-stroke-default: rgb(var(--color-input));
+  --xy-edge-stroke-width-default: 1.5;
+  --xy-controls-button-background-color: rgb(var(--color-surface-raised));
+  --xy-controls-button-background-color-hover: rgb(var(--color-surface-muted));
+  --xy-controls-button-color: rgb(var(--color-fg));
+  --xy-controls-button-color-hover: rgb(var(--color-fg));
+  --xy-controls-button-border-color: rgb(var(--color-border));
+  --xy-attribution-background-color: rgb(var(--color-surface) / 0.95);
+}
+.aicd-graph .react-flow__attribution a {
+  color: rgb(var(--color-fg-muted));
+}
+.aicd-graph .react-flow__edge.aicd-edge-active path {
+  /* Активная зависимость: цвет + пунктир (без бесконечной анимации — prefers-reduced-motion, axe). */
+  stroke: rgb(var(--color-accent));
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+}
+.aicd-graph .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+.aicd-graph .react-flow__controls-button svg {
+  fill: currentColor;
+}

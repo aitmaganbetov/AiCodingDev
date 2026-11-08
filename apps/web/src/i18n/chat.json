@@ -1,5 +1,104 @@
 {
   "chat": {
-    "title": "Live Agent Chat"
+    "title": "Live Agent Chat",
+    "loading": "Загрузка ленты…",
+    "loadEarlier": "Показать более ранние",
+    "timelineLabel": "Лента сообщений run",
+    "emptyTitle": "Сообщений пока нет",
+    "emptyDescription": "Сообщения агентов, события и поручения появятся здесь по мере выполнения run.",
+    "emptyFiltered": "Ничего не найдено — измените фильтры или поиск.",
+    "chooseRoleFirst": "Выберите роль, чтобы открыть поток «Роль».",
+    "chooseTaskFirst": "Выберите задачу, чтобы открыть поток «Задача».",
+    "readOnly": "Ваша роль позволяет только читать ленту.",
+    "live": "получено в реальном времени",
+    "to": "→ {{role}}",
+    "mentionFilter": "Показать поток роли «{{role}}»",
+    "directiveStatus": "Поручение:",
+    "approvalStatus": "Одобрение:",
+    "taskLink": "Задача: {{task}}",
+    "sender": {
+      "user": "Пользователь",
+      "agent": "Агент",
+      "system": "Система"
+    },
+    "thread": {
+      "run": "Весь run",
+      "role": "Роль: {{role}}",
+      "task": "Задача: {{task}}"
+    },
+    "filters": {
+      "title": "Фильтры",
+      "search": "Поиск по ленте",
+      "find": "Найти",
+      "stream": "Поток",
+      "role": "Роль",
+      "chooseRole": "Выберите роль",
+      "task": "Задача",
+      "chooseTask": "Выберите задачу",
+      "thread": "Ветка обсуждения",
+      "allThreads": "Все ветки",
+      "types": "Типы элементов",
+      "typesHint": "Ничего не выбрано — показываются все типы.",
+      "reset": "Сбросить фильтры"
+    },
+    "composer": {
+      "title": "Комментарий",
+      "label": "Текст комментария",
+      "hint": "Комментарий виден участникам, но не доставляется агентам. Чтобы повлиять на выполнение, создайте поручение.",
+      "empty": "Введите текст комментария.",
+      "mention": "Упомянуть роль",
+      "mentionTitle": "Упомянуть роли",
+      "mentions": "Упомянуты: {{roles}}",
+      "send": "Отправить",
+      "sending": "Отправка…",
+      "sent": "Комментарий отправлен."
+    },
+    "enums": {
+      "stream": {
+        "all_agents": "Все агенты",
+        "codex": "Codex",
+        "claude": "Claude",
+        "role": "Роль",
+        "task": "Задача",
+        "approvals": "Одобрения"
+      },
+      "item_type": {
+        "agent_message": "Сообщение агента",
+        "chat_message": "Комментарий",
+        "directive": "Поручение",
+        "approval": "Одобрение",
+        "cli_excerpt": "Выдержка CLI",
+        "system_event": "Событие"
+      },
+      "acp_type": {
+        "TASK_ASSIGN": "Назначение задачи",
+        "HANDOFF": "Передача задачи",
+        "QUESTION": "Вопрос",
+        "ANSWER": "Ответ",
+        "REVIEW_REQUEST": "Запрос ревью",
+        "FINDING": "Замечание",
+        "FIX_REQUEST": "Запрос исправления",
+        "EVIDENCE_SUBMITTED": "Доказательства переданы",
+        "DECISION_PROPOSAL": "Предложение решения",
+        "DECISION_RECORDED": "Решение принято",
+        "BLOCKED": "Заблокировано",
+        "TASK_COMPLETED": "Задача завершена"
+      },
+      "approval_status": {
+        "PENDING": "Ожидает",
+        "APPROVED": "Одобрено",
+        "REJECTED": "Отклонено",
+        "EXPIRED": "Истекло",
+        "CANCELLED": "Отменено"
+      },
+      "ref": {
+        "diff": "Diff",
+        "evidence": "Evidence",
+        "test_report": "Отчёт тестов",
+        "artifact": "Артефакт",
+        "finding": "Находка",
+        "task": "Задача"
+      }
+    }
   }
 }

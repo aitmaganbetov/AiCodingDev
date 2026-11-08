@@ -77,6 +77,8 @@ test('run view: SSE events are shown; reconnect after a dropped connection uses 
   api.sseScripts = [{ toSeq: 3, cut: true }, { fromSeq: 2 }];
 
   await login(page, api);
+  // После входа открывается Dashboard (P7-03); список проектов — отдельный раздел.
+  await page.goto(`/w/${ws.id}/projects`);
   await page.getByRole('link', { name: 'Запуски проекта «Платёжный шлюз»' }).click();
   await expect(page).toHaveURL(`/w/${ws.id}/projects/${project.id}/runs`);
   await expect(page.getByRole('heading', { level: 1, name: 'Запуски · Платёжный шлюз' })).toBeFocused();

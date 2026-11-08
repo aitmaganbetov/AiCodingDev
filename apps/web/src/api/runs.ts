@@ -9,6 +9,12 @@ export type RunPage = Schemas['RunPage'];
 export type TaskStatus = Schemas['TaskStatus'];
 export type TaskSummary = Schemas['TaskSummary'];
 export type TaskGraph = Schemas['TaskGraph'];
+export type TaskDependency = Schemas['TaskDependency'];
+export type AgentRole = Schemas['AgentRole'];
+export type CliProvider = Schemas['CliProvider'];
+export type ActivityEvent = Schemas['ActivityEvent'];
+export type ActivityPage = Schemas['ActivityPage'];
+export type RunActivityQuery = Query<'getRunActivity'>;
 export type RunCommand = Schemas['RunCommandAccepted']['command'];
 export type RunCreateRequest = JsonBody<'createRun'>;
 export type ListRunsQuery = Query<'listRuns'>;
@@ -19,6 +25,7 @@ export const runKeys = {
   list: (workspaceId: string, projectId?: string) => ['runs', workspaceId, projectId ?? null] as const,
   detail: (runId: string) => ['run', runId] as const,
   tasks: (runId: string) => ['run', runId, 'tasks'] as const,
+  activity: (runId: string, taskId?: string) => ['run', runId, 'activity', taskId ?? null] as const,
 };
 
 export const runsApi = {
@@ -36,6 +43,11 @@ export const runsApi = {
 
   tasks(runId: string, query: RunTasksQuery = {}, signal?: AbortSignal): Promise<TaskGraph> {
     return request({ method: 'GET', path: `/runs/${seg(runId)}/tasks`, query, signal });
+  },
+
+  /** История событий run (run_event_log): дополняет SSE-ленту прошлым, фильтр по задаче/типу. */
+  activity(runId: string, query: RunActivityQuery = {}, signal?: AbortSignal): Promise<ActivityPage> {
+    return request({ method: 'GET', path: `/runs/${seg(runId)}/activity`, query, signal });
   },
 
   /** pause | resume | cancel (202: команда принята; переход публикуется событием run.state_changed). */
