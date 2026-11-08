@@ -75,23 +75,23 @@
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P3-01 | Миграции: runs, tasks, task_dependencies (+trigger), task_attempts, policies, approvals, checkpoints, outbox_events, worker_leases, external_actions, run_event_log, processed_events, user_directives, directive_impacts, directive_acknowledgements, agent_decisions | FR-ORCH-01…13 | P1-08 | P0 | Migration + RLS + constraint-тесты (self-dependency, cross-run) | TODO |
-| P3-02 | FSM-движок Run/Task/Execution/Directive/Approval (таблицы переходов + guards) | FR-ORCH-01, FR-ORCH-02 | P3-01 | P0 | Property-based тесты (Hypothesis): ни одна последовательность не нарушает таблицы | TODO |
-| P3-03 | Outbox writer + dispatcher + Dramatiq + базовый идемпотентный consumer | FR-ORCH-08 | P3-01 | P0 | Тест дублирующей доставки: эффект один | TODO |
-| P3-04 | Leases + fencing token + reaper | FR-ORCH-09 | P3-01 | P0 | Тест «зомби-воркера»: запись со старым токеном отклонена | TODO |
-| P3-05 | Валидация DAG (Кан, лимиты, plan_version) | FR-ORCH-04 | P3-02 | P0 | Unit: циклы, self-loop, cross-run, глубина | TODO |
-| P3-06 | Scheduler: готовность, приоритет критического пути, лимиты параллелизма | FR-ORCH-04 | P3-05, P3-04 | P0 | Integration: задачи стартуют только после зависимостей | TODO |
-| P3-07 | Retry/backoff/retry budget/timeouts, `failure_category` | FR-ORCH-02, AC-07 | P3-06, P2-11 | P0 | Fake timeout → RETRY_WAIT → FAILED по бюджету; успех не объявлен | TODO |
-| P3-08 | Runs API: POST/GET runs, GET tasks, pause/resume/cancel, activity; policy snapshot | FR-ORCH-06, FR-ORCH-13, FR-API-01 | P3-02, P1-11 | P0 | Schemathesis + idempotency + ETag тесты | TODO |
-| P3-09 | SSE: run_event_log, Last-Event-ID, heartbeat, периодическая проверка прав, Redis pub/sub | FR-CHAT-07 | P3-03 | P0 | Тест реконнекта: нет дублей и пропусков (AC-08) | TODO |
-| P3-10 | Approvals core: policy, four-eyes, expiry, привязка к plan_version; API `/approvals` | FR-APR-01, FR-APR-02, FR-APR-03 | P3-02, P1-10 | P0 | Тесты self-approval запрещён; истечение; RBAC | TODO |
-| P3-11 | Ledger `external_actions` + reconciler-интерфейс | FR-ORCH-10 | P3-03 | P0 | Тест: crash после CONFIRMED → действие не повторяется | TODO |
-| P3-12 | Checkpoints + recovery reconciler (executions, worktrees, outbox, actions) | FR-ORCH-07 | P3-11, P2-09 | P0 | Chaos: kill worker в RUNNING → корректное восстановление | TODO |
-| P3-13 | Directives backend: intake, детерминированный impact analysis, confirm, safe point, replan, dispatch, ack; API `/runs/{id}/directives` | FR-CHAT-03, FR-CHAT-04 | P3-12, P3-10 | P0 | Integration AC-06 на Fake | TODO |
-| P3-14 | Verification Engine v0: обобщённый `command` gate в verification-контейнере + evidence (расширяется в P6) | FR-QG-02, FR-QG-05, FR-ORCH-11 | P2-07, P1-15 | P0 | Evidence содержит commit, команду, exit code, время, sha256 | TODO |
+| P3-01 | Миграции: runs, tasks, task_dependencies (+trigger), task_attempts, policies, approvals, checkpoints, outbox_events, worker_leases, external_actions, run_event_log, processed_events, user_directives, directive_impacts, directive_acknowledgements, agent_decisions | FR-ORCH-01…13 | P1-08 | P0 | Migration + RLS + constraint-тесты (self-dependency, cross-run) | DONE |
+| P3-02 | FSM-движок Run/Task/Execution/Directive/Approval (таблицы переходов + guards) | FR-ORCH-01, FR-ORCH-02 | P3-01 | P0 | Property-based тесты (Hypothesis): ни одна последовательность не нарушает таблицы | DONE |
+| P3-03 | Outbox writer + dispatcher + Dramatiq + базовый идемпотентный consumer | FR-ORCH-08 | P3-01 | P0 | Тест дублирующей доставки: эффект один | DONE |
+| P3-04 | Leases + fencing token + reaper | FR-ORCH-09 | P3-01 | P0 | Тест «зомби-воркера»: запись со старым токеном отклонена | DONE |
+| P3-05 | Валидация DAG (Кан, лимиты, plan_version) | FR-ORCH-04 | P3-02 | P0 | Unit: циклы, self-loop, cross-run, глубина | DONE |
+| P3-06 | Scheduler: готовность, приоритет критического пути, лимиты параллелизма | FR-ORCH-04 | P3-05, P3-04 | P0 | Integration: задачи стартуют только после зависимостей | DONE |
+| P3-07 | Retry/backoff/retry budget/timeouts, `failure_category` | FR-ORCH-02, AC-07 | P3-06, P2-11 | P0 | Fake timeout → RETRY_WAIT → FAILED по бюджету; успех не объявлен | DONE |
+| P3-08 | Runs API: POST/GET runs, GET tasks, pause/resume/cancel, activity; policy snapshot | FR-ORCH-06, FR-ORCH-13, FR-API-01 | P3-02, P1-11 | P0 | Schemathesis + idempotency + ETag тесты | DONE |
+| P3-09 | SSE: run_event_log, Last-Event-ID, heartbeat, периодическая проверка прав, Redis pub/sub | FR-CHAT-07 | P3-03 | P0 | Тест реконнекта: нет дублей и пропусков (AC-08) | IN_REVIEW |
+| P3-10 | Approvals core: policy, four-eyes, expiry, привязка к plan_version; API `/approvals` | FR-APR-01, FR-APR-02, FR-APR-03 | P3-02, P1-10 | P0 | Тесты self-approval запрещён; истечение; RBAC | DONE |
+| P3-11 | Ledger `external_actions` + reconciler-интерфейс | FR-ORCH-10 | P3-03 | P0 | Тест: crash после CONFIRMED → действие не повторяется | DONE |
+| P3-12 | Checkpoints + recovery reconciler (executions, worktrees, outbox, actions) | FR-ORCH-07 | P3-11, P2-09 | P0 | Chaos: kill worker в RUNNING → корректное восстановление | DONE |
+| P3-13 | Directives backend: intake, детерминированный impact analysis, confirm, safe point, replan, dispatch, ack; API `/runs/{id}/directives` | FR-CHAT-03, FR-CHAT-04 | P3-12, P3-10 | P0 | Integration AC-06 на Fake | DONE |
+| P3-14 | Verification Engine v0: обобщённый `command` gate в verification-контейнере + evidence (расширяется в P6) | FR-QG-02, FR-QG-05, FR-ORCH-11 | P2-07, P1-15 | P0 | Evidence содержит commit, команду, exit code, время, sha256 | DONE |
 | P3-15 | Минимальный Run view UI (вертикальный срез): статус run, задачи, лента событий SSE | FR-CHAT-07 | P3-09, P1-13 | P1 | Playwright: события отображаются, реконнект без дублей | TODO |
-| P3-16 | Chaos suite v1: kill worker, рестарт Redis, потеря аренды, дубль сообщения, разрыв SSE | NFR-REL-01, NFR-REL-02 | P3-12 | P0 | Все сценарии зелёные в CI (nightly) | TODO |
-| P3-17 | E2E-срез на Fake CLI: run → plan → DAG → exec → gate v0 → COMPLETED / BLOCKED / FAILED | AC-07, AC-11, AC-16 | P3-13, P3-14 | P0 | E2E-тест зелёный | TODO |
+| P3-16 | Chaos suite v1: kill worker, рестарт Redis, потеря аренды, дубль сообщения, разрыв SSE | NFR-REL-01, NFR-REL-02 | P3-12 | P0 | Все сценарии зелёные в CI (nightly) | IN_REVIEW |
+| P3-17 | E2E-срез на Fake CLI: run → plan → DAG → exec → gate v0 → COMPLETED / BLOCKED / FAILED | AC-07, AC-11, AC-16 | P3-13, P3-14 | P0 | E2E-тест зелёный | DONE |
 | P3-18 | Retention/архивирование: партиции и job'ы для `run_event_log`, `agent_messages`, `agent_activity_events`, `outbox_events`, `audit_events` (роль `aicd_maintenance`, аудит) | NFR-REL-05 | P3-01 | P1 | Тест job'а на seeded БД; аудит использования BYPASSRLS | IN_PROGRESS |
 
 ## Phase 4 — Multi-Agent System
@@ -250,6 +250,31 @@
 | P2-14 | DONE | `tests/security/test_sandbox.py`, `tests/security/test_adapter_in_sandbox.py` | Запись вне worktree, сеть, секреты хоста, docker.sock, privileged — отклонены/недоступны |
 
 **Итог:** `uv run pytest --cov` → **421 passed** (PostgreSQL 17, Redis, S3-совместимый RustFS, Docker), покрытие 88%; ruff, mypy --strict (117 файлов), import-linter (4 контракта), deny-gate (123 py / 498 js пакетов) — без замечаний.
+
+### Phase 3 — Core Orchestrator (2026-11-08)
+
+Окружение проверки: PostgreSQL 17 (контейнер), Redis 7 (общий + отдельный `redis-server` для chaos), Docker, Python 3.13; CLI — Fake adapter (реальные CLI недоступны, см. Phase 2).
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P3-01 | DONE | `infrastructure/migrations/versions/0003_orchestration.py`, `0004_seed_quality_gates.py` | `tests/migrations/test_orchestration_invariants.py` → 29 passed (DAG-триггер, переходы, RLS, fencing, append-only). Seed 0004 исправлен: под FORCE RLS вставлял 0 строк, теперь снимает FORCE в транзакции миграции и падает при 0 строк |
+| P3-02 | DONE | `aicd_orchestration/fsm.py` | `tests/unit/test_orchestration_core.py` → 22 passed, в т.ч. Hypothesis: ни одна последовательность не нарушает FSM; таблица переходов кода = `allowed_transitions` БД |
+| P3-03 | DONE | `aicd_platform/{outbox,consumer,outbox_dispatcher}.py`, `apps/worker/**` (Dramatiq) | `tests/integration/test_outbox_dispatcher.py` → 5 passed (дубли/сбой публикации → повтор без дублей, монотонный seq при конкурентных диспетчерах); `test_worker_actors.py` → 6 passed (дубль доставки → эффект один) |
+| P3-04 | DONE | `aicd_platform/leases.py`, `aicd_orchestration/recovery.py` | `tests/chaos/test_recovery.py`: после reap старый fencing token не актуален («зомби» не пишет); reaper не освобождает аренду, если смерть процесса не подтверждена |
+| P3-05 | DONE | `aicd_orchestration/{dag,plans}.py` | Unit: цикл с путём, self-loop, неизвестная зависимость, глубина, L3+ без проверки (Hypothesis) — passed |
+| P3-06 | DONE | `aicd_orchestration/engine.py` (`_dispatchable`), `apps/worker/aicd_worker/handlers.py` | `tests/integration/test_scheduler.py` → 2 passed: READY только после зависимостей; порядок по критическому пути; лимит `max_parallel_tasks` из policy snapshot проверяется и в `execute_task` под блокировкой run |
+| P3-07 | DONE | `aicd_orchestration/retry.py`, `engine.py` (`fail_attempt`) | E2E: `nonzero_exit` → 3 попытки `PROCESS_FAILED` → FAILED; секрет в изменении → 3 × `GATE_FAILED` → FAILED; backoff/jitter/RATE_LIMITED — unit. Исправлено: `attempt_no` берётся из истории (после неучитываемого повтора номер дублировался — найдено chaos-тестом) |
+| P3-08 | DONE | `apps/api/aicd_api/routers/runs.py`, `aicd_orchestration/runs.py` | `tests/integration/test_runs_api.py` → 12 passed: Idempotency-Key (повтор/реюз с другим телом 422/отсутствие 400, одно событие `run.created`), ETag/304/If-Match 412, 404 для чужого run, 403 для viewer; Schemathesis-fuzz 9 операций (25 примеров каждая): нет 5xx, ответы по контракту — нашёл недокументированный 404 у `createRun` (контракт дополнен) |
+| P3-09 | IN_REVIEW | `apps/api/aicd_api/routers/events.py`, `aicd_platform/sse.py` | `tests/integration/test_sse.py` → 5 passed (реконнект с Last-Event-ID: ровно один раз, без пропусков; heartbeat; закрытие после терминального события; 404 не участнику; отзыв доступа; 410 за окном). **Не сделано:** throttle `cli.output` 20/с, ограничение буфера медленного клиента; сигнал отзыва доступа из identity (сейчас — перепроверка раз в 60 с); противоречие лимитов — OQ-35 |
+| P3-10 | DONE | `aicd_orchestration/approvals.py`, `apps/api/aicd_api/routers/approvals.py` | `tests/unit/test_approvals_rules.py` → 97 passed; `tests/integration/test_approvals_api.py` → 10 passed (four-eyes, матрица ролей, истечение, повтор по ключу, привязка к plan_version) |
+| P3-11 | DONE | `aicd_orchestration/external_actions.py` | `tests/integration/test_external_actions.py` → 8 passed: крах после CONFIRMED → повторного вызова нет (AC-09); EXECUTING → probe |
+| P3-12 | DONE | `aicd_orchestration/{recovery,checkpoints}.py`, `aicd_security/{local,docker}_runner.py` (`owns/kill`), `apps/worker/aicd_worker/{wiring,maintenance,main}.py` | `tests/chaos/test_recovery.py` → 2 passed: воркер-процесс убит SIGKILL во время работы CLI → пока аренда жива, reconciler ничего не трогает; после истечения — осиротевший CLI убит, исполнение CRASHED, попытка `LEASE_LOST`, задача RETRY_WAIT без расхода попытки, worktree ORPHANED→REMOVED, checkpoint `plan_approved` есть → run COMPLETED второй попыткой |
+| P3-13 | DONE | `aicd_orchestration/directives.py`, `apps/api/aicd_api/routers/directives.py` | `tests/integration/test_directives.py` → 7 passed (AC-06 на Fake: директива → анализ → confirm → safe point + checkpoint → новая plan_version → DISPATCHED) |
+| P3-14 | DONE | `packages/verification/**` | `tests/integration/test_verification_engine.py` → 7 passed, `tests/unit/test_gates_applicability.py` → 33 passed; E2E: evidence с commit, командой, exit code, временем, окружением, sha256 артефакта, `VERIFIED` |
+| P3-16 | IN_REVIEW | `tests/chaos/**`, `.github/workflows/ci.yml` (nightly) | Локально все сценарии зелёные: kill worker (`test_recovery`), потеря аренды, рестарт Redis под диспетчером — событие, записанное во время простоя, доставлено один раз, проекция SSE одна (`test_redis_restart`), дубль сообщения (`test_worker_actors`), разрыв SSE (`test_sse`). Критерий «зелёные в CI (nightly)» — workflow на GitHub ещё не запускался |
+| P3-17 | DONE | `tests/e2e/test_phase3_slice.py`, `tests/support/phase3.py` | 7 passed: COMPLETED с VERIFIED evidence; FAILED (gate/CLI); BLOCKED `PROVIDER_UNAVAILABLE`/`AUTH_REQUIRED` без обхода; AWAITING_APPROVAL → решение → COMPLETED |
+
+Исправления, найденные сквозными тестами: повтор задачи падал на существующей ветке worktree; run не переходил в BLOCKED, пока оставались PENDING-потомки заблокированной задачи; verifier не создавал staging-каталог.
 
 ### P3-18 — Retention/архивирование (2026-11-08)
 
