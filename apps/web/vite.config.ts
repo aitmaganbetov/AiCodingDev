@@ -34,5 +34,7 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
     unstubGlobals: true,
+    // tokens.test.ts читает tokens.css как текст (?raw): остальной CSS в unit-тестах не нужен.
+    css: { include: [/styles\/tokens\.css/] },
   },
 });
