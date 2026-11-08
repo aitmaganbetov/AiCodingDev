@@ -77,6 +77,8 @@ def build_executor(
         repository_roots=settings.repository_roots,
         adapter_factory=fake_adapter_factory(settings),
         worker_host_id=worker_host_id,
+        index_export_cache_root=settings.index_export_cache_root,
+        ensure_index_timeout_seconds=settings.ensure_index_timeout_seconds,
     )
 
 

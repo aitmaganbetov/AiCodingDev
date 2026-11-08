@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import Response
 
@@ -28,6 +29,7 @@ from aicd_api.schemas import (
     ProjectUpdateRequest,
     RepositoryAttachRequest,
 )
+from aicd_code_intelligence.index.jobs import enqueue_indexing_job
 from aicd_identity import api as identity
 from aicd_platform.db import transaction
 from aicd_platform.errors import FieldError, ProblemError
@@ -194,6 +196,17 @@ async def attach_repository(
             default_branch=body.default_branch,
             roots=state.settings.repository_roots,
         )
+        # Контракт attachRepository: «ставит indexing_job (асинхронно)» — HEAD commit на момент привязки;
+        # исполняет `aicd-worker index` (пустой репозиторий без commit — нечего индексировать).
+        head = (
+            await conn.execute(
+                text("SELECT last_synced_commit_sha FROM repositories WHERE id = :id"), {"id": row["id"]}
+            )
+        ).scalar()
+        if head:
+            await enqueue_indexing_job(
+                conn, workspace_id=access.workspace_id, repository_id=row["id"], commit_sha=head, kind="full"
+            )
         return CommandResult(
             201, views.repository(row), {"Location": f"/api/v1/projects/{project_id}/repositories/{row['id']}"}
         )

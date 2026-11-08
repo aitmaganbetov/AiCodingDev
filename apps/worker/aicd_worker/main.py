@@ -1,9 +1,11 @@
-"""Точки входа воркеров: `aicd-worker outbox|orchestrator|exec`.
+"""Точки входа воркеров: `aicd-worker outbox|orchestrator|exec|index`.
 
 * `outbox` — опрос outbox (0,5 с без LISTEN), проекция в run_event_log, публикация в Dramatiq, сигнал SSE;
 * `orchestrator` — Dramatiq-консьюмер очереди `orchestrator` + периодический tick/повторная постановка READY;
 * `exec` — консьюмер очереди `exec` (исполнение задач через CLI Gateway; fake-адаптер запрещён в production)
-  + reaper аренд и recovery reconciler своего хоста.
+  + reaper аренд и recovery reconciler своего хоста;
+* `index` — опрос очереди `indexing_jobs` (`sys_indexing_workspaces`), индексация, определение стека,
+  очистка кэша экспортов снимков (`aicd_worker.indexing`).
 
 SIGINT/SIGTERM — штатная остановка: новые сообщения не берутся, текущие дорабатываются.
 """
@@ -30,14 +32,14 @@ from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.db import DbContext, create_engine, transaction
 from aicd_platform.logging import configure_logging
 from aicd_platform.outbox_dispatcher import dispatch_batch
-from aicd_worker import maintenance, runtime
+from aicd_worker import indexing, maintenance, runtime
 from aicd_worker.broker import EXEC_QUEUE, ORCHESTRATOR_QUEUE, Actors, build_broker, register_actors
 from aicd_worker.settings import WorkerSettings
 from aicd_worker.wiring import ConfigurationError, build_orchestrator, build_reconciler, check_exec_adapter
 
 log = logging.getLogger("aicd.worker")
 
-Kind = Literal["outbox", "orchestrator", "exec"]
+Kind = Literal["outbox", "orchestrator", "exec", "index"]
 ERROR_BACKOFF_SECONDS = 2.0
 
 
@@ -74,6 +76,19 @@ async def run_outbox(
     finally:
         if own_redis:
             await redis.aclose()
+
+
+async def run_indexer(settings: WorkerSettings, engine: AsyncEngine, stop: asyncio.Event) -> None:
+    state = indexing.IndexLoopState()
+    while not stop.is_set():
+        try:
+            iteration = await indexing.index_once(settings, engine, state)
+        except Exception:
+            log.exception("indexing iteration failed")
+            await _wait(stop, ERROR_BACKOFF_SECONDS)
+            continue
+        if not iteration.outcomes:
+            await _wait(stop, settings.index_poll_seconds)
 
 
 async def run_consumers(
@@ -132,6 +147,8 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
     try:
         if kind == "outbox":
             await run_outbox(settings, engine, stop)
+        elif kind == "index":
+            await run_indexer(settings, engine, stop)
         else:
             await run_consumers(kind, settings, engine, stop)
     finally:
@@ -140,7 +157,7 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="aicd-worker", description="Фоновые воркеры AiCodingDev")
-    parser.add_argument("kind", choices=["outbox", "orchestrator", "exec"])
+    parser.add_argument("kind", choices=["outbox", "orchestrator", "exec", "index"])
     args = parser.parse_args(argv)
     settings = WorkerSettings()
     configure_logging(settings.log_level)

@@ -95,7 +95,9 @@ async def run_job_with_stack(
     return outcome
 
 
-async def _ready_snapshot(engine: AsyncEngine, ctx: DbContext, repository_id: uuid.UUID, commit: str) -> uuid.UUID | None:
+async def _ready_snapshot(
+    engine: AsyncEngine, ctx: DbContext, repository_id: uuid.UUID, commit: str
+) -> uuid.UUID | None:
     async with transaction(engine, ctx) as conn:
         row = (
             await conn.execute(
@@ -147,7 +149,7 @@ async def ensure_snapshot(
     except TimeoutError:
         log.warning("index.ensure_timeout", extra={"job_id": str(job_id)})
         return EnsureResult(None, job_id=job_id, warning="index_timeout")
-    except Exception as exc:  # noqa: BLE001 — индексация не должна ронять задачу
+    except Exception as exc:  # индексация не должна ронять задачу
         log.exception("index.ensure_failed", extra={"job_id": str(job_id)})
         return EnsureResult(None, job_id=job_id, warning=f"index_failed:{type(exc).__name__}")
     if outcome.result.status == "SUCCEEDED" and outcome.result.snapshot_id is not None:

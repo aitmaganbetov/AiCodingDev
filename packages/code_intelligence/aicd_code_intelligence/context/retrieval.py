@@ -333,9 +333,9 @@ def _merge_ranges(ranges: Sequence[tuple[int, int, float]]) -> list[tuple[int, i
 def _enclosing(symbols: Sequence[_Symbol], line: int) -> tuple[int, int] | None:
     best: _Symbol | None = None
     for sym in symbols:
-        if sym.start <= line <= sym.end and sym.end - sym.start <= MAX_SYMBOL_LINES:
-            if best is None or sym.end - sym.start < best.end - best.start:
-                best = sym
+        fits = sym.start <= line <= sym.end and sym.end - sym.start <= MAX_SYMBOL_LINES
+        if fits and (best is None or sym.end - sym.start < best.end - best.start):
+            best = sym
     return (best.start, best.end) if best else None
 
 
@@ -375,7 +375,9 @@ async def _load_files(conn: AsyncConnection, snapshot_id: uuid.UUID) -> dict[str
     return {r[0]: _File(r[0], r[1], int(r[2]), bool(r[3]), r[4]) for r in rows}
 
 
-async def _load_symbols(conn: AsyncConnection, snapshot_id: uuid.UUID, paths: Sequence[str]) -> dict[str, list[_Symbol]]:
+async def _load_symbols(
+    conn: AsyncConnection, snapshot_id: uuid.UUID, paths: Sequence[str]
+) -> dict[str, list[_Symbol]]:
     out: dict[str, list[_Symbol]] = {}
     if not paths:
         return out
@@ -406,9 +408,7 @@ async def _symbol_definitions(conn: AsyncConnection, snapshot_id: uuid.UUID, nam
     return [_Symbol(r[0], r[1], r[2], int(r[3]), int(r[4]), r[5]) for r in rows]
 
 
-async def _edges(
-    conn: AsyncConnection, snapshot_id: uuid.UUID, paths: Sequence[str]
-) -> list[tuple[str, str, str]]:
+async def _edges(conn: AsyncConnection, snapshot_id: uuid.UUID, paths: Sequence[str]) -> list[tuple[str, str, str]]:
     if not paths:
         return []
     rows = await conn.execute(
@@ -473,9 +473,7 @@ async def _stack(conn: AsyncConnection, project_id: uuid.UUID) -> list[str]:
         ),
         {"p": project_id},
     )
-    return [
-        f"{r[0]}: {r[1]} {r[2]} ({r[3]}{', подтверждено' if r[4] else ''})" for r in rows
-    ]
+    return [f"{r[0]}: {r[1]} {r[2]} ({r[3]}{', подтверждено' if r[4] else ''})" for r in rows]
 
 
 async def _doc_sections(conn: AsyncConnection, words: Sequence[str]) -> list[dict[str, Any]]:
@@ -510,7 +508,9 @@ async def _doc_sections(conn: AsyncConnection, words: Sequence[str]) -> list[dic
 
 
 def _read_texts(repo: Path, files: Sequence[_File]) -> dict[str, list[str]]:
-    entries = [TreeEntry(path=f.path, mode="100644", object_type="blob", blob_sha=f.blob_sha, size=f.size) for f in files]
+    entries = [
+        TreeEntry(path=f.path, mode="100644", object_type="blob", blob_sha=f.blob_sha, size=f.size) for f in files
+    ]
     blobs = read_blobs(repo, entries)
     return {f.path: _lines(blobs[f.blob_sha]) for f in files if f.blob_sha in blobs}
 
@@ -563,6 +563,49 @@ def _repo_map(files: Mapping[str, _File], stack: Sequence[str]) -> str:
     return body
 
 
+def _materialize(
+    candidates: Sequence[_Candidate],
+    texts: Mapping[str, list[str]],
+    chunks: Mapping[str, list[tuple[int, int, uuid.UUID]]],
+    *,
+    commit: str,
+    base_commit: str,
+) -> tuple[list[Fragment], dict[tuple[str, str, int | None, int | None], _Candidate]]:
+    """Кандидаты → фрагменты: текст строк из blob, ссылка на фрагмент индекса (`knowledge_chunks`)."""
+    fragments: list[Fragment] = []
+    origin: dict[tuple[str, str, int | None, int | None], _Candidate] = {}
+    for c in candidates:
+        start: int | None
+        end: int | None
+        if c.text is not None:
+            body_text, start, end = c.text, c.start, c.end
+        else:
+            lines = texts.get(c.path)
+            if lines is None or c.start is None:
+                continue
+            start = max(1, c.start)
+            end = min(len(lines), c.end or len(lines))
+            if end < start:
+                continue
+            body_text = "\n".join(lines[start - 1 : end])
+        if c.chunk_id is None and c.start is not None:
+            c.chunk_id = next((cid for a, b, cid in chunks.get(c.path, []) if a <= c.start <= b), None)
+        frag = Fragment(
+            section=c.section,
+            kind=c.kind,
+            path=c.path,
+            commit_sha=base_commit if c.kind == "docs" else commit,  # документация не привязана к commit кода
+            text=body_text,
+            score=c.score,
+            start_line=start,
+            end_line=end,
+            source_ref=c.source_ref or (f"chunk:{c.chunk_id}" if c.chunk_id else None),
+        )
+        fragments.append(frag)
+        origin.setdefault(frag.key(), c)
+    return fragments, origin
+
+
 async def build_context_pack(
     engine: AsyncEngine,
     req: RetrievalRequest,
@@ -586,7 +629,9 @@ async def build_context_pack(
     async with transaction(engine, ctx) as conn:
         snap = await _resolve_snapshot(conn, req.repository_id, req.base_commit)
         root_ref = (
-            await conn.execute(text("SELECT local_root_ref FROM repositories WHERE id = :id"), {"id": req.repository_id})
+            await conn.execute(
+                text("SELECT local_root_ref FROM repositories WHERE id = :id"), {"id": req.repository_id}
+            )
         ).scalar()
         files: dict[str, _File] = {}
         defs: list[_Symbol] = []
@@ -641,7 +686,11 @@ async def build_context_pack(
     if snap is not None and repo_path is not None and terms:
         try:
             export = await asyncio.to_thread(
-                materialize_export, repo_path, snap.commit, [(f.path, f.blob_sha) for f in files.values()], export_cache_root
+                materialize_export,
+                repo_path,
+                snap.commit,
+                [(f.path, f.blob_sha) for f in files.values()],
+                export_cache_root,
             )
             rg_hits, rg_warn = await asyncio.to_thread(_rg_terms, export, terms)
             warn.extend(rg_warn)
@@ -662,9 +711,7 @@ async def build_context_pack(
     async with transaction(engine, ctx) as conn:
         edges = await _edges(conn, snap.id, focus) if snap is not None else []
         neighbour_paths = {p for s, t, _ in edges for p in (s, t)}
-        symbols = (
-            await _load_symbols(conn, snap.id, sorted({*hit_files, *neighbour_paths})) if snap is not None else {}
-        )
+        symbols = await _load_symbols(conn, snap.id, sorted({*hit_files, *neighbour_paths})) if snap is not None else {}
         chunk_paths = sorted({*hit_files, *neighbour_paths, *changed})
         chunks = await _file_chunks(conn, snap.id, chunk_paths) if snap is not None else {}
 
@@ -673,13 +720,18 @@ async def build_context_pack(
             if path not in files:
                 continue
             for line in hit_lines:
-                rng = _enclosing(symbols.get(path, []), line) or (max(1, line - HIT_CONTEXT_LINES), line + HIT_CONTEXT_LINES)
+                rng = _enclosing(symbols.get(path, []), line) or (
+                    max(1, line - HIT_CONTEXT_LINES),
+                    line + HIT_CONTEXT_LINES,
+                )
                 exact_ranges.setdefault(path, []).append((rng[0], rng[1], 1.0))
     for path, ranges in exact_ranges.items():
         merged = sorted(_merge_ranges(ranges), key=lambda r: (-r[2], r[0]))[:MAX_RANGES_PER_FILE]
         for a, b, s in merged:
             candidates.append(
-                _Candidate("exact", _section_for(files.get(path)), path, a, b, hit_files.get(path, 0.0) * 10 + s, "exact")
+                _Candidate(
+                    "exact", _section_for(files.get(path)), path, a, b, hit_files.get(path, 0.0) * 10 + s, "exact"
+                )
             )
     for path in path_seeds:
         candidates.append(
@@ -706,11 +758,16 @@ async def build_context_pack(
         if other not in focus_set and other in files:
             neighbour_score[other] = neighbour_score.get(other, 0.0) + 1.0
     for path, score in neighbour_score.items():
-        candidates.append(_Candidate("dependency", _section_for(files.get(path)), path, 1, HEAD_LINES["dependency"], score, "graph"))
+        candidates.append(
+            _Candidate("dependency", _section_for(files.get(path)), path, 1, HEAD_LINES["dependency"], score, "graph")
+        )
     for path, score in tests_for.items():
         candidates.append(_Candidate("dependency", "tests", path, 1, HEAD_LINES["tests"], score, "graph"))
     for path in focus:
-        outline = [f"{s.kind} {s.name} L{s.start}-L{s.end}" + (f": {s.signature}" if s.signature else "") for s in symbols.get(path, [])]
+        outline = [
+            f"{s.kind} {s.name} L{s.start}-L{s.end}" + (f": {s.signature}" if s.signature else "")
+            for s in symbols.get(path, [])
+        ]
         imports = sorted({t for s, t, e in edges if s == path and e == "imports"})
         importers = sorted({s for s, t, e in edges if t == path and e == "imports"})
         tests = sorted({s for s, t, e in edges if t == path and e == "tests"})
@@ -724,7 +781,9 @@ async def build_context_pack(
                 f"tests: {', '.join(tests) or '—'}",
             ]
         )
-        candidates.append(_Candidate("dependency", "symbols_graph", path, None, None, hit_files.get(path, 0.0), "graph", text=body))
+        candidates.append(
+            _Candidate("dependency", "symbols_graph", path, None, None, hit_files.get(path, 0.0), "graph", text=body)
+        )
 
     # 3. task_relevance: FTS и pg_trgm
     if fts_hits:
@@ -733,18 +792,30 @@ async def build_context_pack(
         queries.append(QueryLog("trigram", " | ".join(terms[:6])[:4000]))
     for strategy, hits in (("fts", fts_hits), ("trigram", trgm_hits)):
         for hit in hits:
-            path = hit.metadata.get("path")
-            start, end = hit.metadata.get("start_line"), hit.metadata.get("end_line")
-            if not isinstance(path, str) or path not in files or not isinstance(start, int) or not isinstance(end, int):
+            hit_path = hit.metadata.get("path")
+            hit_start, hit_end = hit.metadata.get("start_line"), hit.metadata.get("end_line")
+            if not (isinstance(hit_path, str) and hit_path in files):
                 continue
-            end = min(end, start + 119)
+            if not (isinstance(hit_start, int) and isinstance(hit_end, int)):
+                continue
             candidates.append(
-                _Candidate("task_relevance", _section_for(files.get(path)), path, start, end, hit.score, strategy, chunk_id=hit.chunk_id)
+                _Candidate(
+                    "task_relevance",
+                    _section_for(files.get(hit_path)),
+                    hit_path,
+                    hit_start,
+                    min(hit_end, hit_start + 119),
+                    hit.score,
+                    strategy,
+                    chunk_id=hit.chunk_id,
+                )
             )
 
     # 4. recency
     for path in changed:
-        candidates.append(_Candidate("recency", _section_for(files.get(path)), path, 1, HEAD_LINES["recency"], 0.0, None))
+        candidates.append(
+            _Candidate("recency", _section_for(files.get(path)), path, 1, HEAD_LINES["recency"], 0.0, None)
+        )
 
     # 5. docs (только SMART/STRICT; OFF — запрос не выполняется и не журналируется)
     if docs_allowed:
@@ -761,14 +832,23 @@ async def build_context_pack(
                 heading = d["heading"] or d["section_path"]
                 candidates.append(
                     _Candidate(
-                        "docs", "docs", f"doc:{d['section_path']}", None, None, float(d["score"]), "docs",
-                        text=f"# {heading}\nsource: {d['uri_or_file_ref']}\n\n{body}", source_ref=f"documentation_section:{d['id']}",
+                        "docs",
+                        "docs",
+                        f"doc:{d['section_path']}",
+                        None,
+                        None,
+                        float(d["score"]),
+                        "docs",
+                        text=f"# {heading}\nsource: {d['uri_or_file_ref']}\n\n{body}",
+                        source_ref=f"documentation_section:{d['id']}",
                     )
                 )
 
     # 6. repo_map
     if snap is not None:
-        candidates.append(_Candidate("map", "repo_map", "<repo_map>", None, None, 0.0, None, text=_repo_map(files, stack)))
+        candidates.append(
+            _Candidate("map", "repo_map", "<repo_map>", None, None, 0.0, None, text=_repo_map(files, stack))
+        )
 
     # Текст из git blob снимка
     need = sorted({c.path for c in candidates if c.text is None and c.path in files})
@@ -781,51 +861,20 @@ async def build_context_pack(
     elif need:
         warn.append("repository_unavailable_code_skipped")
 
-    fragments: list[Fragment] = []
-    origin: dict[tuple[str, str, int | None, int | None], _Candidate] = {}
     commit = snap.commit if snap is not None else req.base_commit
-    for c in candidates:
-        if c.text is not None:
-            body_text, start, end = c.text, c.start, c.end
-        else:
-            lines = texts.get(c.path)
-            if lines is None or c.start is None:
-                continue
-            start = max(1, c.start)
-            end = min(len(lines), c.end or len(lines))
-            if end < start:
-                continue
-            body_text = "\n".join(lines[start - 1 : end])
-        if c.chunk_id is None and c.start is not None:
-            for a, b, cid in chunks.get(c.path, []):
-                if a <= c.start <= b:
-                    c.chunk_id = cid
-                    break
-        frag = Fragment(
-            section=c.section,
-            kind=c.kind,
-            path=c.path,
-            commit_sha=req.base_commit if c.kind == "docs" else commit,
-            text=body_text,
-            score=c.score,
-            start_line=start,
-            end_line=end,
-            source_ref=c.source_ref or (f"chunk:{c.chunk_id}" if c.chunk_id else None),
-        )
-        fragments.append(frag)
-        origin.setdefault(frag.key(), c)
+    fragments, origin = _materialize(candidates, texts, chunks, commit=commit, base_commit=req.base_commit)
 
     selection = select(fragments, base_commit=req.base_commit, budget=budget, stale_policy=req.stale_policy)
 
     # Журнал retrieval: фрагменты индекса (chunk) по стратегиям в порядке ранга
     by_strategy = {q.strategy: q for q in queries}
     for frag in fragments:
-        c = origin.get(frag.key())
-        if c is None or c.chunk_id is None or c.strategy is None:
+        origin_c = origin.get(frag.key())
+        if origin_c is None or origin_c.chunk_id is None or origin_c.strategy is None:
             continue
-        q = by_strategy.get(c.strategy)
-        if q is not None and all(cid != c.chunk_id for cid, _, _ in q.hits):
-            q.hits.append((c.chunk_id, float(frag.score), frag.key()))
+        q = by_strategy.get(origin_c.strategy)
+        if q is not None and all(cid != origin_c.chunk_id for cid, _, _ in q.hits):
+            q.hits.append((origin_c.chunk_id, float(frag.score), frag.key()))
 
     extra = {
         "role": req.role,
@@ -833,8 +882,12 @@ async def build_context_pack(
         "stale_policy": req.stale_policy,
         "budget": [budget.max_bytes, budget.max_files, budget.max_fragment_bytes],
     }
-    digest = content_hash(commit=req.base_commit, policy_version=CONTEXT_POLICY_VERSION, inputs=selection.fragments, extra=extra)
-    manifest = selection.manifest(base_commit=req.base_commit, policy_version=CONTEXT_POLICY_VERSION, stale_policy=req.stale_policy)
+    digest = content_hash(
+        commit=req.base_commit, policy_version=CONTEXT_POLICY_VERSION, inputs=selection.fragments, extra=extra
+    )
+    manifest = selection.manifest(
+        base_commit=req.base_commit, policy_version=CONTEXT_POLICY_VERSION, stale_policy=req.stale_policy
+    )
     pack = ContextPack(
         request=req,
         snapshot_id=snap.id if snap else None,
@@ -853,7 +906,11 @@ async def build_context_pack(
             "role": req.role,
             "documentation_mode": req.documentation_mode,
             "docs": "allowed" if docs_allowed else "off",
-            "budget": {"max_bytes": budget.max_bytes, "max_files": budget.max_files, "max_fragment_bytes": budget.max_fragment_bytes},
+            "budget": {
+                "max_bytes": budget.max_bytes,
+                "max_files": budget.max_files,
+                "max_fragment_bytes": budget.max_fragment_bytes,
+            },
             "terms": terms,
             "content_hash": digest,
             "stats": pack.stats(),

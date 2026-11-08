@@ -28,3 +28,13 @@ class WorkerSettings(Settings):
     stale_ready_seconds: int = Field(default=30, ge=1)
     worker_threads: int = Field(default=4, ge=1, le=64)
     exec_time_limit_seconds: int = Field(default=5 * 3600, ge=60)
+
+    # Индексация кода (P5-02/P5-06): `aicd-worker index` и индекс перед исполнением задачи.
+    index_poll_seconds: float = Field(default=5.0, gt=0, le=300)
+    index_workspace_batch: int = Field(default=10, ge=1, le=1000)
+    index_jobs_per_workspace: int = Field(default=5, ge=1, le=100)
+    index_stale_seconds: int = Field(default=1800, ge=60)  # RUNNING дольше — аренда потеряна, задание повторяется
+    index_export_cache_root: Path = Path("/var/lib/aicd/index-export")
+    index_export_keep: int = Field(default=8, ge=1, le=1000)
+    index_prune_interval_seconds: float = Field(default=3600.0, gt=0)
+    ensure_index_timeout_seconds: float = Field(default=300.0, gt=0, le=3600)
