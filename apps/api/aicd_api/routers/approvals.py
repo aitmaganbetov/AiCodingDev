@@ -84,7 +84,7 @@ def approval_view(row: dict[str, Any], can_decide: bool) -> dict[str, Any]:
 
 async def _locate(request: Request, principal: identity.Principal, approval_id: uuid.UUID) -> Access:
     """Workspace approval через SECURITY DEFINER `sys_resolve_approval_workspace` (только для членов) —
-    иначе 404, не раскрывая чужие ресурсы (AC-12); как `_resolve` в routers/runs.py."""
+    иначе 404, не раскрывая чужие ресурсы (AC-12); как `resolve_resource` в routers/runs.py."""
     state = app_state(request)
     async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
         ws = (

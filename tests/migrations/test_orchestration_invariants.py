@@ -48,12 +48,16 @@ def admin(database: testdb.TestDatabase) -> Iterator[psycopg.Connection]:
 @pytest.fixture(scope="module")
 def world(admin: psycopg.Connection) -> World:
     a, b = seed_tenant(admin), seed_tenant(admin)
-    gate = uuid7()
-    # Глобальный gate в seed-профиле strict (workspace_id = NULL, как у профиля).
+    gate, profile = uuid7(), uuid7()
+    # Gate в собственном профиле workspace A (не в глобальном seed: иначе он попал бы в планы run'ов
+    # других тестов и в сверку seed с реестром gates).
     admin.execute(
-        "INSERT INTO quality_gates (id, workspace_id, profile_id, name, gate_type)"
-        " VALUES (%s, NULL, '01a1c000-0000-7000-8000-000000000002', %s, 'UNIT')",
-        (gate, f"unit-{gate.hex[-8:]}"),
+        "INSERT INTO quality_profiles (id, workspace_id, code, version, definition) VALUES (%s, %s, %s, 1, '{}')",
+        (profile, a.workspace_id, "basic"),
+    )
+    admin.execute(
+        "INSERT INTO quality_gates (id, workspace_id, profile_id, name, gate_type) VALUES (%s, %s, %s, %s, 'UNIT')",
+        (gate, a.workspace_id, profile, f"unit-{gate.hex[-8:]}"),
     )
     artifact = uuid7()
     admin.execute(

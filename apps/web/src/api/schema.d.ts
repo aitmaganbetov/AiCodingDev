@@ -1023,7 +1023,7 @@ export interface components {
          * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
          * @enum {string}
          */
-        ArtifactKind: "git_diff" | "test_report" | "scan_report" | "sbom" | "context_pack" | "cli_output" | "raw_cli_log" | "run_report" | "other";
+        ArtifactKind: "git_diff" | "test_report" | "scan_report" | "sbom" | "context_pack" | "cli_output" | "raw_cli_log" | "run_report" | "other" | "coverage_report" | "gate_log" | "applicability_report" | "signature";
         /**
          * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
          * @enum {string}
@@ -1637,6 +1637,12 @@ export interface components {
             status: components["schemas"]["GateExecutionStatus"];
             /** Format: uuid */
             evidence_id?: string | null;
+            /** @description Commit, на котором выполнен gate (вердикт по задаче/commit, QUALITY_GATES §5) */
+            commit_sha?: string;
+            /** @description Код ERROR/FAIL (TOOL_UNAVAILABLE, TIMEOUT, INFRA, SHA_MISMATCH, REPORT_UNPARSABLE, EMPTY_SUITE, ...) */
+            error_code?: string | null;
+            /** @description Причина NOT_APPLICABLE/SKIPPED (секреты редактируются) */
+            not_applicable_reason?: string | null;
             /** Format: date-time */
             started_at?: string | null;
             /** Format: date-time */
@@ -1651,6 +1657,9 @@ export interface components {
             gate_execution_id?: string | null;
             severity: components["schemas"]["FindingSeverity"];
             rule_id: string;
+            /** @description Краткое описание находки (секреты редактируются) */
+            title?: string;
+            cwe_id?: string | null;
             file_path?: string | null;
             line?: number | null;
             status: components["schemas"]["FindingStatus"];
@@ -1672,6 +1681,10 @@ export interface components {
             findings_summary: {
                 [key: string]: number;
             };
+            /** @description finding_status → count (все находки run, жизненный цикл) */
+            findings_by_status?: {
+                [key: string]: number;
+            };
             findings: components["schemas"]["Finding"][];
             findings_total: number;
         };
@@ -1685,6 +1698,14 @@ export interface components {
             applicability: components["schemas"]["ApplicabilityStatus"];
             agent_role?: components["schemas"]["AgentRole"] | null;
             status: components["schemas"]["ComplianceStatus"];
+            /**
+             * @description Check контроля (трассировка standard → control → check → evidence → verdict)
+             * @enum {string}
+             */
+            verification_method?: "automated_gate" | "agent_review" | "manual" | "document_check";
+            gate_type?: string | null;
+            /** Format: uuid */
+            gate_execution_id?: string | null;
             /** Format: uuid */
             evidence_id?: string | null;
             reviewed_by?: components["schemas"]["UserRef"] | null;
@@ -1712,6 +1733,11 @@ export interface components {
             tasks: components["schemas"]["TaskSummary"][];
             approvals: components["schemas"]["Approval"][];
             evidence: components["schemas"]["Evidence"][];
+            /** @description Полный список находок run (quality.findings усечён до 200) */
+            findings?: components["schemas"]["Finding"][];
+            compliance_matrix?: components["schemas"]["ComplianceTraceRow"][];
+            /** @description Автоматические проверки не являются официальной сертификацией (ТЗ §13) */
+            disclaimer?: string;
             external_actions?: {
                 /** Format: uuid */
                 id: string;
@@ -1726,6 +1752,43 @@ export interface components {
              */
             generated_at: string;
             report_artifact?: components["schemas"]["ArtifactRef"] | null;
+        };
+        /** @description Трассировка ТЗ §13: standard → control → applicability → роль → check → evidence → verdict. */
+        ComplianceTraceRow: {
+            standard: {
+                code: string;
+                edition: string;
+            };
+            control: {
+                code: string;
+                clause_ref: string;
+                description: string;
+            };
+            applicability: components["schemas"]["ApplicabilityStatus"];
+            agent_role?: components["schemas"]["AgentRole"] | null;
+            check: {
+                /** @enum {string} */
+                method: "automated_gate" | "agent_review" | "manual" | "document_check";
+                gate_type?: string | null;
+                /** Format: uuid */
+                gate_execution_id?: string | null;
+                gate_status?: components["schemas"]["GateExecutionStatus"] | null;
+                commit_sha?: string | null;
+            };
+            evidence: {
+                /** Format: uuid */
+                id: string;
+                kind: string;
+                verification_status: components["schemas"]["EvidenceVerificationStatus"];
+                artifact_sha256: string;
+            } | null;
+            verdict: {
+                status: components["schemas"]["ComplianceStatus"];
+                notes?: string | null;
+                reviewed_by?: components["schemas"]["UserRef"] | null;
+                /** Format: date-time */
+                checked_at: string;
+            };
         };
         ActivityEvent: {
             /** Format: uuid */

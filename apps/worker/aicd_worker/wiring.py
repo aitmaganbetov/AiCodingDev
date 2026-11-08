@@ -21,6 +21,8 @@ from aicd_security.docker_runner import DockerSandboxRunner
 from aicd_security.local_runner import LocalProcessRunner
 from aicd_security.sandbox import SandboxRunner
 from aicd_verification.engine import VerificationEngine
+from aicd_verification.images import default_gate_images
+from aicd_verification.security_gates import SECURITY_GATE_IMAGES
 from aicd_worker.settings import WorkerSettings
 
 
@@ -64,7 +66,11 @@ def build_sandbox_runner(settings: WorkerSettings) -> SandboxRunner:
         return LocalProcessRunner()
     # Bind-монтирования gates: worktree задачи (ro) и staging входа SCOPE — других корней линтер не пропустит.
     roots = (str(settings.worktree_root), str(settings.verification_staging_root))
-    return DockerSandboxRunner(settings.docker_url, allowed_bind_roots=roots)
+    return DockerSandboxRunner(
+        settings.docker_url,
+        allowed_bind_roots=roots,
+        require_image_digest=settings.environment == "production",  # профиль server: образы только по digest
+    )
 
 
 def build_executor(
@@ -86,15 +92,21 @@ def default_ports(
     settings: WorkerSettings, engine: AsyncEngine, store: ArtifactStore
 ) -> tuple[ApprovalsPort, VerifierPort]:
     check_verification_runner(settings)
+    approvals = Approvals()
+    # Образы gates: качество/миграции (images.py) + безопасность/цепочка поставок (security_gates), все — по digest;
+    # в production ссылка без digest — ошибка конфигурации (ImagePolicyError), воркер не стартует.
+    images = default_gate_images(SECURITY_GATE_IMAGES, require_digest=settings.environment == "production")
     verifier = VerificationEngine(
         engine=engine,
         store=store,
         runner=build_sandbox_runner(settings),
         image=settings.verification_image,
+        images=images,
         staging_root=settings.verification_staging_root,
         local_env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+        approvals=approvals,  # DESTRUCTIVE_MIGRATION (P6-05): PASS только после APPROVED
     )
-    return Approvals(), verifier
+    return approvals, verifier
 
 
 def build_orchestrator(

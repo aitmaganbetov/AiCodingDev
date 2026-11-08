@@ -77,7 +77,9 @@ def validate_response(operation_id: str, response: Any) -> None:
         assert not response.content, f"{operation_id} {status}: контракт не предусматривает тела"
         return
     validator = Draft202012Validator(_rewrite_refs(schema), registry=_registry(), format_checker=FormatChecker())
-    errors = sorted(validator.iter_errors(response.json()), key=lambda e: list(e.path))
+    # Не-JSON представления (text/markdown отчёта run) проверяются как строка.
+    body = response.json() if media.endswith("json") or not media else response.text
+    errors = sorted(validator.iter_errors(body), key=lambda e: list(e.path))
     assert not errors, f"{operation_id} {status}: " + "; ".join(
         f"{'/'.join(map(str, e.path))}: {e.message}" for e in errors[:5]
     )

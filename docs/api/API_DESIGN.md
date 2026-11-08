@@ -468,7 +468,7 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 | `directive_target_type` | `run`, `role`, `task`, `approval` | `user_directives.target` |
 | `directive_impact_status` | `PENDING`, `READY`, `NOT_REQUIRED`, `FAILED` | `user_directives.impact_status` |
 | `directive_ack_status` | `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `FAILED` | `directive_acknowledgements.status` |
-| `artifact_kind` | `git_diff`, `test_report`, `scan_report`, `sbom`, `context_pack`, `cli_output`, `raw_cli_log`, `run_report`, `other` | `artifacts.kind` |
+| `artifact_kind` | `git_diff`, `test_report`, `scan_report`, `sbom`, `context_pack`, `cli_output`, `raw_cli_log`, `run_report`, `other`, `coverage_report`, `gate_log`, `applicability_report`, `signature` | `artifacts.kind` (`cli_raw_log` → `raw_cli_log`; виды без пары — `other`) |
 | `documentation_source_type` / `trust_level` / `refresh_policy` | `url`,`file`,`git` / `official`,`internal`,`community` / `manual`,`scheduled` | `documentation_sources` |
 | `project_status` | `ACTIVE`, `ARCHIVED` | `projects.status` |
 | `compatibility_status` | `SUPPORTED`, `UNTESTED`, `UNSUPPORTED` | compatibility matrix CLI |

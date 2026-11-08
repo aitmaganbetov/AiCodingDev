@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,9 +33,11 @@ from aicd_platform.db import DbContext, create_engine, transaction
 from aicd_platform.ids import uuid7
 from aicd_security.local_runner import LocalProcessRunner
 from aicd_verification.engine import VerificationEngine
+from aicd_verification.registry import GATE_SPECS
 from tests.conftest import UserSession, init_git_repo
 from tests.support import db as testdb
 from tests.support.contract import validate_response
+from tests.support.orchestration import connect_admin
 
 
 def build_executor(
@@ -155,9 +158,41 @@ async def world(
         headers=user.headers(idem=True),
     )
     assert r.status_code == 201, r.text
+    for code in ("basic", "strict", "critical"):
+        local_profile(database, uuid.UUID(ws["id"]), code)
     worker = create_engine(database.url_for("aicd_worker"))
     yield Slice(user, ws["id"], project["id"], worker, tmp_path, settings, {"name": "agent"})
     await worker.dispose()
+
+
+# Gates, которые исполняются только в своих образах (DockerSandboxRunner): в сквозных тестах оркестрации
+# verifier — LocalProcessRunner, где этих инструментов нет (их отсутствие честно даёт ERROR ≠ PASS).
+CONTAINER_ONLY_GATES = frozenset(name for name, spec in GATE_SPECS.items() if spec.image_key is not None)
+
+
+def local_profile(database: testdb.TestDatabase, workspace_id: uuid.UUID, code: str) -> uuid.UUID:
+    """Профиль workspace = глобальный `code` без gates «только в контейнере» (перекрывает глобальный).
+
+    Поведение самих этих gates проверяют их docker-тесты; полный профиль — `tests/e2e/test_full_profile_docker.py`.
+    """
+    profile = uuid7()
+    with connect_admin(database) as conn:
+        conn.execute(
+            "INSERT INTO aicd.quality_profiles (id, workspace_id, code, version, definition)"
+            " SELECT %s, %s, code, 1, definition FROM aicd.quality_profiles WHERE workspace_id IS NULL AND code = %s"
+            " AND version = 1",
+            (profile, workspace_id, code),
+        )
+        conn.execute(
+            "INSERT INTO aicd.quality_gates (id, workspace_id, profile_id, name, gate_type, required, config,"
+            " timeout_seconds)"
+            " SELECT overlay(overlay(md5(random()::text || g.id::text) PLACING '7' FROM 13) PLACING '8' FROM 17)::uuid,"
+            " %s, %s, g.name, g.gate_type, g.required, g.config, g.timeout_seconds FROM aicd.quality_gates g"
+            " JOIN aicd.quality_profiles p ON p.id = g.profile_id"
+            " WHERE p.workspace_id IS NULL AND p.code = %s AND p.version = 1 AND g.name <> ALL(%s)",
+            (workspace_id, profile, code, sorted(CONTAINER_ONLY_GATES)),
+        )
+    return profile
 
 
 async def create_run(s: Slice, objective: str = "Добавить документ", **extra: Any) -> str:

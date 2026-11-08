@@ -13,7 +13,7 @@
 Подключение security/supply-chain gates (P6-04/P6-07, модуль `security_gates.py`):
 
     from aicd_verification import security_gates
-    PROVIDERS = (CORE_PROVIDER, runners.PROVIDER, migrations.PROVIDER, security_gates.PROVIDER)
+    PROVIDERS = (CORE_PROVIDER, runners.PROVIDER, migrations.PROVIDER, security_gates.SECURITY_PROVIDER)
 
 Если модуль экспортирует только `SPECS` и функцию детектора, провайдер собирается адаптером
 `provider_from(name, specs, detect)` (детектор с сигнатурой `(facts)` или `(facts, stack)`).
@@ -39,6 +39,7 @@ from aicd_verification.gates import (
     RepoFacts,
     StackInfo,
 )
+from aicd_verification.security_gates import SECURITY_PROVIDER
 
 log = logging.getLogger("aicd.verification")
 
@@ -58,21 +59,11 @@ def provider_from(
     return GateProvider(name, tuple(specs), _detect, tuple(definitions))
 
 
-def _optional_providers() -> tuple[GateProvider, ...]:
-    """Провайдер security_gates (P6-04/P6-07) подключается, если модуль экспортирует `PROVIDER`."""
-    try:
-        from aicd_verification import security_gates  # type: ignore[attr-defined,unused-ignore]
-    except ImportError:
-        return ()
-    provider = getattr(security_gates, "PROVIDER", None)
-    return (provider,) if isinstance(provider, GateProvider) else ()
-
-
 PROVIDERS: tuple[GateProvider, ...] = (
     CORE_PROVIDER,
     runners.PROVIDER,
     migrations.PROVIDER,
-    *_optional_providers(),
+    SECURITY_PROVIDER,  # SAST/SECRETS/SCA/IAC/POLICY/PERF/SBOM/SIGN (P6-04, P6-06, P6-07)
 )
 
 

@@ -2286,7 +2286,8 @@ components:
       description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
     ArtifactKind:
       type: string
-      enum: [git_diff, test_report, scan_report, sbom, context_pack, cli_output, raw_cli_log, run_report, other]
+      enum: [git_diff, test_report, scan_report, sbom, context_pack, cli_output, raw_cli_log, run_report, other, coverage_report,
+        gate_log, applicability_report, signature]
       x-proposed-enum: true
       description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
     DocumentationSourceType:
@@ -2979,6 +2980,16 @@ components:
         evidence_id:
           type: [string, 'null']
           format: uuid
+        commit_sha:
+          type: string
+          pattern: ^[0-9a-f]{40}([0-9a-f]{24})?$
+          description: Commit, на котором выполнен gate (вердикт по задаче/commit, QUALITY_GATES §5)
+        error_code:
+          type: [string, 'null']
+          description: Код ERROR/FAIL (TOOL_UNAVAILABLE, TIMEOUT, INFRA, SHA_MISMATCH, REPORT_UNPARSABLE, EMPTY_SUITE, ...)
+        not_applicable_reason:
+          type: [string, 'null']
+          description: Причина NOT_APPLICABLE/SKIPPED (секреты редактируются)
         started_at:
           type: [string, 'null']
           format: date-time
@@ -2998,6 +3009,9 @@ components:
           format: uuid
         severity: {$ref: '#/components/schemas/FindingSeverity'}
         rule_id: {type: string}
+        title: {type: string, description: Краткое описание находки (секреты редактируются)}
+        cwe_id:
+          type: [string, 'null']
         file_path:
           type: [string, 'null']
         line:
@@ -3023,6 +3037,10 @@ components:
           type: object
           additionalProperties: {type: integer}
           description: finding_severity → count открытых
+        findings_by_status:
+          type: object
+          additionalProperties: {type: integer}
+          description: finding_status → count (все находки run, жизненный цикл)
         findings:
           type: array
           items: {$ref: '#/components/schemas/Finding'}
@@ -3044,6 +3062,15 @@ components:
           - {$ref: '#/components/schemas/AgentRole'}
           - {type: 'null'}
         status: {$ref: '#/components/schemas/ComplianceStatus'}
+        verification_method:
+          type: string
+          enum: [automated_gate, agent_review, manual, document_check]
+          description: Check контроля (трассировка standard → control → check → evidence → verdict)
+        gate_type:
+          type: [string, 'null']
+        gate_execution_id:
+          type: [string, 'null']
+          format: uuid
         evidence_id:
           type: [string, 'null']
           format: uuid
@@ -3088,6 +3115,14 @@ components:
         evidence:
           type: array
           items: {$ref: '#/components/schemas/Evidence'}
+        findings:
+          type: array
+          items: {$ref: '#/components/schemas/Finding'}
+          description: Полный список находок run (quality.findings усечён до 200)
+        compliance_matrix:
+          type: array
+          items: {$ref: '#/components/schemas/ComplianceTraceRow'}
+        disclaimer: {type: string, description: Автоматические проверки не являются официальной сертификацией (ТЗ §13)}
         external_actions:
           type: array
           items:
@@ -3107,6 +3142,69 @@ components:
           - {$ref: '#/components/schemas/ArtifactRef'}
           - {type: 'null'}
       required: [run, quality, tasks, approvals, evidence, generated_at]
+    ComplianceTraceRow:
+      type: object
+      description: 'Трассировка ТЗ §13: standard → control → applicability → роль → check → evidence → verdict.'
+      properties:
+        standard:
+          type: object
+          properties:
+            code: {type: string}
+            edition: {type: string}
+          required: [code, edition]
+        control:
+          type: object
+          properties:
+            code: {type: string}
+            clause_ref: {type: string}
+            description: {type: string}
+          required: [code, clause_ref, description]
+        applicability: {$ref: '#/components/schemas/ApplicabilityStatus'}
+        agent_role:
+          oneOf:
+          - {$ref: '#/components/schemas/AgentRole'}
+          - {type: 'null'}
+        check:
+          type: object
+          properties:
+            method:
+              type: string
+              enum: [automated_gate, agent_review, manual, document_check]
+            gate_type:
+              type: [string, 'null']
+            gate_execution_id:
+              type: [string, 'null']
+              format: uuid
+            gate_status:
+              oneOf:
+              - {$ref: '#/components/schemas/GateExecutionStatus'}
+              - {type: 'null'}
+            commit_sha:
+              type: [string, 'null']
+          required: [method]
+        evidence:
+          oneOf:
+          - type: object
+            properties:
+              id: {type: string, format: uuid}
+              kind: {type: string}
+              verification_status: {$ref: '#/components/schemas/EvidenceVerificationStatus'}
+              artifact_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+            required: [id, kind, verification_status, artifact_sha256]
+          - {type: 'null'}
+        verdict:
+          type: object
+          properties:
+            status: {$ref: '#/components/schemas/ComplianceStatus'}
+            notes:
+              type: [string, 'null']
+            reviewed_by:
+              oneOf:
+              - {$ref: '#/components/schemas/UserRef'}
+              - {type: 'null'}
+            checked_at: {type: string, format: date-time}
+          required: [status, checked_at]
+      required: [standard, control, applicability, check, evidence, verdict]
     ActivityEvent:
       type: object
       properties:

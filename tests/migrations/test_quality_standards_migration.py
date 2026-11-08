@@ -50,6 +50,15 @@ def _constraint(db: testdb.TestDatabase, table: str, name_like: str) -> list[tup
         ]
 
 
+def _has_resolver(db: testdb.TestDatabase) -> bool:
+    with psycopg.connect(db.superuser_url) as conn:
+        row = conn.execute(
+            "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'aicd' AND p.proname = 'sys_resolve_evidence_workspace'"
+        ).fetchone()
+    return row == (1,)
+
+
 # --- обратимость и offline-режим --------------------------------------------------------------------
 
 
@@ -68,8 +77,10 @@ def test_0008_upgrade_downgrade_upgrade(scratch_db: testdb.TestDatabase) -> None
     assert created >= NEW_TABLES
     assert "'finding'" in _constraint(scratch_db, "allowed_transitions", "ck_allowed_transitions_entity")[0][1]
     assert "gate_log" in _constraint(scratch_db, "artifacts", "ck_artifacts_kind")[0][1]
+    assert _has_resolver(scratch_db)
     testdb.alembic(scratch_db, "downgrade", "0007")
     assert not (NEW_TABLES & _tables(scratch_db))
+    assert not _has_resolver(scratch_db)
     entity = _constraint(scratch_db, "allowed_transitions", "ck_allowed_transitions_entity")
     assert len(entity) == 1 and "finding" not in entity[0][1] and "indexing_job" in entity[0][1]
     kinds = _constraint(scratch_db, "artifacts", "artifacts_kind_check")
@@ -96,6 +107,7 @@ def test_0008_offline_sql(scratch_db: testdb.TestDatabase) -> None:
         assert f"CREATE TABLE {table} (" in out
     assert "INSERT INTO standard_controls" in out and "ADD CONSTRAINT ck_artifacts_kind" in out
     assert "INSERT INTO quality_gates" not in out  # gates сидирует P6-02/P6-03
+    assert "CREATE FUNCTION sys_resolve_evidence_workspace" in out
 
 
 # --- схема: RLS, seed --------------------------------------------------------------------------------
@@ -590,3 +602,60 @@ def test_key_checks(admin: psycopg.Connection, world: World) -> None:
             " verification_method) VALUES (%s, %s, 'CWE-1', 'bad code!', 'd', 'manual')",
             (uuid7(), std),
         )
+
+
+def test_error_code_check_matches_gate_error_codes(database: testdb.TestDatabase) -> None:
+    """CHECK ck_gate_executions_error_code = gates.ErrorCode: движок может записать любой свой код."""
+    import re
+    from typing import get_args
+
+    from aicd_verification.gates import ErrorCode
+
+    with psycopg.connect(database.superuser_url) as conn:
+        definition = conn.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_gate_executions_error_code'"
+        ).fetchone()
+    assert definition is not None
+    assert set(re.findall(r"'([A-Z_]+)'", definition[0])) == set(get_args(ErrorCode))
+
+
+# --- SECURITY DEFINER резолвер evidence (GET /evidence/{id}, AC-12) ---------------------------------------
+
+
+def test_sys_resolve_evidence_workspace_members_only(database: testdb.TestDatabase, world: World) -> None:
+    a, b = world.a, world.b
+    with psycopg.connect(database.superuser_url) as conn:
+        row = conn.execute(
+            "SELECT p.prosecdef, pg_get_userbyid(p.proowner), p.proconfig FROM pg_proc p"
+            " JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'aicd' AND p.proname = 'sys_resolve_evidence_workspace'"
+        ).fetchone()
+    assert row is not None and row[0] is True and row[1] == "aicd_sysfn"
+    assert any(c.startswith("search_path=") for c in row[2])
+    with psycopg.connect(database.url_for("aicd_app")) as conn, conn.transaction():
+        _ctx(conn, None, a.tenant.owner_id)  # workspace ещё не известен — резолвер его и находит
+        resolve = "SELECT sys_resolve_evidence_workspace(%s)"
+        assert conn.execute(resolve, (a.evidence,)).fetchone() == (a.ws,)
+        assert conn.execute(resolve, (b.evidence,)).fetchone() == (None,), "чужой evidence неотличим от отсутствующего"
+        assert conn.execute(resolve, (uuid7(),)).fetchone() == (None,)
+    with psycopg.connect(database.url_for("aicd_app")) as conn, conn.transaction():
+        _ctx(conn, None)  # без пользователя сессии — ничего
+        assert conn.execute("SELECT sys_resolve_evidence_workspace(%s)", (a.evidence,)).fetchone() == (None,)
+    for role in ("aicd_worker", "aicd_maintenance"):
+        with psycopg.connect(database.url_for(role)) as conn:
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), conn.transaction():
+                conn.execute("SELECT sys_resolve_evidence_workspace(%s)", (a.evidence,))
+
+
+def test_gate_seed_matches_registry(database: testdb.TestDatabase) -> None:
+    """Seed 0009 = `registry.seed_rows()`: новые gates реестра без seed (или расхождение `required`) ломают CI."""
+    from aicd_verification.registry import seed_rows
+
+    expected = {(r["profile"], r["name"]): (r["gate_type"], r["required"], r["timeout_seconds"]) for r in seed_rows()}
+    with psycopg.connect(database.superuser_url) as conn:
+        rows = conn.execute(
+            "SELECT p.code, g.name, g.gate_type, g.required, g.timeout_seconds FROM aicd.quality_gates g"
+            " JOIN aicd.quality_profiles p ON p.id = g.profile_id WHERE g.workspace_id IS NULL AND p.version = 1"
+        ).fetchall()
+    actual = {(r[0], r[1]): (r[2], r[3], r[4]) for r in rows}
+    assert actual == expected

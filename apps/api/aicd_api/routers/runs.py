@@ -63,7 +63,7 @@ class CommandBody(BaseModel):
     reason: Annotated[str, Field(max_length=2000)] | None = None
 
 
-async def _resolve(request: Request, principal: identity.Principal, fn: str, resource_id: uuid.UUID) -> Access:
+async def resolve_resource(request: Request, principal: identity.Principal, fn: str, resource_id: uuid.UUID) -> Access:
     """Workspace ресурса через SECURITY DEFINER функцию (только для членов) — иначе 404 (AC-12)."""
     state = app_state(request)
     async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
@@ -181,31 +181,24 @@ async def list_runs(
     return json_response({"items": [_run_summary(r) for r in page], "next_cursor": next_cursor})
 
 
-@router.get("/runs/{run_id}", **op("getRun", "run:read"))
-async def get_run(
-    request: Request, run_id: Annotated[uuid.UUID, Path()], principal: identity.Principal = Depends(current_principal)
-) -> Response:
-    access = await _resolve(request, principal, "sys_resolve_run_workspace", run_id)
-    await authorize(request, access, "run:read")
-    async with transaction(app_state(request).engine, access.db()) as conn:
-        row = (await conn.execute(text(_RUN_SELECT + " WHERE r.id = :id"), {"id": run_id})).mappings().first()
-        if row is None:
-            raise ProblemError("not_found")
-        counts: dict[str, int] = dict(
-            (
-                await conn.execute(
-                    text(
-                        "SELECT status, count(*) FROM tasks WHERE run_id = :id AND superseded_at IS NULL GROUP BY status"
-                    ),
-                    {"id": run_id},
-                )
-            ).all()
-        )
-        pending = (
+async def run_view(conn: AsyncConnection, run_id: uuid.UUID) -> dict[str, Any]:
+    """Тело `Run` (getRun; также раздел `run` отчёта GET /runs/{id}/report). Нет run ⇒ 404."""
+    row = (await conn.execute(text(_RUN_SELECT + " WHERE r.id = :id"), {"id": run_id})).mappings().first()
+    if row is None:
+        raise ProblemError("not_found")
+    counts: dict[str, int] = dict(
+        (
             await conn.execute(
-                text("SELECT count(*) FROM approvals WHERE run_id = :id AND status = 'PENDING'"), {"id": run_id}
+                text("SELECT status, count(*) FROM tasks WHERE run_id = :id AND superseded_at IS NULL GROUP BY status"),
+                {"id": run_id},
             )
-        ).scalar_one()
+        ).all()
+    )
+    pending = (
+        await conn.execute(
+            text("SELECT count(*) FROM approvals WHERE run_id = :id AND status = 'PENDING'"), {"id": run_id}
+        )
+    ).scalar_one()
     snapshot = row["policy_snapshot"] or {}
     body = {
         **_run_summary(dict(row)),
@@ -219,7 +212,18 @@ async def get_run(
         "updated_at": row["updated_at"],
         "links": {"tasks": f"/api/v1/runs/{run_id}/tasks", "events": f"/api/v1/runs/{run_id}/events"},
     }
-    tag = etag(row["version"])
+    return body
+
+
+@router.get("/runs/{run_id}", **op("getRun", "run:read"))
+async def get_run(
+    request: Request, run_id: Annotated[uuid.UUID, Path()], principal: identity.Principal = Depends(current_principal)
+) -> Response:
+    access = await resolve_resource(request, principal, "sys_resolve_run_workspace", run_id)
+    await authorize(request, access, "run:read")
+    async with transaction(app_state(request).engine, access.db()) as conn:
+        body = await run_view(conn, run_id)
+    tag = etag(body["version"])
     if request.headers.get("if-none-match") == tag:
         return Response(status_code=304, headers={"ETag": tag})
     return json_response(body, headers={"ETag": tag})
@@ -235,7 +239,7 @@ async def get_run_tasks(
     limit: Limit = 200,
     cursor: Cursor = None,
 ) -> Response:
-    access = await _resolve(request, principal, "sys_resolve_run_workspace", run_id)
+    access = await resolve_resource(request, principal, "sys_resolve_run_workspace", run_id)
     await authorize(request, access, "run:read")
     state = app_state(request)
     filters = {"r": "tasks", "run": str(run_id), "s": status, "role": agent_role}
@@ -295,14 +299,14 @@ async def get_run_tasks(
         {
             "run_id": run_id,
             "plan_version": run,
-            "tasks": [_task_summary(r, deps) for r in page],
+            "tasks": [task_summary(r, deps) for r in page],
             "edges": edges,
             "next_cursor": next_cursor,
         }
     )
 
 
-def _task_summary(row: dict[str, Any], deps: dict[uuid.UUID, list[uuid.UUID]]) -> dict[str, Any]:
+def task_summary(row: dict[str, Any], deps: dict[uuid.UUID, list[uuid.UUID]]) -> dict[str, Any]:
     return {
         "id": row["id"],
         "run_id": row["run_id"],
@@ -328,7 +332,7 @@ async def _run_command(
     command: Literal["pause", "resume", "cancel"],
     body: CommandBody | None,
 ) -> Response:
-    access = await _resolve(request, principal, "sys_resolve_run_workspace", run_id)
+    access = await resolve_resource(request, principal, "sys_resolve_run_workspace", run_id)
     await authorize(request, access, "run:control")
     expected = parse_if_match(request.headers.get("if-match"))
 
@@ -391,7 +395,7 @@ async def cancel_run(
 async def get_task(
     request: Request, task_id: Annotated[uuid.UUID, Path()], principal: identity.Principal = Depends(current_principal)
 ) -> Response:
-    access = await _resolve(request, principal, "sys_resolve_task_workspace", task_id)
+    access = await resolve_resource(request, principal, "sys_resolve_task_workspace", task_id)
     await authorize(request, access, "run:read")
     async with transaction(app_state(request).engine, access.db()) as conn:
         row = (
@@ -420,7 +424,7 @@ async def get_task(
         )
     data = dict(row)
     body = {
-        **_task_summary(data, {task_id: deps}),
+        **task_summary(data, {task_id: deps}),
         "instructions": data["instructions"],
         "acceptance_criteria": list(data["acceptance_criteria"] or []),
         "review_loop_count": data["review_loop_count"],
@@ -444,7 +448,7 @@ async def list_attempts(
     limit: Limit = DEFAULT_LIMIT,
     cursor: Cursor = None,
 ) -> Response:
-    access = await _resolve(request, principal, "sys_resolve_task_workspace", task_id)
+    access = await resolve_resource(request, principal, "sys_resolve_task_workspace", task_id)
     await authorize(request, access, "run:read")
     state = app_state(request)
     filters = {"r": "attempts", "t": str(task_id)}
@@ -543,7 +547,7 @@ async def list_task_messages(
     cursor: Cursor = None,
 ) -> Response:
     """ACP-сообщения задачи (P4-12): отправленные из задачи (`task_id`) и адресованные ей (`to.task_id`)."""
-    access = await _resolve(request, principal, "sys_resolve_task_workspace", task_id)
+    access = await resolve_resource(request, principal, "sys_resolve_task_workspace", task_id)
     await authorize(request, access, "run:read")
     state = app_state(request)
     filters = {"r": "task_messages", "t": str(task_id), "ty": sorted(type or []), "c": str(correlation_id)}

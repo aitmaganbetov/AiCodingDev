@@ -44,7 +44,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -77,6 +77,7 @@ from aicd_verification.images import image_key_for
 from aicd_verification.migrations import APPROVAL_ACTION, ApprovalsPort, approval_state
 from aicd_verification.profiles import GateRow, plan_gates, tool_missing_effect
 from aicd_verification.registry import GATE_SPECS, detect_all
+from aicd_verification.security_gates import SECURITY_GATES
 
 log = logging.getLogger("aicd.verification")
 
@@ -86,19 +87,8 @@ TERMINAL = frozenset({"PASS", "FAIL", "ERROR", "SKIPPED", "NOT_APPLICABLE"})
 REUSABLE = frozenset({"PASS", "FAIL", "NOT_APPLICABLE"})  # детерминированный результат на том же SHA
 OK_FOR_COMPLETION = frozenset({"PASS", "NOT_APPLICABLE"})
 # Коды, допустимые CHECK gate_executions.error_code (0008); остальные — только в error_message.
-DB_ERROR_CODES = frozenset(
-    {
-        "TOOL_UNAVAILABLE",
-        "TIMEOUT",
-        "INFRA",
-        "SHA_MISMATCH",
-        "REPORT_UNPARSABLE",
-        "EMPTY_SUITE",
-        "WORKTREE_DIRTY",
-        "NO_BASE_COMMIT",
-        "UNSUPPORTED_GATE",
-    }
-)
+# Коды ошибок gate = CHECK ck_gate_executions_error_code (0008); единый источник — gates.ErrorCode.
+DB_ERROR_CODES = frozenset(get_args(ErrorCode))
 MAX_FINDINGS_PER_GATE = 500
 
 
@@ -440,7 +430,7 @@ class VerificationEngine:
                     "s": status,
                     "e": evidence_id,
                     "err": error[:4000] if error else None,
-                    "code": code if code in DB_ERROR_CODES and status == "ERROR" else None,
+                    "code": code if code in DB_ERROR_CODES and status in ("ERROR", "FAIL") else None,
                     "na": reason[:2000] if reason else None,
                     "id": gate.execution_id,
                 },
@@ -689,6 +679,24 @@ class VerificationEngine:
         async with self._semaphore:
             await self._set_running(task, gate)
             ctx = self._gate_context(task, gate)
+            security = SECURITY_GATES.get(spec.name)
+            if security is not None:
+                if security.db is not None:
+                    # Офлайн-БД уязвимостей подключается отдельным утверждённым и аудируемым шагом обновления;
+                    # пока она не смонтирована, gate не может дать честный вердикт (ERROR ≠ PASS).
+                    await self._finish(
+                        task,
+                        gate,
+                        status="ERROR",
+                        error=f"TOOL_UNAVAILABLE: offline {security.db} vulnerability DB is not configured",
+                    )
+                    return
+                if task.staging is not None:  # файлы платформы (правила/конфиги) для /aicd-input (ro)
+                    for name, content in security.input_files(ctx).items():
+                        target = task.staging / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(content)
+                        target.chmod(0o644)
             probe = await self._execute(task, spec, spec.probe(ctx), PROBE_TIMEOUT_SECONDS, gate)
             if probe.exit_code != 0 or probe.timed_out:
                 effect = tool_missing_effect(task.profile, gate.gate_type)

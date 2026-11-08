@@ -25,6 +25,8 @@ CREATE TABLE перенесены из документа без изменен�
     evidence того же run; gate_execution — того же run;
   * project_controls: утверждение (approved_by/approved_at) и изменение утверждённой строки — только
     человек из контекста сессии; система (worker) ведёт лишь черновики (§13.3).
+SECURITY DEFINER (§19.5, как 0003/0005): sys_resolve_evidence_workspace(uuid) — workspace evidence только для
+члена этого workspace (GET /evidence/{id}: не член ⇒ 404, AC-12); владелец aicd_sysfn, EXECUTE — только aicd_app.
 FK, отложенные до Phase 6 (заголовок 0007: evidence_links ↔ architecture_decision), реализованы
 триггером §18.11 trg_evidence_links_target (статический CASE по target_type, цель — в том же workspace);
 'pull_request' проверяется динамически, когда появится таблица pull_requests (Phase 8), до этого отклоняется.
@@ -379,7 +381,7 @@ CREATE INDEX ix_compliance_results_run ON compliance_results (workspace_id, run_
 -- Дополнения QUALITY_GATES.md §9 к таблицам 0001/0003 (§12.1, §12.4 документа)
 ALTER TABLE gate_executions ADD COLUMN error_code text CONSTRAINT ck_gate_executions_error_code CHECK (error_code IN
   ('TOOL_UNAVAILABLE','TIMEOUT','INFRA','SHA_MISMATCH','REPORT_UNPARSABLE','EMPTY_SUITE','WORKTREE_DIRTY',
-   'NO_BASE_COMMIT','UNSUPPORTED_GATE'));
+   'NO_BASE_COMMIT','UNSUPPORTED_GATE','APPROVAL_REQUIRED','THRESHOLD','EVIDENCE_REJECTED','STALE_EVIDENCE'));
 ALTER TABLE artifacts DROP CONSTRAINT artifacts_kind_check;
 ALTER TABLE artifacts ADD CONSTRAINT ck_artifacts_kind CHECK (kind IN ({ARTIFACT_KINDS}));
 """
@@ -610,6 +612,27 @@ GRANT SELECT ON test_results, findings, evidence_links, standards, standard_cont
 """
 
 
+SYSFN = r"""
+-- §19.5: workspace evidence, только если текущий пользователь — член этого workspace (GET /evidence/{id}).
+CREATE FUNCTION sys_resolve_evidence_workspace(p_evidence_id uuid)
+RETURNS uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, aicd AS $$
+  SELECT e.workspace_id
+    FROM aicd.evidence e
+    JOIN aicd.workspace_members m ON m.workspace_id = e.workspace_id AND m.user_id = aicd.app_current_user()
+   WHERE e.id = p_evidence_id
+$$;
+
+GRANT CREATE ON SCHEMA aicd TO aicd_sysfn;
+ALTER FUNCTION sys_resolve_evidence_workspace(uuid) OWNER TO aicd_sysfn;
+REVOKE CREATE ON SCHEMA aicd FROM aicd_sysfn;
+REVOKE ALL ON FUNCTION sys_resolve_evidence_workspace(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION sys_resolve_evidence_workspace(uuid) TO aicd_app;
+-- Только колонки, которых у aicd_sysfn ещё не было (downgrade отзывает ровно их).
+GRANT SELECT (id, workspace_id) ON evidence TO aicd_sysfn;
+"""
+
+
 def seed_sql() -> str:
     standards = ",\n".join(
         f"  ('{standard_id(n)}', {_q(code)}, {_q(edition)}, {_q(title)}, {_q(uri)}, {_q(LICENSE_NOTE)})"
@@ -632,6 +655,8 @@ def seed_sql() -> str:
 
 
 DOWNGRADE = r"""
+DROP FUNCTION IF EXISTS sys_resolve_evidence_workspace(uuid);
+REVOKE SELECT (id, workspace_id) ON evidence FROM aicd_sysfn;
 DROP TABLE IF EXISTS compliance_results, project_controls, standard_controls, standards, evidence_links, findings,
                      test_results CASCADE;
 DROP TRIGGER IF EXISTS trg_gate_executions_test_results ON gate_executions;
@@ -655,7 +680,7 @@ ALTER TABLE allowed_transitions ADD CONSTRAINT ck_allowed_transitions_entity CHE
 
 
 def upgrade() -> None:
-    for block in (TABLES, TRIGGERS, RLS, GRANTS, seed_sql()):
+    for block in (TABLES, TRIGGERS, RLS, GRANTS, SYSFN, seed_sql()):
         op.execute(block)
 
 
