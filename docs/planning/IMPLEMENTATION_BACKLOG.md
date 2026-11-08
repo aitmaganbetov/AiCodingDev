@@ -279,7 +279,7 @@
 
 ### Phase 5 — Code Intelligence (2026-11-08)
 
-Окружение проверки: PostgreSQL 17, Redis 7, RustFS (S3), Docker; tree-sitter 0.26 (Python/JS/TS/PHP), ripgrep; агенты — Fake CLI.
+Окружение проверки: PostgreSQL 17, Redis 7, RustFS (S3), Docker; tree-sitter 0.26 (Python/JS/TS/PHP), ripgrep; агенты — Fake CLI. Итог: `uv run pytest` → **1924 passed, 0 skipped**; ruff, mypy --strict, import-linter (4 контракта), deny-gate, сверка моделей контрактов, трассировка — без замечаний; `check:api` — веб-схема соответствует контракту.
 
 | Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
 |---|---|---|---|
