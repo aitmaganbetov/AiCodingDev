@@ -133,18 +133,18 @@
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P6-01 | Миграции: quality_profiles, quality_gates, gate_executions, test_results, findings, evidence, evidence_links, standards*, compliance_results | FR-QG-*, FR-STD-* | P3-01 | P0 | Migration + RLS | TODO |
-| P6-02 | Verification Engine: профили, определение применимости по стеку, план gates | FR-QG-01, FR-QG-03 | P6-01, P3-14, P5-07 | P0 | Матрица применимости покрыта тестами | TODO |
-| P6-03 | Gate runners: Ruff, ESLint, PHPStan, typecheck, build, pytest, Vitest, Playwright | FR-QG-03 | P6-02 | P0 | Фикстуры pass/fail для каждого | TODO |
-| P6-04 | Security gates: Semgrep, Gitleaks, Trivy, OSV-Scanner, Checkov, OPA | FR-QG-03 | P6-02 | P0 | Фикстуры с заведомыми находками | TODO |
-| P6-05 | Migration validation gate (эфемерный PG, upgrade/downgrade) | FR-QG-03 | P6-02 | P0 | Деструктивная миграция требует approval | TODO |
-| P6-06 | Performance gate (k6/бенчмарк) при заявлении об ускорении | FR-QG-03 | P6-02 | P1 | Воспроизводимые измерения в evidence | TODO |
-| P6-07 | Supply chain gates: Syft SBOM, Cosign verify | NFR-SEC-05 | P6-02 | P1 | SBOM как artifact | TODO |
-| P6-08 | Evidence, verdict rules (SKIPPED≠PASS, ERROR≠PASS), жизненный цикл findings | FR-QG-04, FR-QG-05, FR-QG-07 | P6-02 | P0 | Unit-тесты правил | TODO |
-| P6-09 | Guard завершения run + coverage gate (core ≥ 85%) | FR-ORCH-11, FR-QG-06 | P6-08 | P0 | AC-11 | TODO |
-| P6-10 | Standards registry seed (собственные формулировки), применимость проекта, compliance evaluation | FR-STD-01, FR-STD-02, FR-STD-03, FR-STD-04 | P6-01 | P0 | Трассировка standard→…→verdict в отчёте | TODO |
-| P6-11 | API: `/runs/{id}/quality`, `/compliance`, `/report`, `/tasks/{id}/evidence`, `/evidence/{id}` | FR-QG-07, FR-STD-05, FR-API-03 | P6-08, P6-10 | P0 | Schemathesis + RBAC | TODO |
-| P6-12 | False-pass prevention suite | FR-QG-04, RISK-09 | P6-09 | P0 | Ни один сценарий не даёт PASS | TODO |
+| P6-01 | Миграции: quality_profiles, quality_gates, gate_executions, test_results, findings, evidence, evidence_links, standards*, compliance_results | FR-QG-*, FR-STD-* | P3-01 | P0 | Migration + RLS | DONE |
+| P6-02 | Verification Engine: профили, определение применимости по стеку, план gates | FR-QG-01, FR-QG-03 | P6-01, P3-14, P5-07 | P0 | Матрица применимости покрыта тестами | DONE |
+| P6-03 | Gate runners: Ruff, ESLint, PHPStan, typecheck, build, pytest, Vitest, Playwright | FR-QG-03 | P6-02 | P0 | Фикстуры pass/fail для каждого | IN_PROGRESS |
+| P6-04 | Security gates: Semgrep, Gitleaks, Trivy, OSV-Scanner, Checkov, OPA | FR-QG-03 | P6-02 | P0 | Фикстуры с заведомыми находками | DONE |
+| P6-05 | Migration validation gate (эфемерный PG, upgrade/downgrade) | FR-QG-03 | P6-02 | P0 | Деструктивная миграция требует approval | DONE |
+| P6-06 | Performance gate (k6/бенчмарк) при заявлении об ускорении | FR-QG-03 | P6-02 | P1 | Воспроизводимые измерения в evidence | DONE |
+| P6-07 | Supply chain gates: Syft SBOM, Cosign verify | NFR-SEC-05 | P6-02 | P1 | SBOM как artifact | DONE |
+| P6-08 | Evidence, verdict rules (SKIPPED≠PASS, ERROR≠PASS), жизненный цикл findings | FR-QG-04, FR-QG-05, FR-QG-07 | P6-02 | P0 | Unit-тесты правил | DONE |
+| P6-09 | Guard завершения run + coverage gate (core ≥ 85%) | FR-ORCH-11, FR-QG-06 | P6-08 | P0 | AC-11 | DONE |
+| P6-10 | Standards registry seed (собственные формулировки), применимость проекта, compliance evaluation | FR-STD-01, FR-STD-02, FR-STD-03, FR-STD-04 | P6-01 | P0 | Трассировка standard→…→verdict в отчёте | DONE |
+| P6-11 | API: `/runs/{id}/quality`, `/compliance`, `/report`, `/tasks/{id}/evidence`, `/evidence/{id}` | FR-QG-07, FR-STD-05, FR-API-03 | P6-08, P6-10 | P0 | Schemathesis + RBAC | DONE |
+| P6-12 | False-pass prevention suite | FR-QG-04, RISK-09 | P6-09 | P0 | Ни один сценарий не даёт PASS | DONE |
 
 ## Phase 7 — Mission Control & Live Agent Chat
 
@@ -276,6 +276,27 @@
 | P3-17 | DONE | `tests/e2e/test_phase3_slice.py`, `tests/support/phase3.py` | 7 passed: COMPLETED с VERIFIED evidence; FAILED (gate/CLI); BLOCKED `PROVIDER_UNAVAILABLE`/`AUTH_REQUIRED` без обхода; AWAITING_APPROVAL → решение → COMPLETED |
 
 Исправления, найденные сквозными тестами: повтор задачи падал на существующей ветке worktree; run не переходил в BLOCKED, пока оставались PENDING-потомки заблокированной задачи; verifier не создавал staging-каталог.
+
+### Phase 6 — Quality, Security & Standards (2026-11-08)
+
+Окружение проверки: PostgreSQL 17, Redis 7, RustFS (S3), Docker с официальными образами инструментов, закреплёнными по digest (сеть в контейнерах gates отключена). Итог: `uv run pytest` → **2336 passed, 3 skipped** (2 — PHPStan недоступен в окружении, 1 — офлайн-БД Trivy не задана; обе ситуации в работе дают ERROR, не PASS); ruff, mypy --strict (325 файлов), import-linter, deny-gate, сверка контрактов, трассировка — без замечаний; `check:api` — веб-схема соответствует контракту.
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P6-01 | DONE | `infrastructure/migrations/versions/0008_quality_standards.py`, `0009_seed_phase6_gates.py` | 28 passed: up/down/up, offline, RLS, FSM findings, guard'ы compliance (PASS только с VERIFIED evidence того же run), CHECK `error_code` = `gates.ErrorCode`, seed 26 gates × 3 профиля = `registry.seed_rows()` |
+| P6-02 | DONE | `aicd_verification/{registry,profiles}.py` | 74 passed: матрица QUALITY_GATES §2.2 × применимость по файлам commit и `project_technologies` |
+| P6-03 | IN_PROGRESS | `aicd_verification/{runners,coverage_driver,images}.py`, `tests/fixtures/gates/**` | 111 passed, 2 skipped: ESLint, mypy, pyright, tsc, сборка, Vitest, Playwright, pytest/coverage — фикстуры pass/fail, ruff/eslint в закреплённых образах. **PHPStan:** раннер есть, отсутствие инструмента → ERROR; фикстурный тест пропущен — в окружении нет phpstan и образа (OQ-43) |
+| P6-04 | DONE | `aicd_verification/security_gates.py`, `tools/**`, `tests/fixtures/security/**` | 74 passed, 1 skipped: Semgrep, Gitleaks, Trivy (config), OSV, Checkov, conftest/OPA на реальных образах по digest и фикстурах с заведомыми находками; подавления репозитория заменены платформенными конфигами. Trivy vuln/OSV без офлайн-БД → ERROR (тест с БД проходит при `AICD_TRIVY_DB_DIR`) |
+| P6-05 | DONE | `aicd_verification/migrations.py` | Эфемерный postgres:17 (digest, сеть none, tmpfs): upgrade → downgrade → upgrade со сверкой схемы; деструктивные операции → finding high, PASS только после APPROVED `DESTRUCTIVE_MIGRATION` (`test_false_pass_prevention.py` с docker и БД). Alembic в контейнере ждёт образ платформы (OQ-43) |
+| P6-06 | DONE | `tools/{perf,bench_runner}.py` | Заявление агента об ускорении → повторяемые замеры base vs head (N ≥ 5, медиана, квартили, окружение) в evidence |
+| P6-07 | DONE | `security_gates.py` (syft, cosign) | SBOM CycloneDX как артефакт с sha256; cosign verify по ключу офлайн (без Rekor) |
+| P6-08 | DONE | `aicd_verification/{verdict,findings}.py` | 76 passed: SKIPPED ≠ PASS, ERROR ≠ PASS, NOT_APPLICABLE только с причиной, полнота evidence (AC-14), нормализация и жизненный цикл findings |
+| P6-09 | DONE | `verdict.run_completion_verdict`, `aicd_orchestration/engine.py` (блок завершения) | COMPLETED только при PASS всех обязательных gates профиля на итоговом commit, проверенном sha256 evidence, без открытых блокирующих findings и PENDING approvals; gate покрытия ядра ≥ 85% (strict/critical) |
+| P6-10 | DONE | `packages/standards/aicd_standards/**`, seed в 0008 | 37 passed: 18 стандартов / 33 контроля собственными формулировками (только идентификаторы и пункты), применимость по стеку, трассировка стандарт → контроль → проверка → evidence → вердикт |
+| P6-11 | DONE | `apps/api/aicd_api/routers/quality.py`, `report_markdown.py`, контракт (аддитивно) | `test_quality_api.py` → 17 passed: контракт, отчёт JSON + Markdown с экранированием, RBAC, 404 чужим, Schemathesis без 5xx |
+| P6-12 | DONE | `tests/integration/test_false_pass_prevention.py`, `tests/e2e/test_completion_guard.py` | 8 passed: нет инструмента, сбой, таймаут, 0 собранных тестов, пропуски, нет/битый отчёт покрытия, exit 0 при падениях, другой commit, расхождение sha256, NOT_APPLICABLE без причины, устаревшее evidence — ни одного PASS/COMPLETED (AC-11) |
+
+Сквозные тесты оркестрации используют профиль workspace без gates «только в контейнере»; полный профиль strict исполняется в контейнерах в `tests/e2e/test_full_profile_docker.py` (run COMPLETED, gitleaks PASS). Исправлено по ходу: `redact_text` портил JSON-отчёты (кавычка), движок не передавал gates безопасности их входные файлы, тест инвариантов засорял глобальный профиль.
 
 ### Phase 5 — Code Intelligence (2026-11-08)
 

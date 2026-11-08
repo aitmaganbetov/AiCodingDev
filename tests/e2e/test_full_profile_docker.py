@@ -72,7 +72,7 @@ async def test_develop_run_completes_with_full_strict_profile_in_containers(
         await orchestrator.on_run_created(uuid.UUID(run_id), ws)
         status = await orchestrator.drive(uuid.UUID(run_id), ws)
     async with transaction(world.worker, DbContext(workspace_id=ws, actor_type="system")) as conn:
-        gates = dict(
+        gates: dict[str, str] = dict(
             (
                 await conn.execute(
                     text(
