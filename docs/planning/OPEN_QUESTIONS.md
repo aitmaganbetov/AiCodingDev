@@ -78,3 +78,4 @@
 | 2026-11-08 | Phase 3 | Старт Phase 3 (Core Orchestrator) на Fake CLI | Владелец продукта |
 | 2026-11-08 | Phase 4 | Отчёт Phase 3 принят, старт Phase 4 (Multi-Agent System) на Fake CLI; P4-13 real-CLI smoke — после P2-01. OQ-35…OQ-37 ожидают решения | Владелец продукта |
 | 2026-11-08 | Phase 5 | Отчёт Phase 4 принят, старт Phase 5 (Code Intelligence); P4-13 real-CLI и человеческое ревью шаблонов (P4-02) — ожидают; OQ-35…OQ-39 ожидают решения | Владелец продукта |
+| 2026-11-08 | Phase 6 | Отчёт Phase 5 принят, старт Phase 6 (Quality, Security & Standards); P5-08 (LSP) отложен; OQ-35…OQ-41 ожидают решения | Владелец продукта |
