@@ -59,5 +59,7 @@
 * ~~В `compose.yaml` нет сервисов воркеров~~ — **выполнено (OQ-46 (3), OQ-51 (d))**: `worker-outbox`, `worker-orchestrator`,
   `worker-exec`, `worker-index` (проверено на одноразовой копии стека — [installation.md §3](../runbooks/installation.md)).
   До P2-01 worker-exec в production не стартует (Fake CLI запрещён) — это ожидаемо и закрывается вместе с реальными CLI.
-* Gate SAST (semgrep) в контейнере без сети: probe `semgrep --version` > 60 с — переменные gate (`SEMGREP_ENABLE_VERSION_CHECK=0`)
-  не передаются в контейнерную спецификацию VerificationEngine (найдено проверкой compose-стека; исправление — verification).
+* ~~Gate SAST (semgrep) в контейнере без сети: probe > 60 с~~ — **исправлено**: объявленные gate переменные офлайн-режима
+  передаются в контейнер (`tests/integration/test_verification_engine.py::test_semgrep_sast_in_container_offline_gets_declared_env`).
+* ~~Установки CLI с версией вне матрицы (`untested`) исключались Router всегда~~ — **исправлено**: `allow_untested_cli_versions`
+  в snapshot run (basic/strict — да с предупреждением `UNTESTED_CLI_VERSION`, critical — нет).

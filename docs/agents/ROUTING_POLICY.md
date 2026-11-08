@@ -104,7 +104,7 @@ flowchart TD
 | # | Фильтр | Источник | Причина исключения в `score_breakdown.excluded[]` |
 |---|---|---|---|
 | H1 | провайдер и установка включены | `cli_providers.enabled`, settings | `disabled` |
-| H2 | установлен, `compatibility ≠ UNSUPPORTED`; `UNTESTED` только если `allow_untested_cli_versions` | probe | `not_installed`, `unsupported_version`, `untested_version` |
+| H2 | установлен, `compatibility ≠ UNSUPPORTED`; `UNTESTED` только если `allow_untested_cli_versions` (snapshot run `routing`; по умолчанию профиля — `true` для basic/strict, `false` для critical; выбор `UNTESTED` — `score_breakdown.warnings = ["UNTESTED_CLI_VERSION"]`, `candidates[].compatibility`, предупреждение в `reason`) | probe | `not_installed`, `unsupported_version`, `untested_version` |
 | H3 | `auth_status = AUTHENTICATED` (статус `UNKNOWN` допустим, только если последнее исполнение на установке успешно < 1 ч назад) | `cli_installations`, `provider_health` | `auth_required` |
 | H4 | `availability ∈ {AVAILABLE, DEGRADED}`, `now ≥ cooldown_until` | `provider_health` | `unavailable`, `rate_limited` |
 | H5 | требуемые capabilities (`noninteractive_mode`, `machine_readable_output ≠ none`; для задач с `session_ref_hint` — `resume_session`) | матрица совместимости | `capability_missing:<flag>` |

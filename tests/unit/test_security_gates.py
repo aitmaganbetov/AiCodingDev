@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -14,8 +14,10 @@ import pytest
 from aicd_security.container_policy import build_host_config, lint_container_config
 from aicd_security.sandbox import ContainerSpec, OutputChunk
 from aicd_verification import security_gates as sg
+from aicd_verification.engine import GateEnvError, declared_gate_env
 from aicd_verification.gates import DiffEntry, GateContext, GateSpec, RepoFacts
 from aicd_verification.images import validate_image_map
+from aicd_verification.registry import GATE_SPECS
 from aicd_verification.tools import images
 
 SAMPLES = Path(__file__).resolve().parents[1] / "fixtures" / "security" / "samples"
@@ -408,3 +410,38 @@ async def test_run_signature_gate_aggregates(tmp_path: Path) -> None:
     assert bad.status == "FAIL"
     empty, _ = await sg.run_signature_gate(FakeRunner(), sg.SigningPolicy("k", ()), _request(tmp_path))
     assert empty.status == "ERROR"
+
+
+# --- Окружение gate в контейнере (VerificationEngine._spec_for) ------------------------------------------------
+
+
+def test_declared_gate_env_is_static_offline_flags_only() -> None:
+    assert declared_gate_env(GATE_SPECS["semgrep-sast"]) == {
+        "SEMGREP_SEND_METRICS": "off",
+        "SEMGREP_ENABLE_VERSION_CHECK": "0",
+    }
+    assert declared_gate_env(GATE_SPECS["scope"]) == {}  # без декларации — ничего (и ничего с хоста)
+    for name in sg.SECURITY_GATES:  # все декларации платформы проходят проверку
+        declared_gate_env(GATE_SPECS[name])
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"HOME": "/root"},
+        {"PATH": "/opt/evil"},
+        {"LD_PRELOAD": "/x.so"},
+        {"GITHUB_TOKEN": "x"},
+        {"AWS_SECRET_ACCESS_KEY": "x"},
+        {"lower_case": "1"},
+        {"OK_NAME": "a\nb"},
+        {"OK_NAME": "x" * 300},
+    ],
+)
+def test_declared_gate_env_rejects_reserved_secret_like_or_malformed(
+    bad: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = sg.SECURITY_GATES["semgrep-sast"]
+    monkeypatch.setitem(sg.SECURITY_GATES, "semgrep-sast", replace(original, env=bad))
+    with pytest.raises(GateEnvError):
+        declared_gate_env(GATE_SPECS["semgrep-sast"])

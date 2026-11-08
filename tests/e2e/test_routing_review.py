@@ -16,9 +16,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_orchestration import router
 from aicd_orchestration.approvals import Approvals
 from aicd_platform.db import DbContext, transaction
-from aicd_orchestration import router
 from tests.support.phase3 import Slice, create_run, drive, install_both, install_cli, install_probed, world
 
 __all__ = ["world"]  # фикстура pytest

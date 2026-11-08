@@ -72,9 +72,12 @@ probe провайдеров через API → установки записа�
 независимый reviewer claude `SUCCEEDED`, gates SECRETS/SCOPE в контейнерах через docker-socket-proxy — `PASS`);
 SIGTERM — все воркеры завершились с кодом 0. Ограничения проверки: образ собран с `AICD_INSTALL_GIT=0` (deb.debian.org
 недоступен, OQ-51 (f)) и для проверки дополнен git хоста (не релизный образ); установки Fake CLI получают
-`compatibility=untested` (матрица пуста) — как живой стенд E2E, проверка отметила их `supported` в БД; gate SAST
-(semgrep) исключён профилем workspace — в контейнере без сети probe `semgrep --version` превышает 60 с (переменные
-gate `SEMGREP_ENABLE_VERSION_CHECK=0` не передаются в контейнер — дефект verification, передан на исправление).
+`compatibility=untested` (матрица пуста) — на момент проверки Router их исключал, проверка отметила их `supported` в
+БД; gate SAST (semgrep) был исключён профилем workspace — в контейнере без сети probe `semgrep --version` превышал 60 с.
+Оба дефекта, найденные этой проверкой, **исправлены**: политика `allow_untested_cli_versions` входит в snapshot run
+(basic/strict — `true` с предупреждением `UNTESTED_CLI_VERSION` в `routing_decisions`, critical — `false`,
+CLI_ADAPTER_CONTRACT §5.3); объявленные gate переменные офлайн-режима (`SEMGREP_ENABLE_VERSION_CHECK=0` и др.)
+передаются в контейнер gate (`aicd_verification.engine.declared_gate_env`, SAST офлайн ≈ 6 с).
 
 ## 4. Сразу после установки
 

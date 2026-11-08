@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shlex
 import shutil
 import tempfile
@@ -90,6 +91,32 @@ OK_FOR_COMPLETION = frozenset({"PASS", "NOT_APPLICABLE"})
 # Коды ошибок gate = CHECK ck_gate_executions_error_code (0008); единый источник — gates.ErrorCode.
 DB_ERROR_CODES = frozenset(get_args(ErrorCode))
 MAX_FINDINGS_PER_GATE = 500
+# Переменные, которые задаёт сам движок (изоляция процесса gate): декларации gate их не переопределяют.
+RESERVED_GATE_ENV = frozenset(
+    {"CI", "TZ", "LANG", "HOME", "PATH", "PYTHONDONTWRITEBYTECODE", "LD_PRELOAD", "LD_LIBRARY_PATH"}
+)
+_GATE_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+_SECRET_LIKE = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PRIVATE", re.I)
+
+
+class GateEnvError(ValueError):
+    """Недопустимая декларация окружения gate (ошибка кода платформы, не данных пользователя)."""
+
+
+def declared_gate_env(spec: GateSpec) -> dict[str, str]:
+    """Окружение, объявленное определением gate (флаги офлайн-режима инструмента: без проверки версий, телеметрии).
+
+    Источник — только статические декларации платформы (`SecurityGateDef.env`); окружение хоста не передаётся.
+    Имена — `[A-Z][A-Z0-9_]*`, без зарезервированных движком и без похожих на секреты; значения — короткие литералы.
+    """
+    security = SECURITY_GATES.get(spec.name)
+    declared = dict(security.env) if security is not None else {}
+    for name, value in declared.items():
+        if not _GATE_ENV_NAME.match(name) or name in RESERVED_GATE_ENV or _SECRET_LIKE.search(name):
+            raise GateEnvError(f"gate {spec.name}: недопустимая переменная окружения {name!r}")
+        if not isinstance(value, str) or len(value) > 256 or "\n" in value or "\x00" in value:
+            raise GateEnvError(f"gate {spec.name}: недопустимое значение переменной {name}")
+    return declared
 
 
 @dataclass(frozen=True)
@@ -847,6 +874,7 @@ class VerificationEngine:
                 "RUFF_CACHE_DIR": "/tmp/ruff-cache",  # noqa: S108 — tmpfs
                 "npm_config_cache": "/tmp/npm-cache",  # noqa: S108 — tmpfs контейнера
                 "npm_config_update_notifier": "false",
+                **declared_gate_env(spec),  # офлайн-флаги инструмента (semgrep без проверки версии и т. п.)
             }
             spec_kwargs: dict[str, Any] = {"user": spec.container_user} if spec.container_user else {}
             return ContainerSpec(
@@ -868,6 +896,7 @@ class VerificationEngine:
             "HOME": home,
             "PYTHONDONTWRITEBYTECODE": "1",
             "npm_config_update_notifier": "false",
+            **declared_gate_env(spec),
             **self._local_env,
         }
         return ContainerSpec(
