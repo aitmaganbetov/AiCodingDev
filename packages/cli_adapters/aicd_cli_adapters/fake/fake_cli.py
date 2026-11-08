@@ -441,7 +441,9 @@ def main() -> int:
         emit({"event": "message", "type": "reasoning", "text": "HIDDEN-REASONING-CANARY думаю о задаче"})
         for i in range(1, 31):
             emit({"event": "message", "text": f"live line {i:02d}"})
-            time.sleep(0.02)
+            # После первых строк процесс заметно «работает»: проверка живого вывода (чанк по SSE раньше
+            # завершения процесса) не должна зависеть от загрузки хоста и интервала опроса outbox.
+            time.sleep(2.0 if i == 5 else 0.02)
         sys.stderr.write("\x1b[31mwarn\x1b[0m: token=ghp_SPLITsplitSPLITsplit")
         sys.stderr.flush()
         time.sleep(0.05)
