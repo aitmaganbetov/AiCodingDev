@@ -111,7 +111,8 @@ def test_no_secret_columns(database: testdb.TestDatabase) -> None:
         ).fetchall()
     bad = re.compile(r"(password|secret|token|api_?key|private_key|cookie)(?!_hash|_ref)")
     allowed_suffixes = ("_hash", "_ref", "_changed_at")  # метаданные, не значения секретов
-    allowed = {"fencing_token", "lease_fencing_token"}  # монотонный номер аренды, не секрет (§18.6, §18.9)
+    # Монотонный номер аренды (§18.6) и счётчики токенов LLM-контекста (§10.5, §10.8) — не секреты (§18.9).
+    allowed = {"fencing_token", "lease_fencing_token", "token_budget", "token_estimate"}
     offenders = [f"{t}.{c}" for t, c in cols if bad.search(c) and not c.endswith(allowed_suffixes) and c not in allowed]
     assert offenders == []
 

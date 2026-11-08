@@ -25,9 +25,13 @@ Phase 6, P6-01). Seed technologies не выполняется: §6.5 его н�
 миграции/admin CLI; определение стека P5-07 регистрирует версии через aicd_worker).
 Классы (§19.4): technologies, technology_versions — G (SELECT app/worker, INSERT только worker, без
 UPDATE/DELETE); остальные 15 таблиц — T (RLS ENABLE+FORCE, политика p_<t>_tenant для app/worker).
+sys_plan_docs_download(p_source_id uuid, p_idempotency_key text, p_request jsonb) RETURNS uuid —
+SECURITY DEFINER (владелец aicd_sysfn, EXECUTE только aicd_app): планирует загрузку документации
+(external_actions PLANNED, 'docs_download', run_id NULL) для POST /documentation/sources/{id}/refresh;
+INSERT на external_actions у aicd_app нет (дополнение к §19.5).
 Миграция — только SQL через op.execute (работает в offline-режиме `alembic upgrade --sql`).
 
-Обратимость: downgrade удаляет таблицы, функции, строки indexing_job в allowed_transitions и возвращает
+Обратимость: downgrade удаляет таблицы, функции (включая sys_plan_docs_download и выданные aicd_sysfn права), строки indexing_job в allowed_transitions и возвращает
 CHECK entity к виду 0002.
 """
 
@@ -539,7 +543,87 @@ GRANT SELECT ON technologies, technology_versions, project_technologies, documen
   TO aicd_maintenance;
 """
 
+SYSFN = r"""
+-- §19.5: POST /documentation/sources/{id}/refresh — запланировать загрузку (external_actions PLANNED,
+-- action_type 'docs_download', run_id NULL, ADR-0012) без права INSERT на external_actions у aicd_app.
+-- Источник ищется только в app_current_workspace(); вызывающий — член workspace с ролью
+-- ≥ approval_min_role('DOCS_DOWNLOAD') (= developer, как documentation:refresh в API_DESIGN §4).
+-- Результат: id действия; NULL — источник не найден в workspace или вызывающий не член (→ 404);
+-- 42501 — роли недостаточно (→ 403); 55000 — источник отключён (→ 409); 22023 — неверные аргументы.
+-- Идемпотентность: ключ = sha256('docs_download' | workspace | source | p_idempotency_key);
+-- повтор возвращает id уже созданного действия.
+CREATE FUNCTION sys_plan_docs_download(p_source_id uuid, p_idempotency_key text, p_request jsonb)
+RETURNS uuid
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, aicd AS $$
+DECLARE
+  v_ws     uuid := aicd.app_current_workspace();
+  v_user   uuid := aicd.app_current_user();
+  v_uri    text;
+  v_enabled boolean;
+  v_role   text;
+  v_key    text;
+  v_id     uuid;
+BEGIN
+  IF p_source_id IS NULL OR p_idempotency_key IS NULL OR length(p_idempotency_key) NOT BETWEEN 1 AND 255
+     OR p_request IS NULL OR jsonb_typeof(p_request) <> 'object' OR octet_length(p_request::text) > 16384 THEN
+    RAISE EXCEPTION 'sys_plan_docs_download: invalid arguments' USING ERRCODE = '22023';
+  END IF;
+  IF v_ws IS NULL OR v_user IS NULL THEN
+    RETURN NULL;
+  END IF;
+  SELECT s.uri_or_file_ref, s.enabled INTO v_uri, v_enabled
+    FROM aicd.documentation_sources s WHERE s.id = p_source_id AND s.workspace_id = v_ws;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  SELECT m.role INTO v_role FROM aicd.workspace_members m WHERE m.workspace_id = v_ws AND m.user_id = v_user;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  IF aicd.workspace_role_rank(v_role) < aicd.workspace_role_rank(aicd.approval_min_role('DOCS_DOWNLOAD')) THEN
+    RAISE EXCEPTION 'role % may not refresh documentation sources', v_role USING ERRCODE = '42501';
+  END IF;
+  IF NOT v_enabled THEN
+    RAISE EXCEPTION 'documentation source % is disabled', p_source_id USING ERRCODE = '55000';
+  END IF;
+  v_key := encode(sha256(convert_to(concat_ws('|', 'docs_download', v_ws::text, p_source_id::text, p_idempotency_key),
+                                    'UTF8')), 'hex');
+  -- UUIDv7 (PostgreSQL 17 не умеет uuidv7()): 48 бит unix-ms поверх случайного v4, версия 0100 → 0111.
+  v_id := encode(set_bit(set_bit(overlay(uuid_send(gen_random_uuid())
+                   PLACING substring(int8send(floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint) FROM 3)
+                   FROM 1 FOR 6), 52, 1), 53, 1), 'hex')::uuid;
+  INSERT INTO aicd.external_actions (id, workspace_id, action_type, idempotency_key, target, request, request_hash)
+  VALUES (v_id, v_ws, 'docs_download', v_key,
+          CASE WHEN length(v_uri) <= 1024 THEN v_uri ELSE 'documentation_source:' || p_source_id::text END,
+          p_request, encode(sha256(convert_to(p_request::text, 'UTF8')), 'hex'))
+  ON CONFLICT (idempotency_key) DO NOTHING;
+  IF NOT FOUND THEN
+    SELECT e.id INTO v_id FROM aicd.external_actions e WHERE e.idempotency_key = v_key;
+  END IF;
+  RETURN v_id;
+END $$;
+
+GRANT CREATE ON SCHEMA aicd TO aicd_sysfn;
+ALTER FUNCTION sys_plan_docs_download(uuid, text, jsonb) OWNER TO aicd_sysfn;
+REVOKE CREATE ON SCHEMA aicd FROM aicd_sysfn;
+REVOKE ALL ON FUNCTION sys_plan_docs_download(uuid, text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION sys_plan_docs_download(uuid, text, jsonb) TO aicd_app;
+GRANT EXECUTE ON FUNCTION approval_min_role(text) TO aicd_sysfn;
+GRANT SELECT (id, workspace_id, uri_or_file_ref, enabled) ON documentation_sources TO aicd_sysfn;
+-- workspace_id/status/executing_at выданы миграцией 0005; здесь — недостающие колонки и вставка.
+GRANT SELECT (id, idempotency_key) ON external_actions TO aicd_sysfn;
+GRANT INSERT (id, workspace_id, action_type, idempotency_key, target, request, request_hash) ON external_actions TO aicd_sysfn;
+-- trg_external_actions_transition выполняется от имени владельца функции (aicd_sysfn) и читает справочник.
+GRANT SELECT ON allowed_transitions TO aicd_sysfn;
+"""
+
 DOWNGRADE = r"""
+DROP FUNCTION IF EXISTS sys_plan_docs_download(uuid, text, jsonb);
+REVOKE SELECT ON allowed_transitions FROM aicd_sysfn;
+REVOKE INSERT (id, workspace_id, action_type, idempotency_key, target, request, request_hash) ON external_actions FROM aicd_sysfn;
+REVOKE SELECT (id, idempotency_key) ON external_actions FROM aicd_sysfn;
+REVOKE EXECUTE ON FUNCTION approval_min_role(text) FROM aicd_sysfn;
+
 DROP TABLE IF EXISTS indexing_jobs, context_packs, retrieval_results, retrieval_queries, knowledge_chunks,
                      code_dependencies, code_symbols, code_files, code_index_snapshots, architecture_decisions,
                      knowledge_entries, documentation_sections, documentation_snapshots, documentation_sources,
@@ -554,7 +638,7 @@ ALTER TABLE allowed_transitions ADD CONSTRAINT allowed_transitions_entity_check
 
 
 def upgrade() -> None:
-    for block in (TABLES, TRIGGERS, RLS, GRANTS):
+    for block in (TABLES, TRIGGERS, RLS, GRANTS, SYSFN):
         op.execute(block)
 
 
