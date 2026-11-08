@@ -20,7 +20,7 @@
    архива) → post-restore → пустой Redis → S3 + артефакты → API и воркеры.
 5. **Проверки**: RPO (потерянные heartbeat), счётчики строк всех таблиц, RLS/FORCE и роли, sha256 артефактов
    (хранилище и скачивание через API), вход пользователя, run №1 COMPLETED, run №2/№3 продолжаются до
-   COMPLETED, сдвиг fencing token, логический дамп восстанавливается.
+   COMPLETED, сдвиг fencing token, логический дамп (роль aicd_maintenance) восстанавливается.
 
 Отчёт — Markdown (`--report`) и JSON рядом. Код возврата 0 — все проверки PASS.
 """
@@ -807,7 +807,8 @@ def run_drill(drill: Drill) -> None:
                 got = conn.execute(f'SELECT count(*) FROM aicd."{table}"').fetchone()  # noqa: S608 — имена таблиц из pg_class
                 if got is None or int(got[0]) != count:
                     mismatched.append((table, count, got[0] if got else None))
-        drill.check("логический дамп восстанавливается (pg_restore) со строками на момент дампа", not mismatched,
+        drill.check("логический дамп под aicd_maintenance (без суперпользователя, миграция 0016) восстанавливается"
+                    " (pg_restore) со строками на момент дампа", not mismatched and facts["dump_role"] == "aicd_maintenance",
                     f"роль дампа: {facts['dump_role']}; расхождения: {mismatched or 'нет'}; {restore_log[-200:]}")  # fmt: skip
 
     facts["rto"] = {

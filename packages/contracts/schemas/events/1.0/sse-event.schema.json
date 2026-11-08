@@ -929,7 +929,8 @@
             "CRITICAL_DIRECTIVE",
             "MANUAL_REVIEW",
             "SELF_REVIEW_FALLBACK",
-            "LOCAL_EXECUTION_FALLBACK"
+            "LOCAL_EXECUTION_FALLBACK",
+            "VULN_DB_UPDATE"
           ]
         },
         "task_id": {
@@ -1011,7 +1012,8 @@
             "CRITICAL_DIRECTIVE",
             "MANUAL_REVIEW",
             "SELF_REVIEW_FALLBACK",
-            "LOCAL_EXECUTION_FALLBACK"
+            "LOCAL_EXECUTION_FALLBACK",
+            "VULN_DB_UPDATE"
           ]
         },
         "status": {

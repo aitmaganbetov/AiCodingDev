@@ -23,6 +23,7 @@ fencing token, внешние действия (push/PR/merge) проходят 
 | Tick оркестратора | `aicd-worker orchestrator` | `AICD_TICK_INTERVAL_SECONDS` (5 с) | READY-задачи, не взятые дольше `AICD_STALE_READY_SECONDS` (30 с), ставятся в очередь повторно (потерянные сообщения Redis) |
 | Повторы outbox | `aicd-worker outbox` | 0,5 с | неопубликованные события (`published_at IS NULL`) — с backoff (`available_at`, `publish_attempts`, `last_error`) |
 | Повторы Dramatiq | все потребители | экспоненциально | после исчерпания — dead-letter (`<очередь>.XQ`), §5 |
+| Сверка GitHub-действий | `aicd-worker orchestrator` (с GitHub App) | при старте и каждые 60 с | `external_actions` GitHub в `EXECUTING` без живой аренды: probe состояния GitHub → `CONFIRMED`, затем продолжение PR workflow/merge без повторной доставки Dramatiq (OQ-47 (7)) |
 
 ## 2. Run «завис» (нет прогресса)
 
@@ -106,3 +107,27 @@ EXECUTING`) не повторяется вслепую: recovery сверяет 
 ## 8. Восстановление после аварии хранилища/БД
 
 См. [backups.md §5](backups.md). После восстановления — шаги этого runbook §2–§5 для run «в полёте».
+
+## 9. Сеть до PostgreSQL «молча» теряет пакеты
+
+Все процессы (API, воркеры, `aicd`) открывают соединения libpq с TCP keepalive и `tcp_user_timeout`
+(`AICD_DB_KEEPALIVES_IDLE_SECONDS`=30, `AICD_DB_KEEPALIVES_INTERVAL_SECONDS`=10, `AICD_DB_KEEPALIVES_COUNT`=3,
+`AICD_DB_TCP_USER_TIMEOUT_MS`=60000; 0 — выключить `tcp_user_timeout`): при обрыве без RST (сбой маршрута,
+failover за NAT/балансировщиком) запрос завершается ошибкой примерно через 60 с вместо ~2 ч, пул отбрасывает
+соединение (`pool_pre_ping`), outbox/воркеры повторяют работу (проверено обрывом и простоем PG через прокси —
+`tests/chaos/test_infra_faults.py`; параметры сокета — `tests/unit/test_db_keepalive.py`). Ручных действий не нужно;
+если ошибки `server closed the connection` / `Connection timed out` продолжаются — проверить сеть до PostgreSQL.
+
+## 10. Объекты-сироты в хранилище артефактов
+
+Объект без строки `artifacts` остаётся после гибели процесса между записью объекта и commit (например, checkpoint
+посреди применения поручения) или после неудачного удаления объекта retention. Сборка — под ролью `aicd_maintenance`:
+
+```sh
+$C run --rm --no-deps api aicd maintenance orphan-objects --dry-run         # только подсчёт (аудит dry_run=true)
+$C run --rm --no-deps api aicd maintenance orphan-objects --grace-hours 24  # удалить сирот старше 24 ч (FS или S3)
+```
+
+Объекты моложе grace (запись в процессе) и архивы retention (`archive/…`) не трогаются; итоги — JSON в stdout и
+`maintenance.orphan_objects_deleted` в аудите. Рекомендуемое расписание — ежедневно после `aicd maintenance retention`.
+

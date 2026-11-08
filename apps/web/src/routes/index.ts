@@ -9,6 +9,7 @@ import { auditArea } from './audit';
 import { chatArea } from './chat';
 import { complianceArea } from './compliance';
 import { dashboardArea } from './dashboard';
+import { integrationsArea } from './integrations';
 import { knowledgeArea } from './knowledge';
 import { projectsArea } from './projects';
 import { providersArea } from './providers';
@@ -31,6 +32,7 @@ export const AREAS: readonly AreaModule[] = [
   knowledgeArea,
   analyticsArea,
   providersArea,
+  integrationsArea,
   settingsArea,
   auditArea,
   workspacesArea,

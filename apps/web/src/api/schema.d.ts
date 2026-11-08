@@ -1716,7 +1716,7 @@ export interface components {
          * @description Каноническое перечисление (docs/README.md §3).
          * @enum {string}
          */
-        ApprovalActionType: "PLAN_APPROVAL" | "MERGE" | "PRODUCTION_DEPLOY" | "DESTRUCTIVE_MIGRATION" | "DATA_DELETION" | "SECRET_CHANGE" | "UNRESTRICTED_NETWORK" | "DOCS_DOWNLOAD" | "CRITICAL_DIRECTIVE" | "MANUAL_REVIEW" | "SELF_REVIEW_FALLBACK" | "LOCAL_EXECUTION_FALLBACK";
+        ApprovalActionType: "PLAN_APPROVAL" | "MERGE" | "PRODUCTION_DEPLOY" | "DESTRUCTIVE_MIGRATION" | "DATA_DELETION" | "SECRET_CHANGE" | "UNRESTRICTED_NETWORK" | "DOCS_DOWNLOAD" | "CRITICAL_DIRECTIVE" | "MANUAL_REVIEW" | "SELF_REVIEW_FALLBACK" | "LOCAL_EXECUTION_FALLBACK" | "VULN_DB_UPDATE";
         /**
          * @description Каноническое перечисление (docs/README.md §3).
          * @enum {string}

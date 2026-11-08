@@ -22,6 +22,7 @@ export const FOUR_EYES_ACTIONS: readonly ApprovalActionType[] = [
   'UNRESTRICTED_NETWORK',
   'CRITICAL_DIRECTIVE',
   'LOCAL_EXECUTION_FALLBACK',
+  'VULN_DB_UPDATE',
 ];
 
 /** События SSE run, после которых список/карточка подтверждений устарели. */

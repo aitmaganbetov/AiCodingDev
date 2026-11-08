@@ -483,6 +483,7 @@ flowchart TD
 | Неограниченная сеть для исполнения | `UNRESTRICTED_NETWORK` | owner | да | да | `execution`/task, список доменов или `*` | на один run | Только расширение allowlist egress-proxy для конкретного контейнера |
 | Исполнение без Docker sandbox | `LOCAL_EXECUTION_FALLBACK` | owner | да | да | run, хост | на один run | Требует включённой политики проекта (§7.7) |
 | Критичная директива (CHANGE_REQUEST/STOP с impact `RESTART_REQUIRED`/`TASK_CANCEL` для задач `risk_level=critical`) | `CRITICAL_DIRECTIVE` | admin | да | нет | `directive_id`, impact hash | 24 ч | Impact preview обязателен |
+| Обновление офлайн-БД уязвимостей SCA-gates (egress к реестрам БД OSV/Trivy) — миграция 0016 | `VULN_DB_UPDATE` | admin | да | да | виды БД, экосистемы OSV, реестр БД Trivy, egress-хосты (sha256 канонического JSON) | 24 ч, однократно | Запрос/использование — только `aicd_maintenance` (`sys_vulndb_*`, docs/runbooks/vulndb-update.md); исполнитель не загружает БД без `APPROVED` |
 | Загрузка внешней документации (`SMART`) | `DOCS_DOWNLOAD` | developer | нет | нет | `source_id`, URL | 7 дней | SSRF guard всегда |
 | Ручное ревью (провайдер ревью недоступен / изменения CI) | `MANUAL_REVIEW` | reviewer | нет* | нет | task, `commit_sha` | 72 ч | *Автор изменений (agent) ≠ человек; повторный review при новом коммите |
 | Самопроверка вместо независимого ревью | `SELF_REVIEW_FALLBACK` | reviewer | нет | нет | task, provider | на task | Метка `review_independence=self_review_fallback` в evidence/UI, не `independent` |

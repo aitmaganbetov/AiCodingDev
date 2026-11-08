@@ -98,7 +98,8 @@
         "CRITICAL_DIRECTIVE": "Критичное поручение",
         "MANUAL_REVIEW": "Ручная проверка",
         "SELF_REVIEW_FALLBACK": "Ревью тем же провайдером",
-        "LOCAL_EXECUTION_FALLBACK": "Выполнение вне песочницы"
+        "LOCAL_EXECUTION_FALLBACK": "Выполнение вне песочницы",
+        "VULN_DB_UPDATE": "Обновление базы уязвимостей"
       },
       "actionHint": {
         "PLAN_APPROVAL": "Утверждение плана: задачи запуска не начнут выполняться до решения.",
@@ -112,7 +113,8 @@
         "CRITICAL_DIRECTIVE": "Критичное поручение пользователя.",
         "MANUAL_REVIEW": "Требуется ручная проверка.",
         "SELF_REVIEW_FALLBACK": "Независимое ревью недоступно: ревью тем же провайдером.",
-        "LOCAL_EXECUTION_FALLBACK": "Выполнение без Docker-песочницы."
+        "LOCAL_EXECUTION_FALLBACK": "Выполнение без Docker-песочницы.",
+        "VULN_DB_UPDATE": "Загрузка офлайн-БД уязвимостей для проверок SCA: без одобрения не выполняется."
       }
     }
   }

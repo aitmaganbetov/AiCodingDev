@@ -88,6 +88,7 @@ APPROVAL_MIN_ROLE: Final[dict[str, Role]] = {
     "MERGE": Role.ADMIN,
     "DESTRUCTIVE_MIGRATION": Role.ADMIN,
     "CRITICAL_DIRECTIVE": Role.ADMIN,
+    "VULN_DB_UPDATE": Role.ADMIN,  # обновление офлайн-БД уязвимостей (egress к реестрам БД), миграция 0016
     "PRODUCTION_DEPLOY": Role.OWNER,
     "SECRET_CHANGE": Role.OWNER,
     "UNRESTRICTED_NETWORK": Role.OWNER,
@@ -116,6 +117,7 @@ FOUR_EYES_ACTIONS: Final = frozenset(
         "UNRESTRICTED_NETWORK",
         "CRITICAL_DIRECTIVE",
         "LOCAL_EXECUTION_FALLBACK",
+        "VULN_DB_UPDATE",
     }
 )
 # Для этих действий исключение single-member workspace не применяется (OQ-10).

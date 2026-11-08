@@ -2726,6 +2726,8 @@ paths:
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
       x-required-permission: github:read
       x-audit-action: none
       x-tz-addition: true
@@ -2861,6 +2863,8 @@ paths:
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
       x-required-permission: github:read
       x-audit-action: none
       x-tz-addition: true
@@ -2983,6 +2987,8 @@ paths:
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
       x-required-permission: github:read
       x-audit-action: none
       x-tz-addition: true
@@ -3655,7 +3661,7 @@ components:
     ApprovalActionType:
       type: string
       enum: [PLAN_APPROVAL, MERGE, PRODUCTION_DEPLOY, DESTRUCTIVE_MIGRATION, DATA_DELETION, SECRET_CHANGE, UNRESTRICTED_NETWORK, DOCS_DOWNLOAD,
-        CRITICAL_DIRECTIVE, MANUAL_REVIEW, SELF_REVIEW_FALLBACK, LOCAL_EXECUTION_FALLBACK]
+        CRITICAL_DIRECTIVE, MANUAL_REVIEW, SELF_REVIEW_FALLBACK, LOCAL_EXECUTION_FALLBACK, VULN_DB_UPDATE]
       description: Каноническое перечисление (docs/README.md §3).
     ApprovalStatus:
       type: string

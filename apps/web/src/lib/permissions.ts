@@ -37,7 +37,11 @@ export type Permission =
   | 'documentation:refresh'
   | 'artifact:download'
   | 'artifact:download_raw'
-  | 'audit:read';
+  | 'audit:read'
+  | 'github:read'
+  | 'github:manage'
+  | 'pull_request:create'
+  | 'pull_request:merge';
 
 const ALL: readonly WorkspaceRole[] = ['owner', 'admin', 'developer', 'reviewer', 'viewer'];
 const ADMINS: readonly WorkspaceRole[] = ['owner', 'admin'];
@@ -78,6 +82,11 @@ const MATRIX: Record<Permission, readonly WorkspaceRole[]> = {
   'artifact:download': ALL,
   'artifact:download_raw': ADMINS,
   'audit:read': ADMINS,
+  // GitHub (P8): установки — owner/admin; PR и запрос merge — developer и выше (merge — через approval MERGE).
+  'github:read': ALL,
+  'github:manage': ADMINS,
+  'pull_request:create': WRITERS,
+  'pull_request:merge': WRITERS,
 };
 
 /** Неизвестная роль (расширение enum) трактуется как отсутствие права. */

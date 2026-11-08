@@ -24,8 +24,12 @@ describe('validateAttach', () => {
   it('requires the location for the chosen provider and a GitHub URL format', () => {
     expect(validateAttach({ provider: 'local', remoteUrl: '', localPath: '', branch: '' }, t)).toEqual({ local_path: 'Обязательное поле.' });
     expect(validateAttach({ provider: 'github', remoteUrl: 'https://gitlab.com/a/b', localPath: '', branch: '' }, t).remote_url).toMatch(/github\.com/);
-    expect(validateAttach({ provider: 'github', remoteUrl: 'https://github.com/a/b', localPath: '', branch: 'x'.repeat(256) }, t)).toEqual({
+    expect(validateAttach({ provider: 'github', remoteUrl: 'https://github.com/a/b', localPath: 'main/b', branch: 'x'.repeat(256) }, t)).toEqual({
       default_branch: 'Не более 255 символов.',
+    });
+    // GitHub-репозиторий тоже требует локальную рабочую копию (OQ-47 (6)).
+    expect(validateAttach({ provider: 'github', remoteUrl: 'https://github.com/a/b', localPath: '', branch: '' }, t)).toEqual({
+      local_path: 'Обязательное поле.',
     });
   });
 });

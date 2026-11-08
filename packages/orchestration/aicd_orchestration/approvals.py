@@ -40,7 +40,10 @@ from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.ids import uuid7
 
 DEFAULT_TTL: Final = timedelta(hours=72)
-TTL_BY_ACTION: Final[dict[str, timedelta]] = {"PRODUCTION_DEPLOY": timedelta(hours=24)}
+TTL_BY_ACTION: Final[dict[str, timedelta]] = {
+    "PRODUCTION_DEPLOY": timedelta(hours=24),
+    "VULN_DB_UPDATE": timedelta(hours=24),  # запрашивает sys_vulndb_request_approval (миграция 0016)
+}
 DECISIONS: Final = frozenset({"APPROVED", "REJECTED"})
 
 _SUMMARIES: Final[dict[str, str]] = {
@@ -56,6 +59,7 @@ _SUMMARIES: Final[dict[str, str]] = {
     "MANUAL_REVIEW": "Ручное ревью",
     "SELF_REVIEW_FALLBACK": "Ревью тем же провайдером",
     "LOCAL_EXECUTION_FALLBACK": "Локальное исполнение без контейнера",
+    "VULN_DB_UPDATE": "Обновление офлайн-БД уязвимостей",
 }
 
 

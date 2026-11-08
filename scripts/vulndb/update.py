@@ -1,16 +1,23 @@
-"""Одобренное и аудируемое обновление офлайн-БД уязвимостей (OQ-43 (f), QUALITY_GATES §4.1, security_gates).
+"""Одобренное и аудируемое обновление офлайн-БД уязвимостей (OQ-43 (f), OQ-51 (b), QUALITY_GATES §4.1, security_gates).
 
-    uv run python -m scripts.vulndb.update --db-root /var/lib/aicd/vulndb --approval-file approval.json \\
-        --osv-ecosystems PyPI,npm [--trivy] [--ca-bundle /path/ca.pem]
+    # 1) запрос approval платформы VULN_DB_UPDATE от имени инициатора (член workspace)
+    uv run python -m scripts.vulndb.update request --workspace-id W --project-id P --requested-by you@corp \
+        --osv-ecosystems PyPI,npm --trivy --pg-container aicodingdev-postgres-1
+    # 2) другой участник (admin+, step-up) утверждает его в UI «Approvals» (four-eyes, срок 24 ч)
+    # 3) обновление по утверждённому approval (однократно, предмет должен совпасть с запросом)
+    uv run python -m scripts.vulndb.update apply --approval-id A --db-root /var/lib/aicd/vulndb \
+        --osv-ecosystems PyPI,npm --trivy --pg-container aicodingdev-postgres-1 [--ca-bundle /path/ca.pem]
 
 Gates `trivy-vuln` и `osv-scanner-sca` работают без сети и читают БД из `/aicd-db` (только чтение); без свежей
 БД — ERROR(DB_UNAVAILABLE), не PASS. Этот шаг — единственный, которому нужен egress, и только к:
 `osv-vulnerabilities.storage.googleapis.com` (OSV) и реестру БД Trivy (`mirror.gcr.io`, `--trivy-db-repository`).
 
-Порядок: проверка одобрения (`--approval-file`, см. docs/runbooks/vulndb-update.md) → загрузка в staging →
-проверки (md5 GCS, целостность zip и JSON-записей, лимиты размера; формат БД Trivy и свежесть через
-`aicd_verification.security_gates.*_db_status`) → атомарная замена `<db-root>/<osv|trivy>` (предыдущая версия —
-`<db-root>/.previous/<вид>` для отката) → запись в журнал аудита `<db-root>/audit.jsonl` (кто, одобрение, sha256).
+Порядок `apply`: `sys_vulndb_authorize` (APPROVED, не истёк, предмет совпал, не использован; аудит платформы
+`vulndb.update_authorized`) → загрузка в staging → проверки (md5 GCS, целостность zip и JSON-записей, лимиты размера;
+формат БД Trivy и свежесть через `aicd_verification.security_gates.*_db_status`) → атомарная замена
+`<db-root>/<osv|trivy>` (предыдущая версия — `<db-root>/.previous/<вид>`) → итог в аудит платформы
+(`vulndb.update_finished`) и локальный журнал `<db-root>/audit.jsonl`. Офлайн-обхода (файла одобрения) нет:
+без платформы gates всё равно не работают, а одобрение должно быть проверяемым (four-eyes, step-up, аудит).
 """
 
 from __future__ import annotations
@@ -28,21 +35,24 @@ import ssl
 import subprocess
 import sys
 import urllib.request
+import uuid
 import zipfile
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import psycopg
+
 from aicd_verification.security_gates import OSV_MANIFEST_FILE, osv_db_status, trivy_db_status
 from aicd_verification.tools.images import TRIVY
+from scripts.backup.docker import PgTarget
+from scripts.vulndb.approval import PlatformDb, authorize, build_subject, report, request
 
 OSV_BASE = "https://osv-vulnerabilities.storage.googleapis.com"
 OSV_ECOSYSTEMS = frozenset({"PyPI", "npm", "Go", "Packagist", "crates.io", "Maven", "NuGet", "RubyGems", "Hex", "Pub"})
 TRIVY_DB_REPOSITORY = "mirror.gcr.io/aquasec/trivy-db:2"
 MAX_ZIP_BYTES = 1024 * 1024 * 1024
 MAX_ENTRIES = 2_000_000
-APPROVAL_TTL = timedelta(hours=24)
-APPROVAL_FIELDS = ("approved_by", "approved_at", "reason", "ticket", "scope")
 
 
 class UpdateError(RuntimeError):
@@ -51,23 +61,6 @@ class UpdateError(RuntimeError):
 
 def now() -> datetime:
     return datetime.now(UTC)
-
-
-def load_approval(path: Path, kinds: set[str]) -> dict[str, Any]:
-    """Одобрение — JSON {approved_by, approved_at, reason, ticket, scope:[osv|trivy]}; не старше 24 ч, scope ⊇ kinds."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    missing = [f for f in APPROVAL_FIELDS if not data.get(f)]
-    if missing:
-        raise UpdateError(f"одобрение неполное: нет {missing}")
-    approved_at = datetime.fromisoformat(str(data["approved_at"]).replace("Z", "+00:00"))
-    if approved_at.tzinfo is None or not (now() - APPROVAL_TTL <= approved_at <= now() + timedelta(minutes=5)):
-        raise UpdateError("одобрение просрочено (старше 24 ч) или из будущего")
-    if not kinds <= set(data["scope"]):
-        raise UpdateError(f"одобрение не покрывает {sorted(kinds - set(data['scope']))}")
-    operator = getpass.getuser()
-    if str(data["approved_by"]).strip().lower() == operator.lower():
-        raise UpdateError("одобривший не может быть исполнителем обновления (четыре глаза)")
-    return {**data, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def _opener(ca_bundle: Path | None) -> urllib.request.OpenerDirector:
@@ -127,7 +120,7 @@ def update_osv(
 ) -> dict[str, Any]:
     sources = [download_osv(eco, staging / "osv-scalibr" / eco / "all.zip", ca_bundle) for eco in ecosystems]
     manifest = {"updated_at": now().isoformat().replace("+00:00", "Z"), "ecosystems": ecosystems,
-                "sources": sources, "approval": {k: approval[k] for k in (*APPROVAL_FIELDS, "sha256")}}  # fmt: skip
+                "sources": sources, "approval": approval}  # fmt: skip
     (staging / OSV_MANIFEST_FILE).write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
     status = osv_db_status(staging, now=now())
     if not status.ready:
@@ -197,27 +190,53 @@ def audit(db_root: Path, record: dict[str, Any]) -> None:
         fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--db-root", type=Path, required=True, help="каталог БД (монтируется в gates как /aicd-db, ro)")
-    parser.add_argument("--approval-file", type=Path, required=True)
-    parser.add_argument("--osv-ecosystems", default="", help="через запятую: PyPI,npm,Go,Packagist,…")
-    parser.add_argument("--trivy", action="store_true", help="обновить БД Trivy")
-    parser.add_argument("--trivy-db-repository", default=TRIVY_DB_REPOSITORY)
-    parser.add_argument("--ca-bundle", type=Path, help="CA egress-/корпоративного прокси")
-    args = parser.parse_args(argv)
+def _db(args: argparse.Namespace) -> PlatformDb:
+    if args.pg_container:
+        return PlatformDb(target=PgTarget(host="", user=args.pg_user, container=args.pg_container))
+    if args.maintenance_dsn_file:
+        return PlatformDb(dsn=args.maintenance_dsn_file.read_text(encoding="utf-8").strip())
+    raise SystemExit("укажите --pg-container или --maintenance-dsn-file (роль aicd_maintenance)")
+
+
+def _subject(args: argparse.Namespace) -> tuple[list[str], dict[str, Any]]:
     ecosystems = [e.strip() for e in args.osv_ecosystems.split(",") if e.strip()]
-    kinds = ({"osv"} if ecosystems else set()) | ({"trivy"} if args.trivy else set())
-    if not kinds:
+    unknown = sorted(set(ecosystems) - OSV_ECOSYSTEMS)
+    if unknown:
+        raise SystemExit(f"неизвестные экосистемы OSV: {unknown}")
+    if not ecosystems and not args.trivy:
         raise SystemExit("укажите --osv-ecosystems и/или --trivy")
+    return ecosystems, build_subject(ecosystems, args.trivy_db_repository if args.trivy else None)
+
+
+def cmd_request(args: argparse.Namespace) -> int:
+    _, subject = _subject(args)
+    approval_id = request(_db(args), workspace_id=args.workspace_id, project_id=args.project_id,
+                          requested_by_email=args.requested_by, subject=subject)  # fmt: skip
+    print(json.dumps({"ok": True, "approval_id": str(approval_id), "subject": subject,
+                      "next": "утвердить в UI Approvals другим участником (admin+), затем `apply --approval-id`"},
+                     ensure_ascii=False, indent=2))  # fmt: skip
+    return 0
+
+
+def cmd_apply(args: argparse.Namespace) -> int:
+    ecosystems, subject = _subject(args)
+    db = _db(args)
     db_root = args.db_root.resolve()
     db_root.mkdir(parents=True, exist_ok=True)
-    record: dict[str, Any] = {"at": now().isoformat(), "operator": getpass.getuser(), "host": socket.gethostname(),
-                              "kinds": sorted(kinds)}  # fmt: skip
+    operator = f"{getpass.getuser()}@{socket.gethostname()}"
+    record: dict[str, Any] = {"at": now().isoformat(), "operator": operator, "kinds": subject["kinds"],
+                              "approval_id": str(args.approval_id)}  # fmt: skip
     try:
-        approval = load_approval(args.approval_file, kinds)
-        record["approval"] = {k: approval[k] for k in ("approved_by", "ticket", "sha256")}
-        results: dict[str, Any] = {}
+        granted = authorize(db, args.approval_id, subject, operator)
+    except (psycopg.Error, RuntimeError) as exc:  # DockerError — RuntimeError
+        record |= {"result": "denied", "error": str(exc)[:500]}
+        audit(db_root, record)
+        print(json.dumps({"ok": False, "error": f"approval не действует: {exc}"}, ensure_ascii=False))
+        return 1
+    approval = {"approval_id": str(args.approval_id), **granted}
+    record["approval"] = approval
+    results: dict[str, Any] = {}
+    try:
         if ecosystems:
             staging = db_root / f".staging-osv-{os.getpid()}"
             shutil.rmtree(staging, ignore_errors=True)
@@ -229,15 +248,45 @@ def main(argv: list[str] | None = None) -> int:
             shutil.rmtree(staging, ignore_errors=True)
             results["trivy"] = update_trivy(staging, args.trivy_db_repository, args.ca_bundle, db_root / "trivy")
             swap(db_root, "trivy", staging)
-        record |= {"result": "success", **results}
     except (UpdateError, OSError, ValueError, zipfile.BadZipFile) as exc:
         record |= {"result": "failure", "error": str(exc)[:500]}
         audit(db_root, record)
+        report(db, args.approval_id, "failure", {"error": str(exc)[:500], "operator": operator})
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
         return 1
+    record |= {"result": "success", **results}
     audit(db_root, record)
-    print(json.dumps({"ok": True, **results}, ensure_ascii=False, indent=2, default=str))
+    summary = {k: {"sha256": v.get("sha256")} if k == "trivy" else {"sha256": [s["sha256"] for s in v["sources"]]}
+               for k, v in results.items()}  # fmt: skip
+    report(db, args.approval_id, "success", {"operator": operator, **summary})
+    print(json.dumps({"ok": True, "approval": approval, **results}, ensure_ascii=False, indent=2, default=str))
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name in ("request", "apply"):
+        p = sub.add_parser(name)
+        p.add_argument("--osv-ecosystems", default="", help="через запятую: PyPI,npm,Go,Packagist,…")
+        p.add_argument("--trivy", action="store_true", help="обновить БД Trivy")
+        p.add_argument("--trivy-db-repository", default=TRIVY_DB_REPOSITORY)
+        p.add_argument("--pg-container", help="psql в контейнере сервера (compose: aicodingdev-postgres-1)")
+        p.add_argument("--pg-user", default="aicd_maintenance")
+        p.add_argument("--maintenance-dsn-file", type=Path, help="или файл с DSN роли aicd_maintenance")
+        if name == "request":
+            p.add_argument("--workspace-id", type=uuid.UUID, required=True)
+            p.add_argument("--project-id", type=uuid.UUID, required=True, help="проект, к которому относится approval")
+            p.add_argument("--requested-by", required=True, help="e-mail инициатора (член workspace)")
+            p.set_defaults(handler=cmd_request)
+        else:
+            p.add_argument("--approval-id", type=uuid.UUID, required=True)
+            p.add_argument("--db-root", type=Path, required=True, help="каталог БД (в gates — /aicd-db, только чтение)")
+            p.add_argument("--ca-bundle", type=Path, help="CA egress-/корпоративного прокси")
+            p.set_defaults(handler=cmd_apply)
+    args = parser.parse_args(argv)
+    result: int = args.handler(args)
+    return result
 
 
 if __name__ == "__main__":

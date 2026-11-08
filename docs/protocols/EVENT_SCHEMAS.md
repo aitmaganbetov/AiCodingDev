@@ -307,7 +307,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
       "required": ["approval_id", "action_type", "summary", "required_role", "expires_at"],
       "properties": {
         "approval_id": {"$ref": "#/$defs/uuid"},
-        "action_type": {"enum": ["PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE", "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK", "LOCAL_EXECUTION_FALLBACK"]},
+        "action_type": {"enum": ["PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE", "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK", "LOCAL_EXECUTION_FALLBACK", "VULN_DB_UPDATE"]},
         "task_id": {"type": ["string", "null"], "format": "uuid"},
         "summary": {"type": "string", "maxLength": 2000},
         "required_role": {"enum": ["owner", "admin", "developer", "reviewer"]},
@@ -324,7 +324,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
       "required": ["approval_id", "action_type", "status"],
       "properties": {
         "approval_id": {"$ref": "#/$defs/uuid"},
-        "action_type": {"enum": ["PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE", "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK", "LOCAL_EXECUTION_FALLBACK"]},
+        "action_type": {"enum": ["PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE", "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK", "LOCAL_EXECUTION_FALLBACK", "VULN_DB_UPDATE"]},
         "status": {"enum": ["APPROVED", "REJECTED", "EXPIRED", "CANCELLED"]},
         "decided_by": {"type": ["string", "null"], "format": "uuid"},
         "decision_reason": {"type": ["string", "null"], "maxLength": 2000}

@@ -9,29 +9,28 @@
     "archive_timeout_s": 10,
     "wal_sync_interval_s": 5.0,
     "server_version": "postgres (PostgreSQL) 17.11",
-    "alembic_head": "0015",
+    "alembic_head": "0016",
     "probes": [
       "claude:AUTHENTICATED",
       "codex:AUTHENTICATED"
     ],
-    "ws_a": "01a1bc60-776f-747c-b562-f7b7a1e39270",
-    "ws_b": "01a1bc60-7bd4-71cd-9893-098ca271268e",
-    "project_b": "01a1bc60-82e6-7575-b431-24ca3ba75127",
-    "run1": "01a1bc60-8309-76be-972b-632308c434ef",
+    "ws_a": "01a1bc77-738f-74da-993d-31c88576d421",
+    "ws_b": "01a1bc77-788d-74c1-8568-a43dfc400796",
+    "project_b": "01a1bc77-7f91-7517-9000-d2c0f2cfc468",
+    "run1": "01a1bc77-7fba-7664-adff-4f24200a2730",
     "run1_status": "COMPLETED",
-    "run2": "01a1bc60-9d5a-7713-a783-922e12a8719a",
+    "run2": "01a1bc77-9bc0-7728-942a-c072cd600134",
     "run2_status_at_backup": "RUNNING",
-    "keygen": "9c96c4b931b7f45c",
+    "keygen": "df408716b397216a",
     "base_backup": {
-      "backup_id": "20261108T181655Z-90b2",
+      "backup_id": "20261108T184202Z-9fd7",
       "start_lsn": "0/3000028",
       "end_lsn": "0/3000120",
       "start_wal_segment": "000000010000000000000003",
-      "size_bytes": 5691102
+      "size_bytes": 5698427
     },
-    "dump_role": "aicd_admin (fallback)",
-    "dump_maintenance_error": "pg_dump завершился с кодом 1: pg_dump: error: query failed: ERROR:  permission denied for table outbox_events_y2026m10",
-    "dump_backup_id": "20261108T181658Z-9c4d",
+    "dump_role": "aicd_maintenance",
+    "dump_backup_id": "20261108T184204Z-ee78",
     "counts_at_dump": {
       "agent_activity_events": 8,
       "agent_assignments": 0,
@@ -113,14 +112,14 @@
       "worktrees": 2
     },
     "artifacts_backup": {
-      "backup_id": "20261108T181659Z-c5aa",
+      "backup_id": "20261108T184205Z-528e",
       "objects": 14,
       "new_objects": 13,
       "rows_checked": 14,
       "ok": 14
     },
     "secrets_backup": 9,
-    "run3": "01a1bc60-c29d-7447-be94-cc17d6ef0656",
+    "run3": "01a1bc77-beb6-72f1-b6c3-6e6aa4d858c5",
     "counts_before_crash": {
       "agent_activity_events": 8,
       "agent_assignments": 0,
@@ -213,24 +212,24 @@
         "aicd_worker": false
       }
     },
-    "crash_at": "2026-11-08T18:17:25.756Z",
+    "crash_at": "2026-11-08T18:42:32.082Z",
     "heartbeat_last_acked": {
       "id": 123,
-      "at": "2026-11-08T18:17:25.400Z"
+      "at": "2026-11-08T18:42:31.853Z"
     },
     "wal_sync_runs": {
       "total": 3,
       "ok": 3,
-      "last_ok_at": "2026-11-08T18:17:20.948Z"
+      "last_ok_at": "2026-11-08T18:42:28.600Z"
     },
     "artifact_sync_runs": {
       "total": 3,
       "ok": 3,
       "new_objects": 1,
-      "last_ok_at": "2026-11-08T18:17:21.466Z"
+      "last_ok_at": "2026-11-08T18:42:29.052Z"
     },
     "restore_pg": {
-      "backup_id": "20261108T181655Z-90b2",
+      "backup_id": "20261108T184202Z-9fd7",
       "wal_staged": {
         "files": 4,
         "segments": 3,
@@ -240,12 +239,12 @@
       "post_restore": {
         "fencing_seq": 1000004,
         "timeline": 2,
-        "alembic_revision": "0015"
+        "alembic_revision": "0016"
       }
     },
     "restore_artifacts": {
       "restored": 15,
-      "snapshot": "20261108T181721Z-499b",
+      "snapshot": "20261108T184228Z-d89f",
       "verify": {
         "ok": 15,
         "rows_checked": 15,
@@ -257,10 +256,10 @@
     },
     "rpo": {
       "last_acked_id": 123,
-      "restored_max_id": 81,
-      "lost_commits": 42,
-      "restored_last_commit_at": "2026-11-08T18:17:16.850Z",
-      "rpo_seconds": 8.55,
+      "restored_max_id": 85,
+      "lost_commits": 38,
+      "restored_last_commit_at": "2026-11-08T18:42:23.986Z",
+      "rpo_seconds": 7.87,
       "rpo_bound_seconds": 15.0
     },
     "counts_after_restore": {
@@ -363,21 +362,21 @@
     },
     "artifacts_rpo_loss": 0,
     "run2_final": "COMPLETED",
-    "run2_completed_at": "2026-11-08T18:17:41.868Z",
+    "run2_completed_at": "2026-11-08T18:42:48.488Z",
     "run3_final": "COMPLETED",
-    "run3_completed_at": "2026-11-08T18:17:41.883Z",
+    "run3_completed_at": "2026-11-08T18:42:48.506Z",
     "rto": {
-      "crash_at": "2026-11-08T18:17:25.756Z",
-      "postgres_ready_seconds": 6.5,
-      "service_ready_seconds": 10.4,
-      "runs_continued_seconds": 16.1
+      "crash_at": "2026-11-08T18:42:32.082Z",
+      "postgres_ready_seconds": 6.6,
+      "service_ready_seconds": 11.2,
+      "runs_continued_seconds": 16.4
     }
   },
   "checks": [
     {
       "name": "RPO в пределах archive_timeout + интервал wal-sync",
       "ok": true,
-      "detail": "RPO 8.5 с, потеряно 42 из 123 подтверждённых heartbeat-коммитов"
+      "detail": "RPO 7.9 с, потеряно 38 из 123 подтверждённых heartbeat-коммитов"
     },
     {
       "name": "счётчики строк всех таблиц aicd = снимок перед аварией",
@@ -425,100 +424,100 @@
       "detail": "seq=1000004, max token сейчас=(1000010,)"
     },
     {
-      "name": "логический дамп восстанавливается (pg_restore) со строками на момент дампа",
+      "name": "логический дамп под aicd_maintenance (без суперпользователя, миграция 0016) восстанавливается (pg_restore) со строками на момент дампа",
       "ok": true,
-      "detail": "роль дампа: aicd_admin (fallback); расхождения: нет; pg_restore exit 0 "
+      "detail": "роль дампа: aicd_maintenance; расхождения: нет; pg_restore exit 0 "
     }
   ],
   "steps": [
     {
       "name": "стенд: сеть, секреты, PostgreSQL (архив WAL), Redis, S3",
-      "started": 1794161792.6026511,
-      "finished": 1794161796.1284955,
+      "started": 1794163296.9803705,
+      "finished": 1794163300.6418424,
       "ok": true,
       "detail": ""
     },
     {
       "name": "миграции Alembic (aicd_migrator)",
-      "started": 1794161796.1285417,
-      "finished": 1794161797.8642905,
+      "started": 1794163300.6419253,
+      "finished": 1794163302.415474,
       "ok": true,
       "detail": ""
     },
     {
       "name": "приложение: API + воркеры outbox/orchestrator/exec",
-      "started": 1794161797.8643725,
-      "finished": 1794161799.8746579,
+      "started": 1794163302.415513,
+      "finished": 1794163304.4193418,
       "ok": true,
       "detail": ""
     },
     {
       "name": "данные через приложение: владельцы (aicd CLI), probe CLI, проекты, run №1",
-      "started": 1794161799.8747015,
-      "finished": 1794161809.194581,
+      "started": 1794163304.4193902,
+      "finished": 1794163315.708278,
       "ok": true,
       "detail": ""
     },
     {
       "name": "run №2 «в полёте»: исполнитель остановлен",
-      "started": 1794161809.1946228,
-      "finished": 1794161814.800445,
+      "started": 1794163315.7083592,
+      "finished": 1794163321.7239783,
       "ok": true,
       "detail": ""
     },
     {
       "name": "бэкап: ключ (офлайн), репозиторий, pg-base, pg-dump, artifacts, secrets",
-      "started": 1794161814.80048,
-      "finished": 1794161820.2675505,
+      "started": 1794163321.7240434,
+      "finished": 1794163326.5806417,
       "ok": true,
-      "detail": "base 20261108T181655Z-90b2, artifacts ok=14/14"
+      "detail": "base 20261108T184202Z-9fd7, artifacts ok=14/14"
     },
     {
       "name": "после бэкапа: run №3 (есть только в WAL), heartbeat, непрерывный pg-wal-sync",
-      "started": 1794161820.2690291,
-      "finished": 1794161845.465554,
+      "started": 1794163326.58192,
+      "finished": 1794163351.7942116,
       "ok": true,
       "detail": ""
     },
     {
       "name": "АВАРИЯ: kill процессов и PostgreSQL, удаление томов/контейнеров/секретов/рабочих каталогов",
-      "started": 1794161845.4656277,
-      "finished": 1794161846.7707853,
+      "started": 1794163351.7942839,
+      "finished": 1794163353.333295,
       "ok": true,
       "detail": ""
     },
     {
       "name": "восстановление: секреты из бэкапа",
-      "started": 1794161846.770822,
-      "finished": 1794161847.0219018,
+      "started": 1794163353.3333333,
+      "finished": 1794163353.563963,
       "ok": true,
       "detail": ""
     },
     {
       "name": "восстановление: PostgreSQL (base + WAL → promote), post-restore",
-      "started": 1794161847.021945,
-      "finished": 1794161852.2643325,
+      "started": 1794163353.5639992,
+      "finished": 1794163358.6532,
       "ok": true,
       "detail": "timeline 2, WAL 3 сегм."
     },
     {
       "name": "восстановление: Redis (пустой), S3 + артефакты, проверка sha256",
-      "started": 1794161852.26438,
-      "finished": 1794161854.5746758,
+      "started": 1794163358.6532493,
+      "finished": 1794163361.3182385,
       "ok": true,
       "detail": ""
     },
     {
       "name": "восстановление: API и воркеры",
-      "started": 1794161854.5747366,
-      "finished": 1794161856.1685488,
+      "started": 1794163361.318299,
+      "finished": 1794163363.2686133,
       "ok": true,
       "detail": ""
     },
     {
       "name": "проверки: RPO, строки, RLS, артефакты, вход, run продолжаются",
-      "started": 1794161856.1685736,
-      "finished": 1794161863.919469,
+      "started": 1794163363.268663,
+      "finished": 1794163370.6052787,
       "ok": true,
       "detail": ""
     }

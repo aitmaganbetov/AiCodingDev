@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
@@ -26,6 +26,8 @@ import {
 import { can } from '../../lib/permissions';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
+import { PullRequestsPanel } from '../integrations/PullRequestsPanel';
+import { VerificationStatus } from '../integrations/VerificationStatus';
 import { AttachRepositoryForm } from './AttachRepositoryForm';
 import { RepositoryExplorer } from './RepositoryExplorer';
 
@@ -110,10 +112,13 @@ function RepositoryCard({ projectId, repo }: { projectId: string; repo: Reposito
   );
 }
 
-function RepositoriesPanel({ projectId, canAttach }: { projectId: string; canAttach: boolean }) {
+function RepositoriesPanel({ workspaceId, projectId, canAttach }: { workspaceId: string; projectId: string; canAttach: boolean }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // provider=github: проверки доступа на воркере (OQ-47 (2)) — статус, пока репозиторий не привязан.
+  const [verifications, setVerifications] = useState<string[]>([]);
   const query = useInfiniteQuery({
     queryKey: projectKeys.repositories(projectId),
     queryFn: ({ pageParam, signal }) =>
@@ -133,9 +138,10 @@ function RepositoriesPanel({ projectId, canAttach }: { projectId: string; canAtt
       <DialogContent title={t('projects.repo.attachTitle')} description={t('projects.repo.attachDescription')}>
         <AttachRepositoryForm
           projectId={projectId}
-          onDone={(message) => {
+          onDone={(message, verificationId) => {
             setOpen(false);
             setNotice(message);
+            if (verificationId) setVerifications((v) => [...v, verificationId]);
           }}
         />
       </DialogContent>
@@ -186,6 +192,14 @@ function RepositoriesPanel({ projectId, canAttach }: { projectId: string; canAtt
           {notice}
         </p>
       ) : null}
+      {verifications.map((id) => (
+        <VerificationStatus
+          key={id}
+          workspaceId={workspaceId}
+          verificationId={id}
+          onSettled={() => void queryClient.invalidateQueries({ queryKey: projectKeys.repositories(projectId) })}
+        />
+      ))}
       {body}
     </section>
   );
@@ -312,12 +326,16 @@ export function ProjectDetailPage() {
         <TabsList label={t('projects.detail.tabs')}>
           <TabsTrigger value="repositories">{t('projects.repo.title')}</TabsTrigger>
           <TabsTrigger value="technologies">{t('projects.tech.title')}</TabsTrigger>
+          <TabsTrigger value="pull-requests">{t('integrations.pr.title')}</TabsTrigger>
         </TabsList>
         <TabsContent value="repositories">
-          <RepositoriesPanel projectId={project.id} canAttach={can(membership.role, 'repository:attach')} />
+          <RepositoriesPanel workspaceId={workspaceId ?? ''} projectId={project.id} canAttach={can(membership.role, 'repository:attach')} />
         </TabsContent>
         <TabsContent value="technologies">
           <TechnologiesPanel projectId={project.id} />
+        </TabsContent>
+        <TabsContent value="pull-requests">
+          <PullRequestsPanel workspaceId={workspaceId ?? ''} projectId={project.id} role={membership.role} />
         </TabsContent>
       </Tabs>
     </section>

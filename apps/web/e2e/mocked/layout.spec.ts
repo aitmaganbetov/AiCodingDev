@@ -13,6 +13,7 @@ const SECTIONS = [
   { name: 'Знания и документация', path: 'knowledge' },
   { name: 'Аналитика', path: 'analytics' },
   { name: 'CLI-провайдеры', path: 'providers' },
+  { name: 'Интеграции', path: 'integrations' },
   { name: 'Настройки', path: 'settings' },
   { name: 'Аудит', path: 'audit' },
 ];
@@ -30,6 +31,7 @@ const IMPLEMENTED = new Set([
   'quality',
   'compliance',
   'analytics',
+  'integrations',
 ]);
 
 const PLACEHOLDERS = [

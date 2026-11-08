@@ -38,7 +38,7 @@ def _decrypt(key: BackupKey, blob: bytes, name: str = "f") -> bytes:
 def test_roundtrip_chunk_boundaries(key: BackupKey, size: int) -> None:
     data = secrets.token_bytes(size)
     blob = _encrypt(key, data)
-    assert data not in blob or size == 0
+    assert size < 16 or data not in blob  # короткая строка случайно встречается в шифротексте (1 байт — ~16%)
     assert _decrypt(key, blob) == data
 
 

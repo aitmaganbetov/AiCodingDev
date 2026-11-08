@@ -41,7 +41,7 @@ def test_matrix_values_match_api_design() -> None:
     assert {a for a, r in APPROVAL_MIN_ROLE.items() if r is Role.REVIEWER} == {"MANUAL_REVIEW", "SELF_REVIEW_FALLBACK"}
     assert {a for a, r in APPROVAL_MIN_ROLE.items() if r is Role.DEVELOPER} == {"PLAN_APPROVAL", "DOCS_DOWNLOAD"}
     assert {a for a, r in APPROVAL_MIN_ROLE.items() if r is Role.ADMIN} == {
-        "MERGE", "DESTRUCTIVE_MIGRATION", "CRITICAL_DIRECTIVE"}  # fmt: skip
+        "MERGE", "DESTRUCTIVE_MIGRATION", "CRITICAL_DIRECTIVE", "VULN_DB_UPDATE"}  # fmt: skip
     assert approvals.required_role("PRODUCTION_DEPLOY") is Role.OWNER
     with pytest.raises(ValueError, match="action_type"):
         approvals.required_role("NUKE")

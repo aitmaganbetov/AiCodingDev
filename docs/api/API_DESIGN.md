@@ -201,12 +201,12 @@ flowchart LR
 |---|---|
 | `MANUAL_REVIEW`, `SELF_REVIEW_FALLBACK` | `reviewer` |
 | `PLAN_APPROVAL`, `DOCS_DOWNLOAD` | `developer` |
-| `MERGE`, `DESTRUCTIVE_MIGRATION`, `CRITICAL_DIRECTIVE` | `admin` |
+| `MERGE`, `DESTRUCTIVE_MIGRATION`, `CRITICAL_DIRECTIVE`, `VULN_DB_UPDATE` (миграция 0016) | `admin` |
 | `PRODUCTION_DEPLOY`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `DATA_DELETION`, `LOCAL_EXECUTION_FALLBACK` | `owner` |
 
 Иерархия ролей: `owner ⊃ admin ⊃ developer ⊃ reviewer ⊃ viewer` для решений по approvals (reviewer-типы могут решать и вышестоящие роли).
 
-**Four-eyes:** для `MERGE`, `PRODUCTION_DEPLOY`, `DESTRUCTIVE_MIGRATION`, `DATA_DELETION`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `CRITICAL_DIRECTIVE`, `LOCAL_EXECUTION_FALLBACK` пользователь, инициировавший действие (автор run/директивы), не может его утвердить ⇒ `403 four_eyes_violation`. Исключение — workspace с единственным участником и политикой `allow_single_member_self_approval=true`; такое решение помечается в `audit_events.metadata.self_approved=true`. Агент никогда не является решающей стороной (ТЗ §10 «no self-authorized critical actions»). Поле `Approval.can_decide` вычисляется сервером, чтобы UI не дублировал правила.
+**Four-eyes:** для `MERGE`, `PRODUCTION_DEPLOY`, `DESTRUCTIVE_MIGRATION`, `DATA_DELETION`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `CRITICAL_DIRECTIVE`, `LOCAL_EXECUTION_FALLBACK`, `VULN_DB_UPDATE` пользователь, инициировавший действие (автор run/директивы), не может его утвердить ⇒ `403 four_eyes_violation`. Исключение — workspace с единственным участником и политикой `allow_single_member_self_approval=true`; такое решение помечается в `audit_events.metadata.self_approved=true`. Агент никогда не является решающей стороной (ТЗ §10 «no self-authorized critical actions»). Поле `Approval.can_decide` вычисляется сервером, чтобы UI не дублировал правила.
 
 ### 5.4 Право на директивы по `directive_type`
 
@@ -420,7 +420,7 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 
 **Доступ:** проверка `run:read` при подключении (cookie-сессия; same-origin `EventSource` отправляет cookie); повторная проверка сессии и членства **каждые 60 с** и немедленно по внутреннему сигналу (logout, revoke, удаление участника, понижение роли). При потере доступа сервер прекращает отправку и закрывает соединение; переподключение получит `401`/`404`. Подключение аудируется (`sse.connect`) с агрегированием — один audit-event на сессию+run в час.
 
-**Серверные ограничения:** ≤ 5 одновременных потоков на пользователя (6-й ⇒ `429`); общий лимит на процесс API (по умолчанию 1000, ⇒ `503`); максимальная длительность соединения 30 мин (сервер закрывает, клиент переподключается с `Last-Event-ID` — заодно ротация проверки доступа); буфер медленного клиента 1000 событий / 1 MiB — при переполнении соединение закрывается (данные не теряются благодаря durable replay); `cli.output` — не более 20 событий/с на run в SSE (избыток коалесцируется, `dropped_chunks` > 0, полный санитизированный вывод доступен как artifact `cli_output`). Заголовки ответа: `Cache-Control: no-store`, `X-Accel-Buffering: no`; reverse proxy настраивается без буферизации и с read-timeout > 30 мин.
+**Серверные ограничения:** ≤ 5 одновременных потоков на пользователя (6-й ⇒ `429`); общий лимит на процесс API (по умолчанию 1000, ⇒ `503 service_unavailable` + `Retry-After: 5`; сбой учёта слотов в Redis — тоже `503`, не `500`); сигналы Redis pub/sub всех потоков процесса принимает **одно** соединение (`aicd_api.sse_hub`, P9-04: раньше поток держал своё соединение, и пул Redis ограничивал процесс ~100 потоками); максимальная длительность соединения 30 мин (сервер закрывает, клиент переподключается с `Last-Event-ID` — заодно ротация проверки доступа); буфер медленного клиента 1000 событий / 1 MiB — при переполнении соединение закрывается (данные не теряются благодаря durable replay); `cli.output` — не более 20 событий/с на run в SSE (избыток коалесцируется, `dropped_chunks` > 0, полный санитизированный вывод доступен как artifact `cli_output`). Заголовки ответа: `Cache-Control: no-store`, `X-Accel-Buffering: no`; reverse proxy настраивается без буферизации и с read-timeout > 30 мин.
 
 ### 13.1 SSE уведомлений workspace: `GET /workspaces/{workspace_id}/events` (доп., Phase 8, OQ-45 (c))
 

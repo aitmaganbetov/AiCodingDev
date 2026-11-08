@@ -21,7 +21,7 @@ export AICD_BACKUP_STATUS_FILE=/srv/aicd-backup/status/status.json  # для м�
 |---|---|---|---|
 | PostgreSQL, физически | `pg_basebackup` (tar+gzip, WAL `fetch`, manifest SHA256) через `docker exec` в контейнер сервера | ежедневно | `$B pg-base --pg-container aicodingdev-postgres-1` |
 | PostgreSQL, WAL (PITR) | сервер архивирует WAL сам (`archive_command`, `archive_timeout=${AICD_PG_ARCHIVE_TIMEOUT:-60}`) в том `aicodingdev_pgwal`; перенос в репозиторий | каждую минуту | `$B pg-wal-sync --wal-volume aicodingdev_pgwal --delete-synced` |
-| PostgreSQL, логически | `pg_dump -Fc` (переносимость, выборочное восстановление) | ежедневно | `$B pg-dump --pg-container aicodingdev-postgres-1` (см. примечание) |
+| PostgreSQL, логически | `pg_dump -Fc` (переносимость, выборочное восстановление) | ежедневно | `$B pg-dump --pg-container aicodingdev-postgres-1 --pg-user aicd_maintenance` (см. примечание) |
 | Артефакты | снимок хранилища (FS-том `aicodingdev_artifacts` или S3), сверка каждого объекта с `artifacts.sha256`; объекты content-addressed, инкрементально | каждые 15 мин; `--full` еженедельно | `$B artifacts --fs-root "$(docker volume inspect -f '{{.Mountpoint}}' aicodingdev_artifacts)" --pg-container aicodingdev-postgres-1` |
 | Секреты/конфигурация | зашифрованный tar каталога `infrastructure/docker/secrets` (+ `.env`/override-файлы оператора — отдельной копией каталога) | при каждом изменении и ежедневно | `$B secrets --dir infrastructure/docker/secrets` |
 | Redis | **не копируется**: только транспорт Dramatiq и pub/sub SSE (ADR-0002). Состояние — в PostgreSQL: outbox, `tick` оркестратора повторно ставит READY-задачи, recovery reconciler разбирает аренды. Проверено дриллом (пустой Redis после восстановления, run «в полёте» завершились) | — | — |
@@ -29,10 +29,11 @@ export AICD_BACKUP_STATUS_FILE=/srv/aicd-backup/status/status.json  # для м�
 | Офлайн-БД уязвимостей | не копируется: воспроизводится [vulndb-update.md](vulndb-update.md) | — | — |
 | Локальные Git-репозитории проектов (`AICD_REPOS_DIR`) | данные оператора вне платформы (обычно у них есть remote) | по политике оператора | — |
 
-Примечание к `pg-dump`: роль `aicd_maintenance` (DATABASE_DESIGN §19.6) сейчас **не может** выполнить `pg_dump` — у неё нет
-`SELECT` на помесячные партиции `outbox_events_*`/`agent_activity_events_*` (создаются `maint_ensure_monthly_partitions`
-без GRANT) и на `worker_lease_fencing_seq` (вывод DR drill). До миграции, выдающей эти права (решение владельца, OPEN_QUESTIONS OQ-51 (a)),
-логический дамп выполняется суперпользователем через `--pg-container`. Физический бэкап и WAL от этого не зависят.
+Примечание к `pg-dump`: дамп выполняется ролью `aicd_maintenance` (DATABASE_DESIGN §19.6, BYPASSRLS, только чтение) —
+миграция 0016 выдала ей `SELECT` на партиции `outbox_events_*`/`agent_activity_events_*` и на `worker_lease_fencing_seq`, а
+`maint_ensure_monthly_partitions` выдаёт право на каждую новую партицию (OQ-51 (a); проверено DR drill и
+`tests/migrations/test_backup_vulndb_migration.py`). В режиме `--pg-container` вход по unix-сокету контейнера (`--pg-user`),
+в сетевом режиме — пароль роли из файла секрета `pg_maintenance_password`.
 
 Все файлы в репозитории шифруются AES-256-GCM (потоково, защита от подмены/усечения/перестановки записей и подмены
 файла другим), манифесты подписаны HMAC-SHA256; сегменты WAL раскладываются по `system_identifier` кластера
@@ -59,7 +60,7 @@ $B init                                          # REPO.json: формат и ke
 * * * * *    cd /opt/aicodingdev && uv run python -m scripts.backup pg-wal-sync --wal-volume aicodingdev_pgwal --delete-synced
 */15 * * * * cd /opt/aicodingdev && uv run python -m scripts.backup artifacts --fs-root /var/lib/docker/volumes/aicodingdev_artifacts/_data --pg-container aicodingdev-postgres-1
 17 2 * * *   cd /opt/aicodingdev && uv run python -m scripts.backup pg-base --pg-container aicodingdev-postgres-1 && uv run python -m scripts.backup verify --kind base --backup-id latest
-37 2 * * *   cd /opt/aicodingdev && uv run python -m scripts.backup pg-dump --pg-container aicodingdev-postgres-1
+37 2 * * *   cd /opt/aicodingdev && uv run python -m scripts.backup pg-dump --pg-container aicodingdev-postgres-1 --pg-user aicd_maintenance
 47 3 * * 0   cd /opt/aicodingdev && uv run python -m scripts.backup artifacts --full --fs-root /var/lib/docker/volumes/aicodingdev_artifacts/_data --pg-container aicodingdev-postgres-1
 57 3 * * *   cd /opt/aicodingdev && uv run python -m scripts.backup prune --keep-base 7 --keep-dumps 7 --keep-artifact-snapshots 14 && uv run python -m scripts.backup verify --wal
 ```
@@ -145,5 +146,5 @@ Dangerous action (ТЗ §15): решение о восстановлении и 
 ## 7. Связанные решения и ограничения
 
 * Шифрование «на покое» самих томов хоста — LUKS/шифрование диска (SECURITY_ARCHITECTURE §14); бэкапы шифруются независимо.
-* Права `aicd_maintenance` для `pg_dump` — нужна миграция (см. §1, OPEN_QUESTIONS).
+* Права `aicd_maintenance` для `pg_dump` — миграция 0016 (см. §1).
 * Метрики бэкапа требуют сервиса worker-outbox в развёртывании (в `compose.yaml` сервисов воркеров пока нет — P1-02).

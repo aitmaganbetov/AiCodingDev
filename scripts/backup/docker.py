@@ -102,6 +102,17 @@ def psql(target: PgTarget, sql: str, *, dbname: str | None = None, timeout: floa
         return docker(*target.command(auth, argv)[1:], timeout=timeout).strip()
 
 
+def psql_vars(target: PgTarget, sql: str, variables: dict[str, str], *, timeout: float = 120) -> str:
+    """Запрос с параметрами-переменными psql (`:'имя'` — экранирует сам psql): SQL — через stdin, значения — `-v`."""
+    argv = ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At", *target.conn_args(), "-d", target.dbname]
+    for name, value in variables.items():
+        argv += ["-v", f"{name}={value}"]
+    argv += ["-f", "-"]
+    with pgpass(target) as auth:
+        cmd = target.command(auth, argv, interactive=True)
+        return docker(*cmd[1:], input_bytes=sql.encode(), timeout=timeout).strip()
+
+
 @contextlib.contextmanager
 def streaming_tool(target: PgTarget, argv: Sequence[str]) -> Iterator[subprocess.Popen[bytes]]:
     """Утилита PostgreSQL в контейнере со stdout в процесс оператора (pg_basebackup -D -, pg_dump)."""

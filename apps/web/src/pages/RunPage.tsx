@@ -15,6 +15,7 @@ import { formatDate } from '../lib/format';
 import { can } from '../lib/permissions';
 import { problemMessage } from '../lib/problem';
 import { useCurrentWorkspace } from '../workspace';
+import { PullRequestsPanel } from '../features/integrations/PullRequestsPanel';
 import { RunNav } from '../features/runs/RunNav';
 import { useRunTasks } from '../features/runs/useRunTasks';
 import { WorkspaceNotFound } from './NotFoundPage';
@@ -412,6 +413,12 @@ export function RunPage() {
           <RunHeader run={run.data} />
           {can(membership.role, 'run:control') ? <RunControls run={run.data} /> : null}
           <RunTasks runId={runId} taskHref={taskHref} />
+          {/* PR создаются только из завершённого run (P8-04): панель — для COMPLETED. */}
+          {projectId && run.data.status === 'COMPLETED' ? (
+            <div className="mt-6">
+              <PullRequestsPanel workspaceId={workspaceId} projectId={projectId} role={membership.role} run={{ id: run.data.id, status: run.data.status }} />
+            </div>
+          ) : null}
         </>
       )}
       {runId && !run.isError ? <EventFeed key={runId} runId={runId} isTerminal={isTerminal} taskTitle={taskTitle} /> : null}

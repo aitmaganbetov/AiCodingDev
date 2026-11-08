@@ -26,13 +26,22 @@ export function validateAttach(
     if (!input.remoteUrl) errors.remote_url = t('validation.required');
     else if (input.remoteUrl.length > REMOTE_URL_MAX) errors.remote_url = t('validation.maxLength', { max: REMOTE_URL_MAX });
     else if (!GITHUB_URL_PATTERN.test(input.remoteUrl)) errors.remote_url = t('projects.repo.remoteUrlInvalid');
-  } else if (!input.localPath) errors.local_path = t('validation.required');
+  }
+  // GitHub-репозиторий тоже требует локальную рабочую копию из allowlist-корней (OQ-47 (6)).
+  if (!input.localPath) errors.local_path = t('validation.required');
   else if (input.localPath.length > LOCAL_PATH_MAX) errors.local_path = t('validation.maxLength', { max: LOCAL_PATH_MAX });
   if (input.branch.length > BRANCH_MAX) errors.default_branch = t('validation.maxLength', { max: BRANCH_MAX });
   return errors;
 }
 
-export function AttachRepositoryForm({ projectId, onDone }: { projectId: string; onDone: (message: string) => void }) {
+export function AttachRepositoryForm({
+  projectId,
+  onDone,
+}: {
+  projectId: string;
+  /** `verificationId` — provider=github: доступ проверяет воркер (202 GitHubVerification). */
+  onDone: (message: string, verificationId?: string) => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const formRef = useRef<HTMLFormElement>(null);
@@ -50,7 +59,8 @@ export function AttachRepositoryForm({ projectId, onDone }: { projectId: string;
       intent.current.complete();
       await queryClient.invalidateQueries({ queryKey: projectKeys.repositories(projectId) });
       // 202 (github): репозиторий появится после проверки доступа воркером (GitHubVerification).
-      onDone(t('kind' in result ? 'projects.repo.verificationQueued' : 'projects.repo.attached'));
+      if ('kind' in result) onDone(t('projects.repo.verificationQueued'), result.id);
+      else onDone(t('projects.repo.attached'));
     },
     onError: (error) => {
       const mapped = mapProblemToFields(t, error, FIELDS);
@@ -72,7 +82,8 @@ export function AttachRepositoryForm({ projectId, onDone }: { projectId: string;
     }
     const body: RepositoryAttachRequest = {
       provider,
-      ...(provider === 'github' ? { remote_url: input.remoteUrl } : { local_path: input.localPath }),
+      ...(provider === 'github' ? { remote_url: input.remoteUrl } : {}),
+      local_path: input.localPath,
       ...(input.branch ? { default_branch: input.branch } : {}),
     };
     attach.mutate(body);
@@ -105,18 +116,17 @@ export function AttachRepositoryForm({ projectId, onDone }: { projectId: string;
           onChange={(e) => setRemoteUrl(e.target.value)}
           error={fieldErrors.remote_url}
         />
-      ) : (
-        <TextField
-          id="repo-local-path"
-          label={t('projects.repo.localPath')}
-          hint={t('projects.repo.localPathHint')}
-          autoComplete="off"
-          maxLength={LOCAL_PATH_MAX}
-          value={localPath}
-          onChange={(e) => setLocalPath(e.target.value)}
-          error={fieldErrors.local_path}
-        />
-      )}
+      ) : null}
+      <TextField
+        id="repo-local-path"
+        label={t('projects.repo.localPath')}
+        hint={provider === 'github' ? t('projects.repo.localPathHintGithub') : t('projects.repo.localPathHint')}
+        autoComplete="off"
+        maxLength={LOCAL_PATH_MAX}
+        value={localPath}
+        onChange={(e) => setLocalPath(e.target.value)}
+        error={fieldErrors.local_path}
+      />
       <TextField
         id="repo-branch"
         label={t('projects.repo.defaultBranch')}

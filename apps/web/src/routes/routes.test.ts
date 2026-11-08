@@ -27,6 +27,7 @@ describe('routes registry', () => {
       'knowledge',
       'analytics',
       'providers',
+      'integrations',
       'settings',
       'audit',
     ]);
