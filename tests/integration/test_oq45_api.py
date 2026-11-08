@@ -567,3 +567,175 @@ async def test_probe_rbac_rate_limit_and_audit(app: FastAPI, app_engine: AsyncEn
     finally:
         for s in (developer, viewer, stranger):
             await s.client.aclose()
+
+
+# --- Безопасные настройки провайдера (PATCH /providers/{id}/settings, API_DESIGN §15) ---------------------
+
+
+async def test_provider_settings_patch_versions_audit_and_listing(app_engine: AsyncEngine, user: UserSession) -> None:
+    ws = await user.create_workspace()
+    provider = await _provider_id(user, ws["id"], "codex")
+    url = f"/api/v1/providers/{provider}/settings"
+    listed = await user.client.get("/api/v1/providers", headers={"X-Workspace-Id": ws["id"]})
+    codex = next(p for p in listed.json()["items"] if p["code"] == "codex")
+    assert codex["workspace_settings"]["settings_version"] == 0
+
+    r = await user.client.patch(url, json={"max_parallel_sessions": 2}, headers=user.headers(ws["id"]))
+    validate_response("updateProviderSettings", r)
+    assert r.status_code == 428
+    r = await user.client.patch(url, json={"max_parallel_sessions": 2}, headers=user.headers(ws["id"], if_match='"v3"'))
+    validate_response("updateProviderSettings", r)
+    assert r.status_code == 412 and r.headers["etag"] == '"v0"'
+
+    r = await user.client.patch(
+        url,
+        json={"max_parallel_sessions": 2, "allowed_roles": ["developer", "qa"]},
+        headers=user.headers(ws["id"], if_match='"v0"'),
+    )
+    validate_response("updateProviderSettings", r)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body == {
+        "enabled": True,
+        "max_parallel_sessions": 2,
+        "default_timeout_seconds": 1800,
+        "allowed_roles": ["developer", "qa"],
+        "settings_version": 1,
+    }
+    assert r.headers["etag"] == '"v1"'
+    r = await user.client.patch(
+        url, json={"enabled": False, "default_timeout_seconds": 900}, headers=user.headers(ws["id"], if_match='"v1"')
+    )
+    assert r.status_code == 200 and r.json()["settings_version"] == 2 and r.json()["max_parallel_sessions"] == 2
+    # Без отличий — no-op, версия не меняется; старый ETag — 412.
+    r = await user.client.patch(url, json={"enabled": False}, headers=user.headers(ws["id"], if_match='"v2"'))
+    assert r.status_code == 200 and r.json()["settings_version"] == 2
+    r = await user.client.patch(url, json={"enabled": True}, headers=user.headers(ws["id"], if_match='"v1"'))
+    assert r.status_code == 412 and r.headers["etag"] == '"v2"'
+
+    listed = await user.client.get("/api/v1/providers", headers={"X-Workspace-Id": ws["id"]})
+    validate_response("listProviders", listed)
+    by_code = {p["code"]: p for p in listed.json()["items"]}
+    assert by_code["codex"]["workspace_settings"]["settings_version"] == 2
+    assert by_code["codex"]["workspace_settings"]["enabled"] is False
+    assert by_code["claude"]["workspace_settings"]["settings_version"] == 0  # другой провайдер не затронут
+    other = await user.create_workspace()
+    other_list = await user.client.get("/api/v1/providers", headers={"X-Workspace-Id": other["id"]})
+    assert {p["code"]: p for p in other_list.json()["items"]}["codex"]["workspace_settings"]["settings_version"] == 0
+
+    for payload in (
+        {},
+        {"binary_path": "/usr/bin/codex"},
+        {"credentials": "x"},
+        {"max_parallel_sessions": 65},
+        {"max_parallel_sessions": -1},
+        {"default_timeout_seconds": 59},
+        {"default_timeout_seconds": 14401},
+        {"max_parallel_sessions": "2"},
+        {"allowed_roles": ["root"]},
+        {"allowed_roles": ["qa", "qa"]},
+        {"enabled": None},
+    ):
+        r = await user.client.patch(url, json=payload, headers=user.headers(ws["id"], if_match='"v2"'))
+        validate_response("updateProviderSettings", r)
+        assert r.status_code == 422, (payload, r.text)
+
+    async with transaction(
+        app_engine, DbContext(user_id=uuid.UUID(user.user_id), workspace_id=uuid.UUID(ws["id"]))
+    ) as conn:
+        audits = (
+            await conn.execute(
+                text(
+                    "SELECT metadata FROM audit_events WHERE action = 'provider.settings.update' AND resource_id = :p"
+                    " AND workspace_id = :ws ORDER BY created_at, id"
+                ),
+                {"p": provider, "ws": ws["id"]},
+            )
+        ).all()
+        versions = (
+            await conn.execute(
+                text(
+                    "SELECT version, active FROM policies WHERE policy_type = 'provider_settings' AND name = 'codex'"
+                    " AND workspace_id = :ws ORDER BY version"
+                ),
+                {"ws": ws["id"]},
+            )
+        ).all()
+    assert [a[0]["settings_version"] for a in audits] == [1, 2]
+    assert {"field": "max_parallel_sessions", "from": 1, "to": 2} in audits[0][0]["changes"]
+    assert [(v[0], v[1]) for v in versions] == [(1, False), (2, True)]
+
+
+async def test_provider_settings_rbac_isolation_and_fuzz(
+    app: FastAPI, app_engine: AsyncEngine, user: UserSession
+) -> None:
+    ws = await user.create_workspace()
+    provider = await _provider_id(user, ws["id"], "claude")
+    url = f"/api/v1/providers/{provider}/settings"
+    sessions: dict[str, UserSession] = {}
+    try:
+        for role in ("admin", "developer", "reviewer", "viewer"):
+            sessions[role] = await login(app, app_engine)
+            await _member(user, ws["id"], sessions[role], role)
+        version = 0
+        for role, s in sessions.items():
+            r = await s.client.patch(
+                url, json={"max_parallel_sessions": version + 2}, headers=s.headers(ws["id"], if_match=f'"v{version}"')
+            )
+            validate_response("updateProviderSettings", r)
+            if role == "admin":
+                assert r.status_code == 200, r.text
+                version = r.json()["settings_version"]
+            else:
+                assert r.status_code == 403, (role, r.text)
+        async with transaction(
+            app_engine, DbContext(user_id=uuid.UUID(user.user_id), workspace_id=uuid.UUID(ws["id"]))
+        ) as conn:
+            denied = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM audit_events WHERE action = 'authz.denied' AND workspace_id = :ws"
+                        " AND metadata ->> 'permission' = 'provider:settings'"
+                    ),
+                    {"ws": ws["id"]},
+                )
+            ).scalar_one()
+        assert denied == 3
+        stranger = await login(app, app_engine)
+        try:
+            await stranger.create_workspace()
+            r = await stranger.client.patch(
+                url, json={"enabled": False}, headers=stranger.headers(ws["id"], if_match='"v1"')
+            )
+            validate_response("updateProviderSettings", r)
+            assert r.status_code == 404
+        finally:
+            await stranger.client.aclose()
+        r = await user.client.patch(
+            f"/api/v1/providers/{uuid7()}/settings",
+            json={"enabled": False},
+            headers=user.headers(ws["id"], if_match='"v0"'),
+        )
+        validate_response("updateProviderSettings", r)
+        assert r.status_code == 404
+        r = await user.client.patch(
+            url, json={"enabled": False}, headers={"X-Workspace-Id": ws["id"], "If-Match": '"v1"'}
+        )
+        assert r.status_code == 403 and r.json()["code"] == "csrf_failed"
+
+        # Fuzz по контракту: без 5xx, ответы соответствуют схеме.
+        for n, case in enumerate(_cases("updateProviderSettings", 25)):
+            path = case.formatted_path
+            if n % 2 == 0:
+                for name, value in (case.path_parameters or {}).items():
+                    path = path.replace(str(value), provider if name == "provider_id" else str(value), 1)
+            headers = {k: v for k, v in (case.headers or {}).items() if k.lower() not in ("cookie", "x-csrf-token")}
+            headers["X-CSRF-Token"] = user.csrf
+            if n % 2 == 0:
+                headers["X-Workspace-Id"] = ws["id"]
+            r = await user.client.patch(f"/api/v1{path}", headers=headers, json=case.body)
+            assert r.status_code < 500, f"{path} {case.body!r}: {r.status_code} {r.text}"
+            validate_response("updateProviderSettings", r)
+    finally:
+        for s in sessions.values():
+            await s.client.aclose()

@@ -403,7 +403,9 @@ async def update_workspace_settings(
     if version != expected_version:
         raise ProblemError("precondition_failed", headers={"ETag": f'"v{version}"'})
     current = _settings_view(_as_dict(row[2]) if row else None, version)
-    diff = {k: {"from": current[k], "to": v} for k, v in changes.items() if current[k] != v}
+    # Список, а не словарь по имени поля: имена вроде `max_parallel_sessions` редактор секретов считает ключами
+    # сессии и скрыл бы значения (redact_value по имени ключа).
+    diff = [{"field": k, "from": current[k], "to": v} for k, v in changes.items() if current[k] != v]
     if not diff:
         return current
     definition = {k: current[k] for k in SETTINGS_FIELDS} | dict(changes)
