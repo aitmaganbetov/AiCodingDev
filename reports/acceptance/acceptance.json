@@ -1,12 +1,12 @@
 {
   "report": "AiCodingDev acceptance AC-01…AC-16 (P9-01)",
-  "generated_at": "2026-11-08T18:25:41.300522Z",
-  "commit_sha": "0ebd932a1e0d9c54c9cc955afbc1b4599e5eb913",
+  "generated_at": "2026-11-08T19:13:10.766339Z",
+  "commit_sha": "fc45a7f6f7b93a351ceb629de91fd7287abf7187",
   "branch": "ccr-69fbf9a8-p2650i",
   "working_tree": {
     "dirty": true,
-    "changed_paths": 20,
-    "diff_vs_head_sha256": "b4bf8fb61a859fba8459f00b1445d042c055ff0e1497c0b1f6f506095dd25b5f"
+    "changed_paths": 4,
+    "diff_vs_head_sha256": "01ef4a700c59ed1a4d84d391a3fd03c2ec69c06c63a5854b1f91411a8fd094b8"
   },
   "environment": {
     "python": "3.13.18",
@@ -21,15 +21,39 @@
       "command": "/home/user/AiCodingDev/.venv/bin/python3 -m pytest -m acceptance -p no:cacheprovider -q -rs -o junit_family=xunit1 --junitxml=/home/user/AiCodingDev/reports/acceptance/junit/python.xml",
       "cwd": ".",
       "exit_code": 0,
-      "started_at": "2026-11-08T18:21:38.789052Z",
-      "duration_seconds": 242.5,
+      "started_at": "2026-11-08T19:06:03.701222Z",
+      "duration_seconds": 225.8,
       "log": "reports/acceptance/logs/python.log"
+    },
+    "live": {
+      "command": "pnpm exec playwright test -c playwright.live.config.ts --trace off --reporter=list,junit",
+      "cwd": "apps/web",
+      "exit_code": 0,
+      "started_at": "2026-11-08T19:09:49.523279Z",
+      "duration_seconds": 80.9,
+      "log": "reports/acceptance/logs/web-live.log"
+    },
+    "mocked": {
+      "command": "pnpm exec playwright test -c playwright.mocked.config.ts --trace off --reporter=list,junit",
+      "cwd": "apps/web",
+      "exit_code": 1,
+      "started_at": "2026-11-08T19:11:10.468560Z",
+      "duration_seconds": 120.3,
+      "log": "reports/acceptance/logs/web-mocked.log"
     }
   },
   "junit": {
     "python": {
       "path": "reports/acceptance/junit/python.xml",
-      "sha256": "b1fc6020d6358bfc2c3ce3c9af4f1f16519933f842c0240aaaaa9bee582f62a6"
+      "sha256": "50fc16b8bca3736ede40d605c8f44db19662fe1221b185b27c098dc1adf06cb2"
+    },
+    "live": {
+      "path": "reports/acceptance/junit/web-live.xml",
+      "sha256": "eedd3a60a8051caea48677c120e17461df27c041f22fb7b8b52db86cbfbd022f"
+    },
+    "mocked": {
+      "path": "reports/acceptance/junit/web-mocked.xml",
+      "sha256": "5b240cf6c54e6e93a14536931d522aa1f6cae01bb2e6a9edb1e93ed4152aab90"
     }
   },
   "counts": {
@@ -38,28 +62,40 @@
       "passed": 355,
       "failed": 0,
       "skipped": 0
+    },
+    "live": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "mocked": {
+      "total": 63,
+      "passed": 62,
+      "failed": 1,
+      "skipped": 0
     }
   },
   "summary": {
     "criteria": 16,
-    "pass": 7,
+    "pass": 16,
     "fail": 0,
-    "incomplete": 9,
+    "incomplete": 0,
     "real_cli_blocked": 4,
-    "all_mandatory_pass": false
+    "all_mandatory_pass": true
   },
   "real_cli_blocked_reason": "Opt-in прогон с реальными CLI невозможен: P2-01 (spike probe Codex/Claude CLI), P2-05/P2-06 (адаптеры реальных CLI) и P2-13 (opt-in набор) — BLOCKED: нет машины с установленными и авторизованными официальными Codex CLI и Claude Code CLI (решение владельца, IMPLEMENTATION_BACKLOG §Phase 2; OQ-01, OQ-03). Тестов real-CLI в репозитории нет.",
   "criteria": [
     {
       "id": "AC-01",
       "title": "Подключение локального репозитория, создание проекта, запуск DEVELOP",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "BLOCKED",
       "clauses": [
         {
           "text": "Локальный Git-репозиторий из allowlist привязывается к проекту (201); путь вне allowlist отклоняется",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
@@ -69,7 +105,7 @@
                 {
                   "id": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
                   "status": "PASSED",
-                  "time": 4.8
+                  "time": 4.93
                 }
               ]
             },
@@ -81,7 +117,7 @@
                 {
                   "id": "tests/integration/test_api_projects.py::test_attach_local_repository",
                   "status": "PASSED",
-                  "time": 0.48
+                  "time": 0.54
                 }
               ]
             },
@@ -93,17 +129,17 @@
                 {
                   "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[traversal]",
                   "status": "PASSED",
-                  "time": 0.46
+                  "time": 0.43
                 },
                 {
                   "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[outside]",
                   "status": "PASSED",
-                  "time": 0.44
+                  "time": 0.41
                 },
                 {
                   "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[symlink]",
                   "status": "PASSED",
-                  "time": 0.44
+                  "time": 0.42
                 },
                 {
                   "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[not_git]",
@@ -113,20 +149,26 @@
                 {
                   "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[nested]",
                   "status": "PASSED",
-                  "time": 0.43
+                  "time": 0.47
                 },
                 {
                   "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[github]",
                   "status": "PASSED",
-                  "time": 0.41
+                  "time": 0.43
                 }
               ]
             },
             {
               "ref": "live:smoke.spec.ts::live smoke",
               "suite": "live",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "smoke.spec.ts::live smoke: login → workspace → projects → create project → logout",
+                  "status": "PASSED",
+                  "time": 3.13
+                }
+              ]
             }
           ]
         },
@@ -143,7 +185,7 @@
                 {
                   "id": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
                   "status": "PASSED",
-                  "time": 4.8
+                  "time": 4.93
                 }
               ]
             },
@@ -155,7 +197,7 @@
                 {
                   "id": "tests/integration/test_runs_api.py::test_create_run_is_idempotent_and_key_reuse_with_other_body_is_rejected",
                   "status": "PASSED",
-                  "time": 0.69
+                  "time": 0.62
                 }
               ]
             }
@@ -164,7 +206,7 @@
         {
           "text": "run переходит в DISCOVERY, событие run.state_changed получено по SSE",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
@@ -174,7 +216,7 @@
                 {
                   "id": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
                   "status": "PASSED",
-                  "time": 4.8
+                  "time": 4.93
                 }
               ]
             },
@@ -186,15 +228,21 @@
                 {
                   "id": "tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence",
                   "status": "PASSED",
-                  "time": 2.52
+                  "time": 1.99
                 }
               ]
             },
             {
               "ref": "live:mission-control.spec.ts::AC-05",
               "suite": "live",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into Live Agent Chat; graph statuses progress live",
+                  "status": "PASSED",
+                  "time": 8.44
+                }
+              ]
             }
           ]
         },
@@ -226,7 +274,7 @@
                 {
                   "id": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
                   "status": "PASSED",
-                  "time": 5.64
+                  "time": 5.0
                 }
               ]
             }
@@ -245,7 +293,7 @@
                 {
                   "id": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
                   "status": "PASSED",
-                  "time": 5.64
+                  "time": 5.0
                 }
               ]
             }
@@ -264,7 +312,7 @@
                 {
                   "id": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
                   "status": "PASSED",
-                  "time": 5.64
+                  "time": 5.0
                 }
               ]
             },
@@ -276,7 +324,7 @@
                 {
                   "id": "tests/unit/test_orchestration_core.py::test_acyclic_plans_validate_and_respect_edges",
                   "status": "PASSED",
-                  "time": 0.82
+                  "time": 0.58
                 }
               ]
             }
@@ -295,7 +343,7 @@
                 {
                   "id": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
                   "status": "PASSED",
-                  "time": 5.64
+                  "time": 5.0
                 }
               ]
             },
@@ -307,7 +355,7 @@
                 {
                   "id": "tests/unit/test_orchestration_core.py::test_any_back_edge_is_detected_with_cycle_path",
                   "status": "PASSED",
-                  "time": 0.86
+                  "time": 0.62
                 }
               ]
             },
@@ -376,7 +424,7 @@
                 {
                   "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac03_router_selects_official_cli_and_platform_has_no_ai_api_egress",
                   "status": "PASSED",
-                  "time": 2.37
+                  "time": 2.19
                 }
               ]
             },
@@ -388,7 +436,7 @@
                 {
                   "id": "tests/e2e/test_routing_review.py::test_review_goes_to_the_other_provider_and_decisions_are_recorded",
                   "status": "PASSED",
-                  "time": 2.37
+                  "time": 1.97
                 }
               ]
             },
@@ -419,7 +467,7 @@
                 {
                   "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac03_router_selects_official_cli_and_platform_has_no_ai_api_egress",
                   "status": "PASSED",
-                  "time": 2.37
+                  "time": 2.19
                 }
               ]
             },
@@ -431,7 +479,7 @@
                 {
                   "id": "tests/security/test_sandbox.py::test_egress_proxy_enforces_allowlist",
                   "status": "PASSED",
-                  "time": 1.57
+                  "time": 1.29
                 }
               ]
             },
@@ -443,7 +491,7 @@
                 {
                   "id": "tests/security/test_sandbox.py::test_no_direct_egress_on_internal_network",
                   "status": "PASSED",
-                  "time": 0.7
+                  "time": 0.62
                 }
               ]
             }
@@ -462,7 +510,7 @@
                 {
                   "id": "tests/unit/test_ci_gates.py::test_current_dependencies_pass_gate",
                   "status": "PASSED",
-                  "time": 0.01
+                  "time": 0.02
                 }
               ]
             },
@@ -486,7 +534,7 @@
                 {
                   "id": "tests/contract/test_architecture.py::test_import_contracts",
                   "status": "PASSED",
-                  "time": 0.21
+                  "time": 0.2
                 }
               ]
             }
@@ -520,7 +568,7 @@
                 {
                   "id": "tests/acceptance/test_ac04_codex_implements_claude_reviews.py::test_ac04_codex_implements_in_task_worktree_and_claude_reviews_independently",
                   "status": "PASSED",
-                  "time": 2.24
+                  "time": 2.23
                 }
               ]
             },
@@ -532,7 +580,7 @@
                 {
                   "id": "tests/integration/test_worktrees.py::test_create_diff_commit_remove",
                   "status": "PASSED",
-                  "time": 0.06
+                  "time": 0.07
                 }
               ]
             },
@@ -563,7 +611,7 @@
                 {
                   "id": "tests/acceptance/test_ac04_codex_implements_claude_reviews.py::test_ac04_codex_implements_in_task_worktree_and_claude_reviews_independently",
                   "status": "PASSED",
-                  "time": 2.24
+                  "time": 2.23
                 }
               ]
             },
@@ -575,7 +623,7 @@
                 {
                   "id": "tests/e2e/test_agent_handoff.py::test_develop_review_fix_rereview_handoff",
                   "status": "PASSED",
-                  "time": 3.63
+                  "time": 3.37
                 }
               ]
             },
@@ -606,7 +654,7 @@
                 {
                   "id": "tests/e2e/test_routing_review.py::test_single_provider_strict_requires_manual_review",
                   "status": "PASSED",
-                  "time": 1.8
+                  "time": 1.51
                 }
               ]
             },
@@ -618,7 +666,7 @@
                 {
                   "id": "tests/e2e/test_routing_review.py::test_basic_profile_self_review_only_after_explicit_approval",
                   "status": "PASSED",
-                  "time": 2.26
+                  "time": 2.24
                 }
               ]
             },
@@ -662,7 +710,7 @@
                 {
                   "id": "tests/unit/test_routing.py::test_self_review_is_never_marked_independent",
                   "status": "PASSED",
-                  "time": 0.09
+                  "time": 0.1
                 }
               ]
             }
@@ -680,13 +728,13 @@
     {
       "id": "AC-05",
       "title": "Межагентные сообщения видны в Live Agent Chat без скрытого CoT",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "NOT_REQUIRED",
       "clauses": [
         {
           "text": "Все agent_messages run отображаются (потоки All Agents / Role / Task)",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
@@ -696,7 +744,7 @@
                 {
                   "id": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
                   "status": "PASSED",
-                  "time": 5.88
+                  "time": 5.7
                 }
               ]
             },
@@ -708,28 +756,40 @@
                 {
                   "id": "tests/integration/test_chat_api.py::test_feed_streams_filters_search_and_pagination",
                   "status": "PASSED",
-                  "time": 1.22
+                  "time": 1.18
                 }
               ]
             },
             {
               "ref": "live:mission-control.spec.ts::AC-05",
               "suite": "live",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into Live Agent Chat; graph statuses progress live",
+                  "status": "PASSED",
+                  "time": 8.44
+                }
+              ]
             },
             {
               "ref": "mocked:chat.spec.ts::AC-05",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "chat.spec.ts::AC-05: live chat shows inter-agent messages and handoffs streaming in, with streams, filters, search and mentions",
+                  "status": "PASSED",
+                  "time": 4.09
+                }
+              ]
             }
           ]
         },
         {
           "text": "С типом, отправителем, временем, статусом (статус = принято брокером; отклонённые — в активности)",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
@@ -739,7 +799,7 @@
                 {
                   "id": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
                   "status": "PASSED",
-                  "time": 5.88
+                  "time": 5.7
                 }
               ]
             },
@@ -751,15 +811,21 @@
                 {
                   "id": "tests/integration/test_review_loops.py::test_worker_projects_accepted_acp_message_into_chat_and_activity",
                   "status": "PASSED",
-                  "time": 0.19
+                  "time": 0.18
                 }
               ]
             },
             {
               "ref": "live:mission-control.spec.ts::AC-05",
               "suite": "live",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into Live Agent Chat; graph statuses progress live",
+                  "status": "PASSED",
+                  "time": 8.44
+                }
+              ]
             }
           ]
         },
@@ -776,7 +842,7 @@
                 {
                   "id": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
                   "status": "PASSED",
-                  "time": 5.88
+                  "time": 5.7
                 }
               ]
             },
@@ -793,7 +859,7 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u043f\\u0440\\u043e\\u0432\\u0430\\u0439\\u0434\\u0435\\u0440 \\u0432\\u043d\\u0435 {codex, claude}]",
                   "status": "PASSED",
-                  "time": 0.01
+                  "time": 0.02
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0434\\u043e\\u0441\\u0442\\u0443\\u043f \\u043a production]",
@@ -833,7 +899,7 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[installed \\u043d\\u0435 boolean]",
                   "status": "PASSED",
-                  "time": 0.01
+                  "time": 0.02
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f1]",
@@ -843,22 +909,22 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u043d\\u0435\\u0438\\u0437\\u0432\\u0435\\u0441\\u0442\\u043d\\u044b\\u0439 \\u0442\\u0438\\u043f SSE]",
                   "status": "PASSED",
-                  "time": 0.08
+                  "time": 0.09
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[seq < 1_1]",
                   "status": "PASSED",
-                  "time": 0.06
+                  "time": 0.07
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0447\\u0443\\u0436\\u0430\\u044f \\u0432\\u0435\\u0440\\u0441\\u0438\\u044f \\u0441\\u0445\\u0435\\u043c\\u044b]",
                   "status": "PASSED",
-                  "time": 0.06
+                  "time": 0.07
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 run \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f]",
                   "status": "PASSED",
-                  "time": 0.07
+                  "time": 0.08
                 }
               ]
             },
@@ -900,7 +966,7 @@
                 {
                   "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[FIX_REQUEST]",
                   "status": "PASSED",
-                  "time": 0.01
+                  "time": 0.0
                 },
                 {
                   "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[EVIDENCE_SUBMITTED]",
@@ -936,13 +1002,13 @@
     {
       "id": "AC-06",
       "title": "CHANGE_REQUEST во время выполнения",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "NOT_REQUIRED",
       "clauses": [
         {
           "text": "202 → IMPACT_ANALYSIS_PENDING → directive.impact_ready",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
@@ -952,22 +1018,28 @@
                 {
                   "id": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
                   "status": "PASSED",
-                  "time": 1.24
+                  "time": 1.32
                 }
               ]
             },
             {
               "ref": "live:mission-control.spec.ts::AC-06",
               "suite": "live",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; CHANGE_REQUEST impact preview → confirm → replan (new plan version) → acknowledged by agents → completed",
+                  "status": "PASSED",
+                  "time": 16.05
+                }
+              ]
             }
           ]
         },
         {
           "text": "Подтверждение, если критично (four-eyes)",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/integration/test_directives.py::test_critical_directive_requires_admin_approval_with_four_eyes",
@@ -977,22 +1049,28 @@
                 {
                   "id": "tests/integration/test_directives.py::test_critical_directive_requires_admin_approval_with_four_eyes",
                   "status": "PASSED",
-                  "time": 1.44
+                  "time": 1.47
                 }
               ]
             },
             {
               "ref": "mocked:chat.spec.ts::AC-06",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "chat.spec.ts::AC-06: CHANGE_REQUEST with impact preview → confirmation → delivered / acknowledged / completed",
+                  "status": "PASSED",
+                  "time": 4.32
+                }
+              ]
             }
           ]
         },
         {
           "text": "Checkpoint создан → новая plan_version → DISPATCHED → ACKNOWLEDGED",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
@@ -1002,7 +1080,7 @@
                 {
                   "id": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
                   "status": "PASSED",
-                  "time": 1.24
+                  "time": 1.32
                 }
               ]
             },
@@ -1014,15 +1092,21 @@
                 {
                   "id": "tests/integration/test_directive_delivery.py::test_change_request_delivered_acknowledged_and_completed_on_fake_cli",
                   "status": "PASSED",
-                  "time": 2.68
+                  "time": 2.69
                 }
               ]
             },
             {
               "ref": "live:mission-control.spec.ts::AC-06",
               "suite": "live",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; CHANGE_REQUEST impact preview → confirm → replan (new plan version) → acknowledged by agents → completed",
+                  "status": "PASSED",
+                  "time": 16.05
+                }
+              ]
             }
           ]
         },
@@ -1039,7 +1123,7 @@
                 {
                   "id": "tests/integration/test_directives.py::test_running_task_gets_safe_point_not_silent_change",
                   "status": "PASSED",
-                  "time": 0.82
+                  "time": 0.88
                 }
               ]
             },
@@ -1051,7 +1135,7 @@
                 {
                   "id": "tests/integration/test_directive_delivery.py::test_exec_stops_running_task_for_directive_applied_elsewhere",
                   "status": "PASSED",
-                  "time": 1.03
+                  "time": 0.95
                 }
               ]
             }
@@ -1070,7 +1154,7 @@
                 {
                   "id": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
                   "status": "PASSED",
-                  "time": 1.24
+                  "time": 1.32
                 }
               ]
             },
@@ -1082,7 +1166,7 @@
                 {
                   "id": "tests/integration/test_directives.py::test_rbac_version_mismatch_and_idempotency",
                   "status": "PASSED",
-                  "time": 2.61
+                  "time": 2.56
                 }
               ]
             }
@@ -1109,7 +1193,7 @@
                 {
                   "id": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
                   "status": "PASSED",
-                  "time": 4.76
+                  "time": 4.39
                 }
               ]
             },
@@ -1121,7 +1205,7 @@
                 {
                   "id": "tests/integration/test_gateway.py::test_timeout_recorded",
                   "status": "PASSED",
-                  "time": 1.22
+                  "time": 1.2
                 }
               ]
             }
@@ -1140,7 +1224,7 @@
                 {
                   "id": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
                   "status": "PASSED",
-                  "time": 4.76
+                  "time": 4.39
                 }
               ]
             },
@@ -1152,7 +1236,7 @@
                 {
                   "id": "tests/e2e/test_phase3_slice.py::test_cli_failure_exhausts_retry_budget",
                   "status": "PASSED",
-                  "time": 1.62
+                  "time": 1.4
                 }
               ]
             },
@@ -1213,7 +1297,7 @@
                 {
                   "id": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
                   "status": "PASSED",
-                  "time": 4.76
+                  "time": 4.39
                 }
               ]
             },
@@ -1225,7 +1309,7 @@
                 {
                   "id": "tests/e2e/test_phase3_slice.py::test_cli_failure_exhausts_retry_budget",
                   "status": "PASSED",
-                  "time": 1.62
+                  "time": 1.4
                 }
               ]
             }
@@ -1236,13 +1320,13 @@
     {
       "id": "AC-08",
       "title": "Разрыв соединения UI без дублей",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "NOT_REQUIRED",
       "clauses": [
         {
           "text": "Переподключение с Last-Event-ID → все события seq > N ровно один раз, по порядку",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/integration/test_sse.py::test_replay_reconnect_and_live_exactly_once",
@@ -1252,7 +1336,7 @@
                 {
                   "id": "tests/integration/test_sse.py::test_replay_reconnect_and_live_exactly_once",
                   "status": "PASSED",
-                  "time": 0.77
+                  "time": 0.68
                 }
               ]
             },
@@ -1264,52 +1348,88 @@
                 {
                   "id": "tests/integration/test_outbox_dispatcher.py::test_concurrent_dispatchers_keep_per_run_seq_monotonic",
                   "status": "PASSED",
-                  "time": 9.13
+                  "time": 9.12
                 }
               ]
             },
             {
               "ref": "live:mission-control.spec.ts::AC-08",
               "suite": "live",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-08: server-side SSE drop mid-run — the UI resumes with Last-Event-ID, every event exactly once and without gaps",
+                  "status": "PASSED",
+                  "time": 26.79
+                }
+              ]
             },
             {
               "ref": "mocked:sse.spec.ts::network drop",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "sse.spec.ts::network drop (offline → online): stream pauses, resumes with Last-Event-ID, every event exactly once, no gaps",
+                  "status": "PASSED",
+                  "time": 1.23
+                }
+              ]
             },
             {
               "ref": "mocked:sse.spec.ts::connection cut mid-frame",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "sse.spec.ts::connection cut mid-frame while online: reconnect without duplicates or gaps (no offline event)",
+                  "status": "PASSED",
+                  "time": 0.62
+                }
+              ]
             },
             {
               "ref": "mocked:run.spec.ts::run view: SSE events are shown",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "run.spec.ts::run view: SSE events are shown; reconnect after a dropped connection uses Last-Event-ID, no duplicates, no gaps",
+                  "status": "PASSED",
+                  "time": 4.21
+                }
+              ]
             }
           ]
         },
         {
           "text": "UI после восстановления показывает тот же run",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "live:mission-control.spec.ts::AC-08",
               "suite": "live",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-08: server-side SSE drop mid-run — the UI resumes with Last-Event-ID, every event exactly once and without gaps",
+                  "status": "PASSED",
+                  "time": 26.79
+                }
+              ]
             },
             {
               "ref": "mocked:run.spec.ts::run view: 410 replay_window_exceeded",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "run.spec.ts::run view: 410 replay_window_exceeded → state reread, feed continues from last_seq",
+                  "status": "PASSED",
+                  "time": 2.52
+                }
+              ]
             }
           ]
         }
@@ -1346,7 +1466,7 @@
                 {
                   "id": "tests/integration/test_github_workflow.py::test_merge_rejected_when_head_moved_and_crash_after_merge",
                   "status": "PASSED",
-                  "time": 1.96
+                  "time": 1.85
                 }
               ]
             },
@@ -1358,7 +1478,7 @@
                 {
                   "id": "tests/chaos/test_github_recovery.py::test_worker_killed_after_merge_is_reconciled",
                   "status": "PASSED",
-                  "time": 2.03
+                  "time": 1.96
                 }
               ]
             }
@@ -1377,7 +1497,7 @@
                 {
                   "id": "tests/integration/test_external_actions.py::test_crash_during_executing_is_reconciled_by_probe",
                   "status": "PASSED",
-                  "time": 0.05
+                  "time": 0.04
                 }
               ]
             },
@@ -1401,7 +1521,7 @@
                 {
                   "id": "tests/integration/test_external_actions.py::test_stale_token_cannot_confirm_or_take_over",
                   "status": "PASSED",
-                  "time": 0.03
+                  "time": 0.04
                 }
               ]
             },
@@ -1413,7 +1533,7 @@
                 {
                   "id": "tests/integration/test_github_workflow.py::test_crash_between_pr_created_and_confirmed_creates_one_pr[crash]",
                   "status": "PASSED",
-                  "time": 0.94
+                  "time": 0.91
                 },
                 {
                   "id": "tests/integration/test_github_workflow.py::test_crash_between_pr_created_and_confirmed_creates_one_pr[exception]",
@@ -1430,27 +1550,27 @@
                 {
                   "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[after_pr_create]",
                   "status": "PASSED",
-                  "time": 1.85
+                  "time": 1.73
                 },
                 {
                   "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[after_push]",
                   "status": "PASSED",
-                  "time": 1.63
+                  "time": 1.53
                 },
                 {
                   "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[after_review]",
                   "status": "PASSED",
-                  "time": 1.6
+                  "time": 1.54
                 },
                 {
                   "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[after_status]",
                   "status": "PASSED",
-                  "time": 1.82
+                  "time": 1.62
                 },
                 {
                   "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[before_pr_create]",
                   "status": "PASSED",
-                  "time": 1.87
+                  "time": 1.56
                 }
               ]
             }
@@ -1469,7 +1589,7 @@
                 {
                   "id": "tests/chaos/test_recovery.py::test_worker_killed_while_cli_running_is_recovered",
                   "status": "PASSED",
-                  "time": 5.94
+                  "time": 6.15
                 }
               ]
             },
@@ -1493,12 +1613,12 @@
                 {
                   "id": "tests/chaos/test_worker_kills.py::test_worker_killed_mid_step_is_recovered_without_duplicates[lease-RUNNING]",
                   "status": "PASSED",
-                  "time": 4.77
+                  "time": 4.32
                 },
                 {
                   "id": "tests/chaos/test_worker_kills.py::test_worker_killed_mid_step_is_recovered_without_duplicates[gate-VERIFYING]",
                   "status": "PASSED",
-                  "time": 5.01
+                  "time": 5.05
                 }
               ]
             }
@@ -1517,17 +1637,17 @@
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[migration_apply]",
                   "status": "PASSED",
-                  "time": 0.17
+                  "time": 0.16
                 },
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[pr_merge]",
                   "status": "PASSED",
-                  "time": 0.1
+                  "time": 0.09
                 },
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[production_deploy]",
                   "status": "PASSED",
-                  "time": 0.08
+                  "time": 0.09
                 }
               ]
             },
@@ -1539,7 +1659,7 @@
                 {
                   "id": "tests/integration/test_false_pass_prevention.py::test_destructive_migration_requires_approval",
                   "status": "PASSED",
-                  "time": 6.5
+                  "time": 5.89
                 }
               ]
             }
@@ -1566,7 +1686,7 @@
                 {
                   "id": "tests/e2e/test_phase5_acceptance.py::test_ac10_off_uses_local_index_only",
                   "status": "PASSED",
-                  "time": 5.57
+                  "time": 4.99
                 }
               ]
             },
@@ -1578,7 +1698,7 @@
                 {
                   "id": "tests/e2e/test_phase5_acceptance.py::test_ac10_repeated_docs_request_fails_attempt",
                   "status": "PASSED",
-                  "time": 1.77
+                  "time": 1.62
                 }
               ]
             },
@@ -1690,7 +1810,7 @@
                 {
                   "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-True-APPROVED]",
                   "status": "PASSED",
-                  "time": 0.0
+                  "time": 0.25
                 },
                 {
                   "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-True-REJECTED]",
@@ -1724,7 +1844,7 @@
                 {
                   "id": "tests/e2e/test_phase5_acceptance.py::test_ac10_smart_downloads_only_after_approval",
                   "status": "PASSED",
-                  "time": 6.43
+                  "time": 5.05
                 }
               ]
             },
@@ -1736,7 +1856,7 @@
                 {
                   "id": "tests/e2e/test_phase5_acceptance.py::test_ac10_smart_rejected_completes_without_docs",
                   "status": "PASSED",
-                  "time": 6.13
+                  "time": 4.83
                 }
               ]
             },
@@ -1779,7 +1899,7 @@
     {
       "id": "AC-11",
       "title": "Ошибочные тесты блокируют COMPLETED; exit 0 ≠ verified",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "NOT_REQUIRED",
       "clauses": [
         {
@@ -1795,7 +1915,7 @@
                 {
                   "id": "tests/e2e/test_phase3_slice.py::test_secret_in_change_fails_gate_and_run_never_completes",
                   "status": "PASSED",
-                  "time": 3.1
+                  "time": 2.6
                 }
               ]
             },
@@ -1807,7 +1927,7 @@
                 {
                   "id": "tests/integration/test_false_pass_prevention.py::test_gate_on_different_commit_and_open_finding_block_completion",
                   "status": "PASSED",
-                  "time": 1.47
+                  "time": 1.5
                 }
               ]
             },
@@ -1819,7 +1939,7 @@
                 {
                   "id": "tests/e2e/test_completion_guard.py::test_open_critical_finding_blocks_completion",
                   "status": "PASSED",
-                  "time": 2.27
+                  "time": 1.99
                 }
               ]
             }
@@ -1921,7 +2041,7 @@
         {
           "text": "SKIPPED/ERROR обязательного gate не дают PASS",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/unit/test_verdict_rules.py::test_non_pass_statuses_never_count",
@@ -1963,7 +2083,7 @@
                 {
                   "id": "tests/unit/test_verdict_rules.py::test_fp_required_skipped",
                   "status": "PASSED",
-                  "time": 0.41
+                  "time": 0.14
                 }
               ]
             },
@@ -1975,7 +2095,7 @@
                 {
                   "id": "tests/integration/test_verification_engine.py::test_required_tool_missing_is_error_not_pass",
                   "status": "PASSED",
-                  "time": 0.29
+                  "time": 0.3
                 }
               ]
             },
@@ -1987,15 +2107,21 @@
                 {
                   "id": "tests/integration/test_false_pass_prevention.py::test_tool_missing_writes_error_code_and_blocks_completion",
                   "status": "PASSED",
-                  "time": 0.31
+                  "time": 0.34
                 }
               ]
             },
             {
               "ref": "mocked:quality.spec.ts::quality: SKIPPED/ERROR are not PASS",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "quality.spec.ts::quality: SKIPPED/ERROR are not PASS; gate results arrive via SSE, reconnect with Last-Event-ID without duplicates (AC-08, AC-11)",
+                  "status": "PASSED",
+                  "time": 5.74
+                }
+              ]
             }
           ]
         }
@@ -2004,7 +2130,7 @@
     {
       "id": "AC-12",
       "title": "Пользователь без прав",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "NOT_REQUIRED",
       "clauses": [
         {
@@ -2020,7 +2146,7 @@
                 {
                   "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
                   "status": "PASSED",
-                  "time": 1.84
+                  "time": 1.49
                 }
               ]
             },
@@ -2032,7 +2158,7 @@
                 {
                   "id": "tests/security/test_cross_tenant_api.py::test_foreign_workspace_is_invisible",
                   "status": "PASSED",
-                  "time": 1.16
+                  "time": 0.98
                 }
               ]
             },
@@ -2044,7 +2170,7 @@
                 {
                   "id": "tests/security/test_cross_tenant_api.py::test_unknown_resource_and_foreign_resource_look_identical",
                   "status": "PASSED",
-                  "time": 0.88
+                  "time": 0.87
                 }
               ]
             },
@@ -2056,17 +2182,17 @@
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[workspaces-aicd_app]",
                   "status": "PASSED",
-                  "time": 0.07
+                  "time": 0.05
                 },
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[workspaces-aicd_worker]",
                   "status": "PASSED",
-                  "time": 0.02
+                  "time": 0.01
                 },
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[workspace_members-aicd_app]",
                   "status": "PASSED",
-                  "time": 0.02
+                  "time": 0.01
                 },
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[workspace_members-aicd_worker]",
@@ -2081,7 +2207,7 @@
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[projects-aicd_worker]",
                   "status": "PASSED",
-                  "time": 0.01
+                  "time": 0.02
                 },
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[project_settings-aicd_app]",
@@ -2091,7 +2217,7 @@
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[project_settings-aicd_worker]",
                   "status": "PASSED",
-                  "time": 0.02
+                  "time": 0.01
                 },
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[repositories-aicd_app]",
@@ -2106,7 +2232,7 @@
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[artifacts-aicd_app]",
                   "status": "PASSED",
-                  "time": 0.02
+                  "time": 0.01
                 },
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[artifacts-aicd_worker]",
@@ -2116,7 +2242,7 @@
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[audit_events-aicd_app]",
                   "status": "PASSED",
-                  "time": 0.01
+                  "time": 0.02
                 },
                 {
                   "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[audit_events-aicd_worker]",
@@ -2130,7 +2256,7 @@
         {
           "text": "Не член / viewer не может отправить поручение (404 / 403)",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
@@ -2140,7 +2266,7 @@
                 {
                   "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
                   "status": "PASSED",
-                  "time": 1.84
+                  "time": 1.49
                 }
               ]
             },
@@ -2152,22 +2278,28 @@
                 {
                   "id": "tests/integration/test_directives.py::test_rbac_version_mismatch_and_idempotency",
                   "status": "PASSED",
-                  "time": 2.61
+                  "time": 2.56
                 }
               ]
             },
             {
               "ref": "mocked:chat.spec.ts::chat permissions",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "chat.spec.ts::chat permissions: viewer reads only; reviewer gets the restricted command set",
+                  "status": "PASSED",
+                  "time": 1.51
+                }
+              ]
             }
           ]
         },
         {
           "text": "Не член / viewer не может утвердить критическое действие (404 / 403)",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
@@ -2177,7 +2309,7 @@
                 {
                   "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
                   "status": "PASSED",
-                  "time": 1.84
+                  "time": 1.49
                 }
               ]
             },
@@ -2189,40 +2321,46 @@
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[MANUAL_REVIEW-allowed0]",
                   "status": "PASSED",
-                  "time": 2.1
+                  "time": 2.02
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[DOCS_DOWNLOAD-allowed1]",
                   "status": "PASSED",
-                  "time": 2.14
+                  "time": 1.93
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[MERGE-allowed2]",
                   "status": "PASSED",
-                  "time": 2.06
+                  "time": 1.79
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[CRITICAL_DIRECTIVE-allowed3]",
                   "status": "PASSED",
-                  "time": 2.19
+                  "time": 1.92
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[PRODUCTION_DEPLOY-allowed4]",
                   "status": "PASSED",
-                  "time": 2.36
+                  "time": 1.95
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[SECRET_CHANGE-allowed5]",
                   "status": "PASSED",
-                  "time": 2.06
+                  "time": 1.92
                 }
               ]
             },
             {
               "ref": "mocked:approvals.spec.ts::viewer sees approvals read-only",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "approvals.spec.ts::viewer sees approvals read-only",
+                  "status": "PASSED",
+                  "time": 1.33
+                }
+              ]
             }
           ]
         },
@@ -2239,7 +2377,7 @@
                 {
                   "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
                   "status": "PASSED",
-                  "time": 1.84
+                  "time": 1.49
                 }
               ]
             },
@@ -2251,32 +2389,32 @@
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[MANUAL_REVIEW-allowed0]",
                   "status": "PASSED",
-                  "time": 2.1
+                  "time": 2.02
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[DOCS_DOWNLOAD-allowed1]",
                   "status": "PASSED",
-                  "time": 2.14
+                  "time": 1.93
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[MERGE-allowed2]",
                   "status": "PASSED",
-                  "time": 2.06
+                  "time": 1.79
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[CRITICAL_DIRECTIVE-allowed3]",
                   "status": "PASSED",
-                  "time": 2.19
+                  "time": 1.92
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[PRODUCTION_DEPLOY-allowed4]",
                   "status": "PASSED",
-                  "time": 2.36
+                  "time": 1.95
                 },
                 {
                   "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[SECRET_CHANGE-allowed5]",
                   "status": "PASSED",
-                  "time": 2.06
+                  "time": 1.92
                 }
               ]
             }
@@ -2295,7 +2433,7 @@
                 {
                   "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
                   "status": "PASSED",
-                  "time": 1.84
+                  "time": 1.49
                 }
               ]
             },
@@ -2307,7 +2445,7 @@
                 {
                   "id": "tests/integration/test_sse.py::test_non_member_gets_404_and_activity",
                   "status": "PASSED",
-                  "time": 0.97
+                  "time": 0.9
                 }
               ]
             },
@@ -2319,7 +2457,7 @@
                 {
                   "id": "tests/integration/test_sse.py::test_revoked_member_stream_closes",
                   "status": "PASSED",
-                  "time": 1.52
+                  "time": 1.38
                 }
               ]
             }
@@ -2330,13 +2468,13 @@
     {
       "id": "AC-13",
       "title": "Production deploy / merge / destructive migration без approval невозможны",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "NOT_REQUIRED",
       "clauses": [
         {
           "text": "Без APPROVED действие не выполняется, external_actions не переходит в EXECUTING (merge, deploy, деструктивная миграция)",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval",
@@ -2346,17 +2484,17 @@
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[migration_apply]",
                   "status": "PASSED",
-                  "time": 0.17
+                  "time": 0.16
                 },
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[pr_merge]",
                   "status": "PASSED",
-                  "time": 0.1
+                  "time": 0.09
                 },
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[production_deploy]",
                   "status": "PASSED",
-                  "time": 0.08
+                  "time": 0.09
                 }
               ]
             },
@@ -2368,7 +2506,7 @@
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_rejected_approval_blocks_execution",
                   "status": "PASSED",
-                  "time": 0.05
+                  "time": 0.04
                 }
               ]
             },
@@ -2380,7 +2518,7 @@
                 {
                   "id": "tests/integration/test_external_actions.py::test_ac13_merge_requires_approved_matching_approval",
                   "status": "PASSED",
-                  "time": 0.08
+                  "time": 0.09
                 }
               ]
             },
@@ -2392,7 +2530,7 @@
                 {
                   "id": "tests/integration/test_external_actions.py::test_ac13_expired_approval_blocks_execution",
                   "status": "PASSED",
-                  "time": 0.04
+                  "time": 0.06
                 }
               ]
             },
@@ -2404,7 +2542,7 @@
                 {
                   "id": "tests/integration/test_github_workflow.py::test_merge_requires_approval_four_eyes_and_branch_protection",
                   "status": "PASSED",
-                  "time": 1.3
+                  "time": 1.29
                 }
               ]
             },
@@ -2416,22 +2554,28 @@
                 {
                   "id": "tests/e2e/test_phase3_slice.py::test_plan_approval_required_and_decided_by_member",
                   "status": "PASSED",
-                  "time": 2.6
+                  "time": 2.04
                 }
               ]
             },
             {
               "ref": "mocked:approvals.spec.ts::AC-13: plan approval gates execution",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "approvals.spec.ts::AC-13: plan approval gates execution — run waits in AWAITING_APPROVAL until a human approves; live update via SSE",
+                  "status": "PASSED",
+                  "time": 3.91
+                }
+              ]
             }
           ]
         },
         {
           "text": "Requester не может утвердить сам (four-eyes; исключение OQ-10 — никогда для PRODUCTION_DEPLOY)",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval",
@@ -2441,17 +2585,17 @@
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[migration_apply]",
                   "status": "PASSED",
-                  "time": 0.17
+                  "time": 0.16
                 },
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[pr_merge]",
                   "status": "PASSED",
-                  "time": 0.1
+                  "time": 0.09
                 },
                 {
                   "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[production_deploy]",
                   "status": "PASSED",
-                  "time": 0.08
+                  "time": 0.09
                 }
               ]
             },
@@ -2463,15 +2607,21 @@
                 {
                   "id": "tests/integration/test_approvals_api.py::test_four_eyes_and_single_member_self_approval",
                   "status": "PASSED",
-                  "time": 1.31
+                  "time": 1.25
                 }
               ]
             },
             {
               "ref": "mocked:approvals.spec.ts::AC-13: requester cannot approve own merge",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "approvals.spec.ts::AC-13: requester cannot approve own merge (four-eyes); server four_eyes_violation and reject reason are handled",
+                  "status": "PASSED",
+                  "time": 2.12
+                }
+              ]
             }
           ]
         }
@@ -2480,13 +2630,13 @@
     {
       "id": "AC-14",
       "title": "Состав evidence",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "NOT_REQUIRED",
       "clauses": [
         {
           "text": "Evidence содержит commit_sha, command, exit_code, started_at, finished_at, environment, artifact с sha256",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence",
@@ -2496,7 +2646,7 @@
                 {
                   "id": "tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence",
                   "status": "PASSED",
-                  "time": 2.52
+                  "time": 1.99
                 }
               ]
             },
@@ -2508,7 +2658,7 @@
                 {
                   "id": "tests/integration/test_verification_engine.py::test_clean_change_scope_pass_with_complete_evidence",
                   "status": "PASSED",
-                  "time": 0.43
+                  "time": 0.38
                 }
               ]
             },
@@ -2520,15 +2670,21 @@
                 {
                   "id": "tests/integration/test_quality_api.py::test_evidence_fields_links_and_redaction",
                   "status": "PASSED",
-                  "time": 0.74
+                  "time": 0.66
                 }
               ]
             },
             {
               "ref": "mocked:quality.spec.ts::quality: reviewer cannot accept risk",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "quality.spec.ts::quality: reviewer cannot accept risk; FIXED is engine-only; task evidence tab; incomplete evidence is flagged; report download",
+                  "status": "PASSED",
+                  "time": 2.87
+                }
+              ]
             }
           ]
         },
@@ -2545,7 +2701,7 @@
                 {
                   "id": "tests/integration/test_verification_engine.py::test_clean_change_scope_pass_with_complete_evidence",
                   "status": "PASSED",
-                  "time": 0.43
+                  "time": 0.38
                 }
               ]
             },
@@ -2557,7 +2713,7 @@
                 {
                   "id": "tests/integration/test_false_pass_prevention.py::test_artifact_tampering_detected_by_completion_guard",
                   "status": "PASSED",
-                  "time": 1.36
+                  "time": 1.44
                 }
               ]
             },
@@ -2608,7 +2764,7 @@
                 {
                   "id": "tests/contract/test_contracts.py::test_openapi_is_valid_3_1",
                   "status": "PASSED",
-                  "time": 0.63
+                  "time": 0.65
                 }
               ]
             },
@@ -2620,7 +2776,7 @@
                 {
                   "id": "tests/contract/test_contracts.py::test_implemented_routes_match_contract",
                   "status": "PASSED",
-                  "time": 0.15
+                  "time": 0.14
                 }
               ]
             },
@@ -2632,7 +2788,7 @@
                 {
                   "id": "tests/contract/test_codegen.py::test_generated_contract_models_are_up_to_date",
                   "status": "PASSED",
-                  "time": 3.15
+                  "time": 3.2
                 }
               ]
             }
@@ -2651,7 +2807,7 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_oasdiff_no_breaking_changes_against_baseline",
                   "status": "PASSED",
-                  "time": 0.82
+                  "time": 0.63
                 }
               ]
             }
@@ -2670,47 +2826,47 @@
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[createRun]",
                   "status": "PASSED",
-                  "time": 1.06
+                  "time": 0.94
                 },
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listRuns]",
                   "status": "PASSED",
-                  "time": 1.25
+                  "time": 1.22
                 },
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRun]",
                   "status": "PASSED",
-                  "time": 0.93
+                  "time": 0.85
                 },
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRunTasks]",
                   "status": "PASSED",
-                  "time": 0.99
+                  "time": 0.94
                 },
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[pauseRun]",
                   "status": "PASSED",
-                  "time": 1.45
+                  "time": 1.34
                 },
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[resumeRun]",
                   "status": "PASSED",
-                  "time": 1.02
+                  "time": 0.97
                 },
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[cancelRun]",
                   "status": "PASSED",
-                  "time": 1.11
+                  "time": 1.07
                 },
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getTask]",
                   "status": "PASSED",
-                  "time": 1.36
+                  "time": 1.07
                 },
                 {
                   "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listTaskAttempts]",
                   "status": "PASSED",
-                  "time": 0.82
+                  "time": 0.91
                 }
               ]
             },
@@ -2722,32 +2878,32 @@
                 {
                   "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRunQuality]",
                   "status": "PASSED",
-                  "time": 0.59
+                  "time": 0.53
                 },
                 {
                   "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRunCompliance]",
                   "status": "PASSED",
-                  "time": 0.88
+                  "time": 0.78
                 },
                 {
                   "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRunReport]",
                   "status": "PASSED",
-                  "time": 1.0
+                  "time": 0.95
                 },
                 {
                   "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listTaskEvidence]",
                   "status": "PASSED",
-                  "time": 0.52
+                  "time": 0.5
                 },
                 {
                   "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getEvidence]",
                   "status": "PASSED",
-                  "time": 0.79
+                  "time": 0.6
                 },
                 {
                   "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listRunEvidence]",
                   "status": "PASSED",
-                  "time": 0.53
+                  "time": 0.4
                 }
               ]
             },
@@ -2759,32 +2915,32 @@
                 {
                   "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listRunFindings]",
                   "status": "PASSED",
-                  "time": 3.0
+                  "time": 2.51
                 },
                 {
                   "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getFinding]",
                   "status": "PASSED",
-                  "time": 0.47
+                  "time": 0.6
                 },
                 {
                   "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listProjectControls]",
                   "status": "PASSED",
-                  "time": 0.56
+                  "time": 0.45
                 },
                 {
                   "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[transitionFinding]",
                   "status": "PASSED",
-                  "time": 0.58
+                  "time": 0.57
                 },
                 {
                   "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[reviewComplianceControl]",
                   "status": "PASSED",
-                  "time": 0.8
+                  "time": 0.79
                 },
                 {
                   "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[approveProjectControl]",
                   "status": "PASSED",
-                  "time": 0.61
+                  "time": 0.53
                 }
               ]
             },
@@ -2796,47 +2952,47 @@
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listGitHubInstallations]",
                   "status": "PASSED",
-                  "time": 3.1
+                  "time": 3.15
                 },
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[startGitHubInstallation]",
                   "status": "PASSED",
-                  "time": 2.8
+                  "time": 2.64
                 },
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[connectGitHubInstallation]",
                   "status": "PASSED",
-                  "time": 2.85
+                  "time": 2.62
                 },
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[disconnectGitHubInstallation]",
                   "status": "PASSED",
-                  "time": 2.79
+                  "time": 2.81
                 },
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getGitHubVerification]",
                   "status": "PASSED",
-                  "time": 2.92
+                  "time": 2.79
                 },
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[requestPullRequest]",
                   "status": "PASSED",
-                  "time": 3.08
+                  "time": 2.86
                 },
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listPullRequests]",
                   "status": "PASSED",
-                  "time": 2.51
+                  "time": 2.73
                 },
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[requestPullRequestMerge]",
                   "status": "PASSED",
-                  "time": 3.07
+                  "time": 3.05
                 },
                 {
                   "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[receiveGitHubWebhook]",
                   "status": "PASSED",
-                  "time": 3.58
+                  "time": 3.15
                 }
               ]
             },
@@ -2848,12 +3004,12 @@
                 {
                   "id": "tests/integration/test_chat_api.py::test_chat_contract_fuzz_never_5xx[getRunChat]",
                   "status": "PASSED",
-                  "time": 1.43
+                  "time": 1.56
                 },
                 {
                   "id": "tests/integration/test_chat_api.py::test_chat_contract_fuzz_never_5xx[postChatMessage]",
                   "status": "PASSED",
-                  "time": 1.28
+                  "time": 1.13
                 }
               ]
             },
@@ -2865,7 +3021,7 @@
                 {
                   "id": "tests/integration/test_task_messages_api.py::test_task_messages_contract_fuzz_never_5xx",
                   "status": "PASSED",
-                  "time": 1.27
+                  "time": 1.25
                 }
               ]
             },
@@ -2877,7 +3033,7 @@
                 {
                   "id": "tests/integration/test_oq45_api.py::test_branches_commits_isolation_and_fuzz",
                   "status": "PASSED",
-                  "time": 2.94
+                  "time": 2.68
                 }
               ]
             },
@@ -2889,7 +3045,7 @@
                 {
                   "id": "tests/integration/test_oq45_api.py::test_provider_settings_rbac_isolation_and_fuzz",
                   "status": "PASSED",
-                  "time": 3.29
+                  "time": 2.86
                 }
               ]
             },
@@ -2901,7 +3057,7 @@
                 {
                   "id": "tests/e2e/test_analytics_observability.py::test_analytics_contract_fuzz_never_5xx",
                   "status": "PASSED",
-                  "time": 2.12
+                  "time": 1.63
                 }
               ]
             }
@@ -2950,12 +3106,12 @@
                 {
                   "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/EVIDENCE_SUBMITTED.schema.json]",
                   "status": "PASSED",
-                  "time": 0.0
+                  "time": 0.01
                 },
                 {
                   "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/FINDING.schema.json]",
                   "status": "PASSED",
-                  "time": 0.0
+                  "time": 0.01
                 },
                 {
                   "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/FIX_REQUEST.schema.json]",
@@ -3062,7 +3218,7 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid[events/1.0/sse-event.schema.json]",
                   "status": "PASSED",
-                  "time": 0.06
+                  "time": 0.07
                 }
               ]
             },
@@ -3074,7 +3230,7 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/execution-request.schema.json]",
                   "status": "PASSED",
-                  "time": 0.02
+                  "time": 0.01
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/execution-result.schema.json]",
@@ -3084,7 +3240,7 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/normalized-event.schema.json]",
                   "status": "PASSED",
-                  "time": 0.03
+                  "time": 0.02
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/probe-result.schema.json]",
@@ -3116,7 +3272,7 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u043f\\u0440\\u043e\\u0432\\u0430\\u0439\\u0434\\u0435\\u0440 \\u0432\\u043d\\u0435 {codex, claude}]",
                   "status": "PASSED",
-                  "time": 0.01
+                  "time": 0.02
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0434\\u043e\\u0441\\u0442\\u0443\\u043f \\u043a production]",
@@ -3156,7 +3312,7 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[installed \\u043d\\u0435 boolean]",
                   "status": "PASSED",
-                  "time": 0.01
+                  "time": 0.02
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f1]",
@@ -3166,22 +3322,22 @@
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u043d\\u0435\\u0438\\u0437\\u0432\\u0435\\u0441\\u0442\\u043d\\u044b\\u0439 \\u0442\\u0438\\u043f SSE]",
                   "status": "PASSED",
-                  "time": 0.08
+                  "time": 0.09
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[seq < 1_1]",
                   "status": "PASSED",
-                  "time": 0.06
+                  "time": 0.07
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0447\\u0443\\u0436\\u0430\\u044f \\u0432\\u0435\\u0440\\u0441\\u0438\\u044f \\u0441\\u0445\\u0435\\u043c\\u044b]",
                   "status": "PASSED",
-                  "time": 0.06
+                  "time": 0.07
                 },
                 {
                   "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 run \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f]",
                   "status": "PASSED",
-                  "time": 0.07
+                  "time": 0.08
                 }
               ]
             },
@@ -3248,7 +3404,7 @@
                 {
                   "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[TASK_COMPLETED]",
                   "status": "PASSED",
-                  "time": 0.0
+                  "time": 0.01
                 }
               ]
             },
@@ -3477,7 +3633,7 @@
                 {
                   "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[to_unknown_role-overrides6]",
                   "status": "PASSED",
-                  "time": 0.0
+                  "time": 0.01
                 },
                 {
                   "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[orchestrator_with_provider-overrides7]",
@@ -3576,7 +3732,7 @@
                 {
                   "id": "tests/integration/test_outbox_dispatcher.py::test_dispatched_messages_match_outbox_envelope_schema",
                   "status": "PASSED",
-                  "time": 2.95
+                  "time": 2.67
                 }
               ]
             }
@@ -3587,7 +3743,7 @@
     {
       "id": "AC-16",
       "title": "CLI-авторизация недоступна",
-      "status": "INCOMPLETE",
+      "status": "PASS",
       "real_cli": "BLOCKED",
       "clauses": [
         {
@@ -3603,12 +3759,12 @@
                 {
                   "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[both_auth_required-reasons0]",
                   "status": "PASSED",
-                  "time": 0.86
+                  "time": 0.78
                 },
                 {
                   "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[one_auth_required_other_denied_by_policy-reasons1]",
                   "status": "PASSED",
-                  "time": 0.84
+                  "time": 0.82
                 }
               ]
             },
@@ -3620,12 +3776,12 @@
                 {
                   "id": "tests/e2e/test_phase3_slice.py::test_no_usable_cli_blocks_without_workaround[None-PROVIDER_UNAVAILABLE]",
                   "status": "PASSED",
-                  "time": 0.78
+                  "time": 0.62
                 },
                 {
                   "id": "tests/e2e/test_phase3_slice.py::test_no_usable_cli_blocks_without_workaround[AUTH_REQUIRED-AUTH_REQUIRED]",
                   "status": "PASSED",
-                  "time": 0.8
+                  "time": 0.64
                 }
               ]
             },
@@ -3646,7 +3802,7 @@
         {
           "text": "Причина видна в API и UI",
           "kind": "fake",
-          "status": "INCOMPLETE",
+          "status": "PASS",
           "tests": [
             {
               "ref": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround",
@@ -3656,20 +3812,26 @@
                 {
                   "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[both_auth_required-reasons0]",
                   "status": "PASSED",
-                  "time": 0.86
+                  "time": 0.78
                 },
                 {
                   "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[one_auth_required_other_denied_by_policy-reasons1]",
                   "status": "PASSED",
-                  "time": 0.84
+                  "time": 0.82
                 }
               ]
             },
             {
               "ref": "mocked:dashboard.spec.ts::dashboard is the landing page",
               "suite": "mocked",
-              "status": "NOT_RUN",
-              "cases": []
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "dashboard.spec.ts::dashboard is the landing page: stats, runs needing attention, active and recent runs (light/dark axe)",
+                  "status": "PASSED",
+                  "time": 2.88
+                }
+              ]
             }
           ]
         },
@@ -3686,12 +3848,12 @@
                 {
                   "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[both_auth_required-reasons0]",
                   "status": "PASSED",
-                  "time": 0.86
+                  "time": 0.78
                 },
                 {
                   "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[one_auth_required_other_denied_by_policy-reasons1]",
                   "status": "PASSED",
-                  "time": 0.84
+                  "time": 0.82
                 }
               ]
             },
