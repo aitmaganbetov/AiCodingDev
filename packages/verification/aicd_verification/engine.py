@@ -348,7 +348,7 @@ class VerificationEngine:
                 (
                     await conn.execute(
                         text(
-                            "SELECT id, status, commit_sha FROM gate_executions WHERE run_id = :r AND task_id = :t"
+                            "SELECT id, status, commit_sha, error_message FROM gate_executions WHERE run_id = :r AND task_id = :t"
                             " AND gate_id = :g AND superseded_at IS NULL FOR UPDATE"
                         ),
                         {"r": task.run_id, "t": task.task_id, "g": gate.gate_id},
@@ -358,7 +358,8 @@ class VerificationEngine:
                 .first()
             )
             if current is not None:
-                if current["commit_sha"] == task.commit_sha and current["status"] in REUSABLE:
+                awaiting_approval = str(current["error_message"] or "").startswith("APPROVAL_REQUIRED")
+                if current["commit_sha"] == task.commit_sha and current["status"] in REUSABLE and not awaiting_approval:
                     gate.execution_id, gate.status, gate.reused = current["id"], current["status"], True
                     return
                 if current["status"] in TERMINAL:

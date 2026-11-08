@@ -1,2 +1,1 @@
--- ошибка: откат не удаляет колонку
-SELECT 1;
+ALTER TABLE accounts DROP COLUMN nickname;

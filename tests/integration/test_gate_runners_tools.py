@@ -59,7 +59,12 @@ async def test_mypy(tmp_path: Path, case: str, status: str) -> None:
 
 @pytest.mark.parametrize(
     ("case", "status", "error"),
-    [("pass", "PASS", None), ("fail", "FAIL", None), ("empty", "FAIL", "EMPTY_SUITE"), ("skipped", "FAIL", "EMPTY_SUITE")],
+    [
+        ("pass", "PASS", None),
+        ("fail", "FAIL", None),
+        ("empty", "FAIL", "EMPTY_SUITE"),
+        ("skipped", "FAIL", "EMPTY_SUITE"),
+    ],
 )
 async def test_pytest(tmp_path: Path, case: str, status: str, error: str | None) -> None:
     repo = _repo(tmp_path, "pytest", case)
@@ -136,7 +141,7 @@ def vitest_modules(tmp_path_factory: pytest.TempPathFactory) -> Path:
     if npm is None:
         pytest.skip("npm недоступен")
     (cache / "package.json").write_text('{"name": "vitest-cache", "private": true}\n')
-    proc = subprocess.run(  # noqa: S603 — фиксированный argv, тестовое окружение
+    proc = subprocess.run(
         [npm, "install", "--prefer-offline", "--no-audit", "--no-fund", "--ignore-scripts", "vitest@3.2.4"],
         cwd=cache,
         capture_output=True,
@@ -162,7 +167,7 @@ async def test_phpstan_missing_tool_is_not_pass(tmp_path: Path) -> None:
     repo = _repo(tmp_path, "phpstan", "fail")
     res = await run_spec(GATE_SPECS["phpstan"], repo, path=PATH)
     if shutil.which("phpstan", path=PATH) is None:
-        assert res.probe_code not in (0, None) and res.verdict is None  # движок → ERROR(TOOL_UNAVAILABLE)
+        assert res.probe_code != 0 and res.verdict is None  # не запустился/ненулевой probe → ERROR(TOOL_UNAVAILABLE)
     else:  # pragma: no cover — окружение с phpstan
         assert res.verdict is not None and res.verdict.status == "FAIL"
 

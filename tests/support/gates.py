@@ -46,7 +46,7 @@ class FixtureRepo:
 
 def materialize(tool: str, case: str, dest: Path) -> FixtureRepo:
     src = FIXTURES / tool / case
-    assert src.is_dir(), src  # noqa: S101 — тестовый помощник
+    assert src.is_dir(), src
     dest.mkdir(parents=True)
     git(dest, "init", "-q", "-b", "main")
     (dest / "README.md").write_text("fixture\n")
@@ -74,7 +74,7 @@ class SpecRun:
     verdict: Verdict | None
 
 
-async def _collect(runner: SandboxRunner, spec: ContainerSpec, timeout: float) -> tuple[int | None, str, str]:
+async def _collect(runner: SandboxRunner, spec: ContainerSpec, limit_seconds: float) -> tuple[int | None, str, str]:
     try:
         proc = await runner.start(spec)
     except (OSError, ValueError):
@@ -87,7 +87,7 @@ async def _collect(runner: SandboxRunner, spec: ContainerSpec, timeout: float) -
         return await proc.wait()
 
     try:
-        code = await asyncio.wait_for(read(), timeout=timeout)
+        code = await asyncio.wait_for(read(), timeout=limit_seconds)
     except TimeoutError:
         await proc.terminate(grace_seconds=1.0)
         code = -9
@@ -103,7 +103,7 @@ async def run_spec(
     runner: SandboxRunner | None = None,
     image: str | None = None,
     config: dict[str, object] | None = None,
-    timeout: float = 300.0,
+    limit_seconds: float = 300.0,
 ) -> SpecRun:
     """Probe + команда gate тем же argv, что у движка; локально (по умолчанию) или в контейнере."""
     facts = repo.facts()
@@ -123,10 +123,10 @@ async def run_spec(
     home.mkdir()
 
     def container(argv: tuple[str, ...]) -> ContainerSpec:
-        limits = ResourceLimits(cpus=2.0, memory_mb=2048, pids=256, timeout_seconds=int(timeout) + 30)
+        limits = ResourceLimits(cpus=2.0, memory_mb=2048, pids=256, timeout_seconds=int(limit_seconds) + 30)
         labels = {"aicd.execution_id": f"test-{uuid.uuid4()}", "aicd.kind": "verification"}
         if docker:
-            assert image is not None  # noqa: S101
+            assert image is not None
             extra = {"user": spec.container_user} if spec.container_user else {}
             return ContainerSpec(
                 image=image,
@@ -145,6 +145,6 @@ async def run_spec(
     probe_code, _o, _e = await _collect(run, container(spec.probe(ctx)), 60)
     if probe_code != 0:
         return SpecRun(probe_code, None, "", "", None)
-    code, out, err = await _collect(run, container(spec.build_argv(ctx)), timeout)
+    code, out, err = await _collect(run, container(spec.build_argv(ctx)), limit_seconds)
     verdict = spec.run_evaluate(code, out, ctx) if code is not None and code >= 0 else None
     return SpecRun(probe_code, code, out, err, verdict)
