@@ -183,16 +183,16 @@
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P9-01 | Полный acceptance-набор AC-01…AC-16 (Fake + opt-in real CLI) | все AC | P1…P8 | P0 | 100% зелёные, evidence | TODO |
-| P9-02 | Security suite ТЗ §20 (SSRF, prompt injection, traversal, command injection, cross-tenant, secret leakage, webhook spoofing) | NFR-SEC-*, NFR-ISO-01 | P1…P8 | P0 | 0 открытых critical | IN_REVIEW |
-| P9-03 | Chaos/recovery suite полный | NFR-REL-01, NFR-REL-02 | P3-16 | P0 | Зелёный | IN_REVIEW |
+| P9-01 | Полный acceptance-набор AC-01…AC-16 (Fake + opt-in real CLI) | все AC | P1…P8 | P0 | 100% зелёные, evidence | IN_REVIEW |
+| P9-02 | Security suite ТЗ §20 (SSRF, prompt injection, traversal, command injection, cross-tenant, secret leakage, webhook spoofing) | NFR-SEC-*, NFR-ISO-01 | P1…P8 | P0 | 0 открытых critical | DONE |
+| P9-03 | Chaos/recovery suite полный | NFR-REL-01, NFR-REL-02 | P3-16 | P0 | Зелёный | DONE |
 | P9-04 | Performance baseline и предложение SLO | NFR-PERF-01 | P9-01 | P1 | Отчёт с методикой | IN_REVIEW |
 | P9-05 | Backup/restore + DR drill | NFR-REL-03 | P1-02 | P0 | Протокол восстановления | DONE |
 | P9-06 | Runbooks: recovery, backups, CLI auth, incident response | NFR-MAINT-01 | P9-05 | P0 | Ревью оператором | IN_REVIEW |
 | P9-07 | Ревизия threat model, закрытие critical/high | NFR-SEC-04, NFR-SEC-06 | P9-02 | P0 | Release security gate | IN_REVIEW |
 | P9-08 | Supply chain релиза: SBOM, подпись, provenance | NFR-SEC-05 | P6-07 | P1 | Проверяемая подпись | IN_REVIEW |
-| P9-09 | Release checklist, инструкция установки, README | NFR-MAINT-01 | P9-01…08 | P0 | Утверждение владельцем | TODO |
-| P9-10 | Подтверждение coverage core ≥ 85% и 100% обязательных тестов | FR-QG-06 | P9-01 | P0 | Отчёт покрытия | TODO |
+| P9-09 | Release checklist, инструкция установки, README | NFR-MAINT-01 | P9-01…08 | P0 | Утверждение владельцем | IN_REVIEW |
+| P9-10 | Подтверждение coverage core ≥ 85% и 100% обязательных тестов | FR-QG-06 | P9-01 | P0 | Отчёт покрытия | DONE |
 
 ---
 
@@ -367,6 +367,12 @@
 | P3-18 | IN_PROGRESS | `infrastructure/migrations/versions/0005_retention_and_resolvers.py`, `packages/platform/aicd_platform/{retention,config}.py`, `apps/cli/aicd_cli/main.py` (`aicd maintenance retention`), `tests/integration/test_retention.py`, `tests/migrations/test_retention_migration.py` | `uv run pytest tests/migrations tests/integration/test_retention.py tests/integration/test_approvals_api.py -q` → **56 passed** (PostgreSQL 17): на засеянной БД под `aicd_maintenance` — партиции вперёд, архив audit-партиции 2002-03 в NDJSON.gz (sha256 сверен) → DETACH+DROP, опубликованная outbox-партиция удалена, партиция с неопубликованным событием сохранена, `run_event_log` отменённого run удалён пакетами (активный run не тронут), `processed_events` старше срока удалены, политика `retention` переопределяет срок; каждое действие и сессия (`maintenance.session_started/…_finished`) в `audit_events`; без `maint_begin` удаление/drop отклоняются, под `aicd_app` job не стартует. ruff, mypy, lint-imports — без замечаний. **Не закрыто (поэтому IN_PROGRESS):** расписание job не подключено (cron/systemd/воркер); `agent_activity_events` и архив run (`agent_messages`, `message_deliveries`, `chat_*`) — таблиц ещё нет, job отмечает их пропущенными; S3-приёмник архива; расписание job (cron/systemd) |
 
 В той же миграции: `sys_resolve_approval_workspace` (approvals API больше не перебирает workspace пользователя) и `sys_recovery_workspaces` для recovery reconciler (P3-12).
+
+### Phase 9 — итоговая проверка ведущего (2026-11-08)
+
+После завершения всех агентов, на чистом дереве (HEAD a1457ce): `uv run pytest` → **2883 passed, 0 failed, 4 skipped** (PHPStan ×2, opt-in реальный GitHub, офлайн-БД Trivy); ruff, ruff format (535 файлов), mypy (442), import-linter (4 kept), запрет AI SDK, `gen_contract_models --check` — OK. `scripts/run_acceptance.py` → **AC PASS 16/16** на Fake CLI (python 355/355, web live, web mocked); реальные CLI для AC-01/03/04/16 — BLOCKED (P2-01). `pytest -m security` → 1750 passed, 1 skipped; `scripts/security_gate.py --junit` → 65 угроз, 0 нарушений; с `--require-decisions` (релизный режим) — 3 нарушения до решения владельца по OQ-48. `scripts/coverage_report.py --run` → core **93,21 %** line (orchestration 92,11; collaboration 95,08; cli_adapters 94,53; verification 94,87; security 89,99; identity 93,65), порог 85 % выполнен по каждому пакету. Web: `check:api`, `typecheck`, `lint`, `test` → 159 passed, `build` — OK. DR drill (агент эксплуатации, после миграции 0016) → PASS 11/11, RPO 7,9 с, RTO 11,2 с.
+
+Статусы: P9-01 IN_REVIEW (Fake 16/16; реальные CLI — после P2-01), P9-02/P9-03/P9-05/P9-10 DONE; P9-04 (утверждение SLO), P9-06 (ревью оператором), P9-07 (OQ-48), P9-08 (пересборка backend с apt), P9-09 (утверждение владельцем), P3-18 (S3-приёмник архива) — IN_REVIEW.
 
 ### Phase 8 — GitHub и пробелы API (P8-01…P8-05, P8-09, OQ-45, 2026-11-08)
 
