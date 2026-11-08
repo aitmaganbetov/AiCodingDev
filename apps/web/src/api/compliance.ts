@@ -1,4 +1,5 @@
 /** Матрица соответствия run и вердикт человека по контролю (ТЗ §13, QUALITY_GATES §8.2). */
+import { can } from '../lib/permissions';
 import { request, seg, type JsonBody, type Query, type Schemas } from './client';
 
 export type ComplianceRow = Schemas['ComplianceRow'];
@@ -15,7 +16,6 @@ export const complianceKeys = {
 };
 
 const MANUAL_METHODS: readonly string[] = ['manual', 'document_check', 'agent_review'];
-const REVIEW_ROLES: readonly string[] = ['owner', 'admin', 'developer', 'reviewer'];
 
 /**
  * Можно ли запросить вердикт человека (API_DESIGN §5.5): manual/document_check/agent_review в
@@ -28,9 +28,9 @@ export function isComplianceReviewable(row: ComplianceRow): boolean {
   return row.status === 'MANUAL_REVIEW' && MANUAL_METHODS.includes(row.verification_method ?? '');
 }
 
-/** compliance:review — reviewer и выше (только UX). */
+/** `compliance:review` по каталогу прав (API_DESIGN §5.1): reviewer и выше (только UX). */
 export function canReviewCompliance(role: string | null | undefined): boolean {
-  return Boolean(role && REVIEW_ROLES.includes(role));
+  return can(role, 'compliance:review');
 }
 
 export const complianceApi = {

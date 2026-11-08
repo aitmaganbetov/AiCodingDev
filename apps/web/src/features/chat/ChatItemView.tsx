@@ -12,7 +12,7 @@ interface Props {
   onMention: (role: AgentRole) => void;
 }
 
-const REF_TAB: Record<string, string> = { diff: 'diff', evidence: 'evidence', test_report: 'evidence', artifact: 'evidence', task: 'overview' };
+const REF_TAB: Record<string, string> = { diff: 'diff', evidence: 'evidence', test_report: 'evidence', artifact: 'evidence', gate_execution: 'evidence', task: 'overview' };
 
 /**
  * Элемент ленты. Тело (`body`) — санитизированный, но недоверенный текст агента/CLI/пользователя:
@@ -82,7 +82,7 @@ export function ChatItemView({ item, taskTitle, taskHref, onMention }: Props) {
             </Link>
           ) : null}
           {(item.refs ?? []).map((ref) =>
-            item.task_id || ref.type === 'task' ? (
+            (item.task_id && ref.type !== 'approval') || ref.type === 'task' ? (
               <Link key={`${ref.type}-${ref.id}`} to={taskHref(ref.type === 'task' ? ref.id : (item.task_id ?? ''), REF_TAB[ref.type])} className="link">
                 {t(`chat.enums.ref.${ref.type}`, { defaultValue: ref.type })}
               </Link>

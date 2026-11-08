@@ -27,7 +27,6 @@ interface Props {
 export function DirectivesPanel({ run, role, workspaceId, tasks, taskHref, approvalsHref, isTerminal }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [summaries, setSummaries] = useState<ReadonlyMap<string, string>>(new Map());
   const [open, setOpen] = useState(false);
   const titles = new Map(tasks.map((x) => [x.id, x.title]));
   const taskTitle = (id: string) => titles.get(id);
@@ -36,14 +35,6 @@ export function DirectivesPanel({ run, role, workspaceId, tasks, taskHref, appro
 
   const onEvents = useCallback(
     (events: RunEvent[]) => {
-      const ready = events.filter((e) => e.type === 'directive.impact_ready' && typeof e.payload.summary === 'string');
-      if (ready.length > 0) {
-        setSummaries((prev) => {
-          const next = new Map(prev);
-          for (const e of ready) next.set(String(e.payload.directive_id), String(e.payload.summary));
-          return next;
-        });
-      }
       if (events.some((e) => DIRECTIVE_EVENTS.has(e.type))) void queryClient.invalidateQueries({ queryKey: directiveKeys.all(run.id) });
     },
     [queryClient, run.id],
@@ -73,7 +64,6 @@ export function DirectivesPanel({ run, role, workspaceId, tasks, taskHref, appro
                 role={role}
                 workspaceId={workspaceId}
                 tasks={tasks}
-                impactSummaries={summaries}
                 taskHref={taskHref}
                 approvalsHref={approvalsHref}
                 canConfirm={canConfirm}
@@ -104,7 +94,6 @@ export function DirectivesPanel({ run, role, workspaceId, tasks, taskHref, appro
                 </p>
                 <DirectiveDetails
                   directive={d}
-                  impactSummary={summaries.get(d.id)}
                   taskTitle={taskTitle}
                   taskHref={taskHref}
                   approvalsHref={approvalsHref}

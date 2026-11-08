@@ -81,6 +81,7 @@ _FEED_SELECT = (
     " m.source_event_id, CAST(m.mentions AS text[]) AS mentions, m.created_at,"
     " th.target_role::text AS thread_role, th.target_task_id AS thread_task,"
     " am.message_type::text AS acp_type, am.recipient_role AS acp_recipient, am.task_id AS acp_task,"
+    " am.payload AS acp_payload,"
     " d.id AS directive_id, d.status AS directive_status, d.target_role::text AS directive_role,"
     " d.target_task_id AS directive_task, d.approval_id, ap.status AS approval_status"
     " FROM chat_messages m JOIN chat_threads th ON th.id = m.thread_id"
@@ -91,7 +92,7 @@ _FEED_SELECT = (
 )
 
 
-def _item(r: dict[str, Any]) -> dict[str, Any]:
+def _item(r: dict[str, Any], seqs: dict[str, int]) -> dict[str, Any]:
     item_type, kind = _KIND_VIEW.get(r["message_kind"], ("system_event", "system_notice"))
     acp_recipient = r["acp_recipient"] if r["acp_recipient"] in _AGENT_ROLES else None
     user = {"id": r["sender_id"], "display_name": r["sender_name"] or ""} if r["sender_id"] else None
@@ -112,9 +113,9 @@ def _item(r: dict[str, Any]) -> dict[str, Any]:
         "approval_id": r["approval_id"],
         "approval_status": r["approval_status"],
         "mentions": list(r["mentions"] or []),
-        "refs": [],
+        "refs": chat_service.acp_refs(r["acp_payload"]),
         "source_event_id": r["source_event_id"],
-        "seq": None,
+        "seq": seqs.get(str(r["id"])),
         "created_at": r["created_at"],
     }
 
@@ -232,12 +233,13 @@ async def get_run_chat(
     async with transaction(state.engine, access.db()) as conn:
         rows = [dict(r) for r in (await conn.execute(text(sql), params)).mappings().all()]
         threads = await _threads(conn, run_id)
-    page = rows[:limit]
+        page = rows[:limit]
+        seqs = await chat_service.event_seqs(conn, run_id, [r["id"] for r in page])
     next_cursor = None
     if len(rows) > limit:
         last = page[-1]
         next_cursor = encode_cursor(state.secret_key, [last["created_at"].isoformat(), str(last["id"])], filters)
-    return json_response({"items": [_item(r) for r in page], "next_cursor": next_cursor, "threads": threads})
+    return json_response({"items": [_item(r, seqs) for r in page], "next_cursor": next_cursor, "threads": threads})
 
 
 @router.post("/messages", status_code=201, **op("postChatMessage", "chat:write"))

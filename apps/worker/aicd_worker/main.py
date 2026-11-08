@@ -2,7 +2,8 @@
 
 * `outbox` — опрос outbox (0,5 с без LISTEN), проекция в run_event_log, публикация в Dramatiq, сигнал SSE;
 * `orchestrator` — Dramatiq-консьюмер очередей `orchestrator` и `docs` (загрузка документации через
-  `security.ssrf`, `aicd_worker.docs`) + периодический tick/повторная постановка READY;
+  `security.ssrf`, `aicd_worker.docs`; шаги поручений `directive.state_changed` → `directives.process`)
+  + периодический tick/повторная постановка READY;
 * `exec` — консьюмер очереди `exec` (исполнение задач через CLI Gateway; fake-адаптер запрещён в production)
   + reaper аренд и recovery reconciler своего хоста;
 * `index` — опрос очереди `indexing_jobs` (`sys_indexing_workspaces`), индексация, определение стека,
@@ -28,6 +29,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_cli_adapters.registry import register_host
+from aicd_orchestration import directives
 from aicd_platform import sse
 from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.db import DbContext, create_engine, transaction
@@ -119,6 +121,12 @@ async def run_consumers(
         reconciler=build_reconciler(settings, engine, host_id, store) if host_id is not None else None,
         docs_importer=docs.build_importer(settings, engine, store) if kind == "orchestrator" else None,
     )
+    if kind == "orchestrator":
+
+        async def process_directive(ws: uuid.UUID, directive_id: uuid.UUID) -> None:
+            await directives.process(engine, ws, directive_id, artifacts=store)
+
+        rt.process_directive = process_directive
     runtime.install(rt)
     scheduler = maintenance.Scheduler()  # exec: reconcile при старте, далее reap 15 с / reconcile 60 с
     queues = {ORCHESTRATOR_QUEUE, DOCS_QUEUE} if kind == "orchestrator" else {EXEC_QUEUE}

@@ -5,6 +5,7 @@ import type { Repository } from '../../api/projects';
 import i18n from '../../i18n';
 import { json, mockFetch, problem, project, renderApp, session, WS_ID } from '../../test/utils';
 import { validateAttach } from './AttachRepositoryForm';
+import { lineNumbers } from './RepositoryExplorer';
 
 const P1 = project(1);
 const REPO: Repository = {
@@ -26,6 +27,15 @@ describe('validateAttach', () => {
     expect(validateAttach({ provider: 'github', remoteUrl: 'https://github.com/a/b', localPath: '', branch: 'x'.repeat(256) }, t)).toEqual({
       default_branch: 'Не более 255 символов.',
     });
+  });
+});
+
+describe('lineNumbers', () => {
+  it('numbers lines without an extra trailing line', () => {
+    expect(lineNumbers('')).toBe('');
+    expect(lineNumbers('a')).toBe('1');
+    expect(lineNumbers('a\nb\n')).toBe('1\n2');
+    expect(lineNumbers('a\n\nb')).toBe('1\n2\n3');
   });
 });
 
@@ -51,7 +61,7 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
       }),
   };
 
-  it('shows repositories with index state, the file-tree gap and the stack', async () => {
+  it('shows repositories with index state, no-local-copy notice and the stack', async () => {
     const user = userEvent.setup();
     mockFetch({ ...base, [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [REPO], next_cursor: null }) });
     renderApp(`/w/${WS_ID}/projects/${P1.id}`);
@@ -59,7 +69,7 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
     const list = await screen.findByRole('list', { name: 'Репозитории проекта' });
     expect(within(list).getByText('https://github.com/acme/payments')).toBeInTheDocument();
     expect(within(list).getByText('aaaaaaaaaaaa')).toBeInTheDocument();
-    expect(within(list).getByText('Дерево файлов недоступно')).toBeInTheDocument();
+    expect(within(list).getByText('Просмотр файлов недоступен')).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Технологии' }));
     expect(await screen.findByRole('cell', { name: 'pyproject.toml' })).toBeInTheDocument();
   });
@@ -88,6 +98,47 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
     expect(post?.body).toEqual({ provider: 'local', local_path: '/srv/repos/payments' });
     expect(post?.headers.get('Idempotency-Key')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('repos/payments')).toBeInTheDocument());
+  });
+
+  it('browses the tree of a local repository and shows a file as plain text', async () => {
+    const user = userEvent.setup();
+    const local: Repository = { ...REPO, provider: 'local', remote_url: null, local_root_ref: 'repos/payments' };
+    const sha = 'b'.repeat(40);
+    const { calls } = mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [local], next_cursor: null }),
+      [`GET /api/v1/projects/${P1.id}/repositories/${REPO.id}/tree`]: () =>
+        json(200, {
+          repository_id: REPO.id,
+          commit_sha: sha,
+          path: '',
+          items: [{ name: 'a.html', path: 'a.html', type: 'file', mode: '100644', size: 20 }],
+          next_cursor: null,
+        }),
+      [`GET /api/v1/projects/${P1.id}/repositories/${REPO.id}/file`]: () =>
+        json(200, {
+          repository_id: REPO.id,
+          commit_sha: sha,
+          path: 'a.html',
+          type: 'file',
+          mode: '100644',
+          size: 20,
+          max_bytes: 524288,
+          truncated: false,
+          is_binary: false,
+          encoding: 'utf-8',
+          content: '<img src=x>\n<i>x</i>\n',
+        }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}`);
+    await user.click(await screen.findByRole('button', { name: 'Открыть дерево файлов' }));
+    await user.click(await screen.findByRole('button', { name: /a\.html/ }));
+    const region = await screen.findByRole('region', { name: 'Содержимое файла a.html' });
+    expect(region).toHaveTextContent('<img src=x>');
+    expect(region.querySelector('img, i')).toBeNull();
+    const fileCall = calls.find((c) => c.url.pathname.endsWith('/file'));
+    expect(fileCall?.url.searchParams.get('commit')).toBe(sha);
+    expect(fileCall?.url.searchParams.get('path')).toBe('a.html');
   });
 
   it('shows not found for an inaccessible project and hides attach for viewers', async () => {

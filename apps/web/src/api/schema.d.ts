@@ -206,6 +206,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/repositories/{repository_id}/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Дерево файлов репозитория по commit (FR-PRJ-05) [дополнение к ТЗ]
+         * @description Один уровень каталога `path` в commit (Repository Explorer, FR-PRJ-05). Источник — локальная копия репозитория (`local_root_ref`), чтение объектов git без checkout. Без `commit` — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Сортировка: каталоги, затем файлы/symlink, затем submodule; внутри группы — по имени (байтовый порядок UTF-8). Курсор привязан к разрешённому commit: страницы одного обхода не смешивают разные commit. Записи `.git` и имена с управляющими символами/не UTF-8 не отображаются. 409 — у репозитория нет локальной копии (provider github, Phase 8).
+         */
+        get: operations["listRepositoryTree"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Содержимое файла репозитория по commit (FR-PRJ-05) [дополнение к ТЗ]
+         * @description Файл `path` в commit как текст UTF-8 (без рендеринга HTML). Содержимое больше `max_bytes` усекается (`truncated: true`, отдаются первые `max_bytes` байт). Бинарный файл (NUL-байт или не UTF-8) — `is_binary: true`, `content: null`. Symlink отдаётся как текст цели ссылки (ссылка не разыменовывается). Каталог/submodule — 422 (`errors[].code=not_a_file`).
+         */
+        get: operations["getRepositoryFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/technologies": {
         parameters: {
             query?: never;
@@ -426,7 +466,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** История событий */
+        /**
+         * История событий
+         * @description События run из run_event_log (те же, что SSE) строго по возрастанию `seq` (детерминированно, без пропусков внутри фильтра). `after_seq` — исключающая нижняя граница; `cursor` продолжает выборку после `seq` последнего элемента страницы (при наличии `cursor` параметр `after_seq` игнорируется). События, удалённые retention, не возвращаются.
+         */
         get: operations["getRunActivity"];
         put?: never;
         post?: never;
@@ -1400,6 +1443,46 @@ export interface components {
                 status: string;
             } | null;
         };
+        RepositoryTreeEntry: {
+            name: string;
+            /** @description Путь от корня репозитория */
+            path: string;
+            /** @enum {string} */
+            type: "directory" | "file" | "symlink" | "submodule";
+            /** @description Режим git (100644 */
+            mode: string;
+            /** @description Размер blob в байтах; null для каталога/submodule */
+            size: number | null;
+        };
+        RepositoryTreePage: {
+            /** Format: uuid */
+            repository_id: string;
+            commit_sha: string;
+            /** @description Нормализованный путь каталога ('' — корень) */
+            path: string;
+            items: components["schemas"]["RepositoryTreeEntry"][];
+            next_cursor: string | null;
+        };
+        RepositoryFile: {
+            /** Format: uuid */
+            repository_id: string;
+            commit_sha: string;
+            path: string;
+            /** @enum {string} */
+            type: "file" | "symlink";
+            mode: string;
+            /** @description Полный размер blob в байтах */
+            size: number;
+            /** @description Лимит отдаваемого содержимого */
+            max_bytes: number;
+            /** @description Содержимое усечено до max_bytes */
+            truncated: boolean;
+            is_binary: boolean;
+            /** @enum {string|null} */
+            encoding: "utf-8" | null;
+            /** @description Текст файла (усечённый при truncated); null для бинарного файла. Отображается только как текст. */
+            content: string | null;
+        };
         /** @description Страница Repository (cursor pagination). */
         RepositoryPage: {
             items: components["schemas"]["Repository"][];
@@ -1718,7 +1801,10 @@ export interface components {
             commit_sha?: string | null;
             command?: string | null;
             exit_code?: number | null;
-            environment?: Record<string, never>;
+            /** @description Окружение проверки (свободная форма: версии инструментов, ОС, образ) */
+            environment?: {
+                [key: string]: unknown;
+            };
             /** Format: date-time */
             started_at?: string | null;
             /** Format: date-time */
@@ -2023,16 +2109,19 @@ export interface components {
              * Format: int64
              * @description Порядковый номер в run (как `seq` SSE)
              */
-            seq?: number;
+            seq: number;
             event_type: string;
-            payload: Record<string, never>;
+            /** @description payload SSE-события этого типа (sse-event.schema.json) */
+            payload: {
+                [key: string]: unknown;
+            };
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
              */
             occurred_at: string;
         };
-        /** @description Страница ActivityEvent (cursor pagination). */
+        /** @description Страница ActivityEvent (cursor pagination), упорядочена по seq по возрастанию. */
         ActivityPage: {
             items: components["schemas"]["ActivityEvent"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
@@ -2083,16 +2172,20 @@ export interface components {
             approval_id?: string | null;
             approval_status?: components["schemas"]["ApprovalStatus"] | null;
             mentions?: components["schemas"]["AgentRole"][];
+            /** @description Ссылки на объекты из ACP-сообщения (как `links` события chat.message) */
             refs?: {
-                /** @enum {string} */
-                type: "diff" | "evidence" | "test_report" | "artifact" | "finding" | "task";
+                /**
+                 * @description Совпадает с `links[].kind` SSE-события chat.message
+                 * @enum {string}
+                 */
+                type: "diff" | "evidence" | "test_report" | "artifact" | "finding" | "task" | "approval" | "gate_execution";
                 /** Format: uuid */
                 id: string;
                 href?: string;
             }[];
             /** Format: uuid */
             source_event_id?: string | null;
-            /** @description run_event_log seq, для связи с SSE */
+            /** @description seq события chat.message в run_event_log (для связи с SSE); null — событие ещё не спроецировано или удалено retention */
             seq?: number | null;
             /**
              * Format: date-time
@@ -2193,6 +2286,8 @@ export interface components {
             status: components["schemas"]["DirectiveStatus"];
             impact_status: components["schemas"]["DirectiveImpactStatus"];
             impacts: components["schemas"]["DirectiveImpact"][];
+            /** @description Сводка анализа влияния (та же, что `summary` события directive.impact_ready); null до завершения анализа */
+            impact_summary?: string | null;
             requires_confirmation: boolean;
             /** Format: uuid */
             approval_id?: string | null;
@@ -2310,7 +2405,9 @@ export interface components {
             risk_level: components["schemas"]["RiskLevel"];
             summary: string;
             /** @description Детали действия (diff ref, migration plan, target branch...) без секретов */
-            context?: Record<string, never>;
+            context?: {
+                [key: string]: unknown;
+            };
             requested_by: {
                 /** @enum {string} */
                 actor_type: "user" | "agent" | "system";
@@ -2530,14 +2627,25 @@ export interface components {
             /** Format: uuid */
             artifact_id?: string | null;
         };
+        /** @description Payload SSE (sse-event.schema.json#/$defs/directive_impact_ready); итоговое влияние — Directive.impact_status. */
         DirectiveImpactReadyPayload: {
             /** Format: uuid */
             directive_id: string;
-            impacts: components["schemas"]["DirectiveImpact"][];
-            max_impact: components["schemas"]["DirectiveImpactType"];
+            /** @description Сводка анализа влияния (= Directive.impact_summary) */
+            summary?: string;
+            impacts: {
+                /**
+                 * Format: uuid
+                 * @description null для TASK_ADD (новая задача ещё не создана)
+                 */
+                task_id: string | null;
+                impact_type: components["schemas"]["DirectiveImpactType"];
+                resolution?: string;
+            }[];
             requires_confirmation: boolean;
             /** Format: uuid */
             approval_id?: string | null;
+            expected_run_version: number;
         };
         DirectiveStateChangedPayload: {
             /** Format: uuid */
@@ -2557,12 +2665,19 @@ export interface components {
             /** Format: date-time */
             expires_at?: string | null;
         };
+        /** @description Компактный payload SSE (sse-event.schema.json#/$defs/approval_decided); полное представление — Approval. */
         ApprovalDecidedPayload: {
             /** Format: uuid */
             approval_id: string;
             action_type: components["schemas"]["ApprovalActionType"];
-            status: components["schemas"]["ApprovalStatus"];
-            decided_by?: components["schemas"]["UserRef"] | null;
+            /** @enum {string} */
+            status: "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
+            /**
+             * Format: uuid
+             * @description id пользователя, принявшего решение (null — истечение/отмена системой); имя — GET /approvals/{approval_id}
+             */
+            decided_by?: string | null;
+            decision_reason?: string | null;
         };
         GateCompletedPayload: {
             /** Format: uuid */
@@ -2584,8 +2699,51 @@ export interface components {
             verdict: "PENDING" | "RUNNING" | "PASS" | "FAIL" | "ERROR";
             report_url: string;
         };
+        /** @description Плоский payload SSE (sse-event.schema.json#/$defs/chat_message). Клиент сопоставляет его с ChatItem по id = chat_message_id; полное представление (UserRef, статусы поручения/approval) — GET /runs/{run_id}/chat. */
         ChatMessagePayload: {
-            item: components["schemas"]["ChatItem"];
+            /**
+             * Format: uuid
+             * @description = ChatItem.id
+             */
+            chat_message_id: string;
+            /** Format: uuid */
+            thread_id: string;
+            /** @enum {string} */
+            scope: "RUN" | "ROLE" | "TASK";
+            /**
+             * @description Вид события; соответствие ChatItem.item_type: USER_TEXT→chat_message, DIRECTIVE→directive, AGENT_MESSAGE→agent_message, CLI_HIGHLIGHT→cli_excerpt, APPROVAL→approval, прочие→system_event
+             * @enum {string}
+             */
+            message_kind: "USER_TEXT" | "DIRECTIVE" | "AGENT_MESSAGE" | "CLI_HIGHLIGHT" | "STATUS" | "APPROVAL" | "DIRECTIVE_STATUS" | "SYSTEM_NOTICE";
+            sender_type: components["schemas"]["ChatSenderType"];
+            sender_id?: string | null;
+            /** @description Роль агента или ACP-участник (orchestrator) */
+            sender_role?: string | null;
+            provider?: components["schemas"]["CliProvider"] | null;
+            /** Format: uuid */
+            task_id?: string | null;
+            target_role?: components["schemas"]["AgentRole"] | null;
+            mentions?: components["schemas"]["AgentRole"][];
+            body: string;
+            /** @description = ChatItem.acp_type (для AGENT_MESSAGE) */
+            acp_type?: components["schemas"]["AcpMessageType"] | null;
+            /** Format: uuid */
+            source_event_id?: string | null;
+            /** Format: uuid */
+            directive_id?: string | null;
+            /** Format: uuid */
+            approval_id?: string | null;
+            links?: {
+                /**
+                 * @description = ChatItem.refs[].type
+                 * @enum {string}
+                 */
+                kind: "diff" | "test_report" | "evidence" | "finding" | "artifact" | "task" | "approval" | "gate_execution";
+                /** Format: uuid */
+                id: string;
+            }[];
+            /** Format: date-time */
+            created_at: string;
         };
         SseRunStateChanged: Omit<components["schemas"]["SseEnvelope"], "type"> & {
             /** @constant */
@@ -2844,6 +3002,9 @@ export interface components {
         Limit: number;
         RunId: string;
         TaskId: string;
+        RepositoryId: string;
+        /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
+        RepositoryCommit: string;
         ProjectId: string;
         WorkspaceId: string;
         UserId: string;
@@ -3486,6 +3647,87 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listRepositoryTree: {
+        parameters: {
+            query?: {
+                /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
+                commit?: components["parameters"]["RepositoryCommit"];
+                /** @description Относительный путь каталога ('' или отсутствует — корень). Запрещены ведущий '/', обратная косая черта, '.', '..', пустые компоненты и '.git' (422). */
+                path?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryTreePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getRepositoryFile: {
+        parameters: {
+            query: {
+                /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
+                commit?: components["parameters"]["RepositoryCommit"];
+                /** @description Относительный путь файла (те же ограничения, что у listRepositoryTree). */
+                path: string;
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryFile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listTechnologies: {
         parameters: {
             query?: {
@@ -4028,6 +4270,7 @@ export interface operations {
             query?: {
                 task_id?: string;
                 event_type?: string;
+                /** @description Вернуть события с seq > after_seq */
                 after_seq?: number;
                 /** @description Opaque cursor из next_cursor */
                 cursor?: components["parameters"]["Cursor"];
@@ -4547,6 +4790,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Содержимое artifact потоком через API (file-адаптер хранилища), Content-Disposition=attachment */
+            200: {
+                headers: {
+                    /** @description attachment; filename="<безопасное имя>" */
+                    "Content-Disposition"?: string;
+                    "Cache-Control"?: "no-store";
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
             /** @description Location — подписанный URL объектного хранилища, TTL 60 с, одноразовый Content-Disposition=attachment */
             302: {
                 headers: {

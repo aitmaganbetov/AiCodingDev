@@ -191,6 +191,34 @@ def completion_state(status: str) -> str:
     return "NOT_STARTED"
 
 
+_IMPACT_LABELS: Final = {
+    "NONE": "без влияния",
+    "CONTEXT_ONLY": "только контекст",
+    "TASK_ADD": "новая задача",
+    "REPLAN_REQUIRED": "перепланирование",
+    "TASK_CANCEL": "отмена задачи",
+    "RESTART_REQUIRED": "перезапуск задачи",
+}
+
+
+def impact_summary(directive_type: str, impact_status: str | None, impact_types: Sequence[str]) -> str | None:
+    """Сводка анализа влияния (событие `directive.impact_ready.summary` и `Directive.impact_summary`).
+
+    Детерминированно выводится из сохранённых данных: тип поручения, агрегат `user_directives.impact_status`
+    и влияния анализа (`directive_impacts` без строк TASK_ADD, которые добавляет перепланирование после
+    подтверждения). Поэтому REST и событие совпадают и не требуют отдельного хранения. None — анализа не было.
+    """
+    if impact_status is None:
+        return None
+    analysed = [i for i in impact_types if i != "TASK_ADD"]
+    head = f"{directive_type}: итоговое влияние — {_IMPACT_LABELS.get(impact_status, impact_status)} ({impact_status})."
+    if not analysed:
+        return head + " Текущие задачи не затронуты."
+    counts = {i: analysed.count(i) for i in IMPACT_ORDER if i in analysed}
+    parts = ", ".join(f"{_IMPACT_LABELS.get(i, i)} — {n}" for i, n in reversed(counts.items()))
+    return head + f" Затронуто задач: {len(analysed)} ({parts})."
+
+
 def impact_status_view(status: str, impact_status: str | None) -> str:
     """DirectiveImpactStatus контракта: PENDING | READY | NOT_REQUIRED | FAILED."""
     if status in ("RECEIVED", "IMPACT_ANALYSIS_PENDING"):
@@ -568,20 +596,9 @@ class Directives:
             )
         aggregate = aggregate_impact(d["directive_type"], impacts)
         d = await _transition(conn, d, "IMPACT_READY", impact_status=aggregate)
-        await outbox.emit(
-            conn,
-            event_type="directive.impact_ready",
-            aggregate_type="directive",
-            aggregate_id=directive_id,
-            workspace_id=d["workspace_id"],
-            run_id=d["run_id"],
-            payload={
-                "directive_id": str(directive_id),
-                "impact_status": aggregate,
-                "impacts": [{"task_id": str(t), "impact_type": i} for t, i in impacts],
-            },
-        )
-        if is_critical(impacts, tasks):
+        approval_id: uuid.UUID | None = None
+        critical = is_critical(impacts, tasks)
+        if critical:
             risk = max(
                 (by_id[t].risk_level for t, _ in impacts),
                 key=["low", "medium", "high", "critical"].index,
@@ -606,6 +623,25 @@ class Directives:
                 requested_by_type="user",
                 requested_by=d["submitted_by"],
             )
+        # Форма SSE directive_impact_ready (sse-event.schema.json): событие после решения о подтверждении,
+        # чтобы requires_confirmation/approval_id были известны.
+        await outbox.emit(
+            conn,
+            event_type="directive.impact_ready",
+            aggregate_type="directive",
+            aggregate_id=directive_id,
+            workspace_id=d["workspace_id"],
+            run_id=d["run_id"],
+            payload={
+                "directive_id": str(directive_id),
+                "summary": impact_summary(d["directive_type"], aggregate, [i for _, i in impacts]),
+                "impacts": [{"task_id": str(t), "impact_type": i} for t, i in impacts],
+                "requires_confirmation": bool(critical or d["requires_impact_preview"]),
+                "approval_id": str(approval_id) if approval_id else None,
+                "expected_run_version": max(int(d["expected_run_version"] or 0), 0),
+            },
+        )
+        if approval_id is not None:
             return await _transition(conn, d, "AWAITING_CONFIRMATION", approval_id=approval_id, reason="critical")
         if d["requires_impact_preview"]:
             return await _transition(conn, d, "AWAITING_CONFIRMATION", reason="impact_preview")

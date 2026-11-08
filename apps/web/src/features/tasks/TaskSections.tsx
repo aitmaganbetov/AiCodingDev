@@ -137,11 +137,10 @@ export function TaskEvents({ runId, taskId, live }: { runId: string; taskId: str
   const events = useMemo(() => {
     const bySeq = new Map<number, RunEvent>();
     for (const a of items) {
-      const seq = a.seq ?? 0;
-      bySeq.set(seq || -bySeq.size - 1, {
+      bySeq.set(a.seq, {
         event_id: a.id,
         run_id: a.run_id,
-        seq,
+        seq: a.seq,
         type: a.event_type,
         timestamp: a.occurred_at,
         schema_version: '1.0',

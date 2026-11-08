@@ -111,7 +111,14 @@ async def test_routing(database: testdb.TestDatabase, worker_engine: AsyncEngine
     fake = FakeOrchestrator()
     dispatched: list[dict[str, Any]] = []
     rt = _runtime(worker_engine, fake, dispatched)
+    processed: list[tuple[uuid.UUID, uuid.UUID]] = []
+
+    async def process_directive(workspace: uuid.UUID, directive: uuid.UUID) -> None:
+        processed.append((workspace, directive))
+
+    rt.process_directive = process_directive
     task = uuid7()
+    directive = uuid7()
     cases = [
         (_event("run.created", run, ws), "on_run_created"),
         (_event("approval.decided", run, ws, {"status": "APPROVED"}, approval), "on_plan_approval_decided"),
@@ -124,12 +131,22 @@ async def test_routing(database: testdb.TestDatabase, worker_engine: AsyncEngine
         ),
         (_event("task.state_changed", run, ws, {"task_id": str(task), "from": "RUNNING", "to": "SUCCEEDED"}), "tick"),
         (_event("gate.completed", run, ws), "tick"),
+        # Поручения: impact analysis после приёма, apply после подтверждения; прочие переходы — без работы.
+        (
+            _event(
+                "directive.state_changed", run, ws, {"directive_id": str(directive), "to": "IMPACT_ANALYSIS_PENDING"}
+            ),
+            "directive_processed",
+        ),
+        (_event("directive.state_changed", run, ws, {"to": "CONFIRMED"}, directive), "directive_processed"),
+        (_event("directive.state_changed", run, ws, {"directive_id": str(directive), "to": "DISPATCHED"}), "ignored"),
     ]
     for event, expected in cases:
         assert await handlers.handle_event(rt, event) == expected
     assert ("on_plan_approval_decided", run, True, 1) in fake.calls
     assert ("on_run_paused_or_cancelled", run, "CANCELLED") in fake.calls
     assert [m["task_id"] for m in dispatched] == [str(task)]
+    assert processed == [(ws, directive), (ws, directive)]
     assert await handlers.handle_event(rt, {"event_id": str(uuid7())}) == "ignored"
     # повтор того же event_id — no-op
     assert await handlers.handle_event(rt, cases[0][0]) == "duplicate"

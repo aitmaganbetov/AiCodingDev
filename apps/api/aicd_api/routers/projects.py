@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi import Path as PathParam
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import Response
@@ -35,6 +38,7 @@ from aicd_platform.db import transaction
 from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
 from aicd_projects import api as projects
+from aicd_projects import explorer
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -95,7 +99,7 @@ async def create_project(
 @router.get("/{project_id}", **op("getProject", "project:read"))
 async def get_project(
     request: Request,
-    project_id: Annotated[uuid.UUID, Path()],
+    project_id: Annotated[uuid.UUID, PathParam()],
     principal: identity.Principal = Depends(current_principal),
 ) -> Response:
     access = await project_access(request, principal, project_id)
@@ -114,7 +118,7 @@ async def get_project(
 @router.patch("/{project_id}", **op("updateProject", "project:update"))
 async def update_project(
     request: Request,
-    project_id: Annotated[uuid.UUID, Path()],
+    project_id: Annotated[uuid.UUID, PathParam()],
     body: ProjectUpdateRequest,
     principal: identity.Principal = Depends(current_principal),
 ) -> Response:
@@ -143,7 +147,7 @@ async def update_project(
 @router.get("/{project_id}/repositories", **op("listRepositories", "project:read"))
 async def list_repositories(
     request: Request,
-    project_id: Annotated[uuid.UUID, Path()],
+    project_id: Annotated[uuid.UUID, PathParam()],
     principal: identity.Principal = Depends(current_principal),
     limit: Limit = DEFAULT_LIMIT,
     cursor: Cursor = None,
@@ -169,7 +173,7 @@ async def list_repositories(
 @router.post("/{project_id}/repositories", status_code=201, **op("attachRepository", "repository:attach"))
 async def attach_repository(
     request: Request,
-    project_id: Annotated[uuid.UUID, Path()],
+    project_id: Annotated[uuid.UUID, PathParam()],
     body: RepositoryAttachRequest,
     principal: identity.Principal = Depends(current_principal),
 ) -> Response:
@@ -212,3 +216,74 @@ async def attach_repository(
         )
 
     return await run_idempotent(request, access.db(), body.model_dump(), command)
+
+
+# --- Repository Explorer (FR-PRJ-05) ---------------------------------------------------------
+
+Commit = Annotated[str | None, Query(min_length=1, max_length=255)]
+
+
+async def _explorer_repo(
+    request: Request, principal: identity.Principal, project_id: uuid.UUID, repository_id: uuid.UUID
+) -> tuple[explorer.ExplorerRepository, Path]:
+    access = await project_access(request, principal, project_id)
+    await authorize(request, access, "project:read")
+    state = app_state(request)
+    # Транзакция только на чтение строки репозитория (RLS); git — вне транзакции и вне event loop.
+    async with transaction(state.engine, access.db()) as conn:
+        repo = await explorer.get_explorer_repository(conn, project_id, repository_id)
+    return repo, explorer.repository_path(repo, state.settings.repository_roots)
+
+
+@router.get("/{project_id}/repositories/{repository_id}/tree", **op("listRepositoryTree", "project:read"))
+async def list_repository_tree(
+    request: Request,
+    project_id: Annotated[uuid.UUID, PathParam()],
+    repository_id: Annotated[uuid.UUID, PathParam()],
+    principal: identity.Principal = Depends(current_principal),
+    commit: Commit = None,
+    path: Annotated[str | None, Query(max_length=4096)] = None,
+    limit: Limit = DEFAULT_LIMIT,
+    cursor: Cursor = None,
+) -> Response:
+    repo, repo_path = await _explorer_repo(request, principal, project_id, repository_id)
+    rel = explorer.validate_tree_path(path)
+    state = app_state(request)
+    filters = {"r": "repo_tree", "repo": str(repository_id), "commit": commit or "", "path": rel}
+    offset = 0
+    if cursor:
+        # Курсор фиксирует разрешённый commit: ветка могла сдвинуться между страницами.
+        sha, raw_offset = decode_cursor(state.secret_key, cursor, filters)
+        commit_sha, offset = str(sha), int(raw_offset)
+    else:
+        commit_sha = await asyncio.to_thread(explorer.resolve_commit, repo_path, repo, commit)
+    items = await asyncio.to_thread(explorer.list_tree, repo_path, commit_sha, rel)
+    page = items[offset : offset + limit]
+    next_cursor = (
+        encode_cursor(state.secret_key, [commit_sha, offset + limit], filters) if offset + limit < len(items) else None
+    )
+    return json_response(
+        {
+            "repository_id": repo.id,
+            "commit_sha": commit_sha,
+            "path": rel,
+            "items": [{"name": i.name, "path": i.path, "type": i.type, "mode": i.mode, "size": i.size} for i in page],
+            "next_cursor": next_cursor,
+        }
+    )
+
+
+@router.get("/{project_id}/repositories/{repository_id}/file", **op("getRepositoryFile", "project:read"))
+async def get_repository_file(
+    request: Request,
+    project_id: Annotated[uuid.UUID, PathParam()],
+    repository_id: Annotated[uuid.UUID, PathParam()],
+    path: Annotated[str, Query(min_length=1, max_length=4096)],
+    principal: identity.Principal = Depends(current_principal),
+    commit: Commit = None,
+) -> Response:
+    repo, repo_path = await _explorer_repo(request, principal, project_id, repository_id)
+    rel = explorer.validate_tree_path(path)
+    commit_sha = await asyncio.to_thread(explorer.resolve_commit, repo_path, repo, commit)
+    body = await asyncio.to_thread(explorer.read_file, repo_path, commit_sha, rel)
+    return json_response({"repository_id": repo.id, **body})

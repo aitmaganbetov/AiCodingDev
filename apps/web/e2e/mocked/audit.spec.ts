@@ -73,6 +73,8 @@ test('audit: list, pagination, filters reflected in the URL, metadata details (l
   await page.getByLabel('Действие').press('Enter');
   await expect(page).toHaveURL(`/w/${ws.id}/audit?action=member.role_change`);
   await expect(table.getByRole('row')).toHaveCount(3);
+  // Смена query (фильтр) — тот же экран: фокус остаётся в форме, а не уходит на h1 (WCAG 2.4.3).
+  await expect(page.getByLabel('Действие')).toBeFocused();
   const last = api.requests.filter((r) => r.operationId === 'listAuditEvents').at(-1);
   expect(last?.headers['x-workspace-id']).toBe(ws.id);
 
@@ -87,6 +89,8 @@ test('audit: list, pagination, filters reflected in the URL, metadata details (l
   await page.getByRole('button', { name: 'Сбросить' }).click();
   await expect(page).toHaveURL(`/w/${ws.id}/audit`);
   await expect(page.getByRole('table', { name: 'События аудита' }).getByRole('row')).toHaveCount(4);
+  await expect(page.getByRole('button', { name: 'Сбросить' })).toBeFocused();
+  await expect(page.getByLabel('Действие')).toHaveValue('');
 });
 
 test('audit: forbidden for developer (no nav item), error state with retry, 360px', async ({ page, api }) => {

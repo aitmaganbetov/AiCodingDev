@@ -161,6 +161,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "target_role",
             "mentions",
             "body",
+            "acp_type",
             "source_event_id",
             "directive_id",
             "approval_id",

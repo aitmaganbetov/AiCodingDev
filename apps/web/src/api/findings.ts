@@ -1,4 +1,5 @@
 /** Находки run (QUALITY_GATES §5.3, API_DESIGN §5.5): список, карточка, решение человека. */
+import { canTriageFinding } from '../lib/permissions';
 import { request, seg, type JsonBody, type Query, type Schemas } from './client';
 
 export type Finding = Schemas['Finding'];
@@ -36,13 +37,9 @@ export function allowedFindingTransitions(status: FindingStatus | (string & {}))
   return TRANSITIONS[status as FindingStatus] ?? [];
 }
 
-const ROLE_RANK: Record<string, number> = { viewer: 0, reviewer: 1, developer: 2, admin: 3, owner: 4 };
-
-/** API_DESIGN §5.5: ACCEPTED_RISK — admin и выше, остальные — reviewer и выше (только UX; решает сервер). */
+/** API_DESIGN §5.5 (`finding:triage` по каталогу прав): ACCEPTED_RISK — admin и выше, остальные — reviewer и выше (только UX; решает сервер). */
 export function canTransitionFinding(role: string | null | undefined, to: FindingTargetStatus): boolean {
-  const rank = role ? ROLE_RANK[role] : undefined;
-  if (rank === undefined) return false;
-  return rank >= (to === 'ACCEPTED_RISK' ? ROLE_RANK.admin! : ROLE_RANK.reviewer!);
+  return canTriageFinding(role, to);
 }
 
 /** critical-профиль: принять риск можно не выше high (иначе сервер ответит 422). */

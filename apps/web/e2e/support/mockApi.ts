@@ -255,6 +255,8 @@ export class MockApi {
       if (task) {
         task.status = p.to_status as S['TaskStatus'];
         if (typeof p.attempt_no === 'number') task.attempt_count = p.attempt_no;
+        // Исполнитель попытки (payload.provider) — REST после события видит того же провайдера.
+        if (typeof p.provider === 'string') task.current_provider = p.provider as S['CliProvider'];
         task.version += 1;
       }
     }
@@ -489,8 +491,9 @@ export class MockApi {
       case 'listRuns': {
         if (!ws) return problem(404, 'not_found');
         const projectId = url.searchParams.get('project_id');
+        const statuses = url.searchParams.getAll('status');
         const items = this.runs
-          .filter((r) => r.workspace_id === ws.id && (!projectId || r.project_id === projectId))
+          .filter((r) => r.workspace_id === ws.id && (!projectId || r.project_id === projectId) && (statuses.length === 0 || statuses.includes(r.status)))
           .map((r) => {
             const summary: S['RunSummary'] = {
               id: r.id,

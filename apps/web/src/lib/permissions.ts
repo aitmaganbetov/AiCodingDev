@@ -23,6 +23,8 @@ export type Permission =
   | 'directive:confirm'
   | 'evidence:read'
   | 'quality:read'
+  | 'finding:triage'
+  | 'compliance:review'
   | 'approval:read'
   | 'approval:decide'
   | 'provider:read'
@@ -57,6 +59,9 @@ const MATRIX: Record<Permission, readonly WorkspaceRole[]> = {
   'directive:confirm': PARTICIPANTS,
   'evidence:read': ALL,
   'quality:read': ALL,
+  // §5.5: ACCEPTED_RISK — только owner/admin (x-permission-depends-on: to_status) — см. canTriageFinding.
+  'finding:triage': PARTICIPANTS,
+  'compliance:review': PARTICIPANTS,
   'approval:read': ALL,
   'approval:decide': PARTICIPANTS,
   'provider:read': ALL,
@@ -74,4 +79,13 @@ const MATRIX: Record<Permission, readonly WorkspaceRole[]> = {
 export function can(role: string | null | undefined, permission: Permission): boolean {
   if (!role) return false;
   return (MATRIX[permission] as readonly string[]).includes(role);
+}
+
+/**
+ * `finding:triage` с учётом целевого статуса (API_DESIGN §5.1/§5.5, `x-permission-depends-on: to_status`):
+ * developer и reviewer — любой переход, кроме `ACCEPTED_RISK`; принять риск — owner/admin.
+ */
+export function canTriageFinding(role: string | null | undefined, toStatus: string): boolean {
+  if (!can(role, 'finding:triage')) return false;
+  return toStatus !== 'ACCEPTED_RISK' || (ADMINS as readonly string[]).includes(role ?? '');
 }

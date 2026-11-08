@@ -30,8 +30,18 @@ EXEC_CONSUMER = "exec.execute_task"
 
 # Типы, которые диспетчер outbox направляет в очередь оркестратора (остальные — только SSE/прочие потребители).
 ORCHESTRATOR_EVENT_TYPES = frozenset(
-    {"run.created", "run.state_changed", "task.state_changed", "approval.decided", "agent.message"}
+    {
+        "run.created",
+        "run.state_changed",
+        "task.state_changed",
+        "approval.decided",
+        "agent.message",
+        "directive.state_changed",
+    }
 )
+# Шаги поручения, которые выполняет воркер (`aicd_orchestration.directives.process`): impact analysis после
+# приёма и apply (checkpoint → replan → dispatch) после подтверждения пользователем или решения approval.
+DIRECTIVE_STEPS = frozenset({"IMPACT_ANALYSIS_PENDING", "CONFIRMED"})
 # Запрос загрузки документации (без run): очередь docs, обработчик `aicd_worker.docs.import_documentation`.
 DOCS_EVENT_TYPES = frozenset({"documentation_source.refresh_requested"})
 # Потребители доставки ACP (ACP §7), обслуживаемые воркером: проекции в чат run и ленту активности.
@@ -46,6 +56,7 @@ Outcome = Literal[
     "on_run_paused_or_cancelled",
     "on_run_resumed",
     "execute_task",
+    "directive_processed",
     "tick",
 ]
 
@@ -92,6 +103,16 @@ async def _route(rt: Runtime, event: dict[str, Any], event_id: uuid.UUID, run_id
     if etype == "run.created":
         await orch.on_run_created(run_id, ws)
         return "on_run_created"
+    if etype == "directive.state_changed":
+        to_status = payload.get("to_status", payload.get("to"))
+        directive_id = _uuid(payload.get("directive_id")) or _uuid(event.get("aggregate_id"))
+        if to_status not in DIRECTIVE_STEPS or directive_id is None or rt.process_directive is None:
+            return "ignored"
+        await rt.process_directive(ws, directive_id)
+        # Новая plan_version: задачи замены, ставшие READY, — в exec (как после любого перехода).
+        for ready_id in await orch.tick(run_id, ws):
+            await rt.dispatch_execution(execution_message(ready_id, ws, event_id))
+        return "directive_processed"
     if etype == "approval.decided":
         decision = await _plan_decision(rt.engine, _uuid(event.get("aggregate_id")), run_id, ws, payload)
         if decision is not None:

@@ -264,3 +264,29 @@ test('approvals: empty and error states', async ({ page, api }) => {
   await expect(page.getByRole('heading', { name: 'Нет ожидающих подтверждений' })).toBeVisible();
   await expectNoSeriousA11yViolations(page, 'approvals empty');
 });
+
+test('approvals: switching tabs and filters keeps keyboard focus on the control (query change is not a navigation)', async ({ page, api }) => {
+  const { ws, run } = seed(api);
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/approvals?run_id=${run.id}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Одобрения' })).toBeFocused();
+  const pendingTab = page.getByRole('tab', { name: 'Ожидают решения' });
+  await pendingTab.focus();
+  await page.keyboard.press('ArrowRight');
+  const decidedTab = page.getByRole('tab', { name: 'Решённые' });
+  await expect(page).toHaveURL(/tab=decided/);
+  await expect(decidedTab).toHaveAttribute('aria-selected', 'true');
+  await expect(decidedTab).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page).toHaveURL(/tab=pending/);
+  await expect(pendingTab).toBeFocused();
+  await expect(page.getByRole('list', { name: 'Ожидающие подтверждения' }).getByRole('listitem')).toHaveCount(3);
+
+  const mine = page.getByLabel('Только те, что я могу решить');
+  await mine.focus();
+  await page.keyboard.press('Space');
+  await expect(page).toHaveURL(/mine=1/);
+  await expect(mine).toBeChecked();
+  await expect(mine).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Одобрения' })).not.toBeFocused();
+});

@@ -339,7 +339,7 @@ async def get_run_activity(
     principal: identity.Principal = Depends(current_principal),
     task_id: Annotated[uuid.UUID | None, Query()] = None,
     event_type: Annotated[str | None, Query(max_length=64)] = None,
-    after_seq: Annotated[int | None, Query()] = None,
+    after_seq: Annotated[int | None, Query(ge=0)] = None,
     limit: Limit = DEFAULT_LIMIT,
     cursor: Cursor = None,
 ) -> Response:
@@ -347,7 +347,8 @@ async def get_run_activity(
     await authorize(request, access, "run:read")
     state = app_state(request)
     filters = {"r": "activity", "run": str(run_id), "task": str(task_id) if task_id else None, "type": event_type}
-    after = max(after_seq or 0, 0)
+    # Детерминированный порядок — по seq по возрастанию (контракт getRunActivity); курсор = seq последнего элемента.
+    after = after_seq or 0
     if cursor:
         (after,) = decode_cursor(state.secret_key, cursor, filters)
         after = int(after)

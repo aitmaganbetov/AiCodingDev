@@ -97,6 +97,8 @@ def directive_view(d: dict[str, Any]) -> dict[str, Any]:
         "impact_status": service.impact_status_view(d["status"], d["impact_status"]),
         "impacts": [{"task_id": i["task_id"], "impact_type": i["impact_type"], "resolution": i["resolution"]}
                     for i in impacts],
+        "impact_summary": service.impact_summary(d["directive_type"], d["impact_status"],
+                                                 [i["impact_type"] for i in impacts]),
         "requires_confirmation": bool(d["requires_impact_preview"] or
                                       (d["approval_id"] is not None and d["directive_type"] not in ("APPROVE", "REJECT"))),
         "approval_id": d["approval_id"] if d["directive_type"] not in ("APPROVE", "REJECT") else None,

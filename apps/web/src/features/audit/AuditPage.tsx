@@ -13,11 +13,19 @@ import { draftFromFilters, filtersFromDraft, filtersFromSearch, searchFromFilter
 
 export const AUDIT_PAGE_SIZE = 50;
 
-function FiltersForm({ filters, onApply }: { filters: AuditFilters; onApply: (f: AuditFilters) => void }) {
+function FiltersForm({ filters, search, onApply }: { filters: AuditFilters; search: string; onApply: (f: AuditFilters) => void }) {
   const { t } = useTranslation();
   const formRef = useRef<HTMLFormElement>(null);
   const [draft, setDraft] = useState<FilterDraft>(() => draftFromFilters(filters));
   const [errors, setErrors] = useState<Partial<Record<FilterKey, string>>>({});
+  // URL изменился (применение, сброс, «назад») — черновик берётся из URL без перемонтирования
+  // формы: фокус остаётся на кнопке, которой фильтр применили.
+  const [seenSearch, setSeenSearch] = useState(search);
+  if (seenSearch !== search) {
+    setSeenSearch(search);
+    setDraft(draftFromFilters(filters));
+    setErrors({});
+  }
   const set = (key: keyof FilterDraft) => (e: { target: { value: string } }) => setDraft({ ...draft, [key]: e.target.value });
 
   const onSubmit = (e: FormEvent) => {
@@ -185,7 +193,7 @@ export function AuditPage() {
     <section aria-labelledby="page-title" className="flex flex-col gap-6">
       <PageHeading title={t('audit.title')} />
       <p className="-mt-4 text-sm text-fg-muted">{t('audit.intro')}</p>
-      <FiltersForm key={search} filters={filters} onApply={(f) => setParams(searchFromFilters(f))} />
+      <FiltersForm search={search} filters={filters} onApply={(f) => setParams(searchFromFilters(f))} />
       <section aria-labelledby="audit-results-title" className="flex flex-col gap-3">
         <h2 id="audit-results-title" className="text-lg font-semibold">
           {t('audit.results')}

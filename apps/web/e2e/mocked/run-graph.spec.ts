@@ -45,7 +45,6 @@ test('run graph: DAG with statuses and current executor, live update via SSE, ax
   await expectNoSeriousA11yViolations(page, 'run graph');
 
   // Live: задача QA начинает выполняться у Claude — узел и «Сейчас выполняют» обновляются без перезагрузки.
-  c.current_provider = 'claude'; // «БД» сервера (REST после события видит того же исполнителя)
   api.addEvent(run, 'task.state_changed', {
     task_id: c.id,
     title: c.title,

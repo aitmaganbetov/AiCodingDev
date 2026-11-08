@@ -15,8 +15,6 @@ const ACK_TONE: Record<string, Tone> = { ACKNOWLEDGED: 'success', DELIVERED: 'in
 
 interface Props {
   directive: Directive;
-  /** Сводка анализа из события directive.impact_ready (в REST-представлении её нет). */
-  impactSummary?: string | undefined;
   taskTitle: (taskId: string) => string | undefined;
   taskHref: (taskId: string) => string;
   approvalsHref: string;
@@ -35,7 +33,7 @@ export function directiveTargetLabel(t: TFunction, d: Directive, taskTitle: (id:
 }
 
 /** Ход поручения: статус обработки, impact preview, доставка/подтверждение агентами, выполнение; подтверждение/отзыв. */
-export function DirectiveDetails({ directive: d, impactSummary, taskTitle, taskHref, approvalsHref, canAct, headingLevel = 3 }: Props) {
+export function DirectiveDetails({ directive: d, taskTitle, taskHref, approvalsHref, canAct, headingLevel = 3 }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const intent = useRef(new IdempotentIntent());
@@ -91,7 +89,7 @@ export function DirectiveDetails({ directive: d, impactSummary, taskTitle, taskH
           {t('directives.impact.title')}{' '}
           <span className="font-normal text-fg-muted">({t(`directives.enums.impact_status.${d.impact_status}`, { defaultValue: d.impact_status })})</span>
         </H>
-        {impactSummary ? <p className="mb-1 whitespace-pre-wrap break-words">{impactSummary}</p> : null}
+        {d.impact_summary ? <p className="mb-1 whitespace-pre-wrap break-words">{d.impact_summary}</p> : null}
         {d.impact_status === 'PENDING' ? (
           <p className="text-fg-muted">{t('directives.impact.pending')}</p>
         ) : d.impacts.length === 0 ? (

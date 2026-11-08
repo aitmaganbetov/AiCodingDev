@@ -25,13 +25,30 @@
       "label": "Разделы run",
       "overview": "Обзор",
       "graph": "Граф задач",
-      "chat": "Live Agent Chat"
+      "chat": "Live Agent Chat",
+      "quality": "Качество",
+      "compliance": "Соответствие",
+      "approvals": "Одобрения"
     },
     "enums": {
       "provider": {
         "codex": "Codex",
         "claude": "Claude"
       }
+    },
+    "all": {
+      "description": "Все запуски рабочего пространства — от новых к старым.",
+      "filters": "Фильтры запусков",
+      "anyStatus": "Любой статус",
+      "active": "Активные",
+      "finished": "Завершённые",
+      "project": "Проект",
+      "anyProject": "Все проекты",
+      "reset": "Сбросить фильтры",
+      "linksLabel": "Разделы run: {{objective}}",
+      "emptyDescription": "Запуск создаётся на странице проекта.",
+      "emptyFilteredTitle": "Нет запусков по фильтру",
+      "emptyFilteredDescription": "Измените или сбросьте фильтры."
     }
   },
   "run": {

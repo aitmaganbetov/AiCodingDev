@@ -61,7 +61,7 @@ flowchart LR
 | Auth **(доп.)** | `POST /auth/login`, `POST /auth/logout`, `GET /auth/session` |
 | Health **(доп.)** | `GET /health/live`, `GET /health/ready` (без аутентификации) |
 | Workspaces | `GET/POST /workspaces`; **(доп.)** `GET/POST /workspaces/{workspace_id}/members`, `PATCH/DELETE /workspaces/{workspace_id}/members/{user_id}` |
-| Projects | `GET/POST /projects`, `GET/PATCH /projects/{project_id}`, `POST /projects/{project_id}/repositories`, **(доп.)** `GET /projects/{project_id}/repositories`, `GET /projects/{project_id}/technologies`, `GET/PATCH /projects/{project_id}/documentation-policy`, `GET /projects/{project_id}/controls`, `POST /projects/{project_id}/controls/{control_id}/approval` |
+| Projects | `GET/POST /projects`, `GET/PATCH /projects/{project_id}`, `POST /projects/{project_id}/repositories`, **(доп.)** `GET /projects/{project_id}/repositories`, `GET /projects/{project_id}/repositories/{repository_id}/tree`, `GET /projects/{project_id}/repositories/{repository_id}/file` (Repository Explorer, FR-PRJ-05), `GET /projects/{project_id}/technologies`, `GET/PATCH /projects/{project_id}/documentation-policy`, `GET /projects/{project_id}/controls`, `POST /projects/{project_id}/controls/{control_id}/approval` |
 | Runs | **(доп.)** `GET /runs`; `POST /runs`, `GET /runs/{run_id}`, `GET /runs/{run_id}/tasks`, `POST /runs/{run_id}/pause|resume|cancel`, `GET /runs/{run_id}/events` (SSE), `GET /runs/{run_id}/activity` |
 | Chat/Directives | `GET /runs/{run_id}/chat`, `POST /runs/{run_id}/chat/messages`, `POST /runs/{run_id}/directives`, `GET /runs/{run_id}/directives/{directive_id}`; **(доп.)** `GET /runs/{run_id}/directives`, `POST .../directives/{directive_id}/confirm`, `POST .../directives/{directive_id}/cancel` |
 | Tasks | `GET /tasks/{task_id}`, `GET /tasks/{task_id}/messages`, `GET /tasks/{task_id}/evidence`; **(доп.)** `GET /tasks/{task_id}/attempts` |
@@ -153,7 +153,7 @@ flowchart LR
 | `POST/PATCH/DELETE .../members[/{user_id}]` | member:manage | ✔ | — | — | — | — |
 | `GET /projects`, `GET /projects/{id}` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /projects`, `PATCH /projects/{id}` | project:create / update | ✔ | ✔ | — | — | — |
-| `GET /projects/{id}/repositories`, `/technologies`, `GET .../documentation-policy` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /projects/{id}/repositories`, `.../repositories/{repository_id}/tree|file`, `/technologies`, `GET .../documentation-policy` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /projects/{id}/repositories` | repository:attach | ✔ | ✔ | — | — | — |
 | `PATCH /projects/{id}/documentation-policy` | project:update | ✔ | ✔ | — | — | — |
 | `GET /runs`, `GET /runs/{id}`, `/tasks`, `/events`, `/activity` | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |

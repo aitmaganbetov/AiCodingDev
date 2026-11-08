@@ -26,7 +26,6 @@ interface Props {
   role: string;
   workspaceId: string;
   tasks: readonly TaskSummary[];
-  impactSummaries: ReadonlyMap<string, string>;
   taskHref: (taskId: string) => string;
   approvalsHref: string;
   canConfirm: boolean;
@@ -37,7 +36,7 @@ interface Props {
  * подтверждение → доставка/подтверждение агентами → выполнение. Содержимое диалога (DialogContent);
  * Dialog/Trigger — у вызывающего.
  */
-export function DirectiveDialogContent({ run, role, workspaceId, tasks, impactSummaries, taskHref, approvalsHref, canConfirm }: Props) {
+export function DirectiveDialogContent({ run, role, workspaceId, tasks, taskHref, approvalsHref, canConfirm }: Props) {
   const { t } = useTranslation();
   const id = useId();
   const queryClient = useQueryClient();
@@ -129,7 +128,6 @@ export function DirectiveDialogContent({ run, role, workspaceId, tasks, impactSu
         ) : (
           <DirectiveDetails
             directive={directive.data}
-            impactSummary={impactSummaries.get(directive.data.id)}
             taskTitle={taskTitle}
             taskHref={taskHref}
             approvalsHref={approvalsHref}

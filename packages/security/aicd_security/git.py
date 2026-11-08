@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +65,43 @@ def run_git_bytes(
     if max_output_bytes is not None and len(proc.stdout) > max_output_bytes:
         raise GitRepositoryError(f"git {args[0] if args else ''}: превышен лимит вывода")
     return proc.stdout
+
+
+def run_git_bytes_prefix(repo: Path, *args: str, limit: int, timeout: float = 60.0) -> tuple[bytes, bool]:
+    """Первые `limit` байт stdout git и признак, что вывод был длиннее (просмотр файла, FR-PRJ-05).
+
+    Процесс завершается после чтения `limit + 1` байт — большой blob не загружается в память целиком;
+    сторожевой таймер убивает процесс по `timeout`. stderr не читается (сообщение без деталей).
+    """
+    argv, env = _argv_env(repo, args)
+    with subprocess.Popen(  # noqa: S603 — argv-массив, без shell
+        argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env
+    ) as proc:
+        watchdog = threading.Timer(timeout, proc.kill)
+        watchdog.start()
+        chunks: list[bytes] = []
+        remaining = limit + 1
+        overflow = False
+        try:
+            stream = proc.stdout
+            while stream is not None and remaining > 0:
+                chunk = stream.read(min(remaining, 1 << 16))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            overflow = remaining <= 0
+            if overflow:
+                proc.kill()
+            returncode = proc.wait()
+        finally:
+            timed_out = not watchdog.is_alive() and not overflow and proc.returncode not in (0, None)
+            watchdog.cancel()
+    if timed_out:
+        raise GitRepositoryError(f"git {args[0] if args else ''}: превышено время ожидания")
+    if not overflow and returncode != 0:
+        raise GitRepositoryError(f"git {args[0] if args else ''} завершился с ошибкой")
+    return b"".join(chunks)[:limit], overflow
 
 
 def _argv_env(repo: Path, args: tuple[str, ...]) -> tuple[list[str], dict[str, str]]:

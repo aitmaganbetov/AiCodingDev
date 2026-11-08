@@ -98,6 +98,7 @@ class ChatBackend {
         message: b.message,
         status: 'IMPACT_ANALYSIS_PENDING',
         impact_status: 'PENDING',
+        impact_summary: null,
         impacts: [],
         requires_confirmation: false,
         approval_id: null,
@@ -371,7 +372,14 @@ test('AC-06: CHANGE_REQUEST with impact preview → confirmation → delivered /
     requires_confirmation: true,
     expected_run_version: 3,
   });
-  chat.update(d.id, { status: 'AWAITING_CONFIRMATION', impact_status: 'READY', impacts, requires_confirmation: true });
+  // Сводка анализа приходит в REST-представлении (Directive.impact_summary), событие лишь инициирует перечитывание.
+  chat.update(d.id, {
+    status: 'AWAITING_CONFIRMATION',
+    impact_status: 'READY',
+    impact_summary: 'Затронута 1 задача: требуется перепланирование',
+    impacts,
+    requires_confirmation: true,
+  });
   await expect(track.getByText('Затронута 1 задача: требуется перепланирование')).toBeVisible();
   const impactList = track.getByTestId('directive-impacts');
   await expect(impactList).toContainText('Перепланирование');

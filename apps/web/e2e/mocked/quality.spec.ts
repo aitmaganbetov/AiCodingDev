@@ -342,3 +342,21 @@ test('quality: error state with retry and viewer has read-only findings', async 
   await page.goto(`/w/${ws.id}/quality/findings/${f.id}`);
   await expect(page.getByText('У вашей роли нет права принимать решения по этой находке.')).toBeVisible();
 });
+
+test('quality: switching run quality tabs keeps keyboard focus on the tab (query change is not a navigation)', async ({ page, api }) => {
+  const { ws, run } = seed(api);
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/quality/runs/${run.id}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Качество запуска' })).toBeFocused();
+  const gatesTab = page.getByRole('tab', { name: 'Quality gates' });
+  await gatesTab.focus();
+  await page.keyboard.press('ArrowRight');
+  const findingsTab = page.getByRole('tab', { name: 'Находки' });
+  await expect(page).toHaveURL(/tab=findings/);
+  await expect(findingsTab).toHaveAttribute('aria-selected', 'true');
+  await expect(findingsTab).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(page).toHaveURL(/tab=evidence/);
+  await expect(page.getByRole('tab', { name: 'Evidence' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Качество запуска' })).not.toBeFocused();
+});

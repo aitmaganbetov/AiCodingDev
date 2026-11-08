@@ -12,7 +12,7 @@ SPA AiCodingDev: вход, каркас Mission Control (боковая нави
 | `pnpm lint` | ESLint flat config: typescript-eslint + jsx-a11y (strict) + react-hooks |
 | `pnpm test` | Vitest + Testing Library (клиент API, формы, состояния) |
 | `pnpm e2e` | Playwright против `vite preview` с моками `page.route`, валидируемыми по OpenAPI |
-| `pnpm e2e:live` | Smoke против реального стенда; пропускается без `AICD_E2E_LIVE_URL` (нужны `AICD_E2E_EMAIL`, `AICD_E2E_PASSWORD`) |
+| `pnpm e2e:live` | Live E2E без моков backend: smoke против `AICD_E2E_LIVE_URL`; с `AICD_E2E_LIVE_STACK=1` — поднимает стенд (API + воркеры + PostgreSQL + Redis + S3 + Fake CLI) и прогоняет AC-05/AC-06/AC-08 (раздел «Live E2E») |
 | `pnpm gen:api` | `openapi-typescript` → `src/api/schema.d.ts` из `../../packages/contracts/openapi.yaml` |
 | `pnpm check:api` | Drift check для CI: генерирует во временный файл и падает, если `schema.d.ts` устарел |
 
@@ -52,7 +52,7 @@ src/
 ### Дизайн-система (P7-01)
 
 - Только семантические цвета Tailwind (`bg-surface`, `text-fg`, `text-fg-muted`, `border-border`, `bg-accent`, `text-link`, `{neutral|info|success|warning|danger}-{soft,border,fg}`, `text-danger-text`) — значения в `styles/tokens.css`. Тема: `prefers-color-scheme`, принудительно — `<html data-theme>` (меню пользователя, `lib/theme.ts`). Контраст AA для всех пар текст/фон и ≥ 3:1 для границ полей и кольца фокуса проверяет `styles/tokens.test.ts`.
-- Фокус: видимое кольцо 3px (`--color-focus`) на `:focus-visible`; после навигации фокус на h1; диалоги возвращают фокус открывшему элементу; цели касания ≥ 44px (`min-h-touch`).
+- Фокус: видимое кольцо 3px (`--color-focus`) на `:focus-visible`; после перехода на другой экран (смена pathname) фокус на h1, смена query (вкладка, фильтр) фокус не трогает; диалоги возвращают фокус открывшему элементу; цели касания ≥ 44px (`min-h-touch`).
 - Клавиатура: `?` — справка, `g` + буква — раздел, Esc — закрыть слой; односимвольные сочетания отключаются в справке (WCAG 2.1.4). Мобильная навигация (< 768px) — Dialog-drawer.
 - Radix-обёртки задают доступные имена и классы; меню немодальные (модальный режим Radix скрывает `#root` через aria-hidden → axe `aria-hidden-focus`).
 
@@ -100,7 +100,7 @@ Dev:
 - `@xyflow/react` 12.12.0 — Run Graph (ADR-0014): DAG задач; холст — отдельный чанк `TaskGraphCanvas` (~187 kB / 62 kB gzip) вместе со стилями. Анимированные рёбра не используются (prefers-reduced-motion, axe ждёт завершения анимаций).
 - `@monaco-editor/react` 4.7.0 + `monaco-editor` 0.57.0 — read-only diff viewer Task Detail (ADR-0014). Monaco берётся из локального пакета (`loader.config({ monaco })` с `monaco-editor/editor/editor.api`), без CDN; editor worker — отдельный файл того же origin (`?worker`, совместимо с CSP `script-src 'self'`). Чанк `MonacoDiff` (~2,7 MB / 713 kB gzip + worker 276 kB) грузится только на вкладке «Изменения».
 
-Не добавлены: `openapi-fetch` — свой клиент закрывает CSRF/idempotency/problem; `@xyflow/react`, Monaco — добавят экраны P7-05/P7-08 (lazy); иконки — свой набор SVG (`components/ui/Icon.tsx`) без зависимости; Radix Toolbar — `Toolbar` на roving tabindex в ~60 строк.
+Не добавлены: `openapi-fetch` — свой клиент закрывает CSRF/idempotency/problem; иконки — свой набор SVG (`components/ui/Icon.tsx`) без зависимости; Radix Toolbar — `Toolbar` на roving tabindex в ~60 строк.
 
 ## Ошибки по контракту
 
@@ -108,7 +108,24 @@ Dev:
 
 ## Live E2E
 
+Без моков backend; SPA и API на одном origin (cookie `SameSite=Strict`, без CORS).
+
+**Стенд из коробки (P7-14, AC-05/AC-06/AC-08).** Конфиг собирает SPA в `dist-live/` и запускает `tests/support/web_live_stack.py`: отдельная временная база PostgreSQL 17 (миграции Alembic, удаляется по завершении), API (`create_app`) и SPA на `127.0.0.1:4190` (как nginx: `/api/` → API, остальное — статика с fallback на `index.html`, те же заголовки и CSP), воркеры `aicd-worker outbox | orchestrator | exec` (Dramatiq, Redis БД 12), Fake CLI (сценарий `agent`: developer → REVIEW_REQUEST → независимый reviewer), gates — локальный runner без gates «только в контейнере», артефакты — S3 (MinIO, отдельный bucket) при `AICD_E2E_S3_ENDPOINT`, иначе FS. Управляющий HTTP стенда (`127.0.0.1:4191`) меняет только темп и инфраструктуру: остановка/запуск воркера исполнения, SIGKILL/запуск процесса API.
+
 ```bash
-AICD_E2E_LIVE_URL=https://aicd.local AICD_E2E_EMAIL=... AICD_E2E_PASSWORD=... pnpm e2e:live
+# из apps/web; нужны uv, Redis, PostgreSQL 17 (суперпользователь) и, по желанию, MinIO
+export UV_SYSTEM_CERTS=1 NO_PROXY=127.0.0.1,localhost
+AICD_E2E_LIVE_STACK=1 \
+AICD_TEST_DATABASE_ADMIN_URL=postgresql://aicd_admin:…@127.0.0.1:55432/postgres \
+AICD_E2E_S3_ENDPOINT=http://127.0.0.1:59000 AICD_E2E_S3_ACCESS_KEY=… AICD_E2E_S3_SECRET_KEY=… \
+pnpm e2e:live
 ```
-SPA и API должны быть на одном origin (cookie `SameSite=Strict`, без CORS). Тест создаёт workspace `e2e-<suffix>` и проект в нём.
+
+Порты — `AICD_E2E_LIVE_PORT` / `AICD_E2E_LIVE_CONTROL_PORT`, Redis — `AICD_E2E_REDIS_URL`. Стенд можно поднять отдельно (`uv run python -m tests.support.web_live_stack --keep` из корня; логи процессов — в выводе) и прогонять против него: `AICD_E2E_LIVE_URL=http://127.0.0.1:4190 AICD_E2E_LIVE_CONTROL_URL=http://127.0.0.1:4191 AICD_E2E_EMAIL=e2e-operator@example.test AICD_E2E_PASSWORD=Correct-Horse-Battery-9 pnpm e2e:live`.
+
+`e2e/live/mission-control.spec.ts`:
+- **AC-05** — DEVELOP run; чат и граф открыты до начала исполнения: handoff developer → reviewer (`Запрос ревью`) и итог ревью появляются в ленте без перезагрузки, статусы узлов графа меняются live до SUCCEEDED, axe.
+- **AC-06** — поручения из чата: PAUSE/RESUME (доставлено → подтверждено → выполнено, run → PAUSED → RUNNING); CHANGE_REQUEST: impact preview (анализ на воркере) → подтверждение → checkpoint → «План v2» → DISPATCHED, задачи замены исполняются до COMPLETED.
+- **AC-08** — процесс API убит посреди run, run продолжается; после подъёма API лента содержит каждое событие ровно один раз, seq 1..N без пропусков, переподключение — с `Last-Event-ID` ≥ последнего принятого seq.
+
+**Внешний стенд (smoke).** `AICD_E2E_LIVE_URL=https://aicd.local AICD_E2E_EMAIL=... AICD_E2E_PASSWORD=... pnpm e2e:live` — `smoke.spec.ts` создаёт workspace `e2e-<suffix>` и проект; сценарии P7-14 без `AICD_E2E_LIVE_CONTROL_URL` пропускаются.

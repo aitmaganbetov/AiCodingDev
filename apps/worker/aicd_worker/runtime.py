@@ -53,6 +53,8 @@ class Runtime:
     reconciler: Reconciler | None = None
     # Импортёр документации (очередь docs; в тестах — с тестовым SsrfFetcher).
     docs_importer: DocumentationImporter | None = None
+    # Шаг поручения пользователя (workspace_id, directive_id): impact analysis / apply (только у orchestrator).
+    process_directive: Callable[[uuid.UUID, uuid.UUID], Awaitable[None]] | None = None
 
 
 _current: Runtime | None = None

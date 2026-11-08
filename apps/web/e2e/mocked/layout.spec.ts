@@ -16,12 +16,11 @@ const SECTIONS = [
   { name: 'Аудит', path: 'audit' },
 ];
 
-/** Заглушки «в разработке»: разделы меню + контекстные экраны run (чат, задача). */
-/** Разделы, реализованные экранами (axe — в их собственных spec); остальные пока заглушки. */
-const IMPLEMENTED = new Set(['projects', 'dashboard', 'knowledge', 'providers', 'settings', 'audit', 'approvals', 'quality', 'compliance']);
+/** Разделы, реализованные экранами (axe — в их собственных spec); остальные пока заглушки «в разработке». */
+const IMPLEMENTED = new Set(['projects', 'dashboard', 'runs', 'knowledge', 'providers', 'settings', 'audit', 'approvals', 'quality', 'compliance']);
 
 const PLACEHOLDERS = [
-  ...SECTIONS.filter((s) => !IMPLEMENTED.has(s.path)).map((s) => ({ path: s.path, title: s.name === 'Запуски' ? 'Запуски' : s.name })),
+  ...SECTIONS.filter((s) => !IMPLEMENTED.has(s.path)).map((s) => ({ path: s.path, title: s.name })),
   // Контекстные экраны run (граф, чат, задача) реализованы (P7-05..P7-08): axe — в run-graph/chat/tasks.spec.ts.
 ];
 

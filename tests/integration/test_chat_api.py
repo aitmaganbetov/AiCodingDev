@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
 from typing import Any
@@ -137,11 +138,16 @@ async def _seed_feed(world: Slice, database: testdb.TestDatabase, run_id: str) -
         orch.drive_run(conn, uuid.UUID(run_id), "DISCOVERY", "PLANNED", "RUNNING")
         task = orch.new_task(conn, tenant, uuid.UUID(run_id), key="dev")
         acp_id = uuid7()
+        evidence_ref, gate_ref = uuid7(), uuid7()
+        acp_payload = {
+            "evidence_refs": [f"evidence:{evidence_ref}", f"gate_execution:{gate_ref}", f"evidence:{evidence_ref}"],
+            "context": f"message:{uuid7()}",  # вид ссылки без представления в чате — не попадает в refs
+        }
         conn.execute(
             "INSERT INTO agent_messages (id, workspace_id, run_id, task_id, sender_role, sender_provider,"
             " recipient_role, message_type, correlation_id, payload) VALUES (%s, %s, %s, %s, 'developer', 'codex',"
-            " 'reviewer', 'REVIEW_REQUEST', %s, '{}'::jsonb)",
-            (acp_id, world.ws, run_id, task, acp_id),
+            " 'reviewer', 'REVIEW_REQUEST', %s, %s::jsonb)",
+            (acp_id, world.ws, run_id, task, acp_id, json.dumps(acp_payload)),
         )
         thread = uuid7()
         conn.execute(
@@ -155,6 +161,12 @@ async def _seed_feed(world: Slice, database: testdb.TestDatabase, run_id: str) -
             " 'developer', 'codex', 'REVIEW_REQUEST developer → reviewer: готово к ревью', 'acp_message', %s,"
             " '{reviewer}')",
             (agent_chat, world.ws, run_id, thread, acp_id),
+        )
+        # Спроецированное событие chat.message (как outbox-диспетчер) — источник ChatItem.seq.
+        conn.execute(
+            "INSERT INTO run_event_log (workspace_id, run_id, seq, event_id, event_type, payload, occurred_at)"
+            " VALUES (%s, %s, 7, %s, 'chat.message', %s::jsonb, now())",
+            (world.ws, run_id, uuid7(), json.dumps({"chat_message_id": str(agent_chat)})),
         )
     run = await world.user.client.get(f"/api/v1/runs/{run_id}")
     directive = await world.user.client.post(
@@ -176,6 +188,7 @@ async def _seed_feed(world: Slice, database: testdb.TestDatabase, run_id: str) -
         "task": task,
         "thread": thread,
         "agent_chat": agent_chat,
+        "refs": [{"type": "evidence", "id": str(evidence_ref)}, {"type": "gate_execution", "id": str(gate_ref)}],
         "directive": directive.json(),
         "comment": comment.json()["id"],
         "task_comment": task_comment.json()["id"],
@@ -209,10 +222,12 @@ async def test_feed_streams_filters_search_and_pagination(world: Slice, database
     assert agent["item_type"] == "agent_message" and agent["acp_type"] == "REVIEW_REQUEST"
     assert agent["sender"]["provider"] == "codex" and agent["recipient_role"] == "reviewer"
     assert agent["task_id"] == str(seed["task"])
+    assert agent["refs"] == seed["refs"] and agent["seq"] == 7, "refs/seq заполняются из сохранённых данных"
     directive = items[seed["directive"]["chat_message_id"]]
     assert directive["item_type"] == "directive" and directive["directive_id"] == seed["directive"]["directive_id"]
     assert directive["directive_status"] is not None and directive["recipient_role"] == "qa"
     comment = items[seed["comment"]]
+    assert comment["refs"] == [] and comment["seq"] is None, "событие ещё не спроецировано в run_event_log"
     assert comment["item_type"] == "chat_message" and comment["sender"]["user"]["id"] == world.user.user_id
     scopes = {t["scope"] for t in body["threads"]}
     assert scopes == {"run", "task"}

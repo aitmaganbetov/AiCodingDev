@@ -47,7 +47,8 @@ describe('live items', () => {
       target_role: 'developer',
       mentions: ['qa', 'nobody'],
       body: '<img src=x onerror=alert(1)>',
-      links: [{ kind: 'diff', id: 'd1' }, { kind: 'gate_execution', id: 'g1' }],
+      acp_type: 'HANDOFF',
+      links: [{ kind: 'diff', id: 'd1' }, { kind: 'gate_execution', id: 'g1' }, { kind: 'bogus', id: 'x1' }],
       created_at: '2026-11-08T09:00:00Z',
     };
     const live = liveItemFromEvent(e)!;
@@ -57,7 +58,11 @@ describe('live items', () => {
       sender: { role: 'architect', provider: 'claude' },
       recipient_role: 'developer',
       mentions: ['qa'],
-      refs: [{ type: 'diff', id: 'd1' }],
+      acp_type: 'HANDOFF',
+      refs: [
+        { type: 'diff', id: 'd1' },
+        { type: 'gate_execution', id: 'g1' },
+      ],
       body: '<img src=x onerror=alert(1)>',
       seq: 7,
       live: true,

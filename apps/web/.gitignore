@@ -7,3 +7,4 @@ blob-report/
 .env
 .env.*
 dist-e2e-*/
+dist-live/

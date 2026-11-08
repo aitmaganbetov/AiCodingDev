@@ -3,9 +3,10 @@ import { useLocation } from 'react-router';
 
 /**
  * Query-параметры состояния внутри экрана (вкладка, вид, фильтры): URL обновляется через
- * history.replaceState без навигации роутера. Навигация меняет location.key, и PageHeading
- * переводит фокус на h1 — при переключении вкладки/фильтра клавиатурой фокус терялся бы.
- * Состояние применяется сразу (без transition роутера), ссылкой на URL можно поделиться.
+ * history.replaceState без навигации роутера, состояние применяется синхронно. Навигация
+ * react-router идёт в transition: контролируемый чекбокс/вкладка, завязанные на URL, на миг
+ * «откатываются» (check() в E2E и скринридер видят старое значение). Фокус от смены query не
+ * зависит: PageHeading переводит его на h1 только при смене pathname. Ссылкой на URL можно поделиться.
  */
 export function useInPageSearchParams(): [URLSearchParams, (next: URLSearchParams) => void] {
   const location = useLocation();

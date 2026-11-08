@@ -27,6 +27,7 @@ import { can } from '../../lib/permissions';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
 import { AttachRepositoryForm } from './AttachRepositoryForm';
+import { RepositoryExplorer } from './RepositoryExplorer';
 
 export const REPOSITORIES_PAGE_SIZE = 50;
 export const TECHNOLOGIES_PAGE_SIZE = 50;
@@ -58,8 +59,10 @@ function ProjectOverview({ project }: { project: Project }) {
   );
 }
 
-function RepositoryCard({ repo }: { repo: Repository }) {
+function RepositoryCard({ projectId, repo }: { projectId: string; repo: Repository }) {
   const { t } = useTranslation();
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const explorerId = `repo-explorer-${repo.id}`;
   const snapshot = repo.latest_index_snapshot ?? null;
   const location = repo.provider === 'github' ? repo.remote_url : repo.local_root_ref;
   return (
@@ -87,9 +90,22 @@ function RepositoryCard({ repo }: { repo: Repository }) {
           )}
         </dd>
       </dl>
-      <Callout tone="neutral" title={t('projects.repo.explorerGapTitle')}>
-        {t('projects.repo.explorerGap')}
-      </Callout>
+      {repo.local_root_ref ? (
+        <div className="flex flex-col gap-3">
+          <div>
+            <Button variant="secondary" icon="folder" aria-expanded={explorerOpen} aria-controls={explorerId} onClick={() => setExplorerOpen((v) => !v)}>
+              {explorerOpen ? t('projects.explorer.close') : t('projects.explorer.open')}
+            </Button>
+          </div>
+          <div id={explorerId} hidden={!explorerOpen}>
+            {explorerOpen ? <RepositoryExplorer projectId={projectId} repo={repo} /> : null}
+          </div>
+        </div>
+      ) : (
+        <Callout tone="neutral" title={t('projects.explorer.unavailableTitle')}>
+          {t('projects.explorer.unavailable')}
+        </Callout>
+      )}
     </li>
   );
 }
@@ -143,7 +159,7 @@ function RepositoriesPanel({ projectId, canAttach }: { projectId: string; canAtt
       <>
         <ul className="flex flex-col gap-3" aria-label={t('projects.repo.listLabel')}>
           {items.map((r) => (
-            <RepositoryCard key={r.id} repo={r} />
+            <RepositoryCard key={r.id} projectId={projectId} repo={r} />
           ))}
         </ul>
         <LoadMore

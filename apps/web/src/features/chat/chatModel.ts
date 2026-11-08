@@ -33,6 +33,23 @@ export const MAX_MENTIONS = 12;
 export const CHAT_BODY_MAX = 8000;
 export const CHAT_Q_MAX = 200;
 
+type AcpType = NonNullable<ChatItem['acp_type']>;
+const ACP_TYPES: ReadonlySet<string> = new Set<AcpType>([
+  'TASK_ASSIGN',
+  'HANDOFF',
+  'QUESTION',
+  'ANSWER',
+  'REVIEW_REQUEST',
+  'FINDING',
+  'FIX_REQUEST',
+  'EVIDENCE_SUBMITTED',
+  'DECISION_PROPOSAL',
+  'DECISION_RECORDED',
+  'BLOCKED',
+  'TASK_COMPLETED',
+]);
+const isAcpType = (v: unknown): v is AcpType => typeof v === 'string' && ACP_TYPES.has(v);
+
 function isRole(v: unknown): v is AgentRole {
   return typeof v === 'string' && (AGENT_ROLES as readonly string[]).includes(v);
 }
@@ -98,7 +115,10 @@ const KIND: Record<string, [ChatItemType, ChatItem['message_kind']]> = {
   DIRECTIVE_STATUS: ['system_event', 'system_notice'],
   SYSTEM_NOTICE: ['system_event', 'system_notice'],
 };
-const REF_KINDS = new Set(['diff', 'evidence', 'test_report', 'artifact', 'finding', 'task']);
+type RefType = NonNullable<ChatItem['refs']>[number]['type'];
+/** links[].kind события chat.message = ChatItem.refs[].type (контракт выровнен). */
+const REF_KINDS: ReadonlySet<string> = new Set<RefType>(['diff', 'evidence', 'test_report', 'artifact', 'finding', 'task', 'approval', 'gate_execution']);
+const isRefType = (v: unknown): v is RefType => typeof v === 'string' && REF_KINDS.has(v);
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v ? v : null;
@@ -127,15 +147,17 @@ export function liveItemFromEvent(e: RunEvent): TimelineItem | null {
     recipient_role: isRole(p.target_role) ? p.target_role : null,
     message_kind: kind,
     body,
-    acp_type: null,
+    acp_type: isAcpType(p.acp_type) ? p.acp_type : null,
     directive_id: str(p.directive_id),
     directive_status: null,
     approval_id: str(p.approval_id),
     approval_status: null,
     mentions: Array.isArray(p.mentions) ? p.mentions.filter(isRole) : [],
-    refs: links
-      .filter((l): l is { kind: string; id: string } => typeof l === 'object' && l !== null && REF_KINDS.has(String((l as { kind?: unknown }).kind)))
-      .map((l) => ({ type: l.kind as NonNullable<ChatItem['refs']>[number]['type'], id: l.id })),
+    refs: links.flatMap((l: unknown) => {
+      if (typeof l !== 'object' || l === null) return [];
+      const { kind, id } = l as { kind?: unknown; id?: unknown };
+      return isRefType(kind) && typeof id === 'string' ? [{ type: kind, id }] : [];
+    }),
     source_event_id: str(p.source_event_id),
     seq: e.seq,
     created_at: str(p.created_at) ?? e.timestamp,

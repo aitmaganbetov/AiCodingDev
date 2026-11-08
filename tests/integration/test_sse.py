@@ -255,6 +255,11 @@ async def test_non_member_gets_404_and_activity(
         r = await client.get(f"/runs/{env.run}/activity", params={"after_seq": 4})
         assert [i["seq"] for i in r.json()["items"]] == [5]
         assert r.json()["next_cursor"] is None
+        r = await client.get(f"/runs/{env.run}/activity", params={"after_seq": 0, "cursor": page["next_cursor"]})
+        assert [i["seq"] for i in r.json()["items"]] == [3, 4, 5], "курсор имеет приоритет над after_seq"
+        r = await client.get(f"/runs/{env.run}/activity", params={"after_seq": -1})
+        validate_response("getRunActivity", r)
+        assert r.status_code == 422
         r = await client.get(f"/runs/{env.run}/events", headers={"Last-Event-ID": "abc"})
         assert r.status_code == 422
 

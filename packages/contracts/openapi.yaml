@@ -537,6 +537,89 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: repository:attach
       x-audit-action: repository.attach
+  /projects/{project_id}/repositories/{repository_id}/tree:
+    get:
+      operationId: listRepositoryTree
+      summary: Дерево файлов репозитория по commit (FR-PRJ-05) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Один уровень каталога `path` в commit (Repository Explorer, FR-PRJ-05). Источник — локальная копия репозитория
+        (`local_root_ref`), чтение объектов git без checkout. Без `commit` — HEAD ветки по умолчанию, иначе последний READY-снимок
+        индекса. Сортировка: каталоги, затем файлы/symlink, затем submodule; внутри группы — по имени (байтовый порядок UTF-8).
+        Курсор привязан к разрешённому commit: страницы одного обхода не смешивают разные commit. Записи `.git` и имена
+        с управляющими символами/не UTF-8 не отображаются. 409 — у репозитория нет локальной копии (provider github, Phase 8).'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      - {$ref: '#/components/parameters/RepositoryCommit'}
+      - name: path
+        in: query
+        description: Относительный путь каталога ('' или отсутствует — корень). Запрещены ведущий '/', обратная косая черта, '.', '..', пустые компоненты и '.git' (422).
+        schema: {type: string, maxLength: 4096}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RepositoryTreePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/repositories/{repository_id}/file:
+    get:
+      operationId: getRepositoryFile
+      summary: Содержимое файла репозитория по commit (FR-PRJ-05) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Файл `path` в commit как текст UTF-8 (без рендеринга HTML). Содержимое больше `max_bytes` усекается
+        (`truncated: true`, отдаются первые `max_bytes` байт). Бинарный файл (NUL-байт или не UTF-8) — `is_binary: true`, `content:
+        null`. Symlink отдаётся как текст цели ссылки (ссылка не разыменовывается). Каталог/submodule — 422 (`errors[].code=not_a_file`).'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      - {$ref: '#/components/parameters/RepositoryCommit'}
+      - name: path
+        in: query
+        required: true
+        description: Относительный путь файла (те же ограничения, что у listRepositoryTree).
+        schema: {type: string, minLength: 1, maxLength: 4096}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RepositoryFile'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
   /projects/{project_id}/technologies:
     get:
       operationId: listTechnologies
@@ -1046,6 +1129,9 @@ paths:
       operationId: getRunActivity
       summary: История событий
       tags: [runs]
+      description: 'События run из run_event_log (те же, что SSE) строго по возрастанию `seq` (детерминированно, без пропусков
+        внутри фильтра). `after_seq` — исключающая нижняя граница; `cursor` продолжает выборку после `seq` последнего элемента
+        страницы (при наличии `cursor` параметр `after_seq` игнорируется). События, удалённые retention, не возвращаются.'
       parameters:
       - {$ref: '#/components/parameters/RunId'}
       - name: task_id
@@ -1053,10 +1139,11 @@ paths:
         schema: {type: string, format: uuid}
       - name: event_type
         in: query
-        schema: {type: string}
+        schema: {type: string, maxLength: 64}
       - name: after_seq
         in: query
-        schema: {type: integer}
+        schema: {type: integer, minimum: 0}
+        description: Вернуть события с seq > after_seq
       - {$ref: '#/components/parameters/Cursor'}
       - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -1537,6 +1624,20 @@ paths:
       parameters:
       - {$ref: '#/components/parameters/ArtifactId'}
       responses:
+        '200':
+          description: Содержимое artifact потоком через API (file-адаптер хранилища), Content-Disposition=attachment
+          content:
+            application/octet-stream:
+              schema: {type: string, contentMediaType: application/octet-stream}
+          headers:
+            Content-Disposition:
+              schema: {type: string}
+              description: attachment; filename="<безопасное имя>"
+            Cache-Control:
+              schema: {type: string, const: no-store}
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
         '302':
           description: Location — подписанный URL объектного хранилища, TTL 60 с, одноразовый Content-Disposition=attachment
           headers:
@@ -2236,6 +2337,17 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    RepositoryId:
+      name: repository_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    RepositoryCommit:
+      name: commit
+      in: query
+      description: 'Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра —
+        HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404.'
+      schema: {type: string, minLength: 1, maxLength: 255}
     ProjectId:
       name: project_id
       in: path
@@ -2818,6 +2930,49 @@ components:
             required: [snapshot_id, commit_sha, status]
           - {type: 'null'}
       required: [id, project_id, provider, default_branch]
+    RepositoryTreeEntry:
+      type: object
+      properties:
+        name: {type: string}
+        path: {type: string, description: Путь от корня репозитория}
+        type: {type: string, enum: [directory, file, symlink, submodule]}
+        mode: {type: string, description: Режим git (100644, 100755, 120000, 040000, 160000)}
+        size:
+          type: [integer, 'null']
+          minimum: 0
+          description: Размер blob в байтах; null для каталога/submodule
+      required: [name, path, type, mode, size]
+    RepositoryTreePage:
+      type: object
+      properties:
+        repository_id: {type: string, format: uuid}
+        commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        path: {type: string, description: Нормализованный путь каталога ('' — корень)}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RepositoryTreeEntry'}
+        next_cursor:
+          type: [string, 'null']
+      required: [repository_id, commit_sha, path, items, next_cursor]
+    RepositoryFile:
+      type: object
+      properties:
+        repository_id: {type: string, format: uuid}
+        commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        path: {type: string}
+        type: {type: string, enum: [file, symlink]}
+        mode: {type: string}
+        size: {type: integer, minimum: 0, description: Полный размер blob в байтах}
+        max_bytes: {type: integer, minimum: 1, description: Лимит отдаваемого содержимого}
+        truncated: {type: boolean, description: Содержимое усечено до max_bytes}
+        is_binary: {type: boolean}
+        encoding:
+          type: [string, 'null']
+          enum: [utf-8, null]
+        content:
+          type: [string, 'null']
+          description: Текст файла (усечённый при truncated); null для бинарного файла. Отображается только как текст.
+      required: [repository_id, commit_sha, path, type, mode, size, max_bytes, truncated, is_binary, encoding, content]
     RepositoryPage:
       type: object
       properties:
@@ -3197,7 +3352,7 @@ components:
           type: [string, 'null']
         exit_code:
           type: [integer, 'null']
-        environment: {type: object}
+        environment: {type: object, additionalProperties: true, description: 'Окружение проверки (свободная форма: версии инструментов, ОС, образ)'}
         started_at:
           type: [string, 'null']
           format: date-time
@@ -3625,9 +3780,9 @@ components:
           format: uuid
         seq: {type: integer, format: int64, minimum: 1, description: 'Порядковый номер в run (как `seq` SSE)'}
         event_type: {type: string}
-        payload: {type: object}
+        payload: {type: object, additionalProperties: true, description: payload SSE-события этого типа (sse-event.schema.json)}
         occurred_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
-      required: [id, run_id, event_type, payload, occurred_at]
+      required: [id, run_id, seq, event_type, payload, occurred_at]
     ActivityPage:
       type: object
       properties:
@@ -3638,7 +3793,7 @@ components:
           type: [string, 'null']
           description: Opaque base64url cursor; null — конец выборки.
       required: [items, next_cursor]
-      description: Страница ActivityEvent (cursor pagination).
+      description: Страница ActivityEvent (cursor pagination), упорядочена по seq по возрастанию.
     ChatThread:
       type: object
       properties:
@@ -3724,16 +3879,18 @@ components:
             properties:
               type:
                 type: string
-                enum: [diff, evidence, test_report, artifact, finding, task]
+                enum: [diff, evidence, test_report, artifact, finding, task, approval, gate_execution]
+                description: Совпадает с `links[].kind` SSE-события chat.message
               id: {type: string, format: uuid}
               href: {type: string}
             required: [type, id]
+          description: Ссылки на объекты из ACP-сообщения (как `links` события chat.message)
         source_event_id:
           type: [string, 'null']
           format: uuid
         seq:
           type: [integer, 'null']
-          description: run_event_log seq, для связи с SSE
+          description: seq события chat.message в run_event_log (для связи с SSE); null — событие ещё не спроецировано или удалено retention
         created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
       required: [id, item_type, sender_type, message_kind, body, created_at]
       description: Элемент единой ленты Live Agent Chat (проекция chat_messages, agent_messages, user_directives, approvals, выдержек CLI).
@@ -3845,6 +4002,10 @@ components:
         impacts:
           type: array
           items: {$ref: '#/components/schemas/DirectiveImpact'}
+        impact_summary:
+          type: [string, 'null']
+          maxLength: 2000
+          description: Сводка анализа влияния (та же, что `summary` события directive.impact_ready); null до завершения анализа
         requires_confirmation: {type: boolean}
         approval_id:
           type: [string, 'null']
@@ -3982,7 +4143,7 @@ components:
         status: {$ref: '#/components/schemas/ApprovalStatus'}
         risk_level: {$ref: '#/components/schemas/RiskLevel'}
         summary: {type: string}
-        context: {type: object, description: 'Детали действия (diff ref, migration plan, target branch...) без секретов'}
+        context: {type: object, additionalProperties: true, description: 'Детали действия (diff ref, migration plan, target branch...) без секретов'}
         requested_by:
           type: object
           properties:
@@ -4254,15 +4415,27 @@ components:
       type: object
       properties:
         directive_id: {type: string, format: uuid}
+        summary: {type: string, maxLength: 2000, description: Сводка анализа влияния (= Directive.impact_summary)}
         impacts:
           type: array
-          items: {$ref: '#/components/schemas/DirectiveImpact'}
-        max_impact: {$ref: '#/components/schemas/DirectiveImpactType'}
+          maxItems: 500
+          items:
+            type: object
+            properties:
+              task_id:
+                type: [string, 'null']
+                format: uuid
+                description: null для TASK_ADD (новая задача ещё не создана)
+              impact_type: {$ref: '#/components/schemas/DirectiveImpactType'}
+              resolution: {type: string, maxLength: 500}
+            required: [task_id, impact_type]
         requires_confirmation: {type: boolean}
         approval_id:
           type: [string, 'null']
           format: uuid
-      required: [directive_id, impacts, max_impact, requires_confirmation]
+        expected_run_version: {type: integer, minimum: 0}
+      required: [directive_id, impacts, requires_confirmation, expected_run_version]
+      description: Payload SSE (sse-event.schema.json#/$defs/directive_impact_ready); итоговое влияние — Directive.impact_status.
     DirectiveStateChangedPayload:
       type: object
       properties:
@@ -4293,12 +4466,18 @@ components:
       properties:
         approval_id: {type: string, format: uuid}
         action_type: {$ref: '#/components/schemas/ApprovalActionType'}
-        status: {$ref: '#/components/schemas/ApprovalStatus'}
+        status:
+          type: string
+          enum: [APPROVED, REJECTED, EXPIRED, CANCELLED]
         decided_by:
-          oneOf:
-          - {$ref: '#/components/schemas/UserRef'}
-          - {type: 'null'}
+          type: [string, 'null']
+          format: uuid
+          description: id пользователя, принявшего решение (null — истечение/отмена системой); имя — GET /approvals/{approval_id}
+        decision_reason:
+          type: [string, 'null']
+          maxLength: 2000
       required: [approval_id, action_type, status]
+      description: Компактный payload SSE (sse-event.schema.json#/$defs/approval_decided); полное представление — Approval.
     GateCompletedPayload:
       type: object
       properties:
@@ -4329,8 +4508,68 @@ components:
     ChatMessagePayload:
       type: object
       properties:
-        item: {$ref: '#/components/schemas/ChatItem'}
-      required: [item]
+        chat_message_id: {type: string, format: uuid, description: '= ChatItem.id'}
+        thread_id: {type: string, format: uuid}
+        scope:
+          type: string
+          enum: [RUN, ROLE, TASK]
+        message_kind:
+          type: string
+          enum: [USER_TEXT, DIRECTIVE, AGENT_MESSAGE, CLI_HIGHLIGHT, STATUS, APPROVAL, DIRECTIVE_STATUS, SYSTEM_NOTICE]
+          description: 'Вид события; соответствие ChatItem.item_type: USER_TEXT→chat_message, DIRECTIVE→directive, AGENT_MESSAGE→agent_message,
+            CLI_HIGHLIGHT→cli_excerpt, APPROVAL→approval, прочие→system_event'
+        sender_type: {$ref: '#/components/schemas/ChatSenderType'}
+        sender_id:
+          type: [string, 'null']
+        sender_role:
+          type: [string, 'null']
+          description: Роль агента или ACP-участник (orchestrator)
+        provider:
+          oneOf:
+          - {$ref: '#/components/schemas/CliProvider'}
+          - {type: 'null'}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        target_role:
+          oneOf:
+          - {$ref: '#/components/schemas/AgentRole'}
+          - {type: 'null'}
+        mentions:
+          type: array
+          maxItems: 12
+          items: {$ref: '#/components/schemas/AgentRole'}
+        body: {type: string, maxLength: 8000}
+        acp_type:
+          oneOf:
+          - {$ref: '#/components/schemas/AcpMessageType'}
+          - {type: 'null'}
+          description: '= ChatItem.acp_type (для AGENT_MESSAGE)'
+        source_event_id:
+          type: [string, 'null']
+          format: uuid
+        directive_id:
+          type: [string, 'null']
+          format: uuid
+        approval_id:
+          type: [string, 'null']
+          format: uuid
+        links:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [diff, test_report, evidence, finding, artifact, task, approval, gate_execution]
+                description: '= ChatItem.refs[].type'
+              id: {type: string, format: uuid}
+            required: [kind, id]
+        created_at: {type: string, format: date-time}
+      required: [chat_message_id, thread_id, scope, message_kind, sender_type, body, created_at]
+      description: 'Плоский payload SSE (sse-event.schema.json#/$defs/chat_message). Клиент сопоставляет его с ChatItem по id =
+        chat_message_id; полное представление (UserRef, статусы поручения/approval) — GET /runs/{run_id}/chat.'
     SseRunStateChanged:
       allOf:
       - {$ref: '#/components/schemas/SseEnvelope'}

@@ -8,14 +8,16 @@ interface Props {
 }
 
 /**
- * Заголовок страницы: обновляет document.title и после навигации переводит фокус
- * на h1, чтобы клавиатура и скринридер начинали с нового содержимого (WCAG 2.4.3).
+ * Заголовок страницы: обновляет document.title и после перехода на другой экран переводит
+ * фокус на h1, чтобы клавиатура и скринридер начинали с нового содержимого (WCAG 2.4.3).
+ * Фокус переносится только при смене pathname (включая смену workspace — он в пути): смена
+ * query-параметров (вкладка, фильтр, пагинация) — состояние того же экрана, и фокус остаётся
+ * на элементе управления, которым пользователь её вызвал.
  */
 export function PageHeading({ title, children }: Props) {
   const { t } = useTranslation();
   const ref = useRef<HTMLHeadingElement>(null);
-  // key меняется при каждой навигации — в том числе между workspace на том же маршруте.
-  const { key: locationKey } = useLocation();
+  const { pathname } = useLocation();
 
   useEffect(() => {
     document.title = t('app.documentTitle', { page: title });
@@ -23,7 +25,7 @@ export function PageHeading({ title, children }: Props) {
 
   useEffect(() => {
     ref.current?.focus();
-  }, [locationKey]);
+  }, [pathname]);
 
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">

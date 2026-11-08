@@ -420,6 +420,7 @@ async def test_duplicate_delivery_has_one_effect(database: testdb.TestDatabase, 
     chat_sse = log[1][5]
     assert chat_sse["scope"] == "TASK" and chat_sse["message_kind"] == "AGENT_MESSAGE"
     assert {"kind": "artifact", "id": str(scene.artifact)} in chat_sse["links"]
+    assert chat_sse["acp_type"] is not None, "chat.message несёт acp_type (= ChatItem.acp_type)"
 
 
 async def test_activity_projection_and_user_role_thread(

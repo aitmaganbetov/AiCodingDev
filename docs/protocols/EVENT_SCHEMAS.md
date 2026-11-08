@@ -381,6 +381,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
         "target_role": {"anyOf": [{"$ref": "#/$defs/agent_role"}, {"type": "null"}]},
         "mentions": {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/agent_role"}},
         "body": {"type": "string", "maxLength": 8000},
+        "acp_type": {"enum": ["TASK_ASSIGN", "HANDOFF", "QUESTION", "ANSWER", "REVIEW_REQUEST", "FINDING", "FIX_REQUEST", "EVIDENCE_SUBMITTED", "DECISION_PROPOSAL", "DECISION_RECORDED", "BLOCKED", "TASK_COMPLETED", null], "description": "тип ACP-сообщения для AGENT_MESSAGE (= ChatItem.acp_type)"},
         "source_event_id": {"type": ["string", "null"], "format": "uuid"},
         "directive_id": {"type": ["string", "null"], "format": "uuid"},
         "approval_id": {"type": ["string", "null"], "format": "uuid"},
