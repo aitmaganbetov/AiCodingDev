@@ -377,7 +377,8 @@ class Approvals:
             },
         )
         decided = await self.get(conn, approval_id)
-        assert decided is not None
+        if decided is None:  # pragma: no cover — нарушение инварианта
+            raise LookupError("decided")
         return decided
 
     async def cancel(self, conn: AsyncConnection, approval_id: uuid.UUID, *, reason: str) -> bool:

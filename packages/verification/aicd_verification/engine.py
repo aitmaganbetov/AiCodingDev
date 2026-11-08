@@ -167,33 +167,70 @@ class VerificationEngine:
 
     # ---------------------------------------------------------------- VerifierPort
     async def verify_task(
-        self, *, workspace_id: uuid.UUID, run_id: uuid.UUID, task_id: uuid.UUID, worktree_path: Any,
-        commit_sha: str, quality_profile: str,
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        run_id: uuid.UUID,
+        task_id: uuid.UUID,
+        worktree_path: Any,
+        commit_sha: str,
+        quality_profile: str,
     ) -> VerificationOutcome:
         async with transaction(self._engine, self._ctx(workspace_id)) as conn:
-            run = (await conn.execute(
-                text("SELECT project_id, quality_profile, quality_profile_id, base_commit_sha FROM runs WHERE id = :id"),
-                {"id": run_id})).mappings().first()
+            run = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT project_id, quality_profile, quality_profile_id, base_commit_sha FROM runs WHERE id = :id"
+                        ),
+                        {"id": run_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
             if run is None:
                 return self._outcome(False, [], "run not found")
             if run["quality_profile"] != quality_profile:
                 return self._outcome(False, [], "quality profile mismatch with run snapshot")
-            rows = (await conn.execute(
-                text("SELECT id, name, gate_type, required, timeout_seconds FROM quality_gates"
-                     " WHERE profile_id = :p ORDER BY name"), {"p": run["quality_profile_id"]})).mappings().all()
+            rows = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT id, name, gate_type, required, timeout_seconds FROM quality_gates"
+                            " WHERE profile_id = :p ORDER BY name"
+                        ),
+                        {"p": run["quality_profile_id"]},
+                    )
+                )
+                .mappings()
+                .all()
+            )
         if not any(r["gate_type"] == "SCOPE" for r in rows):
             # Fail-closed: без определения SCOPE задачу нельзя признать проверенной (ТЗ §14).
             return self._outcome(False, [], f"profile {quality_profile} has no SCOPE gate definition")
 
-        task = _TaskContext(workspace_id, run_id, task_id, run["project_id"], commit_sha.lower(),
-                            Path(str(worktree_path)), base_sha=run["base_commit_sha"])
+        task = _TaskContext(
+            workspace_id,
+            run_id,
+            task_id,
+            run["project_id"],
+            commit_sha.lower(),
+            Path(str(worktree_path)),
+            base_sha=run["base_commit_sha"],
+        )
         await asyncio.to_thread(self._prepare, task)
-        applicability = (detect_applicability(task.facts) if task.facts is not None else {})
+        applicability = detect_applicability(task.facts) if task.facts is not None else {}
         gates = [
-            _GateRun(r["id"], r["name"], r["gate_type"],
-                     True if r["gate_type"] == "SCOPE" else bool(r["required"]),
-                     self._timeout(int(r["timeout_seconds"])), GATE_SPECS.get(r["name"]),
-                     applicability.get(r["name"]))
+            _GateRun(
+                r["id"],
+                r["name"],
+                r["gate_type"],
+                True if r["gate_type"] == "SCOPE" else bool(r["required"]),
+                self._timeout(int(r["timeout_seconds"])),
+                GATE_SPECS.get(r["name"]),
+                applicability.get(r["name"]),
+            )
             for r in rows
         ]
         try:
@@ -227,6 +264,8 @@ class VerificationEngine:
             task.precondition_error = ("INFRA", f"repository inspection failed: {type(exc).__name__}")
             return
         if task.base_sha is not None:
+            if self._staging_root is not None:
+                self._staging_root.mkdir(mode=0o700, parents=True, exist_ok=True)
             staging = Path(tempfile.mkdtemp(prefix="aicd-verify-", dir=self._staging_root))
             staging.chmod(0o755)  # контейнер работает не от root: каталог входа должен читаться
             task.staging = staging
@@ -240,42 +279,80 @@ class VerificationEngine:
     # ---------------------------------------------------------------- строки gate_executions
     async def _open_execution(self, task: _TaskContext, gate: _GateRun) -> None:
         async with transaction(self._engine, self._ctx(task.workspace_id)) as conn:
-            current = (await conn.execute(
-                text("SELECT id, status, commit_sha FROM gate_executions WHERE run_id = :r AND task_id = :t"
-                     " AND gate_id = :g AND superseded_at IS NULL FOR UPDATE"),
-                {"r": task.run_id, "t": task.task_id, "g": gate.gate_id})).mappings().first()
+            current = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT id, status, commit_sha FROM gate_executions WHERE run_id = :r AND task_id = :t"
+                            " AND gate_id = :g AND superseded_at IS NULL FOR UPDATE"
+                        ),
+                        {"r": task.run_id, "t": task.task_id, "g": gate.gate_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
             if current is not None:
                 if current["commit_sha"] == task.commit_sha and current["status"] in REUSABLE:
                     gate.execution_id, gate.status, gate.reused = current["id"], current["status"], True
                     return
                 if current["status"] in TERMINAL:
-                    await conn.execute(text("UPDATE gate_executions SET superseded_at = now() WHERE id = :id"),
-                                       {"id": current["id"]})
+                    await conn.execute(
+                        text("UPDATE gate_executions SET superseded_at = now() WHERE id = :id"), {"id": current["id"]}
+                    )
                 else:  # зависшая PENDING/RUNNING строка прошлого прогона
                     await conn.execute(
-                        text("UPDATE gate_executions SET status = 'ERROR', finished_at = now(), superseded_at = now(),"
-                             " error_message = 'INFRA: stale execution superseded' WHERE id = :id"),
-                        {"id": current["id"]})
-            attempt = (await conn.execute(
-                text("SELECT coalesce(max(attempt_no), 0) + 1 FROM gate_executions"
-                     " WHERE run_id = :r AND task_id = :t AND gate_id = :g"),
-                {"r": task.run_id, "t": task.task_id, "g": gate.gate_id})).scalar_one()
+                        text(
+                            "UPDATE gate_executions SET status = 'ERROR', finished_at = now(), superseded_at = now(),"
+                            " error_message = 'INFRA: stale execution superseded' WHERE id = :id"
+                        ),
+                        {"id": current["id"]},
+                    )
+            attempt = (
+                await conn.execute(
+                    text(
+                        "SELECT coalesce(max(attempt_no), 0) + 1 FROM gate_executions"
+                        " WHERE run_id = :r AND task_id = :t AND gate_id = :g"
+                    ),
+                    {"r": task.run_id, "t": task.task_id, "g": gate.gate_id},
+                )
+            ).scalar_one()
             gate.execution_id = uuid7()
             await conn.execute(
-                text("INSERT INTO gate_executions (id, workspace_id, run_id, task_id, gate_id, gate_type, required,"
-                     " status, attempt_no, commit_sha) VALUES (:id, :ws, :r, :t, :g, :type, :req, 'PENDING', :n, :sha)"),
-                {"id": gate.execution_id, "ws": task.workspace_id, "r": task.run_id, "t": task.task_id,
-                 "g": gate.gate_id, "type": gate.gate_type, "req": gate.required, "n": attempt, "sha": task.commit_sha})
+                text(
+                    "INSERT INTO gate_executions (id, workspace_id, run_id, task_id, gate_id, gate_type, required,"
+                    " status, attempt_no, commit_sha) VALUES (:id, :ws, :r, :t, :g, :type, :req, 'PENDING', :n, :sha)"
+                ),
+                {
+                    "id": gate.execution_id,
+                    "ws": task.workspace_id,
+                    "r": task.run_id,
+                    "t": task.task_id,
+                    "g": gate.gate_id,
+                    "type": gate.gate_type,
+                    "req": gate.required,
+                    "n": attempt,
+                    "sha": task.commit_sha,
+                },
+            )
 
     async def _set_running(self, task: _TaskContext, gate: _GateRun) -> None:
         async with transaction(self._engine, self._ctx(task.workspace_id)) as conn:
             await conn.execute(
                 text("UPDATE gate_executions SET status = 'RUNNING', started_at = now() WHERE id = :id"),
-                {"id": gate.execution_id})
+                {"id": gate.execution_id},
+            )
 
     async def _finish(
-        self, task: _TaskContext, gate: _GateRun, *, status: str, error: str | None = None,
-        reason: str | None = None, evidence: dict[str, Any] | None = None, findings: dict[str, int] | None = None,
+        self,
+        task: _TaskContext,
+        gate: _GateRun,
+        *,
+        status: str,
+        error: str | None = None,
+        reason: str | None = None,
+        evidence: dict[str, Any] | None = None,
+        findings: dict[str, int] | None = None,
         duration_ms: int = 0,
     ) -> None:
         assert gate.execution_id is not None  # noqa: S101 — инвариант: строка создана _open_execution
@@ -284,41 +361,85 @@ class VerificationEngine:
             if evidence is not None:
                 evidence_id = await self._insert_evidence(conn, task, evidence)
             await conn.execute(
-                text("UPDATE gate_executions SET status = :s, evidence_id = :e, error_message = :err,"
-                     " not_applicable_reason = :na, started_at = coalesce(started_at, now()), finished_at = now()"
-                     " WHERE id = :id"),
-                {"s": status, "e": evidence_id, "err": error[:4000] if error else None,
-                 "na": reason[:2000] if reason else None, "id": gate.execution_id})
+                text(
+                    "UPDATE gate_executions SET status = :s, evidence_id = :e, error_message = :err,"
+                    " not_applicable_reason = :na, started_at = coalesce(started_at, now()), finished_at = now()"
+                    " WHERE id = :id"
+                ),
+                {
+                    "s": status,
+                    "e": evidence_id,
+                    "err": error[:4000] if error else None,
+                    "na": reason[:2000] if reason else None,
+                    "id": gate.execution_id,
+                },
+            )
             await outbox.emit(
-                conn, event_type="gate.completed", aggregate_type="gate_execution", aggregate_id=gate.execution_id,
-                workspace_id=task.workspace_id, run_id=task.run_id,
+                conn,
+                event_type="gate.completed",
+                aggregate_type="gate_execution",
+                aggregate_id=gate.execution_id,
+                workspace_id=task.workspace_id,
+                run_id=task.run_id,
                 payload={
-                    "gate_execution_id": str(gate.execution_id), "gate_type": gate.gate_type,
-                    "task_id": str(task.task_id), "status": status, "required": gate.required,
-                    "commit_sha": task.commit_sha, "evidence_id": str(evidence_id) if evidence_id else None,
+                    "gate_execution_id": str(gate.execution_id),
+                    "gate_type": gate.gate_type,
+                    "task_id": str(task.task_id),
+                    "status": status,
+                    "required": gate.required,
+                    "commit_sha": task.commit_sha,
+                    "evidence_id": str(evidence_id) if evidence_id else None,
                     "findings": findings or {"info": 0, "low": 0, "medium": 0, "high": 0, "critical": 0},
-                    "duration_ms": max(0, duration_ms), "tool": (gate.spec.tool if gate.spec else gate.name)[:100],
-                })
+                    "duration_ms": max(0, duration_ms),
+                    "tool": (gate.spec.tool if gate.spec else gate.name)[:100],
+                },
+            )
         gate.status = status
         gate.detail = error or reason or ""
 
     async def _insert_evidence(self, conn: AsyncConnection, task: _TaskContext, ev: dict[str, Any]) -> uuid.UUID:
         await conn.execute(
-            text("INSERT INTO artifacts (id, workspace_id, project_id, run_id, kind, storage_ref, sha256, size_bytes,"
-                 " mime_type, is_sensitive, redaction_applied, retention_class)"
-                 " VALUES (:id, :ws, :p, :r, :kind, :ref, :sha, :size, 'text/plain', false, true, 'evidence')"),
-            {"id": ev["artifact_id"], "ws": task.workspace_id, "p": task.project_id, "r": task.run_id,
-             "kind": ev["artifact_kind"], "ref": ev["storage_ref"], "sha": ev["sha256"], "size": ev["size"]})
+            text(
+                "INSERT INTO artifacts (id, workspace_id, project_id, run_id, kind, storage_ref, sha256, size_bytes,"
+                " mime_type, is_sensitive, redaction_applied, retention_class)"
+                " VALUES (:id, :ws, :p, :r, :kind, :ref, :sha, :size, 'text/plain', false, true, 'evidence')"
+            ),
+            {
+                "id": ev["artifact_id"],
+                "ws": task.workspace_id,
+                "p": task.project_id,
+                "r": task.run_id,
+                "kind": ev["artifact_kind"],
+                "ref": ev["storage_ref"],
+                "sha": ev["sha256"],
+                "size": ev["size"],
+            },
+        )
         evidence_id = uuid7()
         await conn.execute(
-            text("INSERT INTO evidence (id, workspace_id, run_id, task_id, kind, artifact_id, producer,"
-                 " verification_status, commit_sha, command, exit_code, environment, started_at, finished_at,"
-                 " verified_at) VALUES (:id, :ws, :r, :t, :kind, :a, 'verification_engine', :vs, :sha, :cmd, :code,"
-                 " CAST(:env AS jsonb), :st, :fin, CASE WHEN :vs IN ('VERIFIED','REJECTED') THEN now() END)"),
-            {"id": evidence_id, "ws": task.workspace_id, "r": task.run_id, "t": task.task_id,
-             "kind": ev["evidence_kind"], "a": ev["artifact_id"], "vs": ev["verification_status"],
-             "sha": task.commit_sha, "cmd": ev["command"][:8192], "code": ev["exit_code"],
-             "env": json.dumps(ev["environment"]), "st": ev["started_at"], "fin": ev["finished_at"]})
+            text(
+                "INSERT INTO evidence (id, workspace_id, run_id, task_id, kind, artifact_id, producer,"
+                " verification_status, commit_sha, command, exit_code, environment, started_at, finished_at,"
+                " verified_at) VALUES (:id, :ws, :r, :t, :kind, :a, 'verification_engine', :vs, :sha, :cmd, :code,"
+                " CAST(:env AS jsonb), :st, :fin, :vat)"
+            ),
+            {
+                "id": evidence_id,
+                "ws": task.workspace_id,
+                "r": task.run_id,
+                "t": task.task_id,
+                "kind": ev["evidence_kind"],
+                "a": ev["artifact_id"],
+                "vs": ev["verification_status"],
+                "sha": task.commit_sha,
+                "cmd": ev["command"][:8192],
+                "code": ev["exit_code"],
+                "env": json.dumps(ev["environment"]),
+                "st": ev["started_at"],
+                "fin": ev["finished_at"],
+                "vat": utcnow() if ev["verification_status"] in ("VERIFIED", "REJECTED") else None,
+            },
+        )
         return evidence_id
 
     # ---------------------------------------------------------------- исполнение gate
@@ -335,8 +456,9 @@ class VerificationEngine:
         spec = gate.spec
         if spec is None:
             if gate.required:
-                await self._finish(task, gate, status="ERROR",
-                                   error=f"UNSUPPORTED_GATE: no v0 runner for gate '{gate.name}'")
+                await self._finish(
+                    task, gate, status="ERROR", error=f"UNSUPPORTED_GATE: no v0 runner for gate '{gate.name}'"
+                )
             else:
                 await self._finish(task, gate, status="SKIPPED", reason=f"no v0 runner for gate '{gate.name}'")
             return
@@ -350,33 +472,50 @@ class VerificationEngine:
         if gate.applicability is None or not gate.applicability.applicable:
             reason = gate.applicability.reason if gate.applicability else "applicability unknown"
             markers = ", ".join(gate.applicability.markers) if gate.applicability else ""
-            await self._finish(task, gate, status="NOT_APPLICABLE",
-                               reason=f"detector: {reason}; checked markers: {markers}")
+            await self._finish(
+                task, gate, status="NOT_APPLICABLE", reason=f"detector: {reason}; checked markers: {markers}"
+            )
             return
         if spec.executes_repository and task.dirty:
-            await self._finish(task, gate, status="ERROR",
-                               error="WORKTREE_DIRTY: worktree has uncommitted changes, result would not match commit")
+            await self._finish(
+                task,
+                gate,
+                status="ERROR",
+                error="WORKTREE_DIRTY: worktree has uncommitted changes, result would not match commit",
+            )
             return
 
         async with self._semaphore:
             await self._set_running(task, gate)
             ctx = self._gate_context(task)
-            probe = await self._execute(task, spec, spec.probe_argv, PROBE_TIMEOUT_SECONDS, ctx, gate)
+            probe = await self._execute(task, spec, spec.probe_argv, PROBE_TIMEOUT_SECONDS, gate)
             if probe.exit_code != 0 or probe.timed_out:
-                await self._finish(task, gate, status="ERROR",
-                                   error=f"TOOL_UNAVAILABLE: '{spec.tool}' is not available in the verification "
-                                         f"environment ({probe.start_error or f'probe exit {probe.exit_code}'})")
+                await self._finish(
+                    task,
+                    gate,
+                    status="ERROR",
+                    error=f"TOOL_UNAVAILABLE: '{spec.tool}' is not available in the verification "
+                    f"environment ({probe.start_error or f'probe exit {probe.exit_code}'})",
+                )
                 return
-            tool_version = redact_text(probe.stdout.decode("utf-8", "replace").strip().splitlines()[0][:200]
-                                       if probe.stdout.strip() else probe.stderr.decode("utf-8", "replace")[:200])
+            tool_version = redact_text(
+                probe.stdout.decode("utf-8", "replace").strip().splitlines()[0][:200]
+                if probe.stdout.strip()
+                else probe.stderr.decode("utf-8", "replace")[:200]
+            )
             started = time.monotonic()
-            result = await self._execute(task, spec, spec.build_argv(ctx), gate.timeout_seconds, ctx, gate)
+            result = await self._execute(task, spec, spec.build_argv(ctx), gate.timeout_seconds, gate)
             duration_ms = int((time.monotonic() - started) * 1000)
 
         stdout = result.stdout.decode("utf-8", "replace")
         if result.exit_code is None:
-            await self._finish(task, gate, status="ERROR", error=f"INFRA: gate process did not start "
-                                                                 f"({result.start_error})", duration_ms=duration_ms)
+            await self._finish(
+                task,
+                gate,
+                status="ERROR",
+                error=f"INFRA: gate process did not start ({result.start_error})",
+                duration_ms=duration_ms,
+            )
             return
         if result.timed_out:
             verdict = Verdict("ERROR", "TIMEOUT", f"gate exceeded {gate.timeout_seconds}s")
@@ -397,8 +536,14 @@ class VerificationEngine:
             # Без сохранённого и перечитанного результата процесса вердикта нет (ТЗ §14, FP-14).
             status, error = "ERROR", "INFRA: gate output could not be stored and re-verified"
         await self._finish(
-            task, gate, status=status, error=error if status in ("ERROR", "FAIL") else None, evidence=stored,
-            findings=finding_counts(gate.name, status, stdout), duration_ms=duration_ms)
+            task,
+            gate,
+            status=status,
+            error=error if status in ("ERROR", "FAIL") else None,
+            evidence=stored,
+            findings=finding_counts(gate.name, status, stdout),
+            duration_ms=duration_ms,
+        )
 
     def _gate_context(self, task: _TaskContext) -> GateContext:
         changed = changed_python_files(task.facts) if task.facts is not None else ()
@@ -406,32 +551,70 @@ class VerificationEngine:
             return GateContext(CONTAINER_WORKDIR, CONTAINER_INPUT_DIR, changed)
         return GateContext(str(task.worktree), str(task.staging or task.worktree), changed)
 
-    def _spec_for(self, task: _TaskContext, spec: GateSpec, argv: Sequence[str], timeout: int,
-                  gate: _GateRun) -> ContainerSpec:
+    def _spec_for(
+        self, task: _TaskContext, spec: GateSpec, argv: Sequence[str], limit_seconds: int, gate: _GateRun
+    ) -> ContainerSpec:
         image = self._images.get(spec.name, self._image)
-        labels = {"aicd.execution_id": f"verify-{gate.execution_id}", "aicd.kind": "verification",
-                  "aicd.gate": spec.name}
-        limits = ResourceLimits(cpus=self._limits.cpus, memory_mb=self._limits.memory_mb, pids=self._limits.pids,
-                                timeout_seconds=timeout + 30, max_output_bytes=self._max_output)
+        labels = {
+            "aicd.execution_id": f"verify-{gate.execution_id}",
+            "aicd.kind": "verification",
+            "aicd.gate": spec.name,
+        }
+        limits = ResourceLimits(
+            cpus=self._limits.cpus,
+            memory_mb=self._limits.memory_mb,
+            pids=self._limits.pids,
+            timeout_seconds=limit_seconds + 30,
+            max_output_bytes=self._max_output,
+        )
         if self._is_docker:
             mounts = [Mount(task.worktree, CONTAINER_WORKDIR, read_only=True)]
             if spec.needs_scope_input and task.staging is not None:
                 mounts.append(Mount(task.staging, CONTAINER_INPUT_DIR, read_only=True))
-            env = {"CI": "true", "TZ": "UTC", "LANG": "C.UTF-8", "HOME": "/home/verify",
-                   "PYTHONDONTWRITEBYTECODE": "1", "RUFF_CACHE_DIR": "/tmp/ruff-cache",  # noqa: S108 — tmpfs
-                   "npm_config_cache": "/tmp/npm-cache", "npm_config_update_notifier": "false"}  # noqa: S108
-            return ContainerSpec(image=image, argv=tuple(argv), workdir=CONTAINER_WORKDIR, env=env,
-                                 mounts=tuple(mounts), limits=limits, network="none", labels=labels)
+            env = {
+                "CI": "true",
+                "TZ": "UTC",
+                "LANG": "C.UTF-8",
+                "HOME": "/home/verify",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "RUFF_CACHE_DIR": "/tmp/ruff-cache",  # noqa: S108 — tmpfs
+                "npm_config_cache": "/tmp/npm-cache",  # noqa: S108 — tmpfs контейнера
+                "npm_config_update_notifier": "false",
+            }
+            return ContainerSpec(
+                image=image,
+                argv=tuple(argv),
+                workdir=CONTAINER_WORKDIR,
+                env=env,
+                mounts=tuple(mounts),
+                limits=limits,
+                network="none",
+                labels=labels,
+            )
         home = task.extra.setdefault("home", tempfile.mkdtemp(prefix="aicd-verify-home-", dir=self._staging_root))
-        env = {"CI": "true", "TZ": "UTC", "LANG": "C.UTF-8", "HOME": home, "PYTHONDONTWRITEBYTECODE": "1",
-               "npm_config_update_notifier": "false", **self._local_env}
-        return ContainerSpec(image=image, argv=tuple(argv), workdir=str(task.worktree), env=env, limits=limits,
-                             labels=labels, cwd=task.worktree)
+        env = {
+            "CI": "true",
+            "TZ": "UTC",
+            "LANG": "C.UTF-8",
+            "HOME": home,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "npm_config_update_notifier": "false",
+            **self._local_env,
+        }
+        return ContainerSpec(
+            image=image,
+            argv=tuple(argv),
+            workdir=str(task.worktree),
+            env=env,
+            limits=limits,
+            labels=labels,
+            cwd=task.worktree,
+        )
 
-    async def _execute(self, task: _TaskContext, spec: GateSpec, argv: Sequence[str], timeout: int,
-                       ctx: GateContext, gate: _GateRun) -> ProcessResult:
-        del ctx
-        container = self._spec_for(task, spec, argv, timeout, gate)
+    async def _execute(
+        self, task: _TaskContext, spec: GateSpec, argv: Sequence[str], limit_seconds: int, gate: _GateRun
+    ) -> ProcessResult:
+        container = self._spec_for(task, spec, argv, limit_seconds, gate)
         started_at = utcnow()
         try:
             proc = await self._runner.start(container)
@@ -459,12 +642,20 @@ class VerificationEngine:
 
         timed_out = False
         try:
-            code = await asyncio.wait_for(collect(), timeout=timeout)
+            code = await asyncio.wait_for(collect(), timeout=limit_seconds)
         except TimeoutError:
             timed_out = True
             code = await self._kill(proc)
-        return ProcessResult(code, bytes(stdout), bytes(stderr), started_at, utcnow(), timed_out=timed_out,
-                             truncated=truncated, image_id=image_id)
+        return ProcessResult(
+            code,
+            bytes(stdout),
+            bytes(stderr),
+            started_at,
+            utcnow(),
+            timed_out=timed_out,
+            truncated=truncated,
+            image_id=image_id,
+        )
 
     @staticmethod
     async def _kill(proc: SandboxProcess) -> int:
@@ -483,16 +674,24 @@ class VerificationEngine:
             "verifier_host": platform.node()[:255],
         }
         if self._is_docker:
-            env.update({"image": self._images.get(spec.name, self._image), "image_id": result.image_id,
-                        "network": "none", "workdir": CONTAINER_WORKDIR, "workspace_mount": "read-only"})
+            env.update(
+                {
+                    "image": self._images.get(spec.name, self._image),
+                    "image_id": result.image_id,
+                    "network": "none",
+                    "workdir": CONTAINER_WORKDIR,
+                    "workspace_mount": "read-only",
+                }
+            )
         else:
             env.update({"image": None, "network": "host", "workdir": "worktree", "workspace_mount": "host"})
         if result.truncated:
             env["output_truncated"] = True
         return env
 
-    async def _store_output(self, task: _TaskContext, gate: _GateRun, command: str, result: ProcessResult,
-                            environment: dict[str, Any]) -> dict[str, Any]:
+    async def _store_output(
+        self, task: _TaskContext, gate: _GateRun, command: str, result: ProcessResult, environment: dict[str, Any]
+    ) -> dict[str, Any]:
         assert gate.spec is not None  # noqa: S101 — вызывается только для известного gate
         body = (
             f"# aicd verification gate log\n# gate: {gate.name} ({gate.gate_type})\n# commit: {task.commit_sha}\n"
@@ -507,16 +706,25 @@ class VerificationEngine:
         status = "VERIFIED"
         try:  # повторное чтение со сверкой хеша (QUALITY_GATES §4.2)
             reread = await asyncio.to_thread(
-                lambda: b"".join(self._store.open(stored.storage_ref, expected_sha256=stored.sha256)))
+                lambda: b"".join(self._store.open(stored.storage_ref, expected_sha256=stored.sha256))
+            )
             if reread != data:
                 status = "REJECTED"
         except (ArtifactIntegrityError, ArtifactNotFoundError, OSError):
             status = "REJECTED"
         return {
-            "artifact_id": artifact_id, "artifact_kind": gate.spec.artifact_kind, "storage_ref": stored.storage_ref,
-            "sha256": stored.sha256, "size": stored.size_bytes, "evidence_kind": gate.spec.evidence_kind,
-            "verification_status": status, "command": redact_text(command), "exit_code": result.exit_code,
-            "environment": environment, "started_at": result.started_at, "finished_at": result.finished_at,
+            "artifact_id": artifact_id,
+            "artifact_kind": gate.spec.artifact_kind,
+            "storage_ref": stored.storage_ref,
+            "sha256": stored.sha256,
+            "size": stored.size_bytes,
+            "evidence_kind": gate.spec.evidence_kind,
+            "verification_status": status,
+            "command": redact_text(command),
+            "exit_code": result.exit_code,
+            "environment": environment,
+            "started_at": result.started_at,
+            "finished_at": result.finished_at,
         }
 
     # ---------------------------------------------------------------- вердикт

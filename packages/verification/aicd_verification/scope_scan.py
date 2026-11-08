@@ -28,7 +28,7 @@ SCANNER_VERSION = "1"
 MAX_REPORTED = 200
 MAX_LINE_CHARS = 20000  # длинные (минифицированные) строки сканируются по префиксу
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
-SECRET_SEVERITY = "critical"
+SECRET_SEVERITY = "critical"  # noqa: S105 — уровень находки, не секрет
 PATH_SEVERITY = "high"
 
 
@@ -116,8 +116,10 @@ def scan(spec: dict[str, Any], diff_text: str) -> dict[str, Any]:
                     break
             if hit:
                 # Только метаданные: значение совпадения не выводится никогда.
-                violations.append({"rule": f"secret:{rule_id}", "severity": SECRET_SEVERITY, "path": path,
-                                   "line": line_no})
+                violations.append(
+                    {"rule": f"secret-scan/{rule_id}", "severity": SECRET_SEVERITY, "path": path, "line": line_no}
+                )
+                break  # одна находка на строку
     return {
         "tool": "aicd-scope",
         "version": SCANNER_VERSION,

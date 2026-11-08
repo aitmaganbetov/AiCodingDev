@@ -29,8 +29,15 @@ from aicd_security.git import GitRepositoryError, run_git
 
 GateStatus = Literal["PASS", "FAIL", "ERROR", "SKIPPED", "NOT_APPLICABLE"]
 ErrorCode = Literal[
-    "TOOL_UNAVAILABLE", "TIMEOUT", "INFRA", "SHA_MISMATCH", "REPORT_UNPARSABLE", "EMPTY_SUITE", "WORKTREE_DIRTY",
-    "NO_BASE_COMMIT", "UNSUPPORTED_GATE",
+    "TOOL_UNAVAILABLE",
+    "TIMEOUT",
+    "INFRA",
+    "SHA_MISMATCH",
+    "REPORT_UNPARSABLE",
+    "EMPTY_SUITE",
+    "WORKTREE_DIRTY",
+    "NO_BASE_COMMIT",
+    "UNSUPPORTED_GATE",
 ]
 
 SCANNER_SOURCE = (Path(__file__).with_name("scope_scan.py")).read_text(encoding="utf-8")
@@ -71,13 +78,18 @@ def secret_rules() -> list[dict[str, Any]]:
     """Правила для сканера. Из redaction берутся «токенные» паттерны; прозаические (`basic …`,
     `password=` без кавычек) дали бы ложные срабатывания на обычном коде и заменены gitleaks-правилом
     `generic-secret-assignment` (значение в кавычках, ≥ 16 символов)."""
-    rules: list[dict[str, Any]] = []
+    # gitleaks-правила первыми: сканер сообщает одно (первое) правило на строку.
+    rules: list[dict[str, Any]] = [{"id": rid, "pattern": pat, "flags": 0} for rid, pat in _GITLEAKS_RULES]
     for index, pattern in enumerate(redaction._PATTERNS):
         if pattern.pattern.startswith("(?i)") or pattern.groups >= 3:
             continue
-        rules.append({"id": f"platform-redaction-{index}", "pattern": pattern.pattern,
-                      "flags": int(pattern.flags & _RE_FLAGS_MASK)})
-    rules.extend({"id": rid, "pattern": pat, "flags": 0} for rid, pat in _GITLEAKS_RULES)
+        rules.append(
+            {
+                "id": f"platform-redaction-{index}",
+                "pattern": pattern.pattern,
+                "flags": int(pattern.flags & _RE_FLAGS_MASK),
+            }
+        )
     return rules
 
 
@@ -94,8 +106,13 @@ class DiffEntry:
     link_target: str | None = None
 
     def as_json(self) -> dict[str, Any]:
-        return {"path": self.path, "status": self.status, "old_mode": self.old_mode, "new_mode": self.new_mode,
-                "link_target": self.link_target}
+        return {
+            "path": self.path,
+            "status": self.status,
+            "old_mode": self.old_mode,
+            "new_mode": self.new_mode,
+            "link_target": self.link_target,
+        }
 
 
 @dataclass(frozen=True)
@@ -127,8 +144,9 @@ def parse_raw_diff(raw: str) -> list[DiffEntry]:
         if len(parts) != 5:
             raise ValueError("unexpected git diff --raw header")
         old_mode, new_mode, _old_sha, new_sha, status = parts
-        entries.append(DiffEntry(path=tokens[i + 1], status=status[:1], old_mode=old_mode, new_mode=new_mode,
-                                 new_blob=new_sha))
+        entries.append(
+            DiffEntry(path=tokens[i + 1], status=status[:1], old_mode=old_mode, new_mode=new_mode, new_blob=new_sha)
+        )
         i += 2
     return entries
 
@@ -152,8 +170,18 @@ def collect_repo_facts(repo: Path, commit_sha: str, base_sha: str | None) -> Rep
             continue  # не-UTF-8 или нечитаемый конфиг — считаем отсутствующим
     changes: list[DiffEntry] = []
     if base_sha is not None:
-        raw = run_git(repo, "diff", "--raw", "-z", "--no-renames", "--no-abbrev", "--no-ext-diff", base_sha,
-                      commit_sha, timeout=120.0)
+        raw = run_git(
+            repo,
+            "diff",
+            "--raw",
+            "-z",
+            "--no-renames",
+            "--no-abbrev",
+            "--no-ext-diff",
+            base_sha,
+            commit_sha,
+            timeout=120.0,
+        )
         for entry in parse_raw_diff(raw):
             if entry.new_mode == "120000":
                 try:
@@ -167,8 +195,21 @@ def collect_repo_facts(repo: Path, commit_sha: str, base_sha: str | None) -> Rep
 
 def write_scope_input(repo: Path, commit_sha: str, base_sha: str, facts: RepoFacts, target_dir: Path) -> None:
     """scope.json + diff.patch для сканера. diff пишет сам git (`--output`), байты не декодируются."""
-    run_git(repo, "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
-            "--no-renames", "-U0", f"--output={target_dir / SCOPE_DIFF_FILE}", base_sha, commit_sha, timeout=300.0)
+    run_git(
+        repo,
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-renames",
+        "-U0",
+        f"--output={target_dir / SCOPE_DIFF_FILE}",
+        base_sha,
+        commit_sha,
+        timeout=300.0,
+    )
     spec = {
         "entries": [e.as_json() for e in facts.changes],
         "diff_file": SCOPE_DIFF_FILE,
@@ -224,8 +265,11 @@ def npm_test_script(facts: RepoFacts) -> str | None:
 
 
 def changed_python_files(facts: RepoFacts) -> tuple[str, ...]:
-    return tuple(e.path for e in facts.changes if e.status != "D" and e.path.endswith(".py")
-                 and e.new_mode in ("100644", "100755"))
+    return tuple(
+        e.path
+        for e in facts.changes
+        if e.status != "D" and e.path.endswith(".py") and e.new_mode in ("100644", "100755")
+    )
 
 
 def detect_applicability(facts: RepoFacts) -> dict[str, Applicability]:
@@ -237,16 +281,23 @@ def detect_applicability(facts: RepoFacts) -> dict[str, Applicability]:
         result["ruff-lint"] = Applicability(True, "python sources and ruff/pyproject config", ("*.py", *ruff_markers))
     else:
         result["ruff-lint"] = Applicability(
-            False, "no python sources" if not has_py else "no pyproject.toml/ruff.toml at repository root",
-            ("*.py", "pyproject.toml", "ruff.toml", ".ruff.toml"))
+            False,
+            "no python sources" if not has_py else "no pyproject.toml/ruff.toml at repository root",
+            ("*.py", "pyproject.toml", "ruff.toml", ".ruff.toml"),
+        )
     changed_py = changed_python_files(facts)
     if has_py and ruff_ok and _ruff_format_configured(facts) and changed_py:
-        result["ruff-format"] = Applicability(True, f"ruff format configured, {len(changed_py)} changed python files",
-                                              ("[tool.ruff.format]", *ruff_markers))
+        result["ruff-format"] = Applicability(
+            True,
+            f"ruff format configured, {len(changed_py)} changed python files",
+            ("[tool.ruff.format]", *ruff_markers),
+        )
     else:
         result["ruff-format"] = Applicability(
-            False, "ruff format is not configured or no python files changed",
-            ("[tool.ruff.format]", "ruff.toml [format]", "changed *.py"))
+            False,
+            "ruff format is not configured or no python files changed",
+            ("[tool.ruff.format]", "ruff.toml [format]", "changed *.py"),
+        )
     tests = sorted(p for p in facts.files if _TEST_FILE_RE.search(p))
     if tests:
         result["pytest-unit"] = Applicability(True, f"{len(tests)} python test files", ("test_*.py", "*_test.py"))
@@ -255,8 +306,7 @@ def detect_applicability(facts: RepoFacts) -> dict[str, Applicability]:
     if npm_test_script(facts) is not None:
         result["npm-unit"] = Applicability(True, "package.json defines scripts.test", ("package.json",))
     else:
-        result["npm-unit"] = Applicability(False, "no package.json with a non-default scripts.test",
-                                           ("package.json",))
+        result["npm-unit"] = Applicability(False, "no package.json with a non-default scripts.test", ("package.json",))
     return result
 
 
@@ -358,8 +408,14 @@ def _scope_argv(ctx: GateContext) -> tuple[str, ...]:
 
 
 def _scope_display(ctx: GateContext) -> tuple[str, ...]:
-    return ("python3", "-I", "-S", "-c", f"<aicd-scope-scanner sha256:{SCANNER_SHA256}>",
-            f"{ctx.input_dir}/{SCOPE_INPUT_FILE}")
+    return (
+        "python3",
+        "-I",
+        "-S",
+        "-c",
+        f"<aicd-scope-scanner sha256:{SCANNER_SHA256}>",
+        f"{ctx.input_dir}/{SCOPE_INPUT_FILE}",
+    )
 
 
 def _ruff_lint_argv(_ctx: GateContext) -> tuple[str, ...]:
@@ -381,16 +437,63 @@ def _npm_argv(_ctx: GateContext) -> tuple[str, ...]:
 GATE_SPECS: dict[str, GateSpec] = {
     spec.name: spec
     for spec in (
-        GateSpec("scope", "SCOPE", "aicd-scope", ("python3", "--version"), "scan_report", "scan_report",
-                 _scope_argv, _scope_display, interpret_scope, needs_scope_input=True, executes_repository=False),
-        GateSpec("ruff-lint", "LINT", "ruff", ("ruff", "--version"), "command_result", "report",
-                 _ruff_lint_argv, _ruff_lint_argv, _simple_exit),
-        GateSpec("ruff-format", "FORMAT", "ruff", ("ruff", "--version"), "command_result", "report",
-                 _ruff_format_argv, _ruff_format_argv, _simple_exit),
-        GateSpec("pytest-unit", "UNIT", "pytest", ("python3", "-m", "pytest", "--version"), "test_report",
-                 "test_report", _pytest_argv, _pytest_argv, interpret_pytest),
-        GateSpec("npm-unit", "UNIT", "npm", ("npm", "--version"), "test_report", "test_report",
-                 _npm_argv, _npm_argv, interpret_npm),
+        GateSpec(
+            "scope",
+            "SCOPE",
+            "aicd-scope",
+            ("python3", "--version"),
+            "scan_report",
+            "scan_report",
+            _scope_argv,
+            _scope_display,
+            interpret_scope,
+            needs_scope_input=True,
+            executes_repository=False,
+        ),
+        GateSpec(
+            "ruff-lint",
+            "LINT",
+            "ruff",
+            ("ruff", "--version"),
+            "command_result",
+            "report",
+            _ruff_lint_argv,
+            _ruff_lint_argv,
+            _simple_exit,
+        ),
+        GateSpec(
+            "ruff-format",
+            "FORMAT",
+            "ruff",
+            ("ruff", "--version"),
+            "command_result",
+            "report",
+            _ruff_format_argv,
+            _ruff_format_argv,
+            _simple_exit,
+        ),
+        GateSpec(
+            "pytest-unit",
+            "UNIT",
+            "pytest",
+            ("python3", "-m", "pytest", "--version"),
+            "test_report",
+            "test_report",
+            _pytest_argv,
+            _pytest_argv,
+            interpret_pytest,
+        ),
+        GateSpec(
+            "npm-unit",
+            "UNIT",
+            "npm",
+            ("npm", "--version"),
+            "test_report",
+            "test_report",
+            _npm_argv,
+            _npm_argv,
+            interpret_npm,
+        ),
     )
 }
 

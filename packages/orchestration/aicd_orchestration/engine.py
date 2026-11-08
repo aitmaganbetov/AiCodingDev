@@ -19,7 +19,7 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from aicd_orchestration import plans, retry, store
+from aicd_orchestration import directives, plans, retry, store
 from aicd_orchestration.planner import template_plan
 from aicd_platform import context, leases
 from aicd_platform.clock import utcnow
@@ -222,7 +222,8 @@ class Orchestrator:
             run = await _run_row(conn, run_id, lock=True)
             if run is None or run["status"] != "RUNNING":
                 return []
-            tasks = await _tasks(conn, run_id)
+            # Задачи, отменённые на safe point по поручению, выходят из текущего плана (иначе run не завершится).
+            await directives.finalize_superseded(conn, run_id)
             ready_now = (
                 (
                     await conn.execute(
@@ -274,7 +275,9 @@ class Orchestrator:
                 # v0: run-level gates = сумма task gates; guard БД проверяет PASS/approvals (§18.4).
                 await store.transition_run(conn, run_id, "COMPLETED", reason="required_gates_passed")
                 return []
-            active = {"READY", "LEASED", "RUNNING", "VERIFYING", "RETRY_WAIT", "PENDING"}
+            # PENDING с выполненными зависимостями уже переведены в READY выше; оставшиеся PENDING ждут
+            # незавершённых предков и сами не продвинутся, если в работе ничего нет (иначе run «висит» в RUNNING).
+            active = {"READY", "LEASED", "RUNNING", "VERIFYING", "RETRY_WAIT"}
             blocked = [t for t in tasks if t["status"] == "BLOCKED"]
             if blocked and not any(s in active for s in statuses):
                 await store.transition_run(
@@ -400,6 +403,8 @@ class Orchestrator:
                 commit_sha=outcome.head_commit_sha,
                 quality_profile=run["quality_profile"],
             )
+            if not verification.passed:
+                log.warning("verification failed", extra={"task_id": str(task_id), "summary": verification.summary})
         async with transaction(self.engine, self._ctx(ws)) as conn:
             if not await leases.is_current(conn, "task", task_id, lease.fencing_token):
                 return

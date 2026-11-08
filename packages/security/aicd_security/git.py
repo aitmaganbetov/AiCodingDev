@@ -19,7 +19,11 @@ _BRANCH_RE = re.compile(r"^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,255}$")
 
 
 class GitRepositoryError(ValueError):
-    pass
+    """Сообщение безопасно для API; `detail` (усечённый stderr git) — только для журналов сервера."""
+
+    def __init__(self, message: str, *, detail: str = "") -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 @dataclass(frozen=True)
@@ -71,7 +75,9 @@ def _run(repo: Path, *args: str, timeout: float = 10.0) -> str:
         argv, capture_output=True, text=True, timeout=timeout, env=env, check=False
     )
     if proc.returncode != 0:
-        raise GitRepositoryError(f"git {args[0] if args else ''} завершился с ошибкой")
+        raise GitRepositoryError(
+            f"git {args[0] if args else ''} завершился с ошибкой", detail=(proc.stderr or "").strip()[-500:]
+        )
     return proc.stdout.rstrip("\n")
 
 

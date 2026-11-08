@@ -35,10 +35,19 @@ from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 from aicd_platform.redaction import redact_text, redact_value
 
-ACTION_TYPES: Final = frozenset({
-    "git_push", "branch_delete", "pr_create", "pr_update", "pr_merge", "pr_comment", "migration_apply",
-    "docs_download", "production_deploy",
-})
+ACTION_TYPES: Final = frozenset(
+    {
+        "git_push",
+        "branch_delete",
+        "pr_create",
+        "pr_update",
+        "pr_merge",
+        "pr_comment",
+        "migration_apply",
+        "docs_download",
+        "production_deploy",
+    }
+)
 # Требуют approval (ck_external_actions_approval_required): деструктивная миграция — по флагу.
 APPROVAL_REQUIRED: Final = frozenset({"pr_merge", "production_deploy"})
 
@@ -93,7 +102,8 @@ def idempotency_key(
 ) -> str:
     material = json.dumps(
         [str(run_id) if run_id else None, str(task_id) if task_id else None, action_type, target, plan_version],
-        separators=(",", ":"), ensure_ascii=False,
+        separators=(",", ":"),
+        ensure_ascii=False,
     )
     return hashlib.sha256(material.encode()).hexdigest()
 
@@ -111,17 +121,29 @@ _COLS = (
 
 async def get(conn: AsyncConnection, action_id: uuid.UUID, *, lock: bool = False) -> ExternalAction | None:
     row = (
-        await conn.execute(
-            text(f"SELECT {_COLS} FROM external_actions WHERE id = :id" + (" FOR UPDATE" if lock else "")),  # noqa: S608
-            {"id": action_id},
+        (
+            await conn.execute(
+                text(f"SELECT {_COLS} FROM external_actions WHERE id = :id" + (" FOR UPDATE" if lock else "")),  # noqa: S608
+                {"id": action_id},
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     return ExternalAction(**row) if row else None
 
 
 async def plan(
-    conn: AsyncConnection, *, workspace_id: uuid.UUID, run_id: uuid.UUID | None, task_id: uuid.UUID | None,
-    action_type: str, target: str, plan_version: int | None, request: dict[str, Any], is_destructive: bool = False,
+    conn: AsyncConnection,
+    *,
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID | None,
+    task_id: uuid.UUID | None,
+    action_type: str,
+    target: str,
+    plan_version: int | None,
+    request: dict[str, Any],
+    is_destructive: bool = False,
     approval_id: uuid.UUID | None = None,
 ) -> ExternalAction:
     if action_type not in ACTION_TYPES:
@@ -136,9 +158,19 @@ async def plan(
                 " VALUES (:id, :ws, :run, :task, :at, :key, :target, :destr, :appr, CAST(:req AS jsonb), :rh)"
                 " ON CONFLICT ON CONSTRAINT uq_external_actions_idempotency_key DO NOTHING RETURNING id"
             ),
-            {"id": action_id, "ws": workspace_id, "run": run_id, "task": task_id, "at": action_type, "key": key,
-             "target": target, "destr": is_destructive, "appr": approval_id, "req": canonical_json(request),
-             "rh": request_hash(request)},
+            {
+                "id": action_id,
+                "ws": workspace_id,
+                "run": run_id,
+                "task": task_id,
+                "at": action_type,
+                "key": key,
+                "target": target,
+                "destr": is_destructive,
+                "appr": approval_id,
+                "req": canonical_json(request),
+                "rh": request_hash(request),
+            },
         )
     ).scalar_one_or_none()
     if inserted is None:
@@ -146,11 +178,13 @@ async def plan(
             await conn.execute(text("SELECT id FROM external_actions WHERE idempotency_key = :k"), {"k": key})
         ).scalar_one()
         found = await get(conn, existing)
-        assert found is not None
+        if found is None:  # pragma: no cover — нарушение инварианта
+            raise LookupError("found")
         return found
     await _emit(conn, action_id, workspace_id, run_id, None, "PLANNED", action_type)
     found = await get(conn, action_id)
-    assert found is not None
+    if found is None:  # pragma: no cover — нарушение инварианта
+        raise LookupError("found")
     return found
 
 
@@ -185,15 +219,21 @@ async def begin(conn: AsyncConnection, action_id: uuid.UUID, fencing_token: int)
             if getattr(exc.orig, "sqlstate", None) == "23514":
                 raise ApprovalRequiredError(str(action_id)) from exc
             raise
-        await _emit(conn, action_id, current.workspace_id, current.run_id, current.status, "EXECUTING",
-                    current.action_type)
+        await _emit(
+            conn, action_id, current.workspace_id, current.run_id, current.status, "EXECUTING", current.action_type
+        )
     updated = await get(conn, action_id)
-    assert updated is not None
+    if updated is None:  # pragma: no cover — нарушение инварианта
+        raise LookupError("updated")
     return updated
 
 
 async def confirm(
-    conn: AsyncConnection, action_id: uuid.UUID, *, fencing_token: int, external_ref: str | None,
+    conn: AsyncConnection,
+    action_id: uuid.UUID,
+    *,
+    fencing_token: int,
+    external_ref: str | None,
     result: dict[str, Any] | None = None,
 ) -> ExternalAction:
     current = await get(conn, action_id, lock=True)
@@ -208,13 +248,25 @@ async def confirm(
             "UPDATE external_actions SET status = 'CONFIRMED', confirmed_at = now(), external_ref = :ref,"
             " result = CAST(:res AS jsonb), last_error = NULL, version = version + 1 WHERE id = :id"
         ),
-        {"ref": external_ref[:1024] if external_ref else None,
-         "res": json.dumps(redact_value(result or {}), ensure_ascii=False, default=str), "id": action_id},
+        {
+            "ref": external_ref[:1024] if external_ref else None,
+            "res": json.dumps(redact_value(result or {}), ensure_ascii=False, default=str),
+            "id": action_id,
+        },
     )
-    await _emit(conn, action_id, current.workspace_id, current.run_id, "EXECUTING", "CONFIRMED", current.action_type,
-                external_ref=external_ref)
+    await _emit(
+        conn,
+        action_id,
+        current.workspace_id,
+        current.run_id,
+        "EXECUTING",
+        "CONFIRMED",
+        current.action_type,
+        external_ref=external_ref,
+    )
     updated = await get(conn, action_id)
-    assert updated is not None
+    if updated is None:  # pragma: no cover — нарушение инварианта
+        raise LookupError("updated")
     return updated
 
 
@@ -239,7 +291,8 @@ async def fail(
     )
     await _emit(conn, action_id, current.workspace_id, current.run_id, current.status, "FAILED", current.action_type)
     updated = await get(conn, action_id)
-    assert updated is not None
+    if updated is None:  # pragma: no cover — нарушение инварианта
+        raise LookupError("updated")
     return updated
 
 
@@ -248,7 +301,13 @@ Probe = Callable[[], Awaitable[Outcome | None]]
 
 
 async def execute_once(
-    engine: AsyncEngine, workspace_id: uuid.UUID, action_id: uuid.UUID, fencing_token: int, *, do: Do, probe: Probe,
+    engine: AsyncEngine,
+    workspace_id: uuid.UUID,
+    action_id: uuid.UUID,
+    fencing_token: int,
+    *,
+    do: Do,
+    probe: Probe,
 ) -> ExternalAction:
     """Выполнить действие ровно один раз (с точки зрения внешней системы).
 
@@ -264,15 +323,22 @@ async def execute_once(
             raise LookupError(str(action_id))
         if current.status in ("CONFIRMED", "COMPENSATED"):
             return current
-        maybe_applied = current.status == "EXECUTING" or (current.status == "FAILED" and current.executing_at is not None)
+        maybe_applied = current.status == "EXECUTING" or (
+            current.status == "FAILED" and current.executing_at is not None
+        )
     async with transaction(engine, ctx) as conn:
         await begin(conn, action_id, fencing_token)
     if maybe_applied:
         observed = await probe()
         if observed is not None:
             async with transaction(engine, ctx) as conn:
-                return await confirm(conn, action_id, fencing_token=fencing_token, external_ref=observed.external_ref,
-                                     result={**observed.result, "reconciled": True})
+                return await confirm(
+                    conn,
+                    action_id,
+                    fencing_token=fencing_token,
+                    external_ref=observed.external_ref,
+                    result={**observed.result, "reconciled": True},
+                )
     try:
         outcome = await do()
     except Exception as exc:
@@ -280,17 +346,34 @@ async def execute_once(
             await fail(conn, action_id, error=f"{type(exc).__name__}: {exc}", fencing_token=fencing_token)
         raise
     async with transaction(engine, ctx) as conn:
-        return await confirm(conn, action_id, fencing_token=fencing_token, external_ref=outcome.external_ref,
-                             result=outcome.result)
+        return await confirm(
+            conn, action_id, fencing_token=fencing_token, external_ref=outcome.external_ref, result=outcome.result
+        )
 
 
 async def _emit(
-    conn: AsyncConnection, action_id: uuid.UUID, workspace_id: uuid.UUID, run_id: uuid.UUID | None,
-    previous: str | None, status: str, action_type: str, *, external_ref: str | None = None,
+    conn: AsyncConnection,
+    action_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID | None,
+    previous: str | None,
+    status: str,
+    action_type: str,
+    *,
+    external_ref: str | None = None,
 ) -> None:
     await outbox.emit(
-        conn, event_type="external_action.state_changed", aggregate_type="external_action", aggregate_id=action_id,
-        workspace_id=workspace_id, run_id=run_id,
-        payload={"action_id": str(action_id), "action_type": action_type, "from": previous, "to": status,
-                 "external_ref": external_ref},
+        conn,
+        event_type="external_action.state_changed",
+        aggregate_type="external_action",
+        aggregate_id=action_id,
+        workspace_id=workspace_id,
+        run_id=run_id,
+        payload={
+            "action_id": str(action_id),
+            "action_type": action_type,
+            "from": previous,
+            "to": status,
+            "external_ref": external_ref,
+        },
     )

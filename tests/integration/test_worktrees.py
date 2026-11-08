@@ -29,7 +29,7 @@ def test_create_diff_commit_remove(tmp_path: Path) -> None:
     mgr = WorktreeManager(tmp_path / "worktrees")
     run_id, task_id = uuid7(), uuid7()
     info = mgr.create(repo, worktree_id=uuid7(), run_id=run_id, task_id=task_id, base_commit_sha=base)
-    assert info.branch_name == f"aicd/{run_id.hex[-12:]}/{task_id.hex[-12:]}"
+    assert info.branch_name == f"aicd/{run_id.hex[-12:]}/{task_id.hex[-12:]}-{info.worktree_id.hex[-8:]}"
     assert (info.path / "README.md").exists() and not (repo / "HOOK_RAN").exists()
     (info.path / "new.txt").write_text("hello\n")
     (info.path / "README.md").write_text("changed\n")

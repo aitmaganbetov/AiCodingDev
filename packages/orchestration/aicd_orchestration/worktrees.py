@@ -39,8 +39,10 @@ class WorktreeInfo:
 
 
 def branch_for(run_id: uuid.UUID, task_id: uuid.UUID | None, worktree_id: uuid.UUID) -> str:
-    # Последние 12 hex — случайная часть UUIDv7 (первые — время, совпадают у соседних ID).
-    return validate_branch_name(f"aicd/{run_id.hex[-12:]}/{(task_id or worktree_id).hex[-12:]}")
+    # Последние hex — случайная часть UUIDv7 (первые — время, совпадают у соседних ID). Суффикс worktree
+    # делает ветку уникальной для каждой попытки: повтор задачи получает свежий worktree и свою ветку.
+    owner = (task_id or worktree_id).hex[-12:]
+    return validate_branch_name(f"aicd/{run_id.hex[-12:]}/{owner}-{worktree_id.hex[-8:]}")
 
 
 class WorktreeManager:
@@ -78,7 +80,7 @@ class WorktreeManager:
         try:
             run_git(repo_real, "worktree", "add", "--quiet", "-b", branch, str(path), base_commit_sha)
         except GitRepositoryError as exc:
-            raise WorktreeError("не удалось создать worktree") from exc
+            raise WorktreeError(f"не удалось создать worktree: {exc.detail}") from exc
         return WorktreeInfo(worktree_id, path, str(worktree_id), branch, base_commit_sha)
 
     def diff(self, info_path: Path, base_commit_sha: str) -> bytes:
