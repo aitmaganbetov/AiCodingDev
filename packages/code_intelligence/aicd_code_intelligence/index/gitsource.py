@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from aicd_security.git import GitRepositoryError, run_git_bytes
 
@@ -47,8 +47,7 @@ def is_safe_tree_path(path: str) -> bool:
         return False
     if any(ord(ch) < 0x20 or ch == "\x7f" for ch in path):
         return False
-    parts = PurePosixPath(path).parts
-    return not any(part in ("..", ".", "") for part in parts) and "\\" not in path
+    return not any(part in ("..", ".", "") for part in path.split("/")) and "\\" not in path
 
 
 def parse_ls_tree(raw: bytes) -> tuple[list[TreeEntry], list[str]]:

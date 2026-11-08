@@ -62,15 +62,15 @@ def test_zip_bomb_ratio_detected_while_streaming() -> None:
 
 
 def test_zip_bomb_lying_header_detected() -> None:
-    """Заголовок заявляет маленький размер — проверка идёт по фактической распаковке."""
+    """Заголовки заявляют 10 байт: распаковка не доверяет им — запись либо обрывается проверкой CRC,
+    либо отклоняется по коэффициенту; содержимое не попадает в результат."""
     data = bytearray(_zip([("x.md", b"A" * (5 * 1024 * 1024))]))
-    # Подделываем uncompressed size в central directory: zipfile не доверяет ему при потоковом чтении.
-    contents_error: ArchiveRejectedError | None = None
-    try:
+    for sig, offset in ((b"PK\x03\x04", 22), (b"PK\x01\x02", 24)):
+        pos = data.index(sig) + offset
+        data[pos : pos + 4] = (10).to_bytes(4, "little")
+    with pytest.raises(ArchiveRejectedError) as exc:
         extract_zip(bytes(data))
-    except ArchiveRejectedError as exc:
-        contents_error = exc
-    assert contents_error is not None and contents_error.code == "ARCHIVE_BOMB"
+    assert exc.value.code in ("ARCHIVE_INVALID", "ARCHIVE_BOMB")
 
 
 def test_zip_total_size_cap() -> None:
