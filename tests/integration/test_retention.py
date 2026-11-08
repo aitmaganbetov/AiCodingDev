@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
+import secrets
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
@@ -15,6 +17,7 @@ import pytest
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_platform.artifacts import FileSystemArtifactStore
 from aicd_platform.config import Settings
 from aicd_platform.db import create_engine
 from aicd_platform.ids import uuid7
@@ -308,3 +311,157 @@ async def test_retention_is_idempotent(
     assert second.partitions_created == dict.fromkeys(second.partitions_created, 0)
     assert second.partitions_dropped == [] and second.runs_archived == [] and first.session_id != second.session_id
     assert isinstance(second.session_id, uuid.UUID)
+
+
+def _artifact_row(
+    admin: psycopg.Connection, store: FileSystemArtifactStore, ws: uuid.UUID, *, kind: str = "report",
+    retention_class: str = "standard", age_days: int, run: uuid.UUID | None = None,
+) -> tuple[uuid.UUID, str]:  # fmt: skip
+    art = uuid7()
+    stored = store.put(ws, art, io.BytesIO(f"{kind}-{art}".encode()))
+    admin.execute(
+        "INSERT INTO artifacts (id, workspace_id, run_id, kind, storage_ref, sha256, size_bytes, mime_type,"
+        " is_sensitive, retention_class, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 'text/plain', %s, %s,"
+        " now() - make_interval(days => %s))",
+        (art, ws, run, kind, stored.storage_ref, stored.sha256, stored.size_bytes, kind == "cli_raw_log",
+         retention_class, age_days),
+    )  # fmt: skip
+    return art, stored.storage_ref
+
+
+def _snapshot(admin: psycopg.Connection, ws: uuid.UUID, repo: uuid.UUID, status: str, age_days: int) -> uuid.UUID:
+    sid = uuid7()
+    admin.execute(
+        "INSERT INTO code_index_snapshots (id, workspace_id, repository_id, commit_sha, index_version, status,"
+        " file_count, symbol_count, created_at, completed_at) VALUES (%s, %s, %s, %s, 1, %s, 1, 0,"
+        " now() - make_interval(days => %s), now() - make_interval(days => %s))",
+        (sid, ws, repo, secrets.token_hex(20), status, age_days, age_days),
+    )
+    return sid
+
+
+@pytest.mark.db
+async def test_retention_webhooks_snapshots_and_artifacts(
+    database: testdb.TestDatabase, settings: Settings, maintenance_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """P3-18 (Phase 9), OQ-41 (a), OQ-47 (7): доставки webhook 30 дней, снимки индекса (5 последних READY,
+    FAILED 7 дней, используемые сохраняются), SUPERSEDED-снимки документации 90 дней, артефакты по классу."""
+    store = FileSystemArtifactStore(tmp_path / "artifacts")
+    with connect_admin(database) as admin:
+        tenant = seed_tenant(admin)
+        ws, repo = tenant.workspace_id, tenant.repository_id
+        # --- webhook-доставки
+        deliveries = {}
+        for key, status, age in (("old_processed", "PROCESSED", 40), ("old_received", "RECEIVED", 40),
+                                 ("fresh", "PROCESSED", 1)):  # fmt: skip
+            deliveries[key] = uuid7()
+            admin.execute(
+                "INSERT INTO github_webhook_deliveries (id, delivery_guid, event, signature_valid, payload_sha256,"
+                " status, received_at, processed_at) VALUES (%s, %s, 'ping', true, %s, %s,"
+                " now() - make_interval(days => %s), CASE WHEN %s = 'RECEIVED' THEN NULL ELSE now() END)",
+                (deliveries[key], uuid.uuid4(), "0" * 64, status, age, status),
+            )
+        # --- снимки индекса: 7 READY (старые → новые), FAILED старый/свежий
+        ready = [_snapshot(admin, ws, repo, "READY", 70 - i) for i in range(7)]
+        failed_old = _snapshot(admin, ws, repo, "FAILED", 10)
+        failed_fresh = _snapshot(admin, ws, repo, "FAILED", 1)
+        admin.execute(
+            "INSERT INTO code_files (id, workspace_id, snapshot_id, path, blob_sha, content_hash, size_bytes)"
+            " VALUES (%s, %s, %s, 'a.py', %s, %s, 1)",
+            (uuid7(), ws, ready[0], "a" * 40, "b" * 64),
+        )
+        # Завершённое инкрементальное задание на базе ready[0] удаляется вместе со снимком; ready[1] — база
+        # ожидающего задания, сохраняется.
+        done_job = uuid7()
+        admin.execute(
+            "INSERT INTO indexing_jobs (id, workspace_id, repository_id, commit_sha, kind, base_snapshot_id)"
+            " VALUES (%s, %s, %s, %s, 'incremental', %s)",
+            (done_job, ws, repo, "c" * 40, ready[0]),
+        )
+        admin.execute("UPDATE indexing_jobs SET status = 'RUNNING', started_at = now() WHERE id = %s", (done_job,))
+        admin.execute(
+            "UPDATE indexing_jobs SET status = 'SUCCEEDED', finished_at = now(), snapshot_id = %s WHERE id = %s",
+            (ready[2], done_job),
+        )
+        admin.execute(
+            "INSERT INTO indexing_jobs (id, workspace_id, repository_id, commit_sha, kind, status, base_snapshot_id)"
+            " VALUES (%s, %s, %s, %s, 'incremental', 'QUEUED', %s)",
+            (uuid7(), ws, repo, "d" * 40, ready[1]),
+        )
+        # --- снимки документации: SUPERSEDED старый (свободный и со ссылкой из артефакта-хранилища)
+        source = uuid7()
+        admin.execute(
+            "INSERT INTO documentation_sources (id, workspace_id, source_type, uri_or_file_ref, created_by)"
+            " VALUES (%s, %s, 'url', 'https://docs.example.test/x', %s)",
+            (source, ws, tenant.owner_id),
+        )
+        doc_art, doc_ref = _artifact_row(admin, store, ws, kind="documentation", age_days=400)
+        ready_art, _ = _artifact_row(admin, store, ws, kind="documentation", age_days=400)
+        docs = {}
+        for key, status, ref in (("old_free", "SUPERSEDED", None), ("old_with_body", "SUPERSEDED", doc_art),
+                                 ("ready", "READY", ready_art)):  # fmt: skip
+            docs[key] = uuid7()
+            admin.execute(
+                "INSERT INTO documentation_snapshots (id, workspace_id, source_id, content_hash, status, storage_ref,"
+                " created_at, fetched_at) VALUES (%s, %s, %s, %s, %s, %s, now() - interval '120 days',"
+                " now() - interval '120 days')",
+                (docs[key], ws, source, secrets.token_hex(32), status, ref),
+            )
+        # --- артефакты
+        arts = {
+            "ephemeral_old": _artifact_row(admin, store, ws, retention_class="ephemeral", age_days=8),
+            "ephemeral_fresh": _artifact_row(admin, store, ws, retention_class="ephemeral", age_days=2),
+            "raw_log_old": _artifact_row(admin, store, ws, kind="cli_raw_log", age_days=31),
+            "standard_old": _artifact_row(admin, store, ws, age_days=181),
+            "standard_fresh": _artifact_row(admin, store, ws, age_days=100),
+            "evidence_old": _artifact_row(admin, store, ws, retention_class="evidence", age_days=900),
+        }
+        active_run = new_run(admin, tenant)
+        arts["active_run_old"] = _artifact_row(admin, store, ws, age_days=400, run=active_run)
+        referenced, referenced_ref = _artifact_row(admin, store, ws, kind="checkpoint_state", age_days=400)
+        admin.execute(
+            "INSERT INTO checkpoints (id, workspace_id, run_id, reason, state_version, plan_version, state_ref)"
+            " VALUES (%s, %s, %s, 'periodic', 1, 1, %s)",
+            (uuid7(), ws, active_run, referenced),
+        )
+
+    job_settings = settings.model_copy(update={"retention_archive_root": tmp_path / "archive"})
+    report = await run_retention(maintenance_engine, job_settings, artifacts=store, reason="phase9 retention")
+
+    with connect_admin(database) as admin:
+        left = {r[0] for r in admin.execute("SELECT id FROM github_webhook_deliveries WHERE id = ANY(%s)",
+                                            (list(deliveries.values()),)).fetchall()}  # fmt: skip
+        assert left == {deliveries["old_received"], deliveries["fresh"]}, "старые обработанные доставки удалены"
+        assert any("необработанных доставок" in w for w in report.warnings)
+
+        snaps = {r[0] for r in admin.execute("SELECT id FROM code_index_snapshots WHERE repository_id = %s",
+                                             (repo,)).fetchall()}  # fmt: skip
+        assert snaps == {*ready[1:], failed_fresh}, "5 последних READY + база ожидающего задания + свежий FAILED"
+        assert failed_old not in snaps and ready[0] not in snaps
+        assert admin.execute("SELECT count(*) FROM code_files WHERE snapshot_id = %s", (ready[0],)).fetchone() == (0,)
+        assert admin.execute("SELECT count(*) FROM indexing_jobs WHERE id = %s", (done_job,)).fetchone() == (0,)
+
+        doc_left = {r[0] for r in admin.execute("SELECT id FROM documentation_snapshots WHERE source_id = %s",
+                                                (source,)).fetchall()}  # fmt: skip
+        assert doc_left == {docs["old_with_body"], docs["ready"]} or doc_left == {docs["ready"]}
+        assert docs["old_free"] not in doc_left
+
+        art_left = {r[0] for r in admin.execute("SELECT id FROM artifacts WHERE workspace_id = %s", (ws,)).fetchall()}
+        gone = {"ephemeral_old", "raw_log_old", "standard_old"}
+        for key, (art_id, art_ref) in arts.items():
+            assert (art_id in art_left) is (key not in gone), key
+            assert store.exists(art_ref) is (key not in gone), f"объект {key}"
+        assert referenced in art_left and store.exists(referenced_ref), "артефакт со ссылкой (FK RESTRICT) сохранён"
+        if docs["old_with_body"] not in doc_left:  # снимок удалён ⇒ его артефакт (400 дней, standard) тоже
+            assert doc_art not in art_left and not store.exists(doc_ref)
+        audited = {
+            r[0]
+            for r in admin.execute(
+                "SELECT metadata->>'table' FROM audit_events WHERE action = 'maintenance.rows_deleted'"
+                " AND resource_id = %s",
+                (report.session_id,),
+            ).fetchall()
+        }
+    assert {"github_webhook_deliveries", "code_index_snapshots", "documentation_snapshots", "artifacts"} <= audited
+    assert report.artifact_objects_deleted >= len(gone)
+    assert "usage_metrics" not in report.skipped_tables and "code_index_snapshots" not in report.skipped_tables

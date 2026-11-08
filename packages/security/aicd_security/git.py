@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _SAFE_ENV_KEYS = ("PATH", "LANG", "LC_ALL")
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # объект пустого дерева (известен любому репозиторию git)
 _BRANCH_RE = re.compile(r"^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,255}$")
 
 
@@ -114,6 +115,9 @@ def _argv_env(repo: Path, args: tuple[str, ...]) -> tuple[list[str], dict[str, s
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_OPTIONAL_LOCKS": "0",
             "HOME": "/nonexistent",
+            # SC-SBX-11: атрибуты читаются из пустого дерева, а не из `.gitattributes` недоверенного worktree —
+            # filter/diff/textconv-драйверы, на которые ссылаются атрибуты, не выбираются и не исполняются.
+            "GIT_ATTR_SOURCE": EMPTY_TREE,
         }
     )
     argv = [
@@ -124,6 +128,10 @@ def _argv_env(repo: Path, args: tuple[str, ...]) -> tuple[list[str], dict[str, s
         "core.fsmonitor=false",
         "-c",
         "core.sshCommand=/bin/false",
+        "-c",
+        "protocol.ext.allow=never",  # ext:: транспорт исполняет произвольные команды
+        "-c",
+        "submodule.recurse=false",
         "-c",
         f"safe.directory={repo}",
         "-C",

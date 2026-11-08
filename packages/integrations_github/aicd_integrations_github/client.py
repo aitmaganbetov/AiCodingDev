@@ -215,6 +215,11 @@ class GitHubClient:
     def configured(self) -> bool:
         return self._signer is not None
 
+    @property
+    def app_id(self) -> int | None:
+        """ID GitHub App подписанта (проверка `foreign_app` установки); без ключа — None."""
+        return self._signer.app_id if self._signer is not None else None
+
     def _jwt(self) -> str:
         if self._signer is None:
             raise GitHubNotConfiguredError("GitHub App не настроен")

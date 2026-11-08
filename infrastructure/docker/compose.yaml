@@ -24,8 +24,26 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
       POSTGRES_DB: aicd
     secrets: [pg_admin_password, pg_migrator_password, pg_app_password, pg_worker_password, pg_maintenance_password]
+    # Непрерывное архивирование WAL для PITR (P9-05, docs/runbooks/backups.md): сегменты атомарно (cp → mv)
+    # кладутся в том pgwal, откуда `python -m scripts.backup pg-wal-sync` переносит их в зашифрованный
+    # репозиторий бэкапов. archive_timeout ограничивает RPO при малой нагрузке. Каталог архива создаётся с
+    # владельцем postgres до запуска штатного entrypoint образа.
+    entrypoint: ["/bin/sh", "-c", "install -d -o postgres -g postgres -m 0700 /var/lib/postgresql/wal-archive && exec docker-entrypoint.sh \"$$@\"", "aicd-postgres"]
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /var/lib/postgresql/wal-archive/%f && cp %p /var/lib/postgresql/wal-archive/%f.tmp && mv /var/lib/postgresql/wal-archive/%f.tmp /var/lib/postgresql/wal-archive/%f
+      - -c
+      - archive_timeout=${AICD_PG_ARCHIVE_TIMEOUT:-60}
+      - -c
+      - max_wal_senders=4
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - pgwal:/var/lib/postgresql/wal-archive
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
       - ../postgres:/aicd-bootstrap:ro
     networks: [backend]
@@ -146,6 +164,7 @@ networks:
 
 volumes:
   pgdata: {}
+  pgwal: {}  # архив WAL (P9-05); переносится в репозиторий бэкапов pg-wal-sync
   artifacts: {}
   prometheus-data: {}
   alertmanager-data: {}

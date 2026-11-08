@@ -416,6 +416,7 @@ def test_workspace_cap_falls_back_to_other_provider() -> None:
 def test_effective_timeout_precedence() -> None:
     from aicd_cli_adapters.registry import effective_timeout
 
-    assert effective_timeout(1800, 600) == 600  # у задачи значение столбца по умолчанию ⇒ настройка workspace
+    assert effective_timeout(None, 600) == 600  # у задачи тайм-аут не задан (NULL) ⇒ настройка workspace
     assert effective_timeout(900, 600) == 900  # явный тайм-аут задачи важнее
+    assert effective_timeout(1800, 600) == 1800  # OQ-45: явное 1800 отличимо от «не задано» (миграция 0014)
     assert effective_timeout(20000, 600) == 14400 and effective_timeout(10, 600) == 30

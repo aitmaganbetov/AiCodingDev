@@ -1,0 +1,17 @@
+# Восстановление PostgreSQL из бэкапа (P9-05, docs/runbooks/backups.md §5): поверх compose.yaml.
+#   docker compose -f compose.yaml -f compose.restore.yaml up -d --wait postgres
+# Том данных — восстановленный (`python -m scripts.backup restore-pg --data-volume …`), архив WAL для
+# restore_command — том `--wal-volume` (только чтение). После promote: `python -m scripts.backup post-restore`,
+# затем стек поднимается этой же парой файлов (или том переименовывается в штатный pgdata — см. runbook).
+services:
+  postgres:
+    volumes:
+      - wal-restore:/var/lib/postgresql/wal-restore:ro
+
+volumes:
+  pgdata:
+    external: true
+    name: "${AICD_RESTORE_PGDATA_VOLUME:-aicodingdev_pgdata_restored}"
+  wal-restore:
+    external: true
+    name: "${AICD_RESTORE_WAL_VOLUME:-aicodingdev_wal_restore}"

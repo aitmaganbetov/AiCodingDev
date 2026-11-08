@@ -3,6 +3,11 @@
 `python -m tests.support.chaos_worker <json>`; JSON: database_url, tmp, repository_roots, scenario,
 workspace_id, run_id. Процесс CLI запускается в своей группе (start_new_session) и переживает гибель воркера —
 это именно та ситуация, которую разбирает recovery reconciler.
+
+P9-03: необязательные `hang_at` + `marker` — точка сбоя: процесс доходит до неё, создаёт файл `marker` и
+«зависает», пока тест не убьёт его SIGKILL (детерминированная гибель посреди шага):
+* `lease` — аренда задачи взята, попытка RUNNING, CLI ещё не запущен (вход в исполнитель);
+* `gate` — CLI завершился, задача VERIFYING, строка `gate_executions` RUNNING (запуск процесса gate).
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ import json
 import sys
 import uuid
 from pathlib import Path
+from typing import Any
 
 from aicd_platform.db import create_engine
 from tests.support.phase3 import build_orchestrator
@@ -22,6 +28,17 @@ async def main(config: dict[str, str]) -> None:
     roots = {k: Path(v) for k, v in json.loads(config["repository_roots"]).items()}
     orch = build_orchestrator(engine, Path(config["tmp"]), roots, config["scenario"])
     orch.lease_ttl_seconds = int(config.get("lease_ttl_seconds", "120"))
+    hang_at, marker = config.get("hang_at"), config.get("marker")
+    if hang_at and marker:
+
+        async def hang(*args: Any, **kwargs: Any) -> Any:
+            await asyncio.to_thread(Path(marker).write_text, hang_at)
+            await asyncio.sleep(3600)
+
+        if hang_at == "lease":
+            orch.executor.execute = hang  # type: ignore[method-assign]
+        elif hang_at == "gate":
+            orch.verifier._execute = hang  # type: ignore[attr-defined]
     run_id, ws = uuid.UUID(config["run_id"]), uuid.UUID(config["workspace_id"])
     await orch.on_run_created(run_id, ws)
     await orch.drive(run_id, ws)

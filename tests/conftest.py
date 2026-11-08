@@ -25,7 +25,36 @@ REDIS_URL = os.environ.get("AICD_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
 PASSWORD = "Correct-Horse-Battery-9"
 
 
+def _mark_acceptance(items: list[pytest.Item]) -> None:
+    """P9-01: тесты из матрицы приёмки (tests/acceptance/matrix.yaml) — маркер `acceptance` и свойства junit `ac`."""
+    from tests.acceptance import matrix
+
+    loaded = matrix.load()
+    for item in items:
+        acs = loaded.acs_for_nodeid(item.nodeid)
+        if acs:
+            item.add_marker(pytest.mark.acceptance)
+            item.user_properties.append(("ac", ",".join(sorted(acs))))
+            item.user_properties.append(("nodeid", item.nodeid))
+
+
+def _mark_security(items: list[pytest.Item]) -> None:
+    """P9-02: security suite — всё в tests/security/ и тесты из каталога tests/security/catalog.py получают маркер
+    `security` (`pytest -m security`) и свойство junit `controls` (отчёт scripts/security_report.py)."""
+    from tests.security import catalog
+
+    for item in items:
+        if catalog.is_security_test(item.nodeid):
+            item.add_marker(pytest.mark.security)
+            controls = catalog.controls_for_nodeid(item.nodeid)
+            if controls:
+                item.user_properties.append(("controls", ",".join(controls)))
+            item.user_properties.append(("security_nodeid", item.nodeid))
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    _mark_acceptance(items)
+    _mark_security(items)
     if testdb.admin_url():
         return
     skip = pytest.mark.skip(reason="AICD_TEST_DATABASE_ADMIN_URL не задан")

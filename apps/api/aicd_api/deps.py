@@ -84,6 +84,33 @@ async def current_principal(request: Request) -> identity.Principal:
     return principal
 
 
+async def require_step_up(request: Request, principal: identity.Principal, operation: str) -> None:
+    """Step-up re-auth (SC-IAM-08, SECURITY_ARCHITECTURE §3.2): пароль в этой сессии вводился > 10 мин назад ⇒
+    403 `step_up_required` (+ `max_age_seconds`); клиент подтверждает пароль `POST /auth/reauthenticate` и
+    повторяет запрос. Отказ аудируется (`auth.step_up_required`)."""
+    if identity.step_up_fresh(principal):
+        return
+    metrics.AUTHZ_DENIED.labels("step_up").inc()
+    state = app_state(request)
+    async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
+        await audit.record(
+            conn,
+            action="auth.step_up_required",
+            resource_type="user_session",
+            resource_id=principal.session_id,
+            actor_type="user",
+            actor_id=principal.user_id,
+            workspace_id=None,
+            outcome="denied",
+            metadata={"operation": operation, "method": request.method},
+        )
+    raise ProblemError(
+        "step_up_required",
+        detail="Подтвердите пароль: операция требует повторной аутентификации",
+        extensions={"max_age_seconds": int(identity.STEP_UP_MAX_AGE.total_seconds())},
+    )
+
+
 @dataclass(frozen=True)
 class Access:
     principal: identity.Principal

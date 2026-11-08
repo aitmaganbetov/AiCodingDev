@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import Response
 
 from aicd_api import views
-from aicd_api.deps import Access, app_state, authorize, current_principal, workspace_access
+from aicd_api.deps import Access, app_state, authorize, current_principal, require_step_up, workspace_access
 from aicd_api.idempotency import CommandResult, run_idempotent
 from aicd_api.responses import etag, json_response, require_if_match
 from aicd_api.routers import op
@@ -117,6 +117,7 @@ async def update_workspace(
     changes = body.model_dump(exclude_unset=True)
     if "settings" in changes:
         await authorize(request, access, "workspace:policy")
+        await require_step_up(request, principal, "workspace:policy")  # SC-IAM-08: смена политики
     expected = require_if_match(request.headers.get("if-match"))
     if not changes:
         raise ProblemError("validation_error", errors=[FieldError("/", "min_properties", "нет изменяемых полей")])
@@ -192,6 +193,7 @@ async def add_member(
 ) -> Response:
     access = await _ws_access(request, workspace_id, principal)
     await authorize(request, access, "member:manage")
+    await require_step_up(request, principal, "member:manage")  # SC-IAM-08: управление участниками
 
     async def command(conn: AsyncConnection) -> CommandResult:
         row = await identity.add_member(
@@ -216,6 +218,7 @@ async def update_member(
 ) -> Response:
     access = await _ws_access(request, workspace_id, principal)
     await authorize(request, access, "member:manage")
+    await require_step_up(request, principal, "member:manage")  # SC-IAM-08: управление участниками
     expected = require_if_match(request.headers.get("if-match"))
     state = app_state(request)
     async with transaction(state.engine, access.db()) as conn:
@@ -239,6 +242,7 @@ async def remove_member(
 ) -> Response:
     access = await _ws_access(request, workspace_id, principal)
     await authorize(request, access, "member:manage")
+    await require_step_up(request, principal, "member:manage")  # SC-IAM-08: управление участниками
     expected = require_if_match(request.headers.get("if-match"))
     state = app_state(request)
     async with transaction(state.engine, access.db()) as conn:

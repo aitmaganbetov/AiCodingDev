@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     retention_processed_events_days: int = Field(default=30, ge=1)
     retention_user_sessions_days: int = Field(default=30, ge=1)
     retention_provider_health_days: int = Field(default=30, ge=1)
+    retention_webhook_deliveries_days: int = Field(default=30, ge=1)
+    retention_usage_metrics_days: int = Field(default=365, ge=1)
+    retention_index_snapshots_failed_days: int = Field(default=7, ge=1)
+    retention_index_snapshots_keep_ready: int = Field(default=5, ge=1)
+    retention_documentation_superseded_days: int = Field(default=90, ge=1)
+    retention_artifacts_ephemeral_days: int = Field(default=7, ge=1)
+    retention_artifacts_raw_log_days: int = Field(default=30, ge=1)
+    retention_artifacts_standard_days: int = Field(default=180, ge=1)
     # Партиции создаются на N месяцев вперёд; алерт, если впереди меньше 2 (§20.1).
     retention_partitions_ahead_months: int = Field(default=3, ge=2, le=24)
     # Пакетное удаление непартиционированных таблиц (§20.2): 5–10 тыс. строк с паузами.

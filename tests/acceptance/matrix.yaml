@@ -1,0 +1,352 @@
+# P9-01: матрица приёмки AC-01…AC-16 (docs/planning/ACCEPTANCE_CRITERIA.md, ТЗ §19).
+#
+# Каждый AC разложен на пункты (clauses) — утверждения текста критерия; у пункта — доказывающие его тесты:
+#   py:  node id pytest (точное совпадение или все параметризации `id[...]`);
+#   web: "<suite>:<файл относительно testDir>::<начало заголовка теста>", suite ∈ {live, mocked}.
+# Пункт без тестов недопустим (кроме kind: real_cli). Результаты берутся ТОЛЬКО из junit-отчётов прогона
+# (scripts/run_acceptance.py); тест, не найденный в отчёте, = MISSING (≠ PASS); SKIPPED ≠ PASS.
+# kind: real_cli — часть критерия, проверяемая только opt-in прогоном с настоящими Codex/Claude CLI (**RC** в
+# ACCEPTANCE_CRITERIA.md); пока P2-01/P2-13 BLOCKED, такие пункты отчитываются как BLOCKED с причиной.
+# Каталог тестов pytest с этими node id получает маркер `acceptance` (tests/conftest.py) — `pytest -m acceptance`.
+
+real_cli_blocked_reason: >-
+  Opt-in прогон с реальными CLI невозможен: P2-01 (spike probe Codex/Claude CLI), P2-05/P2-06 (адаптеры реальных CLI)
+  и P2-13 (opt-in набор) — BLOCKED: нет машины с установленными и авторизованными официальными Codex CLI и Claude Code
+  CLI (решение владельца, IMPLEMENTATION_BACKLOG §Phase 2; OQ-01, OQ-03). Тестов real-CLI в репозитории нет.
+
+criteria:
+  - id: AC-01
+    title: Подключение локального репозитория, создание проекта, запуск DEVELOP
+    clauses:
+      - text: Локальный Git-репозиторий из allowlist привязывается к проекту (201); путь вне allowlist отклоняется
+        tests:
+          - py: tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run
+          - py: tests/integration/test_api_projects.py::test_attach_local_repository
+          - py: tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths
+          - web: "live:smoke.spec.ts::live smoke"
+      - text: POST /runs mode=DEVELOP → 201, status=CREATED
+        tests:
+          - py: tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run
+          - py: tests/integration/test_runs_api.py::test_create_run_is_idempotent_and_key_reuse_with_other_body_is_rejected
+      - text: run переходит в DISCOVERY, событие run.state_changed получено по SSE
+        tests:
+          - py: tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run
+          - py: tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence
+          - web: "live:mission-control.spec.ts::AC-05"
+      - kind: real_cli
+        text: То же с реальными CLI (RC)
+
+  - id: AC-02
+    title: Определение стека, индексация по commit, DAG без циклов
+    clauses:
+      - text: code_index_snapshots для (repository, base_commit_sha) = READY
+        tests:
+          - py: tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack
+      - text: project_technologies заполнены (стек определён)
+        tests:
+          - py: tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack
+      - text: План проходит валидацию ацикличности
+        tests:
+          - py: tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack
+          - py: tests/unit/test_orchestration_core.py::test_acyclic_plans_validate_and_respect_edges
+      - text: План с циклом отклоняется PLAN_CYCLE_DETECTED
+        tests:
+          - py: tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack
+          - py: tests/unit/test_orchestration_core.py::test_any_back_edge_is_detected_with_cycle_path
+          - py: tests/unit/test_orchestration_core.py::test_plan_rejections
+
+  - id: AC-03
+    title: Router назначает доступный официальный CLI без AI API
+    clauses:
+      - text: routing_decisions содержит выбранный провайдер ∈ {codex, claude} с score_breakdown
+        tests:
+          - py: tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac03_router_selects_official_cli_and_platform_has_no_ai_api_egress
+          - py: tests/e2e/test_routing_review.py::test_review_goes_to_the_other_provider_and_decisions_are_recorded
+          - py: tests/unit/test_routing.py::test_quality_drives_selection_and_breakdown_is_complete
+      - text: Сетевой трафик платформы к AI API отсутствует (egress-лог процесса платформы; runner — только allowlist egress-proxy)
+        tests:
+          - py: tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac03_router_selects_official_cli_and_platform_has_no_ai_api_egress
+          - py: tests/security/test_sandbox.py::test_egress_proxy_enforces_allowlist
+          - py: tests/security/test_sandbox.py::test_no_direct_egress_on_internal_network
+      - text: В зависимостях нет AI SDK (deny-gate, import-linter)
+        tests:
+          - py: tests/unit/test_ci_gates.py::test_current_dependencies_pass_gate
+          - py: tests/unit/test_ci_gates.py::test_gate_detects_forbidden_sdks
+          - py: tests/contract/test_architecture.py::test_import_contracts
+      - kind: real_cli
+        text: Назначение установленного и авторизованного реального CLI; egress runner → эндпоинты провайдера (RC)
+
+  - id: AC-04
+    title: Codex реализует в отдельном worktree; Claude — независимое ревью
+    clauses:
+      - text: Изменения только в worktree задачи (исходная ветка и рабочая копия не тронуты)
+        tests:
+          - py: tests/acceptance/test_ac04_codex_implements_claude_reviews.py::test_ac04_codex_implements_in_task_worktree_and_claude_reviews_independently
+          - py: tests/integration/test_worktrees.py::test_create_diff_commit_remove
+          - py: tests/integration/test_worktrees.py::test_paths_outside_root_rejected
+      - text: Developer-задача исполнена Codex, reviewer-задача назначена Claude, независимость = independent
+        tests:
+          - py: tests/acceptance/test_ac04_codex_implements_claude_reviews.py::test_ac04_codex_implements_in_task_worktree_and_claude_reviews_independently
+          - py: tests/e2e/test_agent_handoff.py::test_develop_review_fix_rereview_handoff
+          - py: tests/unit/test_routing.py::test_reviewer_gets_non_author_provider
+      - text: Claude недоступен → policy fallback, independent=false (human_review / self_review только после approval)
+        tests:
+          - py: tests/e2e/test_routing_review.py::test_single_provider_strict_requires_manual_review
+          - py: tests/e2e/test_routing_review.py::test_basic_profile_self_review_only_after_explicit_approval
+          - py: tests/unit/test_routing.py::test_independence_fallbacks
+          - py: tests/unit/test_routing.py::test_self_review_is_never_marked_independent
+      - kind: real_cli
+        text: Codex developer → Claude reviewer на реальных CLI (P4-13 RC)
+
+  - id: AC-05
+    title: Межагентные сообщения видны в Live Agent Chat без скрытого CoT
+    clauses:
+      - text: Все agent_messages run отображаются (потоки All Agents / Role / Task)
+        tests:
+          - py: tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning
+          - py: tests/integration/test_chat_api.py::test_feed_streams_filters_search_and_pagination
+          - web: "live:mission-control.spec.ts::AC-05"
+          - web: "mocked:chat.spec.ts::AC-05"
+      - text: С типом, отправителем, временем, статусом (статус = принято брокером; отклонённые — в активности)
+        tests:
+          - py: tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning
+          - py: tests/integration/test_review_loops.py::test_worker_projects_accepted_acp_message_into_chat_and_activity
+          - web: "live:mission-control.spec.ts::AC-05"
+      - text: Нет полей скрытых рассуждений — только ACP payload, нормализованные события CLI и артефакты
+        tests:
+          - py: tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning
+          - py: tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected
+          - py: tests/unit/test_acp_schema.py::test_additional_payload_property_rejected
+
+  - id: AC-06
+    title: CHANGE_REQUEST во время выполнения
+    clauses:
+      - text: 202 → IMPACT_ANALYSIS_PENDING → directive.impact_ready
+        tests:
+          - py: tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch
+          - web: "live:mission-control.spec.ts::AC-06"
+      - text: Подтверждение, если критично (four-eyes)
+        tests:
+          - py: tests/integration/test_directives.py::test_critical_directive_requires_admin_approval_with_four_eyes
+          - web: "mocked:chat.spec.ts::AC-06"
+      - text: Checkpoint создан → новая plan_version → DISPATCHED → ACKNOWLEDGED
+        tests:
+          - py: tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch
+          - py: tests/integration/test_directive_delivery.py::test_change_request_delivered_acknowledged_and_completed_on_fake_cli
+          - web: "live:mission-control.spec.ts::AC-06"
+      - text: Работающий CLI-процесс не изменён незаметно (безопасная точка)
+        tests:
+          - py: tests/integration/test_directives.py::test_running_task_gets_safe_point_not_silent_change
+          - py: tests/integration/test_directive_delivery.py::test_exec_stops_running_task_for_directive_applied_elsewhere
+      - text: Неверная expected_run_version → 412
+        tests:
+          - py: tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch
+          - py: tests/integration/test_directives.py::test_rbac_version_mismatch_and_idempotency
+
+  - id: AC-07
+    title: Ошибка/таймаут CLI
+    clauses:
+      - text: Fake TIMEOUT → task_attempts.failure_category=TIMEOUT
+        tests:
+          - py: tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes
+          - py: tests/integration/test_gateway.py::test_timeout_recorded
+      - text: Задача RETRY_WAIT до исчерпания max_attempts, затем FAILED; попыток ≤ бюджета
+        tests:
+          - py: tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes
+          - py: tests/e2e/test_phase3_slice.py::test_cli_failure_exhausts_retry_budget
+          - py: tests/unit/test_orchestration_core.py::test_retry_decisions
+      - text: Run не COMPLETED
+        tests:
+          - py: tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes
+          - py: tests/e2e/test_phase3_slice.py::test_cli_failure_exhausts_retry_budget
+
+  - id: AC-08
+    title: Разрыв соединения UI без дублей
+    clauses:
+      - text: Переподключение с Last-Event-ID → все события seq > N ровно один раз, по порядку
+        tests:
+          - py: tests/integration/test_sse.py::test_replay_reconnect_and_live_exactly_once
+          - py: tests/integration/test_outbox_dispatcher.py::test_concurrent_dispatchers_keep_per_run_seq_monotonic
+          - web: "live:mission-control.spec.ts::AC-08"
+          - web: "mocked:sse.spec.ts::network drop"
+          - web: "mocked:sse.spec.ts::connection cut mid-frame"
+          - web: "mocked:run.spec.ts::run view: SSE events are shown"
+      - text: UI после восстановления показывает тот же run
+        tests:
+          - web: "live:mission-control.spec.ts::AC-08"
+          - web: "mocked:run.spec.ts::run view: 410 replay_window_exceeded"
+
+  - id: AC-09
+    title: Авария worker без повторного merge/опасной миграции
+    clauses:
+      - text: external_actions в CONFIRMED не повторяется после краха/повторной доставки
+        tests:
+          - py: tests/integration/test_external_actions.py::test_execute_once_never_repeats_confirmed
+          - py: tests/integration/test_github_workflow.py::test_merge_rejected_when_head_moved_and_crash_after_merge
+          - py: tests/chaos/test_github_recovery.py::test_worker_killed_after_merge_is_reconciled
+      - text: EXECUTING сверяется с внешней системой (probe) перед любым повтором
+        tests:
+          - py: tests/integration/test_external_actions.py::test_crash_during_executing_is_reconciled_by_probe
+          - py: tests/integration/test_external_actions.py::test_failure_is_recorded_and_retry_probes_first
+          - py: tests/integration/test_external_actions.py::test_stale_token_cannot_confirm_or_take_over
+          - py: tests/integration/test_github_workflow.py::test_crash_between_pr_created_and_confirmed_creates_one_pr
+          - py: tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery
+      - text: Worker убит (SIGKILL) → незавершённые задачи продолжены, run завершается без дублей
+        tests:
+          - py: tests/chaos/test_recovery.py::test_worker_killed_while_cli_running_is_recovered
+          - py: tests/chaos/test_recovery.py::test_reaper_defers_when_execution_cannot_be_confirmed_dead
+          - py: tests/chaos/test_worker_kills.py::test_worker_killed_mid_step_is_recovered_without_duplicates
+      - text: Опасная (деструктивная) миграция не исполняется без approval и не повторяется (ledger migration_apply)
+        tests:
+          - py: tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval
+          - py: tests/integration/test_false_pass_prevention.py::test_destructive_migration_requires_approval
+
+  - id: AC-10
+    title: Docs OFF и SMART
+    clauses:
+      - text: OFF → нет обращений к внешним источникам, контекст из локального индекса
+        tests:
+          - py: tests/e2e/test_phase5_acceptance.py::test_ac10_off_uses_local_index_only
+          - py: tests/e2e/test_phase5_acceptance.py::test_ac10_repeated_docs_request_fails_attempt
+          - py: tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks
+      - text: SMART и источник не в кэше → approval DOCS_DOWNLOAD, загрузка не начинается до APPROVED
+        tests:
+          - py: tests/e2e/test_phase5_acceptance.py::test_ac10_smart_downloads_only_after_approval
+          - py: tests/e2e/test_phase5_acceptance.py::test_ac10_smart_rejected_completes_without_docs
+          - py: tests/unit/test_docs_policy.py::test_smart_never_downloads_without_approved
+
+  - id: AC-11
+    title: Ошибочные тесты блокируют COMPLETED; exit 0 ≠ verified
+    clauses:
+      - text: CLI exit_code=0, обязательный gate FAIL → задача не SUCCEEDED, run не COMPLETED
+        tests:
+          - py: tests/e2e/test_phase3_slice.py::test_secret_in_change_fails_gate_and_run_never_completes
+          - py: tests/integration/test_false_pass_prevention.py::test_gate_on_different_commit_and_open_finding_block_completion
+          - py: tests/e2e/test_completion_guard.py::test_open_critical_finding_blocks_completion
+      - text: Evidence claims агента UNVERIFIED (claims ≠ evidence)
+        tests:
+          - py: tests/integration/test_fake_adapter.py::test_success_claims_are_unverified
+          - py: tests/unit/test_agent_result.py::test_valid_result_claims_unverified_and_candidates
+          - py: tests/unit/test_verdict_rules.py::test_incomplete_evidence
+      - text: SKIPPED/ERROR обязательного gate не дают PASS
+        tests:
+          - py: tests/unit/test_verdict_rules.py::test_non_pass_statuses_never_count
+          - py: tests/unit/test_verdict_rules.py::test_fp_required_skipped
+          - py: tests/integration/test_verification_engine.py::test_required_tool_missing_is_error_not_pass
+          - py: tests/integration/test_false_pass_prevention.py::test_tool_missing_writes_error_code_and_blocks_completion
+          - web: "mocked:quality.spec.ts::quality: SKIPPED/ERROR are not PASS"
+
+  - id: AC-12
+    title: Пользователь без прав
+    clauses:
+      - text: Не член workspace B → 404 на чтение ресурсов B (без утечки существования)
+        tests:
+          - py: tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit
+          - py: tests/security/test_cross_tenant_api.py::test_foreign_workspace_is_invisible
+          - py: tests/security/test_cross_tenant_api.py::test_unknown_resource_and_foreign_resource_look_identical
+          - py: tests/security/test_rls.py::test_context_sees_only_own_workspace
+      - text: Не член / viewer не может отправить поручение (404 / 403)
+        tests:
+          - py: tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit
+          - py: tests/integration/test_directives.py::test_rbac_version_mismatch_and_idempotency
+          - web: "mocked:chat.spec.ts::chat permissions"
+      - text: Не член / viewer не может утвердить критическое действие (404 / 403)
+        tests:
+          - py: tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit
+          - py: tests/integration/test_approvals_api.py::test_role_matrix_by_action_type
+          - web: "mocked:approvals.spec.ts::viewer sees approvals read-only"
+      - text: Попытки учитываются (403 → audit authz.denied; 404 → метрика authz_denied_total{tenant})
+        tests:
+          - py: tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit
+          - py: tests/integration/test_approvals_api.py::test_role_matrix_by_action_type
+      - text: SSE-поток чужого run недоступен
+        tests:
+          - py: tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit
+          - py: tests/integration/test_sse.py::test_non_member_gets_404_and_activity
+          - py: tests/integration/test_sse.py::test_revoked_member_stream_closes
+
+  - id: AC-13
+    title: Production deploy / merge / destructive migration без approval невозможны
+    clauses:
+      - text: Без APPROVED действие не выполняется, external_actions не переходит в EXECUTING (merge, deploy, деструктивная миграция)
+        tests:
+          - py: tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval
+          - py: tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_rejected_approval_blocks_execution
+          - py: tests/integration/test_external_actions.py::test_ac13_merge_requires_approved_matching_approval
+          - py: tests/integration/test_external_actions.py::test_ac13_expired_approval_blocks_execution
+          - py: tests/integration/test_github_workflow.py::test_merge_requires_approval_four_eyes_and_branch_protection
+          - py: tests/e2e/test_phase3_slice.py::test_plan_approval_required_and_decided_by_member
+          - web: "mocked:approvals.spec.ts::AC-13: plan approval gates execution"
+      - text: Requester не может утвердить сам (four-eyes; исключение OQ-10 — никогда для PRODUCTION_DEPLOY)
+        tests:
+          - py: tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval
+          - py: tests/integration/test_approvals_api.py::test_four_eyes_and_single_member_self_approval
+          - web: "mocked:approvals.spec.ts::AC-13: requester cannot approve own merge"
+
+  - id: AC-14
+    title: Состав evidence
+    clauses:
+      - text: Evidence содержит commit_sha, command, exit_code, started_at, finished_at, environment, artifact с sha256
+        tests:
+          - py: tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence
+          - py: tests/integration/test_verification_engine.py::test_clean_change_scope_pass_with_complete_evidence
+          - py: tests/integration/test_quality_api.py::test_evidence_fields_links_and_redaction
+          - web: "mocked:quality.spec.ts::quality: reviewer cannot accept risk"
+      - text: sha256 совпадает с содержимым хранилища (FS и S3)
+        tests:
+          - py: tests/integration/test_verification_engine.py::test_clean_change_scope_pass_with_complete_evidence
+          - py: tests/integration/test_false_pass_prevention.py::test_artifact_tampering_detected_by_completion_guard
+          - py: tests/integration/test_artifacts_s3.py::test_put_get_presign
+          - py: tests/integration/test_artifacts_s3.py::test_integrity_mismatch_detected
+
+  - id: AC-15
+    title: 'Контракты: schema validation, backward compatibility, negative tests'
+    clauses:
+      - text: OpenAPI валидна (3.1), реализованные маршруты = контракт
+        tests:
+          - py: tests/contract/test_contracts.py::test_openapi_is_valid_3_1
+          - py: tests/contract/test_contracts.py::test_implemented_routes_match_contract
+          - py: tests/contract/test_codegen.py::test_generated_contract_models_are_up_to_date
+      - text: oasdiff breaking против базовой версии контракта пуст (или major bump)
+        tests:
+          - py: tests/acceptance/test_ac15_contracts.py::test_ac15_oasdiff_no_breaking_changes_against_baseline
+      - text: Schemathesis без 5xx
+        tests:
+          - py: tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform
+          - py: tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform
+          - py: tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform
+          - py: tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform
+          - py: tests/integration/test_chat_api.py::test_chat_contract_fuzz_never_5xx
+          - py: tests/integration/test_task_messages_api.py::test_task_messages_contract_fuzz_never_5xx
+          - py: tests/integration/test_oq45_api.py::test_branches_commits_isolation_and_fuzz
+          - py: tests/integration/test_oq45_api.py::test_provider_settings_rbac_isolation_and_fuzz
+          - py: tests/e2e/test_analytics_observability.py::test_analytics_contract_fuzz_never_5xx
+      - text: ACP / CLI / SSE JSON Schema — позитивные и негативные фикстуры
+        tests:
+          - py: tests/contract/test_contracts.py::test_json_schemas_are_valid
+          - py: tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid
+          - py: tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected
+          - py: tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected
+          - py: tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass
+          - py: tests/unit/test_acp_schema.py::test_negative_payload_rejected
+          - py: tests/unit/test_acp_schema.py::test_negative_envelope_rejected
+          - py: tests/unit/test_agent_result.py::test_invalid_results_rejected
+
+  - id: AC-16
+    title: CLI-авторизация недоступна
+    clauses:
+      - text: Оба провайдера AUTH_REQUIRED (или один, а другой не подходит по policy) → задача BLOCKED(AUTH_REQUIRED / PROVIDER_UNAVAILABLE)
+        tests:
+          - py: tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround
+          - py: tests/e2e/test_phase3_slice.py::test_no_usable_cli_blocks_without_workaround
+          - py: tests/unit/test_routing.py::test_both_unavailable_blocks_with_right_reason_ac16
+      - text: Причина видна в API и UI
+        tests:
+          - py: tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround
+          - web: "mocked:dashboard.spec.ts::dashboard is the landing page"
+      - text: Нет попыток обходной авторизации и обращений к AI API
+        tests:
+          - py: tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround
+          - py: tests/unit/test_cli_core.py::test_env_built_from_allowlist_and_api_keys_refused
+      - kind: real_cli
+        text: Реальный CLI без авторизации распознаётся как AUTH_REQUIRED (сигнатуры ошибок, P2-05/P2-06) (RC)

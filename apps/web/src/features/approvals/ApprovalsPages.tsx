@@ -33,6 +33,7 @@ import { problemMessage } from '../../lib/problem';
 import { useCurrentWorkspace } from '../../workspace';
 import { LiveStatus, useRunInvalidation, useWorkspaceInvalidation } from '../quality/live';
 import { Field, FieldList, runViewPath, SeverityBadge, TextLink, useWorkspaceRole, workspacePath } from '../quality/shared';
+import { useStepUp } from '../../auth/StepUp';
 
 export const APPROVALS_PAGE_SIZE = 25;
 /** События потока workspace, меняющие список approvals (OQ-45 (c): вместо опроса раз в 30 с). */
@@ -229,9 +230,13 @@ function DecisionDialog({ approval, decision, onClose }: { approval: Approval; d
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const required = decisionReasonRequired(decision, approval.risk_level);
 
+  // Утверждение критического действия (four-eyes) — со свежим вводом пароля (SC-IAM-08): диалог step-up и повтор.
+  const stepUp = useStepUp();
   const decide = useMutation({
     mutationFn: (body: { decision: ApprovalDecision; reason?: string }) =>
-      approvalsApi.decide(approval.id, body, intent.current.keyFor({ id: approval.id, version: approval.version, ...body }), approval.version),
+      stepUp.run(() =>
+        approvalsApi.decide(approval.id, body, intent.current.keyFor({ id: approval.id, version: approval.version, ...body }), approval.version),
+      ),
     onSuccess: (updated) => {
       intent.current.complete();
       queryClient.setQueryData(approvalKeys.detail(approval.id), updated);
@@ -298,6 +303,7 @@ function DecisionDialog({ approval, decision, onClose }: { approval: Approval; d
             </Button>
           </div>
         </form>
+        {stepUp.dialog}
       </DialogContent>
     </Dialog>
   );

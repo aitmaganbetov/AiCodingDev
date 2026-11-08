@@ -41,6 +41,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/reauthenticate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Step-up — повторный ввод пароля в текущей сессии [дополнение к ТЗ]
+         * @description SC-IAM-08, SECURITY_ARCHITECTURE §3.2. Операции критического набора (политики workspace и провайдеров, управление участниками, утверждение approvals из набора four-eyes) требуют ввода пароля не старше 10 минут, иначе 403 step_up_required. Успех ⇒ ротация сессии (новые cookies и csrf_token, старая сессия отозвана, абсолютный срок не продлевается). Неверный пароль ⇒ 403 reauthentication_failed (сессия остаётся действительной; неудача учитывается счётчиком блокировки входа). Лимит — как у входа на IP и 5/мин на пользователя.
+         */
+        post: operations["reauthenticate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/session": {
         parameters: {
             query?: never;
@@ -241,7 +261,7 @@ export interface paths {
         put?: never;
         /**
          * Привязать репозиторий
-         * @description Валидирует путь/URL, регистрирует репозиторий и ставит indexing_job (асинхронно).
+         * @description Валидирует путь/URL, регистрирует репозиторий и ставит indexing_job (асинхронно). provider=local ⇒ 201 Repository. provider=github ⇒ 202 GitHubVerification: локальная копия проверяется сразу (422), доступ установки GitHub App к репозиторию проверяет воркер (OQ-47 (2): ключ App — только у воркера), он же регистрирует репозиторий (result_id) — статус getGitHubVerification.
          */
         post: operations["attachRepository"];
         delete?: never;
@@ -1166,7 +1186,7 @@ export interface paths {
         put?: never;
         /**
          * Подключить установку GitHub App к workspace (P8-02) [дополнение к ТЗ]
-         * @description Вызывается UI со страницы Setup URL App с installation_id и state из startGitHubInstallation. Сервер проверяет state (HMAC, workspace и пользователь сессии, срок, однократность), читает установку через GitHub API (JWT App) и отклоняет установки, права которых шире минимального набора App или содержат workflows/administration/secrets/environments/actions (SC-GH-04) ⇒ 422. Установка другого workspace ⇒ 409. Повторное подключение REVOKED-установки этого workspace — реактивация.
+         * @description Вызывается UI со страницы Setup URL App с installation_id и state из startGitHubInstallation. Сервер проверяет state (HMAC, workspace и пользователь сессии, срок, однократность) и ставит проверку установки воркеру ⇒ 202 GitHubVerification (OQ-47 (2): процесс API не держит закрытый ключ App, SECURITY_ARCHITECTURE §6.1). Воркер читает установку через GitHub API (JWT App) и завершает проверку FAILED, если права шире минимального набора App или содержат workflows/administration/secrets/ environments/actions (SC-GH-04, error.code=permissions), установка другого App (foreign_app), не найдена (not_found) или подключена к другому workspace (conflict); SUCCEEDED — result_id = id установки. Повторное подключение REVOKED-установки этого workspace — реактивация. Статус — getGitHubVerification.
          */
         post: operations["connectGitHubInstallation"];
         delete?: never;
@@ -1210,6 +1230,26 @@ export interface paths {
          * @description Статус REVOKED (строка сохраняется для истории PR); новые PR и merge через неё невозможны. Вебхук не реактивирует отключённую установку.
          */
         delete: operations["disconnectGitHubInstallation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/verifications/{verification_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Статус проверки GitHub App на воркере (установка / доступ к репозиторию) [дополнение к ТЗ]
+         * @description OQ-47 (2): проверки через GitHub API выполняет воркер (единственный процесс с ключом App). PENDING → SUCCEEDED (result_id — github_installations.id или repositories.id) | FAILED (error.code: not_found, foreign_app, permissions, conflict, no_installation, not_accessible, invalid_repository, github_unavailable). Чужая или несуществующая проверка ⇒ 404.
+         */
+        get: operations["getGitHubVerification"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1315,6 +1355,32 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description Проверка GitHub App на воркере (OQ-47 (2)) — подключение установки или доступ установки к репозиторию. */
+        GitHubVerification: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "installation" | "repository";
+            /** @enum {string} */
+            status: "PENDING" | "SUCCEEDED" | "FAILED";
+            /** Format: uuid */
+            project_id: string | null;
+            /**
+             * Format: uuid
+             * @description SUCCEEDED — id установки (kind=installation) или репозитория (kind=repository)
+             */
+            result_id: string | null;
+            error: null | {
+                code: string;
+                detail: string | null;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
         };
         GitHubInstallationList: {
             items: components["schemas"]["GitHubInstallation"][];
@@ -1810,6 +1876,8 @@ export interface components {
              * @description Для replay_window_exceeded (410): наименьший seq, ещё доступный для replay
              */
             min_available_seq?: number;
+            /** @description Для step_up_required (403): допустимый возраст последнего ввода пароля (SC-IAM-08); подтверждение — POST /auth/reauthenticate */
+            max_age_seconds?: number;
         };
         FieldError: {
             /**
@@ -1841,6 +1909,9 @@ export interface components {
             email: string;
             password: string;
         };
+        ReauthenticateRequest: {
+            password: string;
+        };
         WorkspaceMembership: {
             /** Format: uuid */
             workspace_id: string;
@@ -1868,6 +1939,11 @@ export interface components {
              * @description UTC, ISO 8601 с Z
              */
             idle_expires_at?: string;
+            /**
+             * Format: date-time
+             * @description Последний ввод пароля в сессии (вход или step-up, SC-IAM-08); step-up действителен 10 минут
+             */
+            reauthenticated_at?: string | null;
             workspaces: components["schemas"]["WorkspaceMembership"][];
         };
         Workspace: {
@@ -2318,7 +2394,8 @@ export interface components {
             review_loop_count?: number;
             /** Format: date-time */
             next_attempt_at?: string | null;
-            timeout_seconds?: number;
+            /** @description Явный тайм-аут задачи; null — не задан (действует default_timeout_seconds провайдера в workspace). */
+            timeout_seconds?: number | null;
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
@@ -3808,6 +3885,41 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    reauthenticate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReauthenticateRequest"];
+            };
+        };
+        responses: {
+            /** @description Пароль подтверждён, сессия ротирована */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Set-Cookie": components["headers"]["SetCookie"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInfo"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getSession: {
         parameters: {
             query?: never;
@@ -4464,6 +4576,20 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Repository"];
+                };
+            };
+            /** @description provider=github — проверка доступа поставлена воркеру */
+            202: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    Location: components["headers"]["Location"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubVerification"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -6609,17 +6735,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Created */
-            201: {
+            /** @description Проверка установки поставлена воркеру */
+            202: {
                 headers: {
                     "RateLimit-Limit": components["headers"]["RateLimitLimit"];
                     "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
                     "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    Location: components["headers"]["Location"];
                     "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GitHubInstallation"];
+                    "application/json": components["schemas"]["GitHubVerification"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -6691,6 +6818,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getGitHubVerification: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path: {
+                verification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubVerification"];
+                };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];

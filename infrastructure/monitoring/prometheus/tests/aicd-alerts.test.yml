@@ -136,3 +136,61 @@ tests:
           - exp_labels: {severity: critical, area: availability, job: aicd-api, instance: "api:8000"}
             exp_annotations:
               summary: "aicd-api api:8000 недоступен для скрейпа"
+
+  # P9-05: последний бэкап компонента упал → алерт через 5 минут; успешный — нет.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_backup_last_attempt_failed{component="postgres_base", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0 0 1 1 1 1 1 1 1 1'
+      - series: 'aicd_backup_last_attempt_failed{component="artifacts", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0 0 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: AicdBackupFailed
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: AicdBackupFailed
+        exp_alerts:
+          - exp_labels: {severity: critical, area: backup, component: postgres_base}
+            exp_annotations:
+              summary: "Последний бэкап postgres_base завершился ошибкой"
+              description: "См. вывод/журнал задания `python -m scripts.backup` и status.json репозитория бэкапов (docs/runbooks/backups.md §6)."
+
+  # Архив WAL не переносится: последний успех в t=0, алерт после 15 минут + for 5m; свежий базовый бэкап — без алерта.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_backup_last_success_timestamp_seconds{component="postgres_wal", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0x30'
+      - series: 'aicd_backup_last_success_timestamp_seconds{component="postgres_base", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: AicdWalSyncStale
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: AicdWalSyncStale
+        exp_alerts:
+          - exp_labels: {severity: critical, area: backup}
+            exp_annotations:
+              summary: "Архив WAL не переносится в репозиторий бэкапов 25m 0s — RPO растёт"
+      - eval_time: 25m
+        alertname: AicdBaseBackupStale
+        exp_alerts: []
+
+  # archive_command падает: счётчик неудач pg_stat_archiver растёт → алерт сразу.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_postgres_wal_archive_failures{job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0 0 0 0 0 1 2 3 4 5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AicdWalArchiveFailing
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: AicdWalArchiveFailing
+        exp_alerts:
+          - exp_labels: {severity: critical, area: backup}
+            exp_annotations:
+              summary: "PostgreSQL: archive_command завершается ошибкой (5 за 15 мин)"
+              description: "WAL копится в pg_wal (риск переполнения диска), PITR невозможен. Проверьте том архива WAL и логи postgres."
+

@@ -83,7 +83,7 @@ async def run_outbox(
     async def notify_workspace(workspace_id: uuid.UUID) -> None:
         await redis.publish(sse.workspace_channel(workspace_id), str(workspace_id))
 
-    sampler = observability.Sampler(engine, redis)
+    sampler = observability.Sampler(engine, redis, backup_status_file=settings.backup_status_file)
     try:
         while not stop.is_set():
             await sampler.maybe_sample()  # gauge-метрики P8-06 (ошибки сбора не прерывают доставку)
@@ -153,6 +153,7 @@ async def run_consumers(
         rt.github = github.build_workflow(settings, engine)  # None — GitHub App не настроен
     runtime.install(rt)
     scheduler = maintenance.Scheduler()  # exec: reconcile при старте, далее reap 15 с / reconcile 60 с
+    github_recovery = maintenance.GitHubRecoverySchedule()  # orchestrator: сверка GitHub-действий (OQ-47 (7))
     queues = {ORCHESTRATOR_QUEUE, DOCS_QUEUE, GITHUB_QUEUE} if kind == "orchestrator" else {EXEC_QUEUE}
     worker = dramatiq.Worker(actors.broker, queues=queues, worker_threads=settings.worker_threads)
     worker.start()
@@ -161,6 +162,7 @@ async def run_consumers(
             try:
                 if kind == "orchestrator":
                     await maintenance.sweep(rt)
+                    await github_recovery.run_due(rt)
                 else:
                     await scheduler.run_due(rt)
             except Exception:

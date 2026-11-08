@@ -29,6 +29,10 @@ class LoginRequest(_Strict):
     password: Annotated[str, Field(min_length=1, max_length=1024)]
 
 
+class ReauthenticateRequest(_Strict):
+    password: Annotated[str, Field(min_length=1, max_length=1024)]
+
+
 class WorkspaceCreateRequest(_Strict):
     name: Annotated[str, Field(min_length=1, max_length=200)]
     # Контракт: ^[a-z0-9][a-z0-9-]{1,62}$; дополнительно правило CHECK БД — без дефиса в конце (OQ-31).

@@ -81,7 +81,7 @@ flowchart TB
 | `verification` | Verification Engine, gates, evidence, findings | `gates.plan(run/task)`, `gates.execute()`, `evidence.*`, `verdict(run)` | `quality_profiles`, `quality_gates`, `gate_executions`, `test_results`, `findings`, `evidence`, `evidence_links` | `gate.completed`, `finding.created` |
 | `standards` | Registry, controls, применимость, compliance | `registry.*`, `compliance.evaluate(run)` | `standards`, `standard_controls`, `project_controls`, `compliance_results` | `compliance.evaluated` |
 | `security` | Sandbox/контейнерная спецификация, egress policy, redaction, SSRF guard, path guard | `sandbox.spec(execution)`, `redact(text)`, `ssrf.fetch()`, `paths.safe_join()` | — (без таблиц) | — |
-| `integrations_github` | GitHub App, вебхуки (HMAC), PR workflow | `github.open_pr()`, `webhooks.handle()` | `github_installations`, `github_webhook_deliveries`, `pull_requests` | `github.pr.*` |
+| `integrations_github` | GitHub App, вебхуки (HMAC), PR workflow, проверки установки/доступа на воркере (OQ-47 (2)) | `github.open_pr()`, `webhooks.handle()` | `github_installations`, `github_webhook_deliveries`, `pull_requests`, `github_verification_requests` | `github.pr.*`, `github.verification.requested` |
 | `analytics` | Агрегаты метрик ТЗ §16 для UI | `metrics.query()` | — (читает `v_*`) | — |
 
 ## 4. Взаимодействие через события (примеры)

@@ -402,6 +402,22 @@ async def attach_local_repository(
     return dict(row)
 
 
+def validate_github_local_copy(local_path: str, default_branch: str | None, roots: dict[str, Path]) -> None:
+    """Проверка локальной копии GitHub-репозитория до асинхронной проверки доступа (422 сразу в API);
+    те же проверки повторяет `attach_github_repository` в воркере."""
+    if not roots:
+        raise ProblemError("policy_denied", detail="Корни локальных репозиториев не настроены")
+    try:
+        resolved = resolve_in_roots(local_path, roots)
+        git_guard.inspect_repository(resolved.absolute)
+        if default_branch is not None:
+            git_guard.validate_branch_name(default_branch)
+    except (UnsafePathError, git_guard.GitRepositoryError) as exc:
+        raise ProblemError(
+            "validation_error", errors=[FieldError("/local_path", "invalid_repository", str(exc))]
+        ) from exc
+
+
 async def attach_github_repository(
     conn: AsyncConnection,
     *,

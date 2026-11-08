@@ -24,6 +24,7 @@ from aicd_api.deps import (
     authorize,
     current_principal,
     parse_workspace_header,
+    require_step_up,
     workspace_access,
 )
 from aicd_api.idempotency import CommandResult, run_idempotent
@@ -117,6 +118,7 @@ async def update_provider_settings(
 ) -> Response:
     access = await workspace_access(request, principal, parse_workspace_header(request))
     await authorize(request, access, "provider:settings")
+    await require_step_up(request, principal, "provider:settings")  # SC-IAM-08: политика провайдера в workspace
     async with transaction(app_state(request).engine, access.db()) as conn:
         if await registry.provider_code(conn, provider_id) is None:
             raise ProblemError("not_found")

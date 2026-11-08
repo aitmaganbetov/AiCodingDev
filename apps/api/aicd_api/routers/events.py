@@ -78,6 +78,7 @@ async def _run_access(request: Request, principal: identity.Principal, run_id: u
         ws = (await conn.execute(text("SELECT sys_resolve_run_workspace(:id)"), {"id": run_id})).scalar_one_or_none()
         role = await identity.workspace_role(conn, ws) if ws else None
     if ws is None or role is None:
+        metrics.AUTHZ_DENIED.labels("tenant").inc()  # 404 на чужой/несуществующий ресурс — метрика безопасности (AC-12)
         raise ProblemError("not_found")
     header = request.headers.get("x-workspace-id")
     if header is not None and header != str(ws):

@@ -57,8 +57,15 @@ export const projectsApi = {
     return request({ method: 'GET', path: `/projects/${seg(projectId)}/repositories`, query, signal });
   },
 
-  /** 201: репозиторий зарегистрирован, индексация поставлена в очередь (асинхронно). */
-  attachRepository(projectId: string, body: RepositoryAttachRequest, idempotencyKey: string): Promise<JsonResponse<'attachRepository', 201>> {
+  /**
+   * 201 (local): репозиторий зарегистрирован, индексация поставлена в очередь (асинхронно).
+   * 202 (github): доступ установки GitHub App проверяет воркер (OQ-47 (2)) — ответ GitHubVerification.
+   */
+  attachRepository(
+    projectId: string,
+    body: RepositoryAttachRequest,
+    idempotencyKey: string,
+  ): Promise<JsonResponse<'attachRepository', 201> | JsonResponse<'attachRepository', 202>> {
     return request({ method: 'POST', path: `/projects/${seg(projectId)}/repositories`, body, idempotencyKey });
   },
 

@@ -133,6 +133,14 @@ class FileSystemArtifactStore:
     def exists(self, storage_ref: str) -> bool:
         return self._path(self._key(storage_ref)).is_file()
 
+    def delete(self, storage_ref: str) -> bool:
+        """Удаление объекта (только retention, P3-18); False — объекта уже нет."""
+        try:
+            self._path(self._key(storage_ref)).unlink()
+        except FileNotFoundError:
+            return False
+        return True
+
     def healthy(self) -> bool:
         return self._root.is_dir() and os.access(self._root, os.W_OK)
 
@@ -224,6 +232,14 @@ class S3ArtifactStore:
 
     def exists(self, storage_ref: str) -> bool:
         return self._exists_key(self._key(storage_ref))
+
+    def delete(self, storage_ref: str) -> bool:
+        """Удаление объекта (только retention, P3-18); False — объекта уже нет."""
+        key = self._key(storage_ref)
+        if not self._exists_key(key):
+            return False
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+        return True
 
     def healthy(self) -> bool:
         self._client.head_bucket(Bucket=self._bucket)

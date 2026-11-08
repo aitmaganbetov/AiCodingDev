@@ -226,6 +226,50 @@ SAMPLER_ERRORS = Counter(
     "metrics_sampler_errors_total", "Ошибки периодического сбора gauge-метрик", namespace=NAMESPACE
 )
 
+# --- резервное копирование (P9-05, ТЗ §16 «failed backups», SC-OBS-02) ---------------------------------
+# Источник — файл статуса утилиты бэкапа (`python -m scripts.backup`, AICD_BACKUP_STATUS_FILE, только чтение) и
+# pg_stat_archiver сервера (архивирование WAL). Собирает worker-outbox (`aicd_worker.observability`).
+BACKUP_COMPONENTS = frozenset({"postgres_base", "postgres_wal", "postgres_dump", "artifacts", "secrets"})
+BACKUP_LAST_SUCCESS = Gauge(
+    "backup_last_success_timestamp_seconds",
+    "Время (unix) последнего успешного бэкапа компонента (postgres_base, postgres_wal, postgres_dump, artifacts,"
+    " secrets)",
+    ["component"],
+    namespace=NAMESPACE,
+)
+BACKUP_LAST_FAILED = Gauge(
+    "backup_last_attempt_failed",
+    "1 — последняя попытка бэкапа компонента завершилась ошибкой, 0 — успехом",
+    ["component"],
+    namespace=NAMESPACE,
+)
+WAL_ARCHIVE_FAILURES = Gauge(
+    "postgres_wal_archive_failures",
+    "Накопительное число неудачных вызовов archive_command (pg_stat_archiver.failed_count)",
+    namespace=NAMESPACE,
+)
+WAL_ARCHIVED = Gauge(
+    "postgres_wal_archived", "Накопительное число заархивированных файлов WAL (pg_stat_archiver)", namespace=NAMESPACE
+)
+
+
+def observe_backup_status(status: Mapping[str, Any]) -> int:
+    """Gauge по файлу статуса бэкапа (`components.<имя>.last_success_unixtime/last_status`); число компонентов."""
+    components = status.get("components")
+    if not isinstance(components, Mapping):
+        return 0
+    seen = 0
+    for name, entry in components.items():
+        if name not in BACKUP_COMPONENTS or not isinstance(entry, Mapping):
+            continue
+        success = entry.get("last_success_unixtime")
+        if isinstance(success, int | float):
+            BACKUP_LAST_SUCCESS.labels(name).set(float(success))
+        BACKUP_LAST_FAILED.labels(name).set(0 if entry.get("last_status") == "success" else 1)
+        seen += 1
+    return seen
+
+
 # --- CLI Gateway --------------------------------------------------------------------------------------
 CLI_EXECUTIONS = Counter(
     "cli_executions_total",

@@ -72,3 +72,11 @@ def test_weak_password_rejected(settings: Settings) -> None:
         stdin="short\n",
     )
     assert proc.returncode == 1 and "символов" in proc.stderr and "Traceback" not in proc.stderr
+
+
+def test_retention_schedule_rejects_too_short_interval(capsys: pytest.CaptureFixture[str]) -> None:
+    """P3-18: `aicd maintenance retention --every` — расписание без cron; интервал < 60 с — ошибка конфигурации."""
+    from aicd_cli.main import main
+
+    assert main(["maintenance", "retention", "--every", "10"]) == 2
+    assert "--every" in capsys.readouterr().err

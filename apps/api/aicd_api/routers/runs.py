@@ -27,6 +27,7 @@ from aicd_api.routers import op
 from aicd_identity import api as identity
 from aicd_identity.rbac import Role
 from aicd_orchestration import runs as runs_service
+from aicd_platform import metrics
 from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import ProblemError
@@ -70,6 +71,7 @@ async def resolve_resource(request: Request, principal: identity.Principal, fn: 
         ws = (await conn.execute(text(f"SELECT {fn}(:id)"), {"id": resource_id})).scalar_one_or_none()
         role = await identity.workspace_role(conn, ws) if ws else None
     if ws is None or role is None:
+        metrics.AUTHZ_DENIED.labels("tenant").inc()  # 404 на чужой/несуществующий ресурс — метрика безопасности (AC-12)
         raise ProblemError("not_found")
     header = request.headers.get("x-workspace-id")
     if header is not None and header != str(ws):

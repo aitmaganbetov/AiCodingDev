@@ -129,6 +129,9 @@ class GitHubDouble:
         self.requests: list[tuple[str, str]] = []
         self.auth_failures: list[str] = []
         self.fail_next: dict[str, int] = {}  # "METHOD path-regex" → HTTP-код единожды
+        # Chaos (P9-03): "METHOD path-regex" → Hold — успешный ответ задерживается после применения эффекта
+        # (PR создан, push принят, merge выполнен), пока тест не убьёт воркер и не отпустит hold.
+        self.hold_after: dict[str, Hold] = {}
         self._server: ThreadingHTTPServer | None = None
 
     # --- настройка ------------------------------------------------------------------------------------
@@ -186,12 +189,15 @@ class GitHubDouble:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length) if length else b""
                 status, headers, payload = double.handle(self.command, self.path, dict(self.headers.items()), body)
-                self.send_response(status)
-                for k, v in headers.items():
-                    self.send_header(k, v)
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
+                try:
+                    self.send_response(status)
+                    for k, v in headers.items():
+                        self.send_header(k, v)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                except (BrokenPipeError, ConnectionResetError):  # клиент убит во время hold (chaos)
+                    self.close_connection = True
 
             do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = _dispatch
 
@@ -207,6 +213,25 @@ class GitHubDouble:
     # --- обработка ------------------------------------------------------------------------------------
 
     def handle(
+        self, method: str, raw_path: str, headers: dict[str, str], body: bytes
+    ) -> tuple[int, dict[str, str], bytes]:
+        result = self._handle(method, raw_path, headers, body)
+        if not self.hold_after or not 200 <= result[0] < 300:
+            return result
+        path = urlsplit(raw_path).path
+        with self.lock:
+            hold = None
+            for key in list(self.hold_after):
+                m, _, rx = key.partition(" ")
+                if m == method and re.fullmatch(rx, path):
+                    hold = self.hold_after.pop(key)
+                    break
+        if hold is not None:
+            hold.reached.set()
+            hold.release.wait(hold.timeout)
+        return result
+
+    def _handle(
         self, method: str, raw_path: str, headers: dict[str, str], body: bytes
     ) -> tuple[int, dict[str, str], bytes]:
         parts = urlsplit(raw_path)
@@ -480,6 +505,15 @@ class GitHubDouble:
             with self.lock:
                 self.pushes += 1
         return status, out_headers, payload
+
+
+@dataclass
+class Hold:
+    """Задержка ответа после применения эффекта: `reached` — эффект применён, `release` — отпустить ответ."""
+
+    reached: threading.Event = field(default_factory=threading.Event)
+    release: threading.Event = field(default_factory=threading.Event)
+    timeout: float = 60.0
 
 
 class _Http(Exception):

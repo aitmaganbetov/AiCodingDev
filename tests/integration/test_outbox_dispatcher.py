@@ -126,6 +126,11 @@ async def test_dispatch_projects_publishes_and_notifies(
 async def test_publish_failure_backoff_then_redelivery_without_duplicates(
     database: testdb.TestDatabase, app_engine: AsyncEngine, worker_engine: AsyncEngine
 ) -> None:
+    # Изоляция: неопубликованный хвост outbox предыдущих тестов сессии (зависит от набора/порядка, например
+    # `pytest -m security`) не должен вытеснить событие теста из первого пакета диспетчера.
+    backlog = Recorder()
+    while await dispatch_batch(worker_engine, backlog.publish, backlog.notify, batch=500):
+        pass
     tenant, run = _seed(database)
     (event_id,) = await _emit(app_engine, tenant, run, range(1, 2))
     failing = Recorder(fail=True)
@@ -167,6 +172,11 @@ async def test_publish_failure_backoff_then_redelivery_without_duplicates(
 async def test_concurrent_dispatchers_keep_per_run_seq_monotonic(
     database: testdb.TestDatabase, app_engine: AsyncEngine, worker_engine: AsyncEngine
 ) -> None:
+    # Изоляция от предыдущих тестов сессии: их неопубликованный хвост outbox не должен исчерпать лимит итераций
+    # воркеров ниже (иначе события этого теста не будут достигнуты — ложное падение при другом порядке тестов).
+    backlog = Recorder()
+    while await dispatch_batch(worker_engine, backlog.publish, backlog.notify, batch=500):
+        pass
     runs = [_seed(database) for _ in range(3)]
     expected: dict[uuid.UUID, list[uuid.UUID]] = {run: [] for _, run in runs}
     for v in range(1, 21):  # чередование событий разных run

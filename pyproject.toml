@@ -100,6 +100,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "S311", "S603", "S607", "S608", "PT012", "PT018", "E501", "E741", "SIM117"]
+"scripts/perf/**" = ["S105", "S603", "S607"]  # стенд замеров: процессы приложения/git/redis, пароль тестового пользователя
 "infrastructure/migrations/**" = ["E501"]
 "packages/contracts/aicd_contracts/generated/**" = ["E501", "A001"]
 
@@ -127,6 +128,8 @@ markers = [
   "redis: requires Redis",
   "s3: requires S3-compatible storage (AICD_TEST_S3_ENDPOINT)",
   "docker: requires a local Docker daemon (skipped when unavailable)",
+  "acceptance: P9-01 acceptance suite AC-01…AC-16 (assigned from tests/acceptance/matrix.yaml)",
+  "security: security suite (ТЗ §20; SECURITY_CONTROLS ST-*), `pytest -m security`; report — scripts/security_report.py",
 ]
 addopts = "-ra --strict-markers"
 

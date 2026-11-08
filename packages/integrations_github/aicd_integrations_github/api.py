@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aicd_integrations_github import install_state, permissions, store, webhooks
+from aicd_integrations_github import install_state, permissions, store, verifications, webhooks
 from aicd_integrations_github.app_auth import AppJwtSigner, AppKeyError
 from aicd_integrations_github.client import (
     BranchInfo,
@@ -35,6 +35,7 @@ __all__ = [
     "parse_remote_url",
     "permissions",
     "store",
+    "verifications",
     "webhooks",
 ]
 

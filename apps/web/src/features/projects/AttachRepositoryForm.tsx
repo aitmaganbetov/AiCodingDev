@@ -46,10 +46,11 @@ export function AttachRepositoryForm({ projectId, onDone }: { projectId: string;
 
   const attach = useMutation({
     mutationFn: (body: RepositoryAttachRequest) => projectsApi.attachRepository(projectId, body, intent.current.keyFor(body)),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       intent.current.complete();
       await queryClient.invalidateQueries({ queryKey: projectKeys.repositories(projectId) });
-      onDone(t('projects.repo.attached'));
+      // 202 (github): репозиторий появится после проверки доступа воркером (GitHubVerification).
+      onDone(t('kind' in result ? 'projects.repo.verificationQueued' : 'projects.repo.attached'));
     },
     onError: (error) => {
       const mapped = mapProblemToFields(t, error, FIELDS);

@@ -1,7 +1,8 @@
 """P8-02, P8-03, P8-05, P8-09: API GitHub-интеграции на тестовом двойнике GitHub.
 
-* установка GitHub App: state (CSRF, однократность, привязка к пользователю/workspace), проверка прав установки;
-* привязка GitHub-репозитория к проекту (FR-PRJ-03);
+* установка GitHub App: state (CSRF, однократность, привязка к пользователю/workspace), проверка прав установки —
+  на воркере (OQ-47 (2): API отвечает 202 + проверка `github.verification.requested`, ключ App читает только воркер);
+* привязка GitHub-репозитория к проекту (FR-PRJ-03): доступ установки к репозиторию проверяет воркер;
 * вебхук: подпись по сырому телу, дедупликация, replay, allowlist, лимит тела, ротация секрета, аудит;
 * запрос PR / merge (approval MERGE, four-eyes), RBAC-матрица всех GitHub-операций, 404 для чужого workspace;
 * соответствие ответов контракту и fuzz (Schemathesis).
@@ -9,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 import uuid
@@ -27,8 +29,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_api.main import create_app
 from aicd_integrations_github import webhooks
+from aicd_integrations_github.api import AppJwtSigner, GitHubClient
+from aicd_orchestration.github_flow import GitHubWorkflow
 from aicd_platform.config import Settings
 from aicd_platform.ids import uuid7
+from aicd_worker import github as worker_github
+from aicd_worker.runtime import Runtime
 from tests.conftest import UserSession, login, make_client
 from tests.support import db as testdb
 from tests.support import github as ghs
@@ -94,11 +100,52 @@ async def gapp(settings: Settings, env: Env, tmp_path_factory: pytest.TempPathFa
         yield application
 
 
+async def _run_verifications(admin: psycopg.Connection, worker_engine: AsyncEngine, env: Env) -> list[str]:
+    """Воркер: события `github.verification.requested` из outbox → `aicd_worker.github.handle_event` (ключ App —
+    только здесь). Возвращает исходы обработки."""
+    client = GitHubClient(api_url=env.url, signer=AppJwtSigner(env.gh.app_id, env.gh.private_key_pem))
+    workflow = GitHubWorkflow(worker_engine, client, repository_roots={"main": env.root}, git_url=env.url)
+    rt = Runtime(engine=worker_engine, orchestrator=None, loop=asyncio.get_running_loop(),  # type: ignore[arg-type]
+                 dispatch_execution=_noop, github=workflow)  # fmt: skip
+    rows = admin.execute(
+        "SELECT e.id, e.workspace_id, e.aggregate_id, e.payload FROM outbox_events e"
+        " JOIN github_verification_requests v ON v.id = e.aggregate_id"
+        " WHERE e.event_type = 'github.verification.requested' AND v.status = 'PENDING' ORDER BY e.id"
+    ).fetchall()
+    outcomes = []
+    try:
+        for event_id, ws, aggregate_id, payload in rows:
+            event = {"event_id": str(event_id), "event_type": "github.verification.requested",
+                     "workspace_id": str(ws), "aggregate_id": str(aggregate_id), "payload": payload}  # fmt: skip
+            assert worker_github.is_github_event(event)
+            outcomes.append(await worker_github.handle_event(rt, event))
+    finally:
+        await client.aclose()
+    return outcomes
+
+
+async def _noop(message: dict[str, Any]) -> None:
+    del message
+
+
+async def _verification(user: UserSession, ws: str, accepted: Any) -> dict[str, Any]:
+    """Статус проверки после обработки воркером (getGitHubVerification)."""
+    assert accepted.status_code == 202, accepted.text
+    location = accepted.headers["location"]
+    assert location == f"/api/v1/integrations/github/verifications/{accepted.json()['id']}"
+    r = await user.client.get(location, headers={"X-Workspace-Id": ws})
+    validate_response("getGitHubVerification", r)
+    assert r.status_code == 200, r.text
+    body: dict[str, Any] = r.json()
+    return body
+
+
 async def _team(app: FastAPI, engine: AsyncEngine, admin: psycopg.Connection) -> Team:
     return await make_team(app, engine, admin, ROLES)
 
 
 async def _connect(team: Team, who: str, installation_id: int) -> Any:
+    """Запрос подключения (202); проверку выполняет `_run_verifications`."""
     user = team.users[who]
     r = await user.client.post("/api/v1/integrations/github/installations/setup", headers=user.headers(team.ws))
     validate_response("startGitHubInstallation", r)
@@ -118,16 +165,27 @@ async def _connect(team: Team, who: str, installation_id: int) -> Any:
 
 
 async def test_installation_flow_state_and_permissions(
-    gapp: FastAPI, app_engine: AsyncEngine, admin: psycopg.Connection, env: Env
+    gapp: FastAPI, app_engine: AsyncEngine, worker_engine: AsyncEngine, admin: psycopg.Connection, env: Env
 ) -> None:
     team = await _team(gapp, app_engine, admin)
     owner = team.users["owner"]
+    requests_before = len(env.gh.requests)
     r, state = await _connect(team, "owner", 89)
-    assert r.status_code == 201, r.text
-    body = r.json()
+    pending = await _verification(owner, team.ws, r)
+    assert pending["status"] == "PENDING" and pending["kind"] == "installation" and pending["result_id"] is None
+    assert len(env.gh.requests) == requests_before, "API не обращается к GitHub API (ключ App — только у воркера)"
+    assert await _run_verifications(admin, worker_engine, env) == ["succeeded"]
+    done = await _verification(owner, team.ws, r)
+    assert done["status"] == "SUCCEEDED" and done["completed_at"] is not None and done["error"] is None
+    body = (
+        await owner.client.get("/api/v1/integrations/github/installations", headers={"X-Workspace-Id": team.ws})
+    ).json()["items"][0]
+    assert body["id"] == done["result_id"]
     assert body["installation_id"] == 89 and body["status"] == "ACTIVE" and body["account_login"] == "acme2"
     assert body["permissions"] == {"contents": "write", "pull_requests": "write", "checks": "read",
                                    "statuses": "write", "metadata": "read"}  # fmt: skip
+    # Повтор события (дубль доставки) не меняет результат.
+    assert await _run_verifications(admin, worker_engine, env) == []
     # state однократен: тот же state с новым Idempotency-Key отклоняется.
     r = await owner.client.post(
         "/api/v1/integrations/github/installations", json={"installation_id": 89, "state": state},
@@ -146,16 +204,23 @@ async def test_installation_flow_state_and_permissions(
         headers=owner.headers(team.ws, idem=True),
     )  # fmt: skip
     assert r.status_code == 422
-    # Установка с лишними правами (workflows) не подключается (SC-GH-04).
-    r, _ = await _connect(team, "owner", 88)
-    assert r.status_code == 422 and "workflows:write" in r.json()["errors"][0]["message"]
+    # Установка с лишними правами (workflows) не подключается (SC-GH-04) — FAILED на воркере.
+    r_excess, _ = await _connect(team, "owner", 88)
     # Несуществующая установка.
-    r, _ = await _connect(team, "admin", 999_999)
-    assert r.status_code == 422
-    # Та же установка в другом workspace — 409 (UNIQUE installation_id).
+    r_missing, _ = await _connect(team, "admin", 999_999)
+    # Та же установка в другом workspace — conflict (UNIQUE installation_id).
     other = await _team(gapp, app_engine, admin)
-    r, _ = await _connect(other, "owner", 89)
-    assert r.status_code == 409
+    r_conflict, _ = await _connect(other, "owner", 89)
+    assert sorted(await _run_verifications(admin, worker_engine, env)) == ["failed"] * 3
+    excess = await _verification(owner, team.ws, r_excess)
+    assert excess["status"] == "FAILED" and excess["error"]["code"] == "permissions"
+    assert "workflows:write" in excess["error"]["detail"]
+    assert (await _verification(team.users["admin"], team.ws, r_missing))["error"]["code"] == "not_found"
+    assert (await _verification(other.users["owner"], other.ws, r_conflict))["error"]["code"] == "conflict"
+    # Проверка чужого workspace — 404.
+    r = await owner.client.get(r_conflict.headers["location"], headers={"X-Workspace-Id": team.ws})
+    validate_response("getGitHubVerification", r)
+    assert r.status_code == 404
     r = await owner.client.get("/api/v1/integrations/github/installations", headers={"X-Workspace-Id": team.ws})
     validate_response("listGitHubInstallations", r)
     [item] = r.json()["items"]
@@ -168,7 +233,9 @@ async def test_installation_flow_state_and_permissions(
     assert status == ("REVOKED",)
     # Повторное подключение отключённой установки этого workspace — реактивация.
     r, _ = await _connect(team, "owner", 89)
-    assert r.status_code == 201 and r.json()["status"] == "ACTIVE" and r.json()["id"] == item["id"]
+    assert await _run_verifications(admin, worker_engine, env) == ["succeeded"]
+    again = await _verification(owner, team.ws, r)
+    assert again["status"] == "SUCCEEDED" and again["result_id"] == item["id"]
     actions = {
         row[0]
         for row in admin.execute(
@@ -177,12 +244,23 @@ async def test_installation_flow_state_and_permissions(
         ).fetchall()
     }
     assert {"github.installation.connect:success", "github.installation.disconnect:success",
-            "github.installation.connect:denied"} <= actions  # fmt: skip
+            "github.installation.connect:denied", "github.verification.requested:success"} <= actions  # fmt: skip
     admin.execute("UPDATE github_installations SET status = 'REVOKED' WHERE installation_id = 89")
 
 
+def test_api_process_never_loads_github_app_key() -> None:
+    """OQ-47 (2): у процесса API нет пути к ключу App, а подключение установки и привязка репозитория работают
+    (202): ключ читает только воркер (SECURITY_ARCHITECTURE §6.1)."""
+    import aicd_api.routers.github as api_github
+
+    assert not hasattr(api_github, "github_client")
+    source = Path(api_github.__file__).read_text(encoding="utf-8")
+    assert "build_client" not in source and "github_private_key_pem" not in source
+    assert "installation_token" not in source and ".installation(" not in source
+
+
 async def test_attach_github_repository(
-    gapp: FastAPI, app_engine: AsyncEngine, admin: psycopg.Connection, env: Env
+    gapp: FastAPI, app_engine: AsyncEngine, worker_engine: AsyncEngine, admin: psycopg.Connection, env: Env
 ) -> None:
     team = await _team(gapp, app_engine, admin)
     owner = team.users["owner"]
@@ -195,8 +273,8 @@ async def test_attach_github_repository(
     _new_installation(admin, team, env)
     for bad, code in (
         ({**payload, "remote_url": "https://evil.example/acme/app"}, "invalid"),
-        ({**payload, "remote_url": "https://github.test/acme/missing"}, "not_accessible"),
         ({k: v for k, v in payload.items() if k != "local_path"}, "required"),
+        ({**payload, "local_path": "/etc"}, "invalid_repository"),
     ):
         r = await owner.client.post(f"/api/v1/projects/{project}/repositories", json=bad,
                                     headers=owner.headers(team.ws, idem=True))  # fmt: skip
@@ -206,16 +284,34 @@ async def test_attach_github_repository(
         f"/api/v1/projects/{project}/repositories", json=payload, headers=team.users["developer"].headers(team.ws, idem=True)
     )  # fmt: skip
     assert r.status_code == 403
+    # Недоступный установке репозиторий — FAILED not_accessible на воркере.
+    missing = await owner.client.post(
+        f"/api/v1/projects/{project}/repositories", json={**payload, "remote_url": "https://github.test/acme/missing"},
+        headers=owner.headers(team.ws, idem=True),
+    )  # fmt: skip
+    validate_response("attachRepository", missing)
+    requests_before = len(env.gh.requests)
     r = await owner.client.post(f"/api/v1/projects/{project}/repositories", json=payload,
                                 headers=owner.headers(team.ws, idem=True))  # fmt: skip
     validate_response("attachRepository", r)
-    assert r.status_code == 201, r.text
-    assert r.json()["provider"] == "github" and r.json()["remote_url"] == "https://github.test/acme/app"
+    pending = await _verification(owner, team.ws, r)
+    assert pending["status"] == "PENDING" and pending["kind"] == "repository" and pending["project_id"] == project
+    assert len(env.gh.requests) == requests_before, "API не обращается к GitHub API"
+    assert sorted(await _run_verifications(admin, worker_engine, env)) == ["failed", "succeeded"]
+    assert (await _verification(owner, team.ws, missing))["error"]["code"] == "not_accessible"
+    done = await _verification(owner, team.ws, r)
+    assert done["status"] == "SUCCEEDED"
+    listed = await owner.client.get(f"/api/v1/projects/{project}/repositories")
+    assert listed.status_code == 200, listed.text
+    [repo] = [i for i in listed.json()["items"] if i["id"] == done["result_id"]]
+    assert repo["provider"] == "github" and repo["remote_url"] == "https://github.test/acme/app"
     row = admin.execute(
         "SELECT full_name, github_repo_id, github_installation_id IS NOT NULL FROM repositories WHERE id = %s",
-        (r.json()["id"],),
+        (done["result_id"],),
     ).fetchone()
     assert row == ("acme/app", 1001, True)
+    jobs = admin.execute("SELECT kind FROM indexing_jobs WHERE repository_id = %s", (done["result_id"],)).fetchall()
+    assert jobs == [("full",)], "первичная индексация поставлена воркером"
     # Проверка доступа шла токеном только на чтение и только для этого репозитория.
     request = env.gh.token_requests[-1]
     assert request["repositories"] == ["app"] and "write" not in request["permissions"].values()
@@ -476,6 +572,7 @@ def _operations(w: PrWorld) -> list[tuple[str, str, str, dict[str, Any] | None, 
          {"installation_id": 1, "state": "v1.a.b"}, managers),
         ("disconnectGitHubInstallation", "DELETE", f"/api/v1/integrations/github/installations/{uuid.uuid4()}", None,
          managers),
+        ("getGitHubVerification", "GET", f"/api/v1/integrations/github/verifications/{uuid.uuid4()}", None, all_roles),
         ("attachRepository", "POST", f"/api/v1/projects/{project}/repositories",
          {"provider": "github", "remote_url": "https://github.test/acme/nope", "local_path": "/nope"}, managers),
         ("requestPullRequest", "POST", f"/api/v1/runs/{w.done.run}/pull-requests", {"task_id": str(uuid.uuid4())},
@@ -543,6 +640,7 @@ def _cases(operation_id: str, count: int) -> list[Any]:
         "startGitHubInstallation",
         "connectGitHubInstallation",
         "disconnectGitHubInstallation",
+        "getGitHubVerification",
         "requestPullRequest",
         "listPullRequests",
         "requestPullRequestMerge",

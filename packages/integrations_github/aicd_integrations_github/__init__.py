@@ -5,4 +5,6 @@ installation token живёт только в памяти процесса (`cl
 одноразовый GIT_ASKPASS (`aicd_security.git.push_ref`) и никогда не попадает в runner агента.
 """
 
-OWNED_TABLES = frozenset({"github_installations", "github_webhook_deliveries", "pull_requests"})
+OWNED_TABLES = frozenset(
+    {"github_installations", "github_webhook_deliveries", "pull_requests", "github_verification_requests"}
+)

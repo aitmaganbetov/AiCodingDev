@@ -249,6 +249,8 @@ flowchart LR
 | `csrf_failed` | 403 | Нет/неверный `X-CSRF-Token` или чужой `Origin` |
 | `forbidden` | 403 | Член workspace без нужного права |
 | `four_eyes_violation` | 403 | Самоутверждение критического действия |
+| `step_up_required` | 403 | Операция критического набора (политика workspace/провайдера, управление участниками, утверждение approval из набора four-eyes), а пароль в сессии вводился > 10 мин назад; `max_age_seconds` в ответе; подтверждение — `POST /auth/reauthenticate` (SC-IAM-08, Phase 9) |
+| `reauthentication_failed` | 403 | `POST /auth/reauthenticate`: неверный пароль (не 401: сессия остаётся действительной; неудача учитывается счётчиком блокировки) |
 | `policy_denied` | 403 | Запрещено политикой проекта/workspace (например, тип директивы, `LOCAL_EXECUTION_FALLBACK`) |
 | `not_found` | 404 | Нет ресурса **или** ресурс в чужом workspace (единый ответ) |
 | `conflict` | 409 | Нарушение уникальности (slug, повторная привязка репозитория, участник уже есть) |

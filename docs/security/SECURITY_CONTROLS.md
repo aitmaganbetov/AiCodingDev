@@ -1,6 +1,6 @@
 # SECURITY_CONTROLS — каталог контролей безопасности AiCodingDev v1.0
 
-**Статус:** Proposed (Phase 0). Каталог описывает **планируемые** контроли; ни один не реализован и не проверен. Статус каждого контроля до реализации — `TODO` (см. IMPLEMENTATION_BACKLOG.md).
+**Статус:** Каталог из Phase 0; реализация и проверка — по фазам P1…P9. **Phase 9 (P9-02):** каждый контроль сопоставлен с тестами в `tests/security/catalog.py` (вид: automated / partial / manual с описанием остатка), набор запускается `pytest -m security`, результат фактического прогона по каждому контролю — `reports/security/SECURITY_REPORT.md` (генерирует `scripts/security_report.py` из junit-XML); статусы угроз и release security gate — THREAT_MODEL §10, `scripts/security_gate.py`. Колонка «Проверка» ниже — исходный план (`ST-…`), фактические тесты — в каталоге.
 **Основание:** ТЗ §7.1, §8, §9, §10, §12, §14, §15, §16, §20, §21, §23; brief Phase 0; ADR-0003, ADR-0006, ADR-0008–ADR-0012.
 **Связанные документы:** [SECURITY_ARCHITECTURE.md](../architecture/SECURITY_ARCHITECTURE.md), [THREAT_MODEL.md](THREAT_MODEL.md).
 
@@ -36,7 +36,7 @@
 | SC-IAM-05 | CSRF: синхронизирующий токен (hash в `user_sessions.csrf_token_hash`) через cookie `__Host-aicd_csrf` + заголовок `X-CSRF-Token` для всех небезопасных методов; проверка `Origin`/`Sec-Fetch-Site`; login CSRF; без CORS | `apps/api` middleware `csrf.py` | V4 (4.2.2), V13 / V3, V7 | PW.5 | TH-20 | Security: ST-IAM-05 (без токена, чужой токен, чужой Origin → 403) | P1 | P0 |
 | SC-IAM-06 | Защита от подбора: блокировка учётной записи после 10 неудач (экспонента, max 24 ч), лимиты на IP и (аккаунт, IP), единый ответ 401, аудит | `identity`, `apps/api` rate limiter (Redis) | V2 / V6 | PW.5 | TH-23 | Security: ST-IAM-06 | P1 | P0 |
 | SC-IAM-07 | Единый PDP `identity.api.authorize(actor, permission, resource)`, deny-by-default; матрица прав в коде как единственный источник; генерация `permissions-matrix.md` (ТЗ §21); повторная проверка в слое сервиса | `identity`, все сервисы доменных модулей | V4 / V8 | PW.1, PW.5 | TH-04, TH-16, TH-24 | Unit: ST-IAM-07 (каждая пара роль×permission); Contract: каждая операция OpenAPI имеет `x-permission` | P1 | P0 |
-| SC-IAM-08 | Step-up re-auth (повторный пароль, если > 10 мин) для критических approvals, управления участниками, политик безопасности, `SECRET_CHANGE` | `identity`, `orchestration.approvals` | V2, V3 / V6, V7 | PW.5 | TH-33, TH-21 | Integration: ST-IAM-08 | P3 | P1 |
+| SC-IAM-08 | Step-up re-auth (повторный пароль, если > 10 мин) для критических approvals, управления участниками, политик безопасности, `SECRET_CHANGE` | `identity`, `orchestration.approvals`, `apps/api` (`require_step_up`, `POST /auth/reauthenticate`) | V2, V3 / V6, V7 | PW.5 | TH-33, TH-21, TH-61, TH-64 | Integration: ST-IAM-08 (`tests/security/test_step_up.py`; реализовано в P9, миграция 0014) | P3 → P9 | P1 |
 | SC-IAM-09 | Bootstrap первого owner только командой `aicd admin create-owner`; нет учётных записей/паролей по умолчанию; самостоятельная регистрация отключена; управление участниками — owner (приглашение ≤ developer — admin) | `apps/cli`, `identity` | V2, V14 / V6, V13 | PW.9 | TH-23, TH-24 | Integration: ST-IAM-09 (пустая инсталляция не принимает входы) | P1 | P0 |
 
 ### 2.2 TEN — изоляция арендаторов

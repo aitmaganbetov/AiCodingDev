@@ -5,7 +5,10 @@
   чего затронутые run продвигаются tick'ом;
 * tick для run с просроченными RETRY_WAIT и повторная постановка «забытых» READY в очередь exec
   (потерянное сообщение не оставляет задачу без исполнения). Межарендаторная выборка — только через
-  SECURITY DEFINER `sys_schedulable_workspaces`.
+  SECURITY DEFINER `sys_schedulable_workspaces`;
+* сверка прерванных GitHub-действий ledger (OQ-47 (7), `aicd_orchestration.github_recovery`) — на воркере
+  orchestrator (там GitHub App), при старте и каждые 60 с: probe → CONFIRMED и продолжение workflow без
+  ожидания повторной доставки Dramatiq.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import text
 
+from aicd_orchestration import github_recovery
 from aicd_orchestration.recovery import RecoveryReport, reap
 from aicd_platform.db import DbContext, transaction
 from aicd_worker.handlers import execution_message
@@ -25,6 +29,7 @@ log = logging.getLogger("aicd.worker.maintenance")
 
 REAP_INTERVAL_SECONDS = 15.0
 RECONCILE_INTERVAL_SECONDS = 60.0
+GITHUB_RECONCILE_INTERVAL_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
@@ -62,6 +67,23 @@ class Scheduler:
         for run_id, ws in sorted(report.runs_to_tick):
             await rt.orchestrator.tick(run_id, ws)
         return len(report.reaped_tasks), reconciled
+
+
+@dataclass
+class GitHubRecoverySchedule:
+    """Сверка GitHub-действий: сразу при первом вызове (старт воркера), далее по интервалу."""
+
+    interval: float = GITHUB_RECONCILE_INTERVAL_SECONDS
+    next_run: float = 0.0
+
+    async def run_due(self, rt: Runtime) -> github_recovery.GitHubRecoveryReport | None:
+        if rt.github is None:
+            return None
+        now = time.monotonic()
+        if now < self.next_run:
+            return None
+        self.next_run = now + self.interval
+        return await github_recovery.reconcile(rt.github)
 
 
 async def sweep(rt: Runtime, scheduler: Scheduler | None = None, *, workspace_limit: int = 50) -> SweepResult:

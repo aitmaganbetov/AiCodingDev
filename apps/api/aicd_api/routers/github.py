@@ -2,8 +2,10 @@
 
 * Установка: `POST …/installations/setup` выдаёт `state` (HMAC, привязан к workspace и пользователю сессии,
   однократный, 10 мин) и URL установки App; GitHub возвращает пользователя на страницу UI (Setup URL App) с
-  `installation_id` и `state`; UI вызывает `POST …/installations` (сессия + CSRF) — сервер проверяет `state`,
-  читает установку через GitHub API (JWT App) и отклоняет установки с лишними правами (SC-GH-04).
+  `installation_id` и `state`; UI вызывает `POST …/installations` (сессия + CSRF) — сервер проверяет `state` и
+  ставит проверку установки воркеру (202 + `GET …/verifications/{id}`): процесс API не держит закрытый ключ App
+  (SECURITY_ARCHITECTURE §6.1, OQ-47 (2)); воркер читает установку через GitHub API (JWT App) и отклоняет
+  установки с лишними правами (SC-GH-04). Привязка GitHub-репозитория — так же (проверка доступа на воркере).
 * Вебхук `POST /integrations/github/webhook` — без сессии и CSRF: аутентификация HMAC по сырому телу
   (SC-GH-01), дедупликация GUID и событие outbox — `sys_github_webhook_receive` (SC-GH-02).
 * PR/merge: запрос PR и approval MERGE фиксируются транзакционно; внешние действия исполняет воркер через
@@ -23,11 +25,9 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Path as PathParam
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import Response
 
-from aicd_api import views
 from aicd_api.deps import (
     Access,
     app_state,
@@ -42,10 +42,9 @@ from aicd_api.idempotency import CommandResult, run_idempotent
 from aicd_api.responses import json_response
 from aicd_api.routers import op
 from aicd_api.routers.runs import resolve_resource
-from aicd_code_intelligence.index.jobs import enqueue_indexing_job
 from aicd_identity import api as identity
 from aicd_integrations_github import api as gh
-from aicd_orchestration import github_flow
+from aicd_orchestration import github_flow, github_verification
 from aicd_platform import audit, metrics
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import FieldError, ProblemError
@@ -80,15 +79,10 @@ class MergeRequestBody(_Strict):
     merge_method: Literal["merge", "squash", "rebase"] = "merge"
 
 
-def github_client(request: Request) -> gh.GitHubClient:
-    """Клиент GitHub процесса API (кэш installation token — в памяти процесса)."""
-    client = getattr(request.app.state, "aicd_github", None)
-    if not isinstance(client, gh.GitHubClient):
-        client = gh.build_client(app_state(request).settings)
-        request.app.state.aicd_github = client
-    if not client.configured:
+def require_github_app(request: Request) -> None:
+    """GitHub App настроен (app_id): иначе 503. Ключ App процессу API не нужен (OQ-47 (2))."""
+    if app_state(request).settings.github_app_id is None:
         raise ProblemError("service_unavailable", detail="GitHub App не настроен")
-    return client
 
 
 def installation_view(row: dict[str, Any]) -> dict[str, Any]:
@@ -160,7 +154,7 @@ async def start_installation(request: Request, principal: identity.Principal = D
     )
 
 
-@router.post("/integrations/github/installations", status_code=201, **op("connectGitHubInstallation", "github:manage"))
+@router.post("/integrations/github/installations", status_code=202, **op("connectGitHubInstallation", "github:manage"))
 async def connect_installation(
     request: Request, body: InstallationConnectRequest, principal: identity.Principal = Depends(current_principal)
 ) -> Response:
@@ -176,57 +170,24 @@ async def connect_installation(
         raise ProblemError(
             "validation_error", errors=[FieldError("/state", "invalid_state", "state недействителен или истёк")]
         ) from exc
-    client = github_client(request)
-    try:
-        installation = await client.installation(body.installation_id)
-    except gh.GitHubError as exc:
-        if exc.status == 404:
-            raise ProblemError(
-                "validation_error",
-                errors=[FieldError("/installation_id", "not_found", "установка GitHub App не найдена")],
-            ) from exc
-        raise ProblemError("service_unavailable", detail="GitHub API недоступен") from exc
-    if installation.app_id is not None and installation.app_id != state.settings.github_app_id:
-        raise ProblemError(
-            "validation_error", errors=[FieldError("/installation_id", "foreign_app", "установка другого App")]
-        )
-    excess = gh.permissions.excess_permissions(installation.permissions)
-    missing = gh.permissions.missing_permissions(installation.permissions)
-    if excess or missing:
-        await _audit_denied(request, access, "github.installation.connect", {"excess": excess, "missing": missing})
-        raise ProblemError(
-            "validation_error",
-            detail="Права установки GitHub App не совпадают с минимальным набором (SC-GH-04)",
-            errors=[FieldError("/installation_id", "permissions", ", ".join(excess + missing)[:500])],
-        )
+    require_github_app(request)
     nonce_key = f"aicd:{state.settings.environment}:github_install_state:{verified.nonce}"
 
     async def command(conn: AsyncConnection) -> CommandResult:
         # Однократность state: повтор того же Idempotency-Key возвращает сохранённый ответ раньше этой точки.
         if not await state.redis.set(nonce_key, "1", nx=True, ex=state.settings.github_install_state_ttl_seconds):
             raise ProblemError("validation_error", errors=[FieldError("/state", "state_used", "state уже использован")])
-        try:
-            row, created = await gh.store.connect_installation(
-                conn, workspace_id=access.workspace_id, installation=installation, actor_id=principal.user_id
-            )
-        except gh.store.InstallationConflictError as exc:
-            raise ProblemError("conflict", detail="Установка подключена к другому workspace") from exc
-        await audit.record(
-            conn,
-            action="github.installation.connect",
-            resource_type="github_installation",
-            resource_id=row["id"],
-            actor_type="user",
-            actor_id=principal.user_id,
-            workspace_id=access.workspace_id,
-            metadata={
-                "installation_id": installation.installation_id,
-                "account_login": installation.account_login,
-                "permissions": installation.permissions,
-                "reconnected": not created,
-            },
+        params: dict[str, Any] = {"installation_id": body.installation_id}
+        if body.setup_action is not None:
+            params["setup_action"] = body.setup_action
+        row = await github_verification.request_verification(
+            conn, workspace_id=access.workspace_id, kind="installation", params=params, actor_id=principal.user_id
         )
-        return CommandResult(201, installation_view(row))
+        return CommandResult(
+            202,
+            github_verification.verification_view(row),
+            {"Location": f"/api/v1/integrations/github/verifications/{row['id']}"},
+        )
 
     return await run_idempotent(request, access.db(), body.model_dump(), command)
 
@@ -260,6 +221,22 @@ async def disconnect_installation(
                 metadata={"installation_id": row["installation_id"]},
             )
     return Response(status_code=204)
+
+
+@router.get("/integrations/github/verifications/{verification_id}", **op("getGitHubVerification", "github:read"))
+async def get_verification(
+    request: Request,
+    verification_id: Annotated[uuid.UUID, PathParam()],
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    """Статус проверки установки/репозитория воркером (OQ-47 (2)); чужая/несуществующая — 404."""
+    access = await workspace_access(request, principal, parse_workspace_header(request))
+    await authorize(request, access, "github:read")
+    async with transaction(app_state(request).engine, access.db()) as conn:
+        row = await github_verification.get_verification(conn, verification_id)
+    if row is None:
+        raise ProblemError("not_found")
+    return json_response(github_verification.verification_view(row))
 
 
 async def _audit_denied(request: Request, access: Access, action: str, metadata: dict[str, Any]) -> None:
@@ -305,6 +282,7 @@ async def attach_github_repository(
         ref = gh.parse_remote_url(remote_url, state.settings.github_web_url)
     except ValueError as exc:
         raise ProblemError("validation_error", errors=[FieldError("/remote_url", "invalid", str(exc))]) from exc
+    require_github_app(request)
     async with transaction(state.engine, access.db()) as conn:
         installations = [r for r in await gh.store.list_installations(conn) if r["status"] == "ACTIVE"]
     if not installations:
@@ -312,52 +290,31 @@ async def attach_github_repository(
             "validation_error",
             errors=[FieldError("/provider", "no_installation", "в workspace нет активной установки GitHub App")],
         )
-    client = github_client(request)
-    found: tuple[dict[str, Any], gh.RepoInfo] | None = None
-    for inst in installations:
-        if str(inst["account_login"]).lower() != ref.owner.lower():
-            continue
-        try:
-            token = await client.installation_token(int(inst["installation_id"]), "read", repositories=[ref.name])
-            found = (inst, await client.repository(token, ref))
-            break
-        except gh.GitHubError as exc:
-            if exc.status in (0,) or exc.status >= 500:
-                raise ProblemError("service_unavailable", detail="GitHub API недоступен") from exc
-            continue
-    if found is None:
-        raise ProblemError(
-            "validation_error",
-            errors=[FieldError("/remote_url", "not_accessible", "репозиторий недоступен установкам GitHub App")],
-        )
-    inst, info = found
-    canonical = f"{state.settings.github_web_url.rstrip('/')}/{info.full_name}"
+    # Локальная копия проверяется сразу (422); доступ установки к репозиторию — на воркере (ключ App, OQ-47 (2)).
+    projects.validate_github_local_copy(local_path, default_branch, state.settings.repository_roots)
+    params: dict[str, Any] = {
+        "owner": ref.owner,
+        "name": ref.name,
+        "full_name": ref.full_name,
+        "local_path": local_path,
+        "web_url": state.settings.github_web_url,
+    }
+    if default_branch:
+        params["default_branch"] = default_branch
 
     async def command(conn: AsyncConnection) -> CommandResult:
-        row = await projects.attach_github_repository(
+        row = await github_verification.request_verification(
             conn,
-            project_id=project_id,
             workspace_id=access.workspace_id,
+            kind="repository",
+            params=params,
             actor_id=access.principal.user_id,
-            local_path=local_path,
-            remote_url=canonical,
-            full_name=info.full_name,
-            github_repo_id=info.id,
-            github_installation_id=inst["id"],
-            default_branch=default_branch or info.default_branch,
-            roots=state.settings.repository_roots,
+            project_id=project_id,
         )
-        head = (
-            await conn.execute(
-                text("SELECT last_synced_commit_sha FROM repositories WHERE id = :id"), {"id": row["id"]}
-            )
-        ).scalar()
-        if head:  # как для local: первичная индексация (repository.attached → code_intelligence)
-            await enqueue_indexing_job(
-                conn, workspace_id=access.workspace_id, repository_id=row["id"], commit_sha=head, kind="full"
-            )
         return CommandResult(
-            201, views.repository(row), {"Location": f"/api/v1/projects/{project_id}/repositories/{row['id']}"}
+            202,
+            github_verification.verification_view(row),
+            {"Location": f"/api/v1/integrations/github/verifications/{row['id']}"},
         )
 
     return await run_idempotent(request, access.db(), payload, command)

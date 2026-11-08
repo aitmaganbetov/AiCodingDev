@@ -1,6 +1,6 @@
 # THREAT_MODEL — модель угроз AiCodingDev v1.0
 
-**Статус:** Proposed (Phase 0). Модель построена по проектным документам; ни одна митигация не реализована и не проверена. Оценки вероятности/ущерба — экспертные, пересматриваются в конце каждой фазы и обязательно в P9 (ТЗ §18 этап 9 «threat model»).
+**Статус:** Пересмотрено в Phase 9 (P9-07, 2026-11-08): добавлены угрозы Phases 3–8 (GitHub App и вебхуки, SSE workspace, скачивание артефактов, Repository Explorer, `/metrics`, представления аналитики, отмена задач из другого процесса, step-up), каждая угроза high/critical закрыта контролем с тестом либо записана как принятый риск, требующий решения владельца (§10). Реестр статусов §10 проверяет release security gate `scripts/security_gate.py`; результаты тестов контролей — `reports/security/SECURITY_REPORT.md`. Оценки вероятности/ущерба — экспертные.
 **Основание:** ТЗ §2, §7.1, §8–§12, §14–§16, §19, §20, §23; ADR-0003, ADR-0004, ADR-0006–ADR-0012.
 **Связанные документы:** [SECURITY_ARCHITECTURE.md](../architecture/SECURITY_ARCHITECTURE.md) (зоны Z0–Z8, границы B1–B11), [SECURITY_CONTROLS.md](SECURITY_CONTROLS.md) (контроли `SC-<AREA>-NN`, тесты `ST-<AREA>-NN`).
 
@@ -135,6 +135,9 @@ flowchart LR
 | D3 MinIO | — | TH-08 | — | TH-08, TH-47 | TH-37 | — |
 | D5 worktrees | — | TH-08, TH-11 | — | TH-08 | — | TH-11 |
 | F15 GitHub | — | TH-50 | — | — | — | TH-50 |
+| P2 GitHub App / вебхуки (P8) | TH-54 | TH-65 | — | TH-53 | TH-63, TH-65 | TH-53, TH-54 |
+| P2 SSE workspace, artifacts, Explorer, `/metrics`, `v_*` (P7–P8) | — | TH-56 | — | TH-55, TH-56, TH-57, TH-58, TH-59 | TH-57 | — |
+| P2 политики/step-up, P3 поручения (P7–P9) | TH-61, TH-64 | TH-60 | — | — | TH-60, TH-64 | TH-61, TH-62 |
 
 ---
 
@@ -244,7 +247,25 @@ flowchart LR
 | TH-48 | Логи, OTel, D1 | I (privacy) | **Утечка приватных данных через телеметрию/логи**: код и промпты в span-атрибутах, IP в долговременных логах, e-mail в метриках | 2 | 2 | medium | SC-OBS-03, SC-DATA-07, SC-DATA-04 | low | Integration: ST-OBS-03 |
 | TH-51 | P10 миграции | T | **Деструктивная миграция**, сгенерированная агентом, применяется к реальной БД при валидации | 1 | 4 | medium | SC-APR-01, SC-SUP-07, SC-SBX-07 | low — валидация только в эфемерной БД; применение к целевой — `DESTRUCTIVE_MIGRATION` | E2E: AC-13 |
 
-Итого: **52 угрозы** (TH-01…TH-52).
+### 5.11 Дополнения Phases 3–8 (пересмотр P9)
+
+| ID | Элемент | STRIDE | Описание | L | I | Risk | Митигации | Residual | Проверка |
+|---|---|---|---|---|---|---|---|---|---|
+| TH-53 | P2 api (GitHub) | I, E | **Ключ GitHub App в процессе API** (OQ-47 (2)): компрометация API (RCE, чтение `/run/secrets`, дамп памяти) даёт JWT App → installation tokens всех установок | 2 | 4 | high | SC-GH-06 (проверки установки/доступа — на воркере через `github_verification_requests`, миграция 0014; API ключ не читает), SC-NET-02 | low | Integration: `test_github_api::test_api_process_never_loads_github_app_key`, `test_installation_flow_state_and_permissions` |
+| TH-54 | P2 api → worker (F3, F15) | S, E | **Захват установки GitHub App**: подключение чужой установки к своему workspace (подбор `installation_id`, CSRF на Setup URL, повтор `state`) или установки с расширенными правами | 2 | 4 | high | SC-GH-04, SC-IAM-05 (`state` — HMAC, привязан к пользователю и workspace, однократный), SC-GH-06 (проверка `app_id`/прав на воркере), UNIQUE `installation_id` | low | Integration: `test_installation_flow_state_and_permissions`; Unit: `test_github_app::test_install_state` |
+| TH-55 | P2 SSE workspace (`/workspaces/{id}/events`) | I | **Межтенантная утечка через поток workspace**: события чужого workspace, поток после исключения участника, подбор курсора | 2 | 3 | high | SC-API-07, SC-TEN-04, SC-TEN-06 | low | Integration: `test_workspace_events` (изоляция, исключение участника, лимит соединений) |
+| TH-56 | P2 `/artifacts/{id}/download` | I, T | **Скачивание артефактов**: IDOR чужого артефакта, raw CLI log не-администратором, отдача подменённого объекта, XSS/sniffing через inline-отдачу | 3 | 3 | critical | SC-TEN-05, SC-DATA-05, SC-DATA-06, SC-IAM-07 | low | Integration: `test_artifact_download` |
+| TH-57 | P2 Repository Explorer (tree/file/branches/commits) | I, D | **Repository Explorer**: path traversal/symlink за пределы репозитория, чтение `.git` и файлов хоста, огромные blob'ы, ref-инъекция в git | 3 | 4 | critical | SC-SBX-12, SC-INJ-07, SC-SBX-11, SC-API-03 | low | Integration: `test_repository_explorer` |
+| TH-58 | P2/P5 `/metrics` | I | **Метрики**: идентификаторы/секреты в метках, неограниченная кардинальность, открытый endpoint в production | 2 | 2 | medium | SC-OBS-03 (allowlist меток), токен `/metrics` (production без токена — 404) | low | Unit: `test_metrics`; Security: `test_secret_leakage::test_metrics_labels_carry_no_secrets_or_unbounded_ids` |
+| TH-59 | D1 представления аналитики `v_*` | I | **Аналитика в обход RLS**: представления с правами владельца, агрегаты по всем workspaces | 2 | 4 | high | SC-TEN-01 (`security_invoker=true`, права только `aicd_app`), SC-TEN-04 | low | Migration: `test_analytics_views_migration`; Security: `test_cross_tenant_all_operations[getAnalyticsSummary]` |
+| TH-60 | P3/P5 поручения, отмена из другого процесса | T, D | **Поручения и отмена RUNNING-задачи**: подделка STOP/CANCEL через Redis/сообщение, поручение в чужой run, остановка работы reviewer'ом/агентом, гонки отмены | 2 | 3 | high | SC-INJ-05, SC-DATA-09 (решение по состоянию PG), SC-IAM-07, SC-TEN-04 | low | Integration: `test_directives`, `test_directive_delivery`; Security: `test_cross_tenant_all_operations` |
+| TH-61 | P2 политики, участники, критические approvals | E, S | **Критические изменения без повторной аутентификации**: украденная/оставленная сессия меняет политику (включает self-approval), состав участников, утверждает MERGE/деструктивную миграцию | 2 | 4 | high | SC-IAM-08 (step-up ≤ 10 мин, `POST /auth/reauthenticate`, ротация сессии), SC-IAM-04, SC-AUD-03 | low | Security: `test_step_up` |
+| TH-62 | P5/P6 платформенный git над worktree | E | **Исполнение кода агента платформенным git**: подмена gitlink `.git` в worktree (rw для агента) на свой каталог с конфигурацией, `.gitattributes`-фильтры/textconv (обнаружено в P9) | 2 | 4 | high | SC-SBX-11 (проверка gitlink, `GIT_ATTR_SOURCE` = пустое дерево, `protocol.ext.allow=never`, `submodule.recurse=false`) | low | Security: `test_command_injection` (gitlink, атрибуты, отравленный config) |
+| TH-63 | P2 → worker проверки GitHub | D | **Флуд запросов проверки GitHub** / вечный PENDING | 2 | 2 | medium | SC-API-02, терминальный `FAILED github_unavailable` | low | Integration: `test_github_api` |
+| TH-64 | P2 `POST /auth/reauthenticate` | S, D | **Подбор пароля через step-up** живой сессией; блокировка владельца | 2 | 3 | high | SC-IAM-06 (общий счётчик блокировки), SC-API-02 (5/мин на пользователя + лимит IP), SC-AUD-03 | low | Security: `test_step_up::test_reauthenticate_is_rate_limited_per_user`, `test_rate_limits` |
+| TH-65 | P2 приём вебхуков | D, T | **Поддельные доставки с GUID будущих подлинных** (блокировка обработки), флуд неподписанных вебхуков | 3 | 2 | high | SC-GH-01, SC-GH-02 (строка REJECTED не блокирует подлинную доставку), SC-API-02 | low | Integration: `test_github_api::test_webhook_signature_dedup_replay_and_limits` |
+
+Итого: **65 угроз** (TH-01…TH-65; TH-53…TH-65 — пересмотр P9).
 
 ---
 
@@ -299,3 +320,107 @@ flowchart LR
 
 - Идентификаторы `A-NN` (активы), `ACT-N` (акторы; префикс `AC-` не используется, чтобы не конфликтовать с приёмочными сценариями `AC-NN`), `AB-N` (abuse cases), `ST-<AREA>-NN` (тесты безопасности) — не входят в таблицу соглашений docs/README.md §2.
 - Шкала `L×I` → `risk_level` (§1 п.4) — предлагается как общая для RISK-NN в OPEN_QUESTIONS.md.
+
+---
+
+## 10. Реестр статусов угроз (release security gate)
+
+Машиночитаемый реестр для `scripts/security_gate.py` (релиз блокируется при нарушении). Статусы:
+
+* `closed` — угроза high/critical закрыта: residual не выше `medium`, среди контролей закрытия есть контроль с
+  автоматическими тестами (`tests/security/catalog.py`); при запуске с `--junit` тесты контролей прошли в фактическом
+  прогоне `pytest -m security` (результаты — `reports/security/SECURITY_REPORT.md`);
+* `accepted:OQ-NN` — принятый риск, **требующий решения владельца** (OPEN_QUESTIONS); пока решения нет, gate выдаёт
+  предупреждение, а в режиме релиза (`--require-decisions`) — ошибку;
+* `monitored` — inherent и residual ниже `high` (gate не блокирует), контроли действуют и пересматриваются;
+* `open` — блокирует релиз (в текущей редакции таких нет).
+
+Уровни (`Risk` — inherent, `Residual`) совпадают с таблицами §5 — расхождение gate считает ошибкой.
+
+| Угроза | Risk | Residual | Статус | Закрытие: контроли (тесты — SECURITY_REPORT) / обоснование |
+|---|---|---|---|---|
+| TH-01 | critical | high | `accepted:OQ-48` | SC-INJ-01, SC-INJ-02, SC-INJ-04, SC-CLI-07, SC-SBX-01, SC-SBX-06, SC-SEC-04, SC-APR-05 — residual high: модель может выполнить инструкцию в пределах прав задачи; барьеры (fencing, gates, независимое ревью, approvals) проверены, остаток — решение владельца (OQ-48 (a)) |
+| TH-02 | high | medium | `closed` | SC-DOC-07, SC-DOC-08, SC-INJ-01, SC-INJ-02 |
+| TH-03 | high | low | `closed` | SC-INJ-03, SC-INJ-01, SC-INJ-02 |
+| TH-04 | high | low | `closed` | SC-INJ-05, SC-INJ-01, SC-IAM-07, SC-APR-01, SC-APR-06 |
+| TH-05 | critical | low | `closed` | SC-CLI-06, SC-INJ-04, SC-INJ-06, SC-API-03 |
+| TH-30 | critical | medium | `closed` | SC-INJ-04, SC-SBX-07, SC-DATA-05, SC-APR-05 |
+| TH-31 | high | low | `closed` | SC-APR-05 |
+| TH-41 | medium | low | `monitored` | SC-CLI-09, SC-INJ-02 |
+| TH-06 | high | low | `closed` | SC-CLI-01, SC-CLI-02, SC-INJ-07, SC-API-01 |
+| TH-07 | high | low | `closed` | SC-INJ-07, SC-SBX-11 |
+| TH-08 | critical | low | `closed` | SC-SBX-12, SC-SBX-02, SC-TEN-05, SC-DOC-06, SC-API-01 |
+| TH-09 | medium | medium | `monitored` | SC-SBX-01, SC-SBX-02, SC-SBX-05, SC-SBX-08, SC-SBX-09 |
+| TH-10 | medium | medium | `monitored` | SC-SBX-05, SC-NET-02, SC-SBX-09 |
+| TH-11 | high | low | `closed` | SC-SBX-02, SC-SBX-11 |
+| TH-38 | critical | low | `closed` | SC-SUP-07, SC-SBX-07, SC-NET-01, SC-NET-02 |
+| TH-52 | high | medium | `closed` | SC-SBX-10, SC-APR-01, SC-APR-02 |
+| TH-12 | critical | medium | `closed` | SC-NET-01, SC-NET-05, SC-SBX-06, SC-CLI-07 |
+| TH-13 | critical | medium | `closed` | SC-CLI-03, SC-SEC-03, SC-SEC-04, SC-NET-01, SC-DATA-03 |
+| TH-14 | critical | medium | `closed` | SC-SEC-03, SC-SEC-07, SC-OBS-01, SC-API-04 |
+| TH-15 | critical | medium | `closed` | SC-SEC-05, SC-SEC-03, SC-SEC-04 |
+| TH-47 | medium | low | `monitored` | SC-DATA-02, SC-DATA-03 |
+| TH-46 | high | low | `accepted:OQ-48` | SC-NET-03, SC-IAM-03 — TLS/HSTS на edge и внутренний TLS — конфигурация развёртывания, автоматически не проверяется (OQ-48 (b)) |
+| TH-16 | critical | low | `closed` | SC-IAM-07, SC-TEN-01, SC-TEN-04, SC-TEN-05 |
+| TH-17 | high | low | `closed` | SC-TEN-01, SC-TEN-02, SC-TEN-03, SC-TEN-08 |
+| TH-18 | high | low | `closed` | SC-API-07, SC-TEN-04, SC-TEN-06 |
+| TH-19 | high | low | `closed` | SC-TEN-07 |
+| TH-20 | high | low | `closed` | SC-IAM-05, SC-IAM-03, SC-API-08 |
+| TH-21 | high | low | `closed` | SC-IAM-03, SC-IAM-04, SC-INJ-06, SC-NET-03, SC-API-08 |
+| TH-22 | critical | low | `closed` | SC-INJ-06, SC-API-08 |
+| TH-23 | critical | low | `closed` | SC-IAM-01, SC-IAM-02, SC-IAM-06, SC-API-02 |
+| TH-24 | high | low | `closed` | SC-IAM-07, SC-API-09, SC-API-01, SC-AUD-04 |
+| TH-25 | critical | low | `closed` | SC-DOC-01, SC-DOC-02, SC-DOC-03, SC-DOC-04, SC-DOC-05, SC-NET-01, SC-NET-02 |
+| TH-26 | high | low | `closed` | SC-DOC-05, SC-DOC-06, SC-DOC-07 |
+| TH-27 | critical | low | `closed` | SC-GH-01, SC-GH-03 |
+| TH-28 | high | low | `closed` | SC-GH-02, SC-GH-03, SC-DATA-09 |
+| TH-29 | high | low | `closed` | SC-APR-04, SC-DATA-08, SC-DATA-09 |
+| TH-50 | high | low | `closed` | SC-GH-04, SC-GH-05, SC-APR-01, SC-APR-03 |
+| TH-32 | high | low | `closed` | SC-APR-01, SC-APR-03, SC-APR-04, SC-APR-06, SC-INJ-05 |
+| TH-33 | high | medium | `closed` | SC-APR-02, SC-IAM-08, SC-AUD-03 |
+| TH-34 | high | medium | `closed` | SC-AUD-01, SC-AUD-02, SC-AUD-03, SC-TEN-08 |
+| TH-35 | high | low | `closed` | SC-API-02, SC-API-03, SC-INJ-03 |
+| TH-36 | medium | low | `monitored` | SC-API-07, SC-API-03 |
+| TH-37 | critical | low | `closed` | SC-SBX-03, SC-SBX-04, SC-API-03, SC-CLI-06 |
+| TH-45 | medium | low | `monitored` | SC-API-03, SC-CLI-05 |
+| TH-39 | high | medium | `accepted:OQ-48` | SC-SUP-01, SC-SUP-02, SC-SUP-03, SC-SUP-04, SC-SUP-05, SC-SUP-06, SC-SUP-08, SC-CLI-08, SC-SBX-08 — подписи образов/provenance/SCA-блок в CI релиза — ops (P9-06), в security suite не проверяются (OQ-48 (c)) |
+| TH-49 | medium | low | `monitored` | SC-SBX-12, SC-API-03, SC-SBX-03 |
+| TH-42 | medium | low | `monitored` | SC-NET-04, SC-DATA-09, SC-TEN-06 |
+| TH-43 | high | low | `closed` | SC-DATA-09, SC-APR-04 |
+| TH-44 | high | low | `closed` | SC-DATA-08, SC-APR-04 |
+| TH-40 | high | medium | `closed` | SC-CLI-05, SC-CLI-04, SC-CLI-01, SC-NET-01 |
+| TH-48 | medium | low | `monitored` | SC-OBS-03, SC-DATA-07, SC-DATA-04 |
+| TH-51 | medium | low | `monitored` | SC-APR-01, SC-SUP-07, SC-SBX-07 |
+| TH-53 | high | low | `closed` | SC-GH-06, SC-NET-02 |
+| TH-54 | high | low | `closed` | SC-GH-04, SC-IAM-05, SC-GH-06 |
+| TH-55 | high | low | `closed` | SC-API-07, SC-TEN-04, SC-TEN-06 |
+| TH-56 | critical | low | `closed` | SC-TEN-05, SC-DATA-05, SC-DATA-06, SC-IAM-07 |
+| TH-57 | critical | low | `closed` | SC-SBX-12, SC-INJ-07, SC-SBX-11, SC-API-03 |
+| TH-58 | medium | low | `monitored` | SC-OBS-03 |
+| TH-59 | high | low | `closed` | SC-TEN-01, SC-TEN-04 |
+| TH-60 | high | low | `closed` | SC-INJ-05, SC-DATA-09, SC-IAM-07, SC-TEN-04 |
+| TH-61 | high | low | `closed` | SC-IAM-08, SC-IAM-04, SC-AUD-03 |
+| TH-62 | high | low | `closed` | SC-SBX-11 |
+| TH-63 | medium | low | `monitored` | SC-API-02 |
+| TH-64 | high | low | `closed` | SC-IAM-06, SC-API-02, SC-AUD-03 |
+| TH-65 | high | low | `closed` | SC-GH-01, SC-GH-02, SC-API-02 |
+
+**Сводка (P9):** угроз — 65; high/critical (inherent или residual) — 53; открытых — 0; принятых рисков, ожидающих решения владельца, — 3 (OQ-48).
+
+## 11. Пересмотр Phase 9 (P9-07)
+
+* **Новые элементы Phases 3–8:** GitHub App (ключ App, установка, вебхуки, PR/merge — TH-53, TH-54, TH-63, TH-65 и
+  ранее TH-27…TH-29, TH-50), поток SSE workspace (TH-55), скачивание артефактов (TH-56), Repository Explorer (TH-57),
+  `/metrics` (TH-58), представления аналитики (TH-59), поручения и отмена задачи из другого процесса (TH-60),
+  step-up (TH-61, TH-64), платформенный git над worktree (TH-62).
+* **Закрыто в P9:** TH-53 — OQ-47 (2): проверка установки и доступа к репозиторию перенесена в воркер
+  (`github_verification_requests`, API отвечает 202; ключ App читает только воркер); TH-61 — step-up
+  (`user_sessions.reauthenticated_at`, `POST /auth/reauthenticate`, SC-IAM-08); TH-62 — найдено security suite:
+  платформенный git исполнял filter/textconv-драйверы, выбранные `.gitattributes` worktree, и не проверял gitlink
+  `.git` (агент мог перенаправить git на свой каталог с конфигурацией) — исправлено в `aicd_security.git`
+  (`GIT_ATTR_SOURCE`) и `orchestration.worktrees` (проверка gitlink).
+* **Принятые риски (решение владельца — OQ-48):** TH-01 (residual high), TH-46 (TLS — конфигурация), TH-39 (подписи
+  и provenance — CI релиза).
+* **Проверка:** security suite `pytest -m security` (категории ТЗ §20: SSRF, prompt injection, path traversal,
+  command injection, cross-tenant — обход всех операций OpenAPI с ID чужого workspace, secret leakage — БД,
+  артефакты, SSE, логи, ответы об ошибках, метки метрик, webhook spoofing) + отчёт `scripts/security_report.py`.

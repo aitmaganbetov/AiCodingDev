@@ -364,14 +364,11 @@ def default_workspace_settings() -> dict[str, Any]:
     return _settings_view(None, 0)
 
 
-TASK_TIMEOUT_COLUMN_DEFAULT = 1800  # tasks.timeout_seconds DEFAULT (миграция 0003)
-
-
-def effective_timeout(task_timeout: int, workspace_default: int) -> int:
+def effective_timeout(task_timeout: int | None, workspace_default: int) -> int:
     """Тайм-аут исполнения CLI (API_DESIGN §15, ROUTING_POLICY §4.1a): явный тайм-аут задачи важнее
-    `default_timeout_seconds` workspace; значение столбца по умолчанию (1800, план его не задавал) считается
-    «не задано». Результат ограничен 30…14400 с (ExecutionRequest.limits)."""
-    chosen = workspace_default if task_timeout == TASK_TIMEOUT_COLUMN_DEFAULT else task_timeout
+    `default_timeout_seconds` workspace; `tasks.timeout_seconds IS NULL` — «не задано» (миграция 0014, OQ-45:
+    явное 1800 отличимо от отсутствия значения). Результат ограничен 30…14400 с (ExecutionRequest.limits)."""
+    chosen = workspace_default if task_timeout is None else task_timeout
     return max(30, min(int(chosen), 14400))
 
 

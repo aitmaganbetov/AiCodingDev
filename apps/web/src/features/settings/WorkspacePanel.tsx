@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { isApiError, versionFromEtag, type ApiResponse } from '../../api/client';
 import { workspaceKeys, workspacesApi, type Workspace, type WorkspaceRole, type WorkspaceUpdateRequest } from '../../api/workspaces';
 import { sessionQueryKey } from '../../auth/session';
+import { useStepUp } from '../../auth/StepUp';
 import { FormAlert, TextField, focusFirstInvalid } from '../../components/form';
 import { ErrorState, LoadingState } from '../../components/states';
 import { Button, Callout, Card, useToast } from '../../components/ui';
@@ -67,9 +68,11 @@ function WorkspaceForm({ loaded, role, onSaved }: { loaded: ApiResponse<Workspac
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [info, setInfo] = useState<string | null>(null);
 
+  // Политика (settings) — критическое действие: при 403 step_up_required — диалог пароля и повтор (SC-IAM-08).
+  const stepUp = useStepUp();
   const save = useMutation({
     mutationFn: (patch: WorkspaceUpdateRequest) =>
-      workspacesApi.update(ws.id, patch, { etag: base.etag, version: base.etag ? undefined : ws.version }),
+      stepUp.run(() => workspacesApi.update(ws.id, patch, { etag: base.etag, version: base.etag ? undefined : ws.version })),
     onSuccess: async (updated) => {
       setBase(updated);
       setDraft(draftOf(updated.data));
@@ -149,6 +152,7 @@ function WorkspaceForm({ loaded, role, onSaved }: { loaded: ApiResponse<Workspac
           {info}
         </p>
       </div>
+      {stepUp.dialog}
     </form>
   );
 }

@@ -93,7 +93,9 @@ if [ "$mode" = sql ]; then
 else
   ini=$1
   export AICD_MIGRATION_DATABASE_URL="postgresql://aicd@/aicd_verify?host=/tmp" DATABASE_URL="postgresql://aicd@/aicd_verify?host=/tmp"
-  run_alembic upgrade head && up1=$(schema) && echo "AICD_SCHEMA phase=upgrade1 sha256=$up1"
+  # База сравнения — после `stamp base`: таблица версий Alembic переживает downgrade base и не является остатком миграций.
+  if alembic -c "$ini" stamp base >/dev/null; then base=$(schema); else step stamp fail base; fail=stamp; fi
+  [ -z "$fail" ] && run_alembic upgrade head && up1=$(schema) && echo "AICD_SCHEMA phase=upgrade1 sha256=$up1"
   [ -z "$fail" ] && run_alembic downgrade base && down=$(schema) && echo "AICD_SCHEMA phase=downgrade sha256=$down"
   [ -z "$fail" ] && run_alembic upgrade head && up2=$(schema) && echo "AICD_SCHEMA phase=upgrade2 sha256=$up2"
 fi

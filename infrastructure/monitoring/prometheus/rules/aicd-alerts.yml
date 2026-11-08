@@ -1,6 +1,6 @@
 # Алерты ТЗ §16 / FR-OBS-04 / SC-OBS-02 (P8-08): auth failures, stuck leases, high error rates, storage capacity
-# (+ доставка событий, очереди, провайдеры, доступность целей). Сбои бэкапов — после появления бэкапов (P9-05):
-# метрики бэкапа пока нет, правило на несуществующую метрику не добавляется (OPEN_QUESTIONS OQ-46).
+# (+ доставка событий, очереди, провайдеры, доступность целей), сбои бэкапов (P9-05: группа aicd-backup —
+# файл статуса `python -m scripts.backup` и pg_stat_archiver, собирает worker-outbox; docs/runbooks/backups.md).
 # Пороги — стартовые значения для single-team инсталляции; меняются здесь же вместе с тестами
 # (tests/aicd-alerts.test.yml, `promtool test rules`). Имена метрик сверяются с реестром кода
 # (tests/contract/test_observability.py).
@@ -127,3 +127,38 @@ groups:
         labels: {severity: critical, area: storage}
         annotations:
           summary: "Свободно {{ $value | humanizePercentage }} хранилища артефактов — запись артефактов скоро остановится"
+
+  - name: aicd-backup
+    rules:
+      - alert: AicdBackupFailed
+        expr: max by (component) (aicd_backup_last_attempt_failed) == 1
+        for: 5m
+        labels: {severity: critical, area: backup}
+        annotations:
+          summary: "Последний бэкап {{ $labels.component }} завершился ошибкой"
+          description: "См. вывод/журнал задания `python -m scripts.backup` и status.json репозитория бэкапов (docs/runbooks/backups.md §6)."
+      - alert: AicdBaseBackupStale
+        expr: time() - max(aicd_backup_last_success_timestamp_seconds{component="postgres_base"}) > 26 * 3600
+        for: 15m
+        labels: {severity: critical, area: backup}
+        annotations:
+          summary: "Нет успешного базового бэкапа PostgreSQL дольше 26 ч ({{ $value | humanizeDuration }})"
+      - alert: AicdWalSyncStale
+        expr: time() - max(aicd_backup_last_success_timestamp_seconds{component="postgres_wal"}) > 15 * 60
+        for: 5m
+        labels: {severity: critical, area: backup}
+        annotations:
+          summary: "Архив WAL не переносится в репозиторий бэкапов {{ $value | humanizeDuration }} — RPO растёт"
+      - alert: AicdArtifactsBackupStale
+        expr: time() - max(aicd_backup_last_success_timestamp_seconds{component="artifacts"}) > 26 * 3600
+        for: 15m
+        labels: {severity: warning, area: backup}
+        annotations:
+          summary: "Нет успешного снимка артефактов дольше 26 ч"
+      - alert: AicdWalArchiveFailing
+        expr: max(delta(aicd_postgres_wal_archive_failures[15m])) > 0
+        for: 0m
+        labels: {severity: critical, area: backup}
+        annotations:
+          summary: "PostgreSQL: archive_command завершается ошибкой ({{ $value | printf \"%.0f\" }} за 15 мин)"
+          description: "WAL копится в pg_wal (риск переполнения диска), PITR невозможен. Проверьте том архива WAL и логи postgres."

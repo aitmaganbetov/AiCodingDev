@@ -52,6 +52,7 @@ src/
 4. **Строки** — только в своём `src/i18n/<area>.json`, под группой с именем области (`{ "approvals": { … } }`): ключ `approvals.title` работает через `t()` из любого компонента. Свои перечисления — `<area>.enums.*` (общие `enums.*` в common.json не трогать).
 5. **События run** — `useRunEvents(runId, { filters, onEvents, onResync })`: экраны одного run (граф, чат, лента) делят одно соединение; фильтр `types`/`task_id` — отдельный поток.
 6. **Тесты** — unit рядом с кодом; E2E — свой `e2e/mocked/<area>.spec.ts`: операции своей области регистрируются в мок прямо из spec (`api.route(method, path, operationId, handler)` — ответы валидируются по контракту, `mockApi.ts` не меняется), вход — `login()` из `e2e/support/session.ts`, a11y — `expectNoSeriousA11yViolations`.
+7. **Критические действия (step-up, SC-IAM-08)** — команды, которые сервер может отклонить `403 step_up_required` (политики workspace/провайдера, участники, утверждение approvals набора four-eyes), вызываются через `const stepUp = useStepUp()` из `src/auth/StepUp.tsx`: `mutationFn: (b) => stepUp.run(() => api.call(b))`, а `{stepUp.dialog}` отрисовывается внутри формы/диалога экрана. Диалог запрашивает пароль (`POST /auth/reauthenticate`), сохраняет новый csrf_token ротированной сессии и повторяет тот же запрос (тот же Idempotency-Key/If-Match); отмена возвращает исходную ошибку в `onError`.
 
 ### Дизайн-система (P7-01)
 

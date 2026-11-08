@@ -427,6 +427,9 @@ CREATE INDEX ix_user_sessions_user_active ON user_sessions (user_id) WHERE revok
 CREATE INDEX ix_user_sessions_expires ON user_sessions (expires_at) WHERE revoked_at IS NULL;
 ```
 
+
+**Phase 9 (миграция 0014):** `reauthenticated_at timestamptz` — последний ввод пароля в сессии (вход или `POST /auth/reauthenticate`), `CHECK (reauthenticated_at >= created_at)`; step-up (SC-IAM-08) требует не старше 10 минут. `revoke_reason` дополнен значением `rotated` (сессия заменена новой после step-up, SC-IAM-04).
+
 ### 5.4 `workspaces` (T*, projects)
 Корень tenancy. RLS сравнивает `id` с `app.workspace_id`.
 
@@ -771,7 +774,7 @@ CREATE TABLE tasks (
   acceptance_criteria   jsonb                 NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(acceptance_criteria) = 'array'),
   max_attempts          int                   NOT NULL DEFAULT 3 CHECK (max_attempts BETWEEN 1 AND 10),
   attempt_count         int                   NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
-  timeout_seconds       int                   NOT NULL DEFAULT 1800 CHECK (timeout_seconds BETWEEN 30 AND 86400),
+  timeout_seconds       int                   CHECK (timeout_seconds BETWEEN 30 AND 86400),  -- NULL = не задано (миграция 0014, OQ-45): действует default_timeout_seconds провайдера; до 0014 — NOT NULL DEFAULT 1800
   retry_budget_seconds  int                   NOT NULL DEFAULT 7200 CHECK (retry_budget_seconds BETWEEN 0 AND 604800),
   retry_spent_seconds   int                   NOT NULL DEFAULT 0 CHECK (retry_spent_seconds >= 0),
   next_attempt_at       timestamptz,
@@ -2611,6 +2614,32 @@ CREATE INDEX ix_pull_requests_open ON pull_requests (workspace_id, repository_id
 
 ---
 
+### 16.4 `github_verification_requests` (T, integrations_github) — **дополнение Phase 9 (миграция 0014, OQ-47 (2))**
+
+Проверки GitHub App, выполняемые воркером (единственный процесс с закрытым ключом App, SECURITY_ARCHITECTURE §6.1): подключение установки (`kind=installation`) и доступ установки к репозиторию с регистрацией репозитория (`kind=repository`). API создаёт строку `PENDING` + событие outbox `github.verification.requested` и отвечает 202; воркер записывает результат один раз.
+
+```sql
+CREATE TABLE github_verification_requests (
+  id            uuid7       NOT NULL,
+  workspace_id  uuid        NOT NULL,
+  kind          text        NOT NULL CHECK (kind IN ('installation','repository')),
+  status        text        NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','SUCCEEDED','FAILED')),
+  project_id    uuid,                         -- kind=repository
+  params        jsonb       NOT NULL,         -- installation_id | owner/name/local_path/web_url/default_branch (без секретов)
+  requested_by  uuid        NOT NULL,
+  result_id     uuid,                         -- github_installations.id | repositories.id
+  error_code    text        CHECK (error_code ~ '^[a-z_]{1,64}$'),
+  error_detail  text        CHECK (length(error_detail) <= 500),
+  created_at, updated_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz,
+  CONSTRAINT ck_gvr_completed  CHECK ((status = 'PENDING') = (completed_at IS NULL)),
+  CONSTRAINT ck_gvr_succeeded  CHECK (status <> 'SUCCEEDED' OR (result_id IS NOT NULL AND error_code IS NULL)),
+  CONSTRAINT ck_gvr_failed     CHECK (status <> 'FAILED' OR error_code IS NOT NULL),
+  CONSTRAINT ck_gvr_repository CHECK ((kind = 'repository') = (project_id IS NOT NULL))
+);
+```
+
+RLS ENABLE+FORCE (`p_github_verification_requests_tenant`); `aicd_app` — SELECT, INSERT; `aicd_worker` — SELECT, UPDATE полей результата; терминальные состояния неизменяемы (`trg_gvr_transition`). Та же миграция: `aicd_app` теряет INSERT на `github_installations` (и UPDATE полей, кроме `status`), `aicd_worker` получает INSERT на `github_installations` и `repositories`.
+
 ## 17. Наблюдаемость и аудит
 
 ### 17.1 `audit_events` (M, platform) — партиционирована помесячно, append-only
@@ -3096,7 +3125,9 @@ CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USI
 - **Сроки:** `Settings.retention_*` (значения §20.3); активная **глобальная** политика `policies(policy_type='retention', workspace_id IS NULL)` переопределяет их ключами `run_event_log_days`, `agent_activity_days`, `agent_messages_days`, `audit_days` (≥ 30), `outbox_published_months`, `processed_events_days`, `user_sessions_days`, `provider_health_days`; некорректные значения пропускаются с предупреждением. Политики уровня workspace в v1 не применяются (партиции глобальные).
 - **`agent_activity_events` (миграция 0006):** партиции создаются вперёд, истёкшие — архив NDJSON.gz (`archive/global/agent_activity_events/<YYYY-MM>.ndjson.gz`) → `maint_drop_partition`.
 - **Архив run (миграция 0006):** терминальный run с `finished_at` старше `agent_messages_days` без строки `artifacts(kind='archive', run_id)` (она же маркер идемпотентности) → один NDJSON.gz (`archive/<workspace_id>/runs/<run_id>.ndjson.gz`, строка = `{"table", "row"}`: `chat_threads`, `chat_messages` без `search_vector`, `agent_messages`, `message_deliveries`, `user_directives`, `directive_impacts`, `directive_acknowledgements`) → в одной транзакции: `chat_messages` поручений — `body` = `[архив run: <ref>]`, прочие `chat_messages` удаляются, пустые `chat_threads` удаляются, `agent_messages` удаляются (`message_deliveries` — каскадом), кроме сообщений, на которые ссылаются сохраняемые строки (`agent_decisions`, `directive_acknowledgements`, оставшиеся `chat_messages`, ответы из других run) и их цепочек `reply_to`; строка `artifacts(kind='archive', retention_class='archive')`; аудит `maintenance.run_archived` (sha256, число строк). **Отличия от §20.2–20.3:** `user_directives`/`directive_*` только архивируются, не удаляются; удаление — одним оператором на run, а не пакетами по 5–10 тыс. (объём run ограничен); `retrieval_*` — Phase 5. Права `aicd_maintenance`: `DELETE` на `agent_messages`, `chat_messages`, `chat_threads`, `UPDATE (body)` на `chat_messages`, `INSERT` на `artifacts`.
-- **Не реализовано:** `code_index_snapshots`, `documentation_snapshots`, `artifacts` по `retention_class`, `usage_metrics`, `github_webhook_deliveries` — в фазах, где появляются их потребители.
+- **Phase 9 (миграция 0015, P3-18 / OQ-41 (a) / OQ-47 (7)):** `aicd_maintenance` получает `DELETE` на `usage_metrics`, `code_index_snapshots`, `documentation_snapshots`, `indexing_jobs` (SELECT был). Job дополнительно удаляет: `github_webhook_deliveries` старше 30 дней (кроме `RECEIVED` — о необработанных старше срока предупреждение; строки со ссылкой на объект payload пропускаются — payload не хранится, OQ-47 (4)), `usage_metrics` старше 365 дней (пакетами, как прочие); `code_index_snapshots` `FAILED`/`SUPERSEDED` старше 7 дней и `READY` сверх 5 последних на репозиторий — кроме снимков, на которые ссылаются `context_packs` (FK RESTRICT; **отличие от §20.3:** сохраняются ссылки и архивированных run, т.к. архив run не удаляет `context_packs`), активные (`QUEUED`/`RUNNING`) `indexing_jobs` и строящиеся (`BUILDING`) снимки-потомки; содержимое (`code_files`/`code_symbols`/`code_dependencies`/`knowledge_chunks`/`retrieval_results`) — каскадом FK; завершённые `indexing_jobs` удаляемого снимка удаляются вместе с ним (иначе `SET NULL` нарушит `ck_indexing_jobs_kind`); `documentation_snapshots` `SUPERSEDED` старше 90 дней без ссылок; `artifacts` классов `ephemeral` (7 дн.) / `standard` (180 дн.) и `kind = 'cli_raw_log'` (30 дн.) или с истёкшим `expires_at` — кроме артефактов нетерминальных run; `evidence`/`archive` не удаляются никогда. Каждая строка удаляется в savepoint: ссылка FK RESTRICT (evidence, checkpoints, исполнения CLI, Context Pack, …) ⇒ строка сохраняется; объект в хранилище удаляется после commit (`FileSystemArtifactStore`/`S3ArtifactStore.delete`; сбой ⇒ предупреждение, объект-сирота). Обход кандидатов — keyset по `id` (ссылочные строки не блокируют прогресс). Сроки — `Settings.retention_*` и ключи политики `webhook_deliveries_days`, `usage_metrics_days`, `index_snapshots_failed_days`, `index_snapshots_keep_ready`, `documentation_superseded_days`, `artifacts_ephemeral_days`, `artifacts_raw_log_days`, `artifacts_standard_days`. Каждый пакет — `maintenance.rows_deleted` в аудите.
+- **Расписание:** `aicd maintenance retention --every 86400` — проход сразу и затем по интервалу до SIGTERM (сбой прохода не останавливает цикл, ошибка конфигурации — выход с кодом 2); альтернатива — cron/systemd timer с одиночным проходом.
+- **Не реализовано:** объекты-сироты в хранилище артефактов (объект записан, транзакция с его строкой откатилась — например, гибель воркера посреди `directives.apply`, `tests/chaos/test_directive_apply.py`) не собираются; экспорт кэша снимков (`index_export_cache`) чистит воркер `index`.
 
 ---
 

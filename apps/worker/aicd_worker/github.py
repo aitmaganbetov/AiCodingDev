@@ -4,7 +4,9 @@
 
 * `github.pr.requested` (API `POST /runs/{run_id}/pull-requests`) → `GitHubWorkflow.open_pull_request`;
 * `approval.decided` со статусом APPROVED для `MERGE` предмета `scope=github` → `GitHubWorkflow.merge`;
-* `github.webhook.received` (API вебхука после проверки HMAC) → `GitHubWorkflow.process_webhook`.
+* `github.webhook.received` (API вебхука после проверки HMAC) → `GitHubWorkflow.process_webhook`;
+* `github.verification.requested` (API подключения установки / привязки GitHub-репозитория) →
+  `GitHubVerifier.verify`: закрытый ключ App есть только у воркера (OQ-47 (2), SECURITY_ARCHITECTURE §6.1).
 
 Отметка `processed_events(github.handle_event, event_id)` фиксируется только после успешной обработки
 (сбой ⇒ откат ⇒ повтор Dramatiq). Повтор после краха между вызовом GitHub и `CONFIRMED` безопасен:
@@ -21,13 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_integrations_github.api import GitHubClient, build_client
 from aicd_orchestration.github_flow import PR_REQUESTED_EVENT, WEBHOOK_EVENT, GitHubWorkflow
+from aicd_orchestration.github_verification import VERIFICATION_EVENT, GitHubVerifier
 from aicd_platform import context
 from aicd_worker.handlers import claimed
 from aicd_worker.runtime import Runtime
 from aicd_worker.settings import WorkerSettings
 
 GITHUB_CONSUMER: Final = "github.handle_event"
-GITHUB_EVENT_TYPES: Final = frozenset({PR_REQUESTED_EVENT, WEBHOOK_EVENT})
+GITHUB_EVENT_TYPES: Final = frozenset({PR_REQUESTED_EVENT, WEBHOOK_EVENT, VERIFICATION_EVENT})
 
 
 def is_github_event(event: Mapping[str, Any]) -> bool:
@@ -90,6 +93,12 @@ async def handle_event(rt: Runtime, event: dict[str, Any]) -> str:
             return "ignored"
         if etype == PR_REQUESTED_EVENT:
             return await workflow.open_pull_request(ws, payload)
+        if etype == VERIFICATION_EVENT:
+            verification_id = _uuid(payload.get("verification_id")) or _uuid(event.get("aggregate_id"))
+            if verification_id is None:
+                return "ignored"
+            verifier = GitHubVerifier(workflow.engine, workflow.client, repository_roots=workflow.repository_roots)
+            return await verifier.verify(ws, verification_id)
         approval_id = _uuid(payload.get("approval_id")) or _uuid(event.get("aggregate_id"))
         if approval_id is None:
             return "ignored"

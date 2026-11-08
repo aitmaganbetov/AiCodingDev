@@ -5,10 +5,17 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import Response
 
-from aicd_api.deps import app_state, check_origin, client_ip, current_principal, rate_limit_anonymous
+from aicd_api.deps import (
+    _remember_rate,
+    app_state,
+    check_origin,
+    client_ip,
+    current_principal,
+    rate_limit_anonymous,
+)
 from aicd_api.responses import json_response
 from aicd_api.routers import op
-from aicd_api.schemas import LoginRequest
+from aicd_api.schemas import LoginRequest, ReauthenticateRequest
 from aicd_identity import api as identity
 from aicd_platform import metrics
 from aicd_platform.clock import utcnow
@@ -55,6 +62,7 @@ async def _session_info(request: Request, principal: identity.Principal, csrf: s
         "csrf_token": csrf,
         "expires_at": principal.expires_at,
         "idle_expires_at": principal.idle_expires_at,
+        "reauthenticated_at": principal.reauthenticated_at,
         "workspaces": [
             {"workspace_id": m["workspace_id"], "slug": m["slug"], "name": m["name"], "role": m["role"]}
             for m in memberships
@@ -87,8 +95,52 @@ async def login(request: Request, body: LoginRequest) -> Response:
         csrf_token_hash="",
         expires_at=issued.expires_at,
         idle_expires_at=issued.idle_expires_at,
+        reauthenticated_at=utcnow(),
     )
     response = json_response(await _session_info(request, principal, issued.csrf_token))
+    max_age = int((issued.expires_at - utcnow()).total_seconds())
+    _set_cookies(request, response, token=issued.token, csrf=issued.csrf_token, max_age=max_age)
+    return response
+
+
+REAUTH_PER_USER_PER_MINUTE = 5
+
+
+@router.post("/reauthenticate", **op("reauthenticate", "authenticated"))
+async def reauthenticate(
+    request: Request, body: ReauthenticateRequest, principal: identity.Principal = Depends(current_principal)
+) -> Response:
+    """Step-up re-auth (SC-IAM-08): пароль текущего пользователя ⇒ ротация сессии с отметкой ввода пароля.
+
+    Неверный пароль — 403 `reauthentication_failed` (не 401: сессия действительна, SPA не должно выходить);
+    лимиты — как у входа на IP и 5/мин на пользователя; неудача учитывается счётчиком блокировки.
+    """
+    state = app_state(request)
+    await rate_limit_anonymous(request, "reauth", state.settings.rate_limit_login_per_ip_per_minute)
+    _remember_rate(request, await state.limiter.hit(f"reauth:user:{principal.user_id}", REAUTH_PER_USER_PER_MINUTE))
+    async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
+        issued = await identity.reauthenticate(
+            conn,
+            principal,
+            password=body.password,
+            ip=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            policy=state.session_policy,
+        )
+    if issued is None:
+        metrics.AUTH_FAILURES.labels("reauth_failed").inc()
+        raise ProblemError("reauthentication_failed")
+    rotated = identity.Principal(
+        user_id=issued.user_id,
+        session_id=issued.session_id,
+        email=issued.email,
+        display_name=issued.display_name,
+        csrf_token_hash="",
+        expires_at=issued.expires_at,
+        idle_expires_at=issued.idle_expires_at,
+        reauthenticated_at=utcnow(),
+    )
+    response = json_response(await _session_info(request, rotated, issued.csrf_token))
     max_age = int((issued.expires_at - utcnow()).total_seconds())
     _set_cookies(request, response, token=issued.token, csrf=issued.csrf_token, max_age=max_age)
     return response

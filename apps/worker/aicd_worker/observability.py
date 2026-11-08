@@ -4,17 +4,21 @@
   `AICD_METRICS_TOKEN_FILE`; в production без токена endpoint выключен);
 * worker-outbox раз в `SAMPLE_INTERVAL_SECONDS` собирает gauge: backlog outbox, stuck leases, размер БД
   (`outbox_dispatcher.sample_gauges`), доступность провайдеров (`cli_adapters.registry`), глубину очередей
-  Dramatiq в Redis. Ошибка сбора не останавливает доставку (`aicd_metrics_sampler_errors_total`).
+  Dramatiq в Redis, состояние бэкапов (файл статуса `AICD_BACKUP_STATUS_FILE` и `pg_stat_archiver`, P9-05).
+  Ошибка сбора не останавливает доставку (`aicd_metrics_sampler_errors_total`).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from wsgiref.simple_server import WSGIServer
 
 from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_cli_adapters import registry
@@ -59,6 +63,16 @@ async def sample_queues(redis: Redis) -> dict[str, int]:
     return depths
 
 
+async def sample_backups(engine: AsyncEngine, status_file: Path | None) -> None:
+    """Сбои бэкапов (ТЗ §16): файл статуса утилиты бэкапа (если смонтирован) и pg_stat_archiver сервера."""
+    if status_file is not None and status_file.is_file():
+        metrics.observe_backup_status(json.loads(status_file.read_text(encoding="utf-8")))
+    async with engine.connect() as conn:
+        row = (await conn.execute(text("SELECT archived_count, failed_count FROM pg_stat_archiver"))).one()
+    metrics.WAL_ARCHIVED.set(int(row[0]))
+    metrics.WAL_ARCHIVE_FAILURES.set(int(row[1]))
+
+
 @dataclass
 class Sampler:
     """Периодический сбор gauge в цикле worker-outbox (не чаще `interval`)."""
@@ -66,6 +80,7 @@ class Sampler:
     engine: AsyncEngine
     redis: Redis
     interval: float = SAMPLE_INTERVAL_SECONDS
+    backup_status_file: Path | None = None
     _last: float = float("-inf")
 
     async def maybe_sample(self) -> bool:
@@ -77,7 +92,7 @@ class Sampler:
         return True
 
     async def sample(self) -> None:
-        for step in (self._db, self._providers, self._queues):
+        for step in (self._db, self._providers, self._queues, self._backups):
             try:
                 await step()
             except Exception:
@@ -93,3 +108,6 @@ class Sampler:
 
     async def _queues(self) -> None:
         await sample_queues(self.redis)
+
+    async def _backups(self) -> None:
+        await sample_backups(self.engine, self.backup_status_file)

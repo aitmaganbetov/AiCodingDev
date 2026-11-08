@@ -262,7 +262,7 @@ sequenceDiagram
 **Recovery reconciler** (старт воркера + каждые 60 с):
 1. `cli_executions` в `STARTING/RUNNING` без живой аренды → проверить контейнер (`docker inspect` по label `aicd.execution_id`) / PID группу → жив: переподключить стрим или убить по политике; мёртв: `CRASHED`, задача `RETRY_WAIT`.
 2. `worktrees` без активной задачи → `ORPHANED`; удаление после сохранения diff.
-3. `external_actions` в `EXECUTING` → запрос состояния внешней системы → `CONFIRMED`/повтор (ADR-0012). `CONFIRMED` никогда не повторяется (AC-09).
+3. `external_actions` в `EXECUTING` → запрос состояния внешней системы → `CONFIRMED`/повтор (ADR-0012). `CONFIRMED` никогда не повторяется (AC-09). GitHub-действия (`git_push`, `pr_create`, `pr_comment`, `pr_update`, `pr_merge`) сверяет воркер orchestrator, где есть ключ App (`aicd_orchestration.github_recovery`, Phase 9, OQ-47 (7)): только строки без живой аренды с их fencing token; probe по данным строки ledger (ветка на SHA, PR из head-ветки, ревью с маркером `aicd:review:<action_id>`, commit status, PR смёрджен) ⇒ `CONFIRMED` (`result.reconciled`), затем повторный вход в идемпотентный workflow (`open_pull_request`/`merge`) с новой арендой — оставшиеся шаги через `execute_once` (probe → do), без ожидания повторной доставки Dramatiq; GitHub недоступен ⇒ строка остаётся `EXECUTING` в отчёте (алерт по логу).
 4. `outbox_events` неопубликованные старше 30 с → повторная публикация (consumers идемпотентны).
 5. Runs в нетерминальных состояниях без прогресса > порога → алерт `stuck_run`.
 

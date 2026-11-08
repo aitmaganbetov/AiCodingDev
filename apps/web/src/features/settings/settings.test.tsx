@@ -153,3 +153,63 @@ describe('workspace settings (OQ-45 (f))', () => {
     expect(screen.queryByRole('form', { name: 'Параметры рабочего пространства' })).toBeNull();
   });
 });
+
+describe('step-up re-auth (SC-IAM-08)', () => {
+  it('step_up_required opens the password dialog; wrong password keeps it open; success rotates CSRF and retries the same request', async () => {
+    const user = userEvent.setup();
+    let patches = 0;
+    const { calls } = mockFetch({
+      'GET /api/v1/auth/session': () => json(200, session('owner')),
+      [`GET /api/v1/workspaces/${WS_ID}/members`]: () => json(200, { items: [member(ME, 'Anna', 'owner')], next_cursor: null }),
+      [`GET /api/v1/workspaces/${WS_ID}`]: () => wsResponse(WS, 2),
+      [`PATCH /api/v1/workspaces/${WS_ID}`]: (req) => {
+        patches += 1;
+        if (patches === 1) return problem(403, 'step_up_required', { max_age_seconds: 600 });
+        return wsResponse({ ...WS, ...(req.body as object), settings: { allow_single_member_self_approval: true }, version: 3 }, 3);
+      },
+      'POST /api/v1/auth/reauthenticate': (req) =>
+        (req.body as { password: string }).password === 'right-password-1'
+          ? json(200, { ...session('owner'), csrf_token: 'rotated-csrf-token' })
+          : problem(403, 'reauthentication_failed'),
+    });
+    renderApp(`/w/${WS_ID}/settings`);
+    const form = await screen.findByRole('form', { name: 'Параметры рабочего пространства' });
+    await user.click(within(form).getByRole('checkbox', { name: /утверждать собственные критические действия/ }));
+    await user.click(within(form).getByRole('button', { name: 'Сохранить' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Подтвердите пароль' });
+    await user.type(within(dialog).getByLabelText('Пароль'), 'wrong-password');
+    await user.click(within(dialog).getByRole('button', { name: 'Подтвердить' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Неверный пароль. Повторите ввод.');
+    expect(patches).toBe(1);
+    await user.clear(within(dialog).getByLabelText('Пароль'));
+    await user.type(within(dialog).getByLabelText('Пароль'), 'right-password-1');
+    await user.click(within(dialog).getByRole('button', { name: 'Подтвердить' }));
+    expect(await screen.findByText('Параметры рабочего пространства сохранены.', { selector: 'p' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Подтвердите пароль' })).toBeNull();
+    const [first, retry] = calls.filter((c) => c.method === 'PATCH');
+    expect(retry?.body).toEqual(first?.body);
+    expect(retry?.headers.get('If-Match')).toBe(first?.headers.get('If-Match'));
+    expect(retry?.headers.get('X-CSRF-Token')).toBe('rotated-csrf-token');
+    const reauth = calls.filter((c) => c.method === 'POST' && c.url.pathname.endsWith('/auth/reauthenticate'));
+    expect(reauth).toHaveLength(2);
+  });
+
+  it('cancelling the dialog shows step_up_required as a form error without retrying', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch({
+      'GET /api/v1/auth/session': () => json(200, session('owner')),
+      [`GET /api/v1/workspaces/${WS_ID}/members`]: () => json(200, { items: [member(ME, 'Anna', 'owner'), member(OTHER, 'Boris', 'developer', 4)], next_cursor: null }),
+      [`GET /api/v1/workspaces/${WS_ID}`]: () => wsResponse(WS, 2),
+      [`DELETE /api/v1/workspaces/${WS_ID}/members/${OTHER}`]: () => problem(403, 'step_up_required', { max_age_seconds: 600 }),
+    });
+    renderApp(`/w/${WS_ID}/settings`);
+    const table = await screen.findByRole('table', { name: /Участники/ });
+    await user.click(within(table).getByRole('button', { name: 'Удалить участника Boris' }));
+    const removeDialog = await screen.findByRole('dialog', { name: /Boris/ });
+    await user.click(within(removeDialog).getByRole('button', { name: 'Удалить участника' }));
+    const stepUp = await screen.findByRole('dialog', { name: 'Подтвердите пароль' });
+    await user.click(within(stepUp).getByRole('button', { name: 'Отмена' }));
+    expect(await within(removeDialog).findByRole('alert')).toHaveTextContent('Подтвердите пароль: действие требует повторного входа.');
+    expect(calls.filter((c) => c.method === 'DELETE')).toHaveLength(1);
+  });
+});

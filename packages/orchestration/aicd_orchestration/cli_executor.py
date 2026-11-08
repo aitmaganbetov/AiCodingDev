@@ -186,8 +186,9 @@ class CliTaskExecutor:
             ws_settings = (await registry.workspace_settings_by_code(conn)).get(
                 provider
             ) or registry.default_workspace_settings()
+            raw_timeout = task["timeout_seconds"]
             timeout_seconds = registry.effective_timeout(
-                int(task["timeout_seconds"]), int(ws_settings["default_timeout_seconds"])
+                None if raw_timeout is None else int(raw_timeout), int(ws_settings["default_timeout_seconds"])
             )
         permissions = agent_io.role_permissions(role)
         request = ExecutionRequest.model_validate(

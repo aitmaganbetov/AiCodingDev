@@ -22,6 +22,7 @@ import { mapProblemToFields, problemMessage } from '../../lib/problem';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
 import { AGENT_ROLES, MAX_PARALLEL, TIMEOUT_SECONDS, buildSettingsPatch, draftFrom, type SettingsDraft, type SettingsField } from './settingsForm';
+import { useStepUp } from '../../auth/StepUp';
 
 const AUTH_TONE: Record<AuthStatus, Tone> = {
   AUTHENTICATED: 'success',
@@ -146,9 +147,11 @@ function SettingsForm({ workspaceId, provider }: { workspaceId: string; provider
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [info, setInfo] = useState<string | null>(null);
 
+  // Политика провайдера в workspace — step-up (SC-IAM-08): при 403 step_up_required — диалог пароля и повтор.
+  const stepUp = useStepUp();
   const save = useMutation({
     mutationFn: (patch: ProviderSettingsUpdateRequest) =>
-      providersApi.updateSettings(workspaceId, provider.provider_id, patch, settings.settings_version),
+      stepUp.run(() => providersApi.updateSettings(workspaceId, provider.provider_id, patch, settings.settings_version)),
     onSuccess: async (updated) => {
       setSettings(updated);
       setDraft(draftFrom(updated));
@@ -256,6 +259,7 @@ function SettingsForm({ workspaceId, provider }: { workspaceId: string; provider
           {info}
         </p>
       </div>
+      {stepUp.dialog}
     </form>
   );
 }

@@ -81,6 +81,42 @@ paths:
       x-required-permission: authenticated
       x-audit-action: auth.logout
       x-tz-addition: true
+  /auth/reauthenticate:
+    post:
+      operationId: reauthenticate
+      summary: Step-up — повторный ввод пароля в текущей сессии [дополнение к ТЗ]
+      tags: [auth]
+      description: 'SC-IAM-08, SECURITY_ARCHITECTURE §3.2. Операции критического набора (политики workspace и провайдеров, управление
+        участниками, утверждение approvals из набора four-eyes) требуют ввода пароля не старше 10 минут, иначе 403 step_up_required.
+        Успех ⇒ ротация сессии (новые cookies и csrf_token, старая сессия отозвана, абсолютный срок не продлевается). Неверный пароль ⇒
+        403 reauthentication_failed (сессия остаётся действительной; неудача учитывается счётчиком блокировки входа). Лимит — как у входа
+        на IP и 5/мин на пользователя.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReauthenticateRequest'}
+      responses:
+        '200':
+          description: Пароль подтверждён, сессия ротирована
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionInfo'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Set-Cookie: {$ref: '#/components/headers/SetCookie'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: authenticated
+      x-audit-action: auth.reauthenticated
+      x-tz-addition: true
   /auth/session:
     get:
       operationId: getSession
@@ -630,7 +666,9 @@ paths:
       operationId: attachRepository
       summary: Привязать репозиторий
       tags: [projects]
-      description: Валидирует путь/URL, регистрирует репозиторий и ставит indexing_job (асинхронно).
+      description: 'Валидирует путь/URL, регистрирует репозиторий и ставит indexing_job (асинхронно). provider=local ⇒ 201 Repository.
+        provider=github ⇒ 202 GitHubVerification: локальная копия проверяется сразу (422), доступ установки GitHub App к репозиторию
+        проверяет воркер (OQ-47 (2): ключ App — только у воркера), он же регистрирует репозиторий (result_id) — статус getGitHubVerification.'
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       - {$ref: '#/components/parameters/ProjectId'}
@@ -650,6 +688,17 @@ paths:
             RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
             RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
             ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '202':
+          description: provider=github — проверка доступа поставлена воркеру
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubVerification'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
             Location: {$ref: '#/components/headers/Location'}
             Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
         '400': {$ref: '#/components/responses/BadRequest'}
@@ -2685,9 +2734,12 @@ paths:
       summary: Подключить установку GitHub App к workspace (P8-02) [дополнение к ТЗ]
       tags: [github]
       description: 'Вызывается UI со страницы Setup URL App с installation_id и state из startGitHubInstallation. Сервер проверяет state
-        (HMAC, workspace и пользователь сессии, срок, однократность), читает установку через GitHub API (JWT App) и отклоняет установки,
-        права которых шире минимального набора App или содержат workflows/administration/secrets/environments/actions (SC-GH-04) ⇒ 422.
-        Установка другого workspace ⇒ 409. Повторное подключение REVOKED-установки этого workspace — реактивация.'
+        (HMAC, workspace и пользователь сессии, срок, однократность) и ставит проверку установки воркеру ⇒ 202 GitHubVerification
+        (OQ-47 (2): процесс API не держит закрытый ключ App, SECURITY_ARCHITECTURE §6.1). Воркер читает установку через GitHub API
+        (JWT App) и завершает проверку FAILED, если права шире минимального набора App или содержат workflows/administration/secrets/
+        environments/actions (SC-GH-04, error.code=permissions), установка другого App (foreign_app), не найдена (not_found) или
+        подключена к другому workspace (conflict); SUCCEEDED — result_id = id установки. Повторное подключение REVOKED-установки этого
+        workspace — реактивация. Статус — getGitHubVerification.'
       parameters:
       - {$ref: '#/components/parameters/WorkspaceHeader'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -2697,15 +2749,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/GitHubInstallationConnectRequest'}
       responses:
-        '201':
-          description: Created
+        '202':
+          description: Проверка установки поставлена воркеру
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/GitHubInstallation'}
+              schema: {$ref: '#/components/schemas/GitHubVerification'}
           headers:
             RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
             RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
             RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Location: {$ref: '#/components/headers/Location'}
             Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -2717,7 +2770,7 @@ paths:
         '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: github:manage
-      x-audit-action: github.installation.connect
+      x-audit-action: github.verification.requested
       x-tz-addition: true
   /integrations/github/installations/setup:
     post:
@@ -2776,6 +2829,41 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: github:manage
       x-audit-action: github.installation.disconnect
+      x-tz-addition: true
+  /integrations/github/verifications/{verification_id}:
+    get:
+      operationId: getGitHubVerification
+      summary: Статус проверки GitHub App на воркере (установка / доступ к репозиторию) [дополнение к ТЗ]
+      tags: [github]
+      description: 'OQ-47 (2): проверки через GitHub API выполняет воркер (единственный процесс с ключом App). PENDING → SUCCEEDED
+        (result_id — github_installations.id или repositories.id) | FAILED (error.code: not_found, foreign_app, permissions, conflict,
+        no_installation, not_accessible, invalid_repository, github_unavailable). Чужая или несуществующая проверка ⇒ 404.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: verification_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubVerification'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: github:read
+      x-audit-action: none
       x-tz-addition: true
   /integrations/github/webhook:
     post:
@@ -3173,6 +3261,34 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
       required: [id, installation_id, account_login, account_type, repository_selection, permissions, status, created_at, updated_at]
+    GitHubVerification:
+      type: object
+      description: Проверка GitHub App на воркере (OQ-47 (2)) — подключение установки или доступ установки к репозиторию.
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [installation, repository]}
+        status: {type: string, enum: [PENDING, SUCCEEDED, FAILED]}
+        project_id:
+          type: [string, 'null']
+          format: uuid
+        result_id:
+          type: [string, 'null']
+          format: uuid
+          description: SUCCEEDED — id установки (kind=installation) или репозитория (kind=repository)
+        error:
+          oneOf:
+          - type: 'null'
+          - type: object
+            properties:
+              code: {type: string}
+              detail: {type: [string, 'null']}
+            required: [code, detail]
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        completed_at:
+          type: [string, 'null']
+          format: date-time
+      required: [id, kind, status, project_id, result_id, error, created_at, updated_at, completed_at]
     GitHubInstallationList:
       type: object
       properties:
@@ -3674,7 +3790,7 @@ components:
             ошибку по HTTP-статусу (API_DESIGN.md §6, §16). Известные на момент версии коды — в x-known-codes.'
           examples: [validation_error, not_found, internal_error]
           x-known-codes: [malformed_request, validation_error, invalid_cursor, idempotency_key_missing, unauthenticated, session_expired, csrf_failed,
-            forbidden, four_eyes_violation, policy_denied, not_found, conflict, version_mismatch, invalid_state_transition, idempotency_key_in_flight,
+            forbidden, four_eyes_violation, policy_denied, step_up_required, reauthentication_failed, not_found, conflict, version_mismatch, invalid_state_transition, idempotency_key_in_flight,
             last_owner, replay_window_exceeded, precondition_failed, payload_too_large, unsupported_media_type, idempotency_key_reuse, precondition_required,
             rate_limited, internal_error, provider_unavailable, service_unavailable]
         request_id: {type: string, description: Корреляционный ID (W3C trace-id)}
@@ -3686,6 +3802,7 @@ components:
         retry_after_seconds: {type: integer}
         last_seq: {type: integer, format: int64, minimum: 0, description: 'Для replay_window_exceeded (410): текущий максимальный seq run — переподключение с after_seq=last_seq (API_DESIGN §13)'}
         min_available_seq: {type: integer, format: int64, minimum: 0, description: 'Для replay_window_exceeded (410): наименьший seq, ещё доступный для replay'}
+        max_age_seconds: {type: integer, minimum: 1, description: 'Для step_up_required (403): допустимый возраст последнего ввода пароля (SC-IAM-08); подтверждение — POST /auth/reauthenticate'}
       required: [type, title, status, code]
       description: RFC 7807 application/problem+json
     FieldError:
@@ -3722,6 +3839,12 @@ components:
         password: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
       required: [email, password]
       additionalProperties: false
+    ReauthenticateRequest:
+      type: object
+      properties:
+        password: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+      required: [password]
+      additionalProperties: false
     WorkspaceMembership:
       type: object
       properties:
@@ -3743,6 +3866,10 @@ components:
         csrf_token: {type: string, description: Значение для заголовка X-CSRF-Token (также в cookie aicd_csrf)}
         expires_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
         idle_expires_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        reauthenticated_at:
+          type: [string, 'null']
+          format: date-time
+          description: 'Последний ввод пароля в сессии (вход или step-up, SC-IAM-08); step-up действителен 10 минут'
         workspaces:
           type: array
           items: {$ref: '#/components/schemas/WorkspaceMembership'}
@@ -4275,7 +4402,9 @@ components:
           next_attempt_at:
             type: [string, 'null']
             format: date-time
-          timeout_seconds: {type: integer}
+          timeout_seconds:
+            type: [integer, 'null']
+            description: Явный тайм-аут задачи; null — не задан (действует default_timeout_seconds провайдера в workspace).
           created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
           links: {$ref: '#/components/schemas/Links'}
     TaskAttempt:

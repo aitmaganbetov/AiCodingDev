@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/states';
 import { Badge, Button, Dialog, DialogClose, DialogContent, DialogTrigger, LoadMore, Table, Timestamp, type Column } from '../../components/ui';
 import { mapProblemToFields, problemMessage } from '../../lib/problem';
 import { EMAIL_MAX } from '../../lib/validation';
+import { useStepUp } from '../../auth/StepUp';
 
 export const MEMBERS_PAGE_SIZE = 50;
 export const ROLES = ['owner', 'admin', 'developer', 'reviewer', 'viewer'] as const satisfies readonly WorkspaceRole[];
@@ -28,8 +29,9 @@ function AddMemberForm({ workspaceId, onDone }: { workspaceId: string; onDone: (
   const [role, setRole] = useState<WorkspaceRole>('developer');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<'email' | 'role', string>>>({});
   const [formErrors, setFormErrors] = useState<string[]>([]);
+  const stepUp = useStepUp();
   const add = useMutation({
-    mutationFn: (body: MemberCreateRequest) => membersApi.add(workspaceId, body, intent.current.keyFor(body)),
+    mutationFn: (body: MemberCreateRequest) => stepUp.run(() => membersApi.add(workspaceId, body, intent.current.keyFor(body))),
     onSuccess: async (member) => {
       intent.current.complete();
       await queryClient.invalidateQueries({ queryKey: memberKeys.list(workspaceId) });
@@ -76,6 +78,7 @@ function AddMemberForm({ workspaceId, onDone }: { workspaceId: string; onDone: (
           {t('settings.members.add')}
         </Button>
       </div>
+      {stepUp.dialog}
     </form>
   );
 }
@@ -86,8 +89,9 @@ function ChangeRoleDialog({ workspaceId, member, onResult }: { workspaceId: stri
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState<WorkspaceRole>(member.role);
   const [errors, setErrors] = useState<string[]>([]);
+  const stepUp = useStepUp();
   const update = useMutation({
-    mutationFn: (next: WorkspaceRole) => membersApi.update(workspaceId, member.user.id, { role: next }, member.version),
+    mutationFn: (next: WorkspaceRole) => stepUp.run(() => membersApi.update(workspaceId, member.user.id, { role: next }, member.version)),
     onSuccess: async (updated) => {
       setOpen(false);
       onResult(t('settings.members.roleChanged', { name: updated.user.display_name, role: t(`enums.workspace_role.${updated.role}`) }), true);
@@ -131,6 +135,7 @@ function ChangeRoleDialog({ workspaceId, member, onResult }: { workspaceId: stri
           <FormAlert messages={errors} />
           <RadioGroup name={`role-${member.user.id}`} legend={t('settings.members.role')} value={role} onChange={setRole} options={roleOptions(t)} />
         </div>
+        {stepUp.dialog}
       </DialogContent>
     </Dialog>
   );
@@ -141,8 +146,9 @@ function RemoveMemberDialog({ workspaceId, member, onResult }: { workspaceId: st
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const stepUp = useStepUp();
   const remove = useMutation({
-    mutationFn: () => membersApi.remove(workspaceId, member.user.id, member.version),
+    mutationFn: () => stepUp.run(() => membersApi.remove(workspaceId, member.user.id, member.version)),
     onSuccess: async () => {
       setOpen(false);
       onResult(t('settings.members.removed', { name: member.user.display_name }), true);
@@ -179,6 +185,7 @@ function RemoveMemberDialog({ workspaceId, member, onResult }: { workspaceId: st
       >
         <FormAlert messages={errors} />
         <p className="break-all text-sm">{member.email}</p>
+        {stepUp.dialog}
       </DialogContent>
     </Dialog>
   );

@@ -173,3 +173,56 @@ test('settings (developer): read-only members, no audit link; 360px', async ({ p
   await expectNoHorizontalScroll(page);
   await expectNoSeriousA11yViolations(page, 'settings developer 360px');
 });
+
+test('settings (owner): step-up — stale session asks for the password, wrong password, then the policy change is retried (axe)', async ({ page, api }) => {
+  const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
+  mockMembers(api, seedMembers());
+  let patches = 0;
+  api.route('PATCH', '/api/v1/workspaces/{id}', 'updateWorkspace', ({ id, body, headers }) => {
+    const target = api.workspaces.find((w) => w.id === id);
+    if (!target) return problem(404, 'not_found');
+    patches += 1;
+    // Пароль вводился больше 10 минут назад: первая попытка — 403 step_up_required (SC-IAM-08).
+    if (patches === 1) return problem(403, 'step_up_required', { max_age_seconds: 600 });
+    const version = target.version ?? 0;
+    if (headers['if-match'] !== `"v${version}"`) return problem(412, 'precondition_failed');
+    target.settings = { ...(target.settings ?? {}), ...(body as S['WorkspaceUpdateRequest']).settings };
+    target.version = version + 1;
+    return { status: 200, body: { ...target, settings: target.settings ?? {} }, headers: { ETag: `"v${target.version}"` } };
+  });
+  api.route('POST', '/api/v1/auth/reauthenticate', 'reauthenticate', ({ body }) =>
+    (body as S['ReauthenticateRequest']).password === 'correct horse battery staple'
+      ? { status: 200, body: { ...api.session(), reauthenticated_at: '2026-11-08T09:00:00Z' } }
+      : problem(403, 'reauthentication_failed'),
+  );
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/settings`);
+  const wsForm = page.getByRole('form', { name: 'Параметры рабочего пространства' });
+  await wsForm.getByRole('checkbox', { name: /утверждать собственные критические действия/ }).check();
+  await wsForm.getByRole('button', { name: 'Сохранить' }).click();
+
+  const stepUp = page.getByRole('dialog', { name: 'Подтвердите пароль' });
+  await expect(stepUp).toBeVisible();
+  await expect(stepUp.getByLabel('Пароль')).toBeFocused();
+  // Кнопка «Сохранить» под диалогом показывает бесконечный индикатор (запрос ждёт подтверждения пароля) —
+  // бесконечные анимации останавливаются, чтобы проверка axe не ждала их завершения.
+  await page.evaluate(() => {
+    for (const a of document.getAnimations()) if (a.effect?.getComputedTiming().iterations === Infinity) a.cancel();
+  });
+  await expectNoSeriousA11yViolations(page, 'step-up dialog');
+  await stepUp.getByLabel('Пароль').fill('wrong password');
+  await page.keyboard.press('Enter');
+  await expect(stepUp.getByRole('alert')).toHaveText('Неверный пароль. Повторите ввод.');
+  expect(patches).toBe(1);
+  await stepUp.getByLabel('Пароль').fill('correct horse battery staple');
+  await stepUp.getByRole('button', { name: 'Подтвердить' }).click();
+  await expect(stepUp).toBeHidden();
+  await expect(wsForm.getByRole('status')).toHaveText('Параметры рабочего пространства сохранены.');
+  const sent = api.requests.filter((r) => r.operationId === 'updateWorkspace');
+  expect(sent).toHaveLength(2);
+  expect(sent[1]?.body).toEqual({ settings: { allow_single_member_self_approval: true } });
+  expect(sent[1]?.headers['if-match']).toBe(sent[0]?.headers['if-match']);
+  const reauth = api.requests.filter((r) => r.operationId === 'reauthenticate');
+  expect(reauth.map((r) => r.body)).toEqual([{ password: 'wrong password' }, { password: 'correct horse battery staple' }]);
+  expect(api.violations).toEqual([]);
+});
