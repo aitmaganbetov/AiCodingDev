@@ -54,7 +54,24 @@ def test_upgrade_downgrade_upgrade(scratch_db: testdb.TestDatabase) -> None:
         "user_credentials",
         "project_settings",
         "project_member_overrides",
+        "runs",
+        "tasks",
+        "task_dependencies",
+        "approvals",
+        "user_directives",
+        "outbox_events",
+        "worker_leases",
+        "external_actions",
+        "run_event_log",
     } <= created
+    # Пошаговая обратимость 0003: откат к 0002 возвращает справочник переходов к execution-строкам.
+    testdb.alembic(scratch_db, "downgrade", "0002")
+    with psycopg.connect(scratch_db.superuser_url) as conn:
+        entities = {r[0] for r in conn.execute("SELECT DISTINCT entity FROM aicd.allowed_transitions").fetchall()}
+    assert entities == {"execution"}
+    assert "runs" not in _tables(scratch_db)
+    testdb.alembic(scratch_db, "upgrade", "head")
+    assert _tables(scratch_db) == created
     testdb.alembic(scratch_db, "downgrade", "base")
     assert _tables(scratch_db) == set()
     testdb.alembic(scratch_db, "upgrade", "head")
@@ -94,10 +111,8 @@ def test_no_secret_columns(database: testdb.TestDatabase) -> None:
         ).fetchall()
     bad = re.compile(r"(password|secret|token|api_?key|private_key|cookie)(?!_hash|_ref)")
     allowed_suffixes = ("_hash", "_ref", "_changed_at")  # метаданные, не значения секретов
-    allowed = {"cli_executions.fencing_token"}  # монотонный номер аренды, не секрет (§18.6)
-    offenders = [
-        f"{t}.{c}" for t, c in cols if bad.search(c) and not c.endswith(allowed_suffixes) and f"{t}.{c}" not in allowed
-    ]
+    allowed = {"fencing_token", "lease_fencing_token"}  # монотонный номер аренды, не секрет (§18.6, §18.9)
+    offenders = [f"{t}.{c}" for t, c in cols if bad.search(c) and not c.endswith(allowed_suffixes) and c not in allowed]
     assert offenders == []
 
 

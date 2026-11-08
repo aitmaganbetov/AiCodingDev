@@ -10,10 +10,12 @@ import psycopg
 import pytest
 
 import aicd_cli_adapters
+import aicd_collaboration
 import aicd_identity
 import aicd_orchestration
 import aicd_platform
 import aicd_projects
+import aicd_verification
 from tests.support import db as testdb
 
 MODULES = {
@@ -22,6 +24,8 @@ MODULES = {
     "projects": aicd_projects,
     "cli_adapters": aicd_cli_adapters,
     "orchestration": aicd_orchestration,
+    "verification": aicd_verification,
+    "collaboration": aicd_collaboration,
 }
 ROOT = Path(__file__).resolve().parents[2]
 

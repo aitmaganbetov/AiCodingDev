@@ -58,6 +58,8 @@ packages = [
   "packages/security/aicd_security",
   "packages/cli_adapters/aicd_cli_adapters",
   "packages/orchestration/aicd_orchestration",
+  "packages/verification/aicd_verification",
+  "packages/collaboration/aicd_collaboration",
   "apps/api/aicd_api",
   "apps/cli/aicd_cli",
 ]
@@ -87,7 +89,7 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
-mypy_path = "packages/platform:packages/contracts:packages/identity:packages/projects:packages/security:packages/cli_adapters:packages/orchestration:apps/api:apps/cli"
+mypy_path = "packages/platform:packages/contracts:packages/identity:packages/projects:packages/security:packages/cli_adapters:packages/orchestration:packages/verification:packages/collaboration:apps/api:apps/cli"
 explicit_package_bases = true
 files = ["packages", "apps/api", "apps/cli", "tests", "scripts"]
 exclude = ["^infrastructure/migrations/", "^apps/web/"]
@@ -114,11 +116,11 @@ branch = true
 concurrency = ["greenlet", "thread"]
 omit = ["*/aicd_cli_adapters/fake/fake_cli.py"]  # исполняется в дочернем процессе (сценарии проверяются тестами адаптера)
 source = ["aicd_platform", "aicd_identity", "aicd_projects", "aicd_security", "aicd_api", "aicd_contracts", "aicd_cli",
-          "aicd_cli_adapters", "aicd_orchestration"]
+          "aicd_cli_adapters", "aicd_orchestration", "aicd_verification", "aicd_collaboration"]
 
 [tool.importlinter]
 root_packages = ["aicd_platform", "aicd_contracts", "aicd_security", "aicd_identity", "aicd_projects", "aicd_cli_adapters",
-                 "aicd_orchestration", "aicd_api", "aicd_cli"]
+                 "aicd_orchestration", "aicd_verification", "aicd_collaboration", "aicd_api", "aicd_cli"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
@@ -126,7 +128,7 @@ name = "Слои: приложения → домены → security → platfor
 type = "layers"
 layers = [
   "aicd_api | aicd_cli",
-  "aicd_projects | aicd_cli_adapters | aicd_orchestration",
+  "aicd_projects | aicd_cli_adapters | aicd_orchestration | aicd_verification | aicd_collaboration",
   "aicd_identity",
   "aicd_security",
   "aicd_platform",
@@ -144,12 +146,14 @@ allow_indirect_imports = true
 name = "Платформенный слой и security не зависят от доменов и приложений"
 type = "forbidden"
 source_modules = ["aicd_platform", "aicd_security", "aicd_contracts"]
-forbidden_modules = ["aicd_identity", "aicd_projects", "aicd_cli_adapters", "aicd_orchestration", "aicd_api", "aicd_cli"]
+forbidden_modules = ["aicd_identity", "aicd_projects", "aicd_cli_adapters", "aicd_orchestration", "aicd_verification",
+                     "aicd_collaboration", "aicd_api", "aicd_cli"]
 
 [[tool.importlinter.contracts]]
 name = "Запрет SDK AI-провайдеров (ТЗ §1, ADR-0003)"
 type = "forbidden"
 source_modules = ["aicd_platform", "aicd_contracts", "aicd_security", "aicd_identity", "aicd_projects",
-                  "aicd_cli_adapters", "aicd_orchestration", "aicd_api", "aicd_cli"]
+                  "aicd_cli_adapters", "aicd_orchestration", "aicd_verification", "aicd_collaboration", "aicd_api",
+                  "aicd_cli"]
 forbidden_modules = ["openai", "anthropic", "mistralai", "cohere", "ollama", "langchain", "litellm"]
 ignore_imports = []

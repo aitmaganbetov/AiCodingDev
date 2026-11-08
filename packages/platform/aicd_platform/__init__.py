@@ -4,4 +4,14 @@
 """
 
 # Таблицы, которыми владеет модуль (MODULE_BOUNDARIES §3); проверяется тестом архитектуры.
-OWNED_TABLES = frozenset({"audit_events", "idempotency_keys", "artifacts"})
+OWNED_TABLES = frozenset(
+    {
+        "audit_events",
+        "idempotency_keys",
+        "artifacts",
+        "outbox_events",
+        "processed_events",
+        "worker_leases",
+        "run_event_log",
+    }
+)
