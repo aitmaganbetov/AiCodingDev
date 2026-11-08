@@ -331,6 +331,21 @@ class DockerSandboxRunner:
         data: dict[str, Any] = resp.json()
         return data
 
+    def owns(self, ref: str) -> bool:
+        try:
+            self._container_id(ref)
+        except ValueError:
+            return False
+        return True
+
+    async def kill(self, ref: str) -> bool:
+        resp = await self.client.post(
+            self.path(f"/containers/{self._container_id(ref)}/kill"), params={"signal": "SIGKILL"}
+        )
+        if resp.status_code not in (204, 404, 409):  # 409 — контейнер уже не запущен
+            self.raise_for(resp, "kill")
+        return not await self.is_alive(ref)
+
     async def is_alive(self, ref: str) -> bool:
         info = await self.inspect(ref)
         if info is None:

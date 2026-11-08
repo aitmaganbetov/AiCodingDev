@@ -57,28 +57,55 @@ from pydantic import BaseModel
 CliProvider = Literal["codex", "claude"]
 AuthStatus = Literal["UNKNOWN", "AUTHENTICATED", "AUTH_REQUIRED", "EXPIRED", "ERROR"]
 CliErrorCode = Literal[
-    "CLI_NOT_INSTALLED", "AUTH_REQUIRED", "RATE_LIMITED", "TIMEOUT", "SANDBOX_DENIED",
-    "PROCESS_FAILED", "OUTPUT_PARSE_ERROR", "UNSUPPORTED_VERSION", "CANCELLED",
+    "CLI_NOT_INSTALLED",
+    "AUTH_REQUIRED",
+    "RATE_LIMITED",
+    "TIMEOUT",
+    "SANDBOX_DENIED",
+    "PROCESS_FAILED",
+    "OUTPUT_PARSE_ERROR",
+    "UNSUPPORTED_VERSION",
+    "CANCELLED",
 ]
 ExecutionStatus = Literal[
-    "QUEUED", "STARTING", "RUNNING", "EXITED", "COLLECTED",
-    "TIMED_OUT", "CANCELLED", "CRASHED", "AUTH_REQUIRED", "RATE_LIMITED",
+    "QUEUED",
+    "STARTING",
+    "RUNNING",
+    "EXITED",
+    "COLLECTED",
+    "TIMED_OUT",
+    "CANCELLED",
+    "CRASHED",
+    "AUTH_REQUIRED",
+    "RATE_LIMITED",
 ]
 
-class ProbeResult(BaseModel): ...          # схема §4.1
-class AuthCheckResult(BaseModel): ...      # схема §4.2
-class ExecutionRequest(BaseModel): ...     # схема §3.1
+
+class ProbeResult(BaseModel): ...  # схема §4.1
+
+
+class AuthCheckResult(BaseModel): ...  # схема §4.2
+
+
+class ExecutionRequest(BaseModel): ...  # схема §3.1
+
+
 class ExecutionHandle(BaseModel):
     execution_id: UUID
-    status: ExecutionStatus                # QUEUED | STARTING | RUNNING на момент возврата
-    runner_ref: str                        # opaque id runner-контейнера (не PID хоста)
+    status: ExecutionStatus  # QUEUED | STARTING | RUNNING на момент возврата
+    runner_ref: str  # opaque id runner-контейнера (не PID хоста)
     started_at: datetime | None
-class NormalizedEvent(BaseModel): ...      # схема §4.3
-class ExecutionResult(BaseModel): ...      # схема §3.2
+
+
+class NormalizedEvent(BaseModel): ...  # схема §4.3
+
+
+class ExecutionResult(BaseModel): ...  # схема §3.2
+
 
 class CLIExecutor(Protocol):
     provider: CliProvider
-    adapter_version: str                   # SemVer реализации адаптера
+    adapter_version: str  # SemVer реализации адаптера
 
     async def probe(self, *, installation_id: UUID) -> ProbeResult:
         """Определяет бинарь, версию, capabilities, совместимость. Не меняет состояние CLI,
@@ -95,7 +122,12 @@ class CLIExecutor(Protocol):
     def stream_events(self, execution_id: UUID, *, after_seq: int = 0) -> AsyncIterator[NormalizedEvent]:
         """Нормализованные события по возрастанию seq; поддерживает переподключение (after_seq)."""
 
-    async def cancel(self, execution_id: UUID, *, reason: Literal["user", "run_cancel", "directive", "pause", "lease_lost", "timeout"]) -> None:
+    async def cancel(
+        self,
+        execution_id: UUID,
+        *,
+        reason: Literal["user", "run_cancel", "directive", "pause", "lease_lost", "timeout"],
+    ) -> None:
         """SIGTERM группе процессов → grace → SIGKILL → остановка runner-контейнера. Идемпотентно."""
 
     async def collect_result(self, execution_id: UUID) -> ExecutionResult:

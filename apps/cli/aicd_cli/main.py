@@ -6,6 +6,9 @@
       (или интерактивно без эха) — дефолтных паролей нет (ADR-0009).
   aicd db ensure-partitions [--months N]
       Создаёт помесячные партиции audit_events вперёд (подключение роли aicd_migrator).
+  aicd maintenance retention [--reason R]
+      Retention/архивирование (DATABASE_DESIGN §20) под ролью aicd_maintenance
+      (AICD_MAINTENANCE_DATABASE_URL(_FILE)); сессия и каждое действие аудируются (§19.6).
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import json
 import os
 import sys
 
@@ -24,6 +28,7 @@ from aicd_platform.config import get_settings
 from aicd_platform.db import DbContext, apply_context, create_engine, transaction
 from aicd_platform.errors import ProblemError
 from aicd_platform.ids import uuid7
+from aicd_platform.retention import run_retention
 from aicd_projects import api as projects
 
 
@@ -79,6 +84,22 @@ async def _ensure_partitions(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _retention(args: argparse.Namespace) -> int:
+    settings = get_settings()
+    try:
+        url = settings.require_maintenance_database_url()
+    except RuntimeError as err:
+        print(f"Ошибка: {err}", file=sys.stderr)
+        return 2
+    engine = create_engine(url, pool_size=1)
+    try:
+        report = await run_retention(engine, settings, reason=args.reason)
+    finally:
+        await engine.dispose()
+    print(json.dumps({"maintenance_run_id": str(report.session_id), **report.summary()}, ensure_ascii=False))
+    return 0 if not report.warnings else 3
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aicd", description="Администрирование AiCodingDev")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -98,6 +119,12 @@ def build_parser() -> argparse.ArgumentParser:
     parts = db_sub.add_parser("ensure-partitions", help="Создать партиции audit_events вперёд")
     parts.add_argument("--months", type=int, default=3)
     parts.set_defaults(handler=_ensure_partitions)
+
+    maint = sub.add_parser("maintenance", help="Обслуживание под ролью aicd_maintenance (§19.6)")
+    maint_sub = maint.add_subparsers(dest="command", required=True)
+    retention = maint_sub.add_parser("retention", help="Партиции вперёд, архив и удаление по срокам хранения")
+    retention.add_argument("--reason", default="scheduled retention", help="Причина (пишется в аудит)")
+    retention.set_defaults(handler=_retention)
     return parser
 
 

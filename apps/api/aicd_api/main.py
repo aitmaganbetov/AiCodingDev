@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from redis.asyncio import Redis
@@ -12,33 +11,15 @@ from redis.asyncio import Redis
 from aicd_api import errors
 from aicd_api.middleware import BodyLimitMiddleware, request_context_middleware
 from aicd_api.ratelimit import RateLimiter
-from aicd_api.routers import approvals, audit, auth, directives, health, projects, providers, runs, workspaces
+from aicd_api.routers import approvals, audit, auth, directives, events, health, projects, providers, runs, workspaces
 from aicd_api.state import AppState
-from aicd_platform.artifacts import ArtifactStore, FileSystemArtifactStore, S3ArtifactStore
+from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.config import Settings, get_settings
 from aicd_platform.db import create_engine
 from aicd_platform.logging import configure_logging
 from aicd_platform.telemetry import configure_tracing
 
 API_PREFIX = "/api/v1"
-
-
-def build_artifact_store(settings: Settings) -> ArtifactStore:
-    if settings.artifact_backend == "s3":
-        if not (
-            settings.artifact_s3_endpoint
-            and settings.artifact_s3_access_key_file
-            and settings.artifact_s3_secret_key_file
-        ):
-            raise RuntimeError("для artifact_backend=s3 нужны endpoint и файлы ключей доступа")
-        return S3ArtifactStore(
-            endpoint_url=settings.artifact_s3_endpoint,
-            bucket=settings.artifact_s3_bucket,
-            access_key=Path(settings.artifact_s3_access_key_file).read_text().strip(),
-            secret_key=Path(settings.artifact_s3_secret_key_file).read_text().strip(),
-            region=settings.artifact_s3_region,
-        )
-    return FileSystemArtifactStore(settings.artifact_fs_root)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -84,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runs.router,
         approvals.router,
         directives.router,
+        events.router,
         audit.router,
     ):
         app.include_router(router, prefix=API_PREFIX)

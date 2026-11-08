@@ -2999,6 +2999,9 @@ CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USI
 | `sys_resolve_installation_workspace(installation_id bigint)` | `aicd_worker` | `workspace_id` установки GitHub App (после проверки подписи вебхука) |
 | `sys_schedulable_workspaces(limit int)` | `aicd_worker` | workspace с `READY`-задачами, наступившими `RETRY_WAIT`, истекающими `PENDING` approvals, активными directives |
 | `sys_login_lookup(email text)` | `aicd_app` | `user_id` и признак активности для аутентификации (глобальная таблица, но функция централизует rate-limited lookup) |
+| `sys_resolve_run_workspace(run_id uuid)` / `sys_resolve_task_workspace(task_id uuid)` | `aicd_app` | `workspace_id` run/задачи, если `app_current_user()` — член; иначе `NULL` (миграция 0003) |
+| `sys_resolve_approval_workspace(approval_id uuid)` | `aicd_app` | `workspace_id` approval, если `app_current_user()` — член; иначе `NULL` (миграция 0005; `GET/POST /approvals/{id}…`) |
+| `sys_recovery_workspaces(limit int)` | `aicd_worker` | workspace с `cli_executions` в `QUEUED/STARTING/RUNNING/EXITED`, `worktrees` в `ACTIVE/LOCKED`, `external_actions` в `EXECUTING`, нетерминальными `runs` — для recovery reconciler (миграция 0005) |
 
 ### 19.6 Обход RLS для обслуживания
 
@@ -3052,6 +3055,17 @@ CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USI
 | `documentation_snapshots` | `SUPERSEDED` — 90 дней, если не используются | удаление |
 | `artifacts` по `retention_class` | `ephemeral` 7 дн.; `cli_raw_log` (sensitive) 30 дн.; `standard` 180 дн.; `evidence`/`archive` — без автоудаления | удаление объекта и строки, если нет FK-ссылок |
 | `usage_metrics` | 365 дней | удаление |
+
+
+### 20.4 Реализация (P3-18, миграция 0005, `aicd_platform.retention`)
+
+- **Запуск:** `aicd maintenance retention [--reason …]` — подключение `aicd_maintenance` из `AICD_MAINTENANCE_DATABASE_URL(_FILE)`; одно соединение на весь проход. Расписание (ежедневно) задаёт оператор (cron/systemd timer). Код выхода 3 — есть предупреждения (алерт).
+- **Сессия (§19.6):** `maint_begin(session_id, job, reason)` (только `current_user = aicd_maintenance`) пишет `maintenance.session_started` и выставляет `aicd.maint_session`; `maint_end` — `maintenance.session_finished` с итогами. Без сессии `maint_drop_partition` и `DELETE FROM run_event_log` отклоняются (`42501`); каждый drop партиции (`maintenance.partition_dropped`: партиция, ссылка на архив, sha256, число строк) и каждый удалённый пакет (`maintenance.rows_deleted`) аудируются в той же транзакции.
+- **Партиции:** `maint_ensure_monthly_partitions` — `SECURITY DEFINER` (владелец таблиц `aicd_migrator`, `EXECUTE` только `aicd_maintenance`); job создаёт `retention_partitions_ahead_months` (3) месяцев вперёд и предупреждает, если впереди < 2. `maint_drop_partition(table, partition, cutoff, archive_ref, sha256)` — `SECURITY DEFINER`: имя по шаблону, партиция целиком до `cutoff`, `cutoff` ≤ начала текущего месяца; для `audit_events`/`agent_activity_events` без ссылки на архив и sha256 — отказ; для `outbox_events` — только при 0 неопубликованных (иначе `skipped_unpublished`). **Отличие от §20.2:** `DETACH` без `CONCURRENTLY` (невозможен в функции/транзакции; партиция старая, блокировка кратковременная, `lock_timeout = 5s`).
+- **Архив:** NDJSON.gz (детерминированный, `mtime=0`) партиции через родителя по диапазону ключа → `FileSystemArchiveSink` (`retention_archive_root`, по умолчанию `<artifact_fs_root>/archive`): `archive/global/<table>/<YYYY-MM>.ndjson.gz`, атомарная запись и сверка sha256; только затем drop. **Отличие:** sha256 фиксируется в `audit_events`, строка `artifacts(kind='archive')` не создаётся (у `artifacts` обязателен `workspace_id`, а глобальная партиция аудита содержит несколько workspace); S3-приёмник — открытый вопрос.
+- **Пакетное удаление** (`DELETE … WHERE ctid = ANY(ARRAY(SELECT ctid … LIMIT n))`, `retention_batch_size` = 5000, пауза `retention_batch_pause_seconds`): `run_event_log` терминальных run с `finished_at` старше срока (триггер append-only пропускает только `DELETE` от `aicd_maintenance` в сессии обслуживания; `audit_events` построчно неизменяем всегда), `processed_events`, `idempotency_keys` (истёкшие), `user_sessions`, `provider_health`. Дополнительно job считает неопубликованные outbox-события старше 15 мин (предупреждение).
+- **Сроки:** `Settings.retention_*` (значения §20.3); активная **глобальная** политика `policies(policy_type='retention', workspace_id IS NULL)` переопределяет их ключами `run_event_log_days`, `agent_activity_days`, `agent_messages_days`, `audit_days` (≥ 30), `outbox_published_months`, `processed_events_days`, `user_sessions_days`, `provider_health_days`; некорректные значения пропускаются с предупреждением. Политики уровня workspace в v1 не применяются (партиции глобальные).
+- **Не реализовано до Phase 4:** `agent_activity_events` (функции уже знают таблицу, job пропускает её, пока таблицы нет) и архив run (`agent_messages`, `message_deliveries`, `chat_*`, `directive_*`); `code_index_snapshots`, `documentation_snapshots`, `artifacts` по `retention_class`, `usage_metrics`, `github_webhook_deliveries` — в фазах, где появляются их потребители.
 
 ---
 

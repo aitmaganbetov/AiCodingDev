@@ -19,9 +19,10 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from aicd_orchestration import directives, plans, retry, store
+from aicd_orchestration import checkpoints, directives, plans, retry, store
 from aicd_orchestration.planner import template_plan
 from aicd_platform import context, leases
+from aicd_platform.artifacts import ArtifactStore
 from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
 
@@ -117,6 +118,8 @@ class Orchestrator:
     approvals: ApprovalsPort
     verifier: VerifierPort
     executor: TaskExecutorPort
+    # Хранилище снимков checkpoint (DATA_FLOW §7): plan_approved, pause. Без него снимки не создаются.
+    artifacts: ArtifactStore | None = None
     worker_id: str = field(default_factory=lambda: leases.worker_identity("orchestrator"))
     lease_ttl_seconds: int = 120
     _cancel_hooks: dict[uuid.UUID, Callable[[str], Awaitable[None]]] = field(default_factory=dict)
@@ -161,6 +164,7 @@ class Orchestrator:
                 return
             await plans.mark_plan_approved(conn, run_id, plan_version)
             await store.transition_run(conn, run_id, "RUNNING", reason="no_approval_required")
+            await self._checkpoint(conn, run_id, "plan_approved")
         await self.tick(run_id, ws)
 
     async def on_plan_approval_decided(
@@ -173,6 +177,7 @@ class Orchestrator:
             if approved:
                 await plans.mark_plan_approved(conn, run_id, plan_version)
                 await store.transition_run(conn, run_id, "RUNNING", reason="plan_approved")
+                await self._checkpoint(conn, run_id, "plan_approved")
             else:
                 await store.transition_run(conn, run_id, "CANCELLED", reason="plan_rejected")
                 await _cancel_open_tasks(conn, run_id)
@@ -182,6 +187,10 @@ class Orchestrator:
     async def on_run_paused_or_cancelled(self, run_id: uuid.UUID, ws: uuid.UUID, status: str) -> None:
         """Safe point: работающие исполнения run останавливаются штатно (DATA_FLOW §6.2)."""
         async with transaction(self.engine, self._ctx(ws)) as conn:
+            if status == "PAUSED":
+                current = await store.load_run(conn, run_id)
+                if current is not None and current.status == "PAUSED":
+                    await self._checkpoint(conn, run_id, "pause")
             running = (
                 (
                     await conn.execute(
@@ -214,6 +223,10 @@ class Orchestrator:
             for task_id in paused:
                 await store.transition_task(conn, task_id, "READY", reason="run_resumed")
         await self.tick(run_id, ws)
+
+    async def _checkpoint(self, conn: AsyncConnection, run_id: uuid.UUID, reason: checkpoints.Reason) -> None:
+        if self.artifacts is not None:
+            await checkpoints.create(conn, run_id=run_id, artifacts=self.artifacts, reason=reason)
 
     # ---------- scheduler ----------
     async def tick(self, run_id: uuid.UUID, ws: uuid.UUID) -> list[uuid.UUID]:
@@ -333,13 +346,27 @@ class Orchestrator:
             )
             if lease is None:
                 return  # задачей уже владеет другой воркер
-            attempt_no = task["attempt_count"] + 1
+            # attempt_count — расход бюджета (RATE_LIMITED/LEASE_LOST не считаются), attempt_no — сквозной номер
+            # попытки: после «бесплатного» повтора они расходятся, поэтому номер берётся из истории попыток.
+            attempt_count = task["attempt_count"] + 1
+            attempt_no = (
+                1
+                + (
+                    await conn.execute(
+                        text("SELECT COALESCE(max(attempt_no), 0) FROM task_attempts WHERE task_id = :t"),
+                        {"t": task_id},
+                    )
+                ).scalar_one()
+            )
             attempt_id = uuid.uuid4()
             from aicd_platform.ids import uuid7
 
             attempt_id = uuid7()
             await store.transition_task(
-                conn, task_id, "LEASED", extra={"lease_fencing_token": lease.fencing_token, "attempt_count": attempt_no}
+                conn,
+                task_id,
+                "LEASED",
+                extra={"lease_fencing_token": lease.fencing_token, "attempt_count": attempt_count},
             )
             await conn.execute(
                 text(
@@ -452,40 +479,7 @@ class Orchestrator:
             else:
                 await store.transition_task(conn, task_id, "CANCELLED", reason="cancelled")
             return
-        await _finish_attempt_row(conn, attempt_id, "FAILED", category)
-        source = task["status"]
-        decision = retry.decide(
-            failure_category=category,
-            attempt_count=task["attempt_count"],
-            max_attempts=task["max_attempts"],
-            retry_spent_seconds=task["retry_spent_seconds"] + spent,
-            retry_budget_seconds=task["retry_budget_seconds"],
-            now=utcnow(),
-            retry_after=outcome.retry_after,
-        )
-        spent_total = min(task["retry_spent_seconds"] + spent, 2_000_000_000)
-        if decision.action == "retry":
-            extra: dict[str, Any] = {"next_attempt_at": decision.next_attempt_at, "retry_spent_seconds": spent_total}
-            if not decision.counts_attempt:
-                extra["attempt_count"] = max(task["attempt_count"] - 1, 0)
-            await store.transition_task(conn, task_id, "RETRY_WAIT", reason=category, extra=extra)
-        elif decision.action == "block":
-            await store.transition_task(
-                conn,
-                task_id,
-                "BLOCKED",
-                reason=category,
-                extra={
-                    "blocked_reason": decision.blocked_reason,
-                    "retry_spent_seconds": spent_total,
-                    "attempt_count": max(task["attempt_count"] - 1, 0),
-                },
-            )
-        else:
-            del source
-            await store.transition_task(
-                conn, task_id, "FAILED", reason=category, extra={"retry_spent_seconds": spent_total}
-            )
+        await fail_attempt(conn, task, attempt_id, category, spent, retry_after=outcome.retry_after)
 
     # ---------- drive (тесты / E2E без брокера) ----------
     async def drive(
@@ -591,6 +585,54 @@ async def _cancel_open_tasks(conn: AsyncConnection, run_id: uuid.UUID) -> None:
     )
     for task_id in open_ids:
         await store.transition_task(conn, task_id, "CANCELLED", reason="run_terminated")
+
+
+async def fail_attempt(
+    conn: AsyncConnection,
+    task: dict[str, Any],
+    attempt_id: uuid.UUID,
+    category: str,
+    spent: int,
+    *,
+    retry_after: int | None = None,
+) -> None:
+    """Неуспешная попытка → RETRY_WAIT / BLOCKED / FAILED по политике retry (DATA_FLOW §3.2).
+
+    Общая для исполнителя и reaper (LEASE_LOST/WORKER_CRASH): один источник правил бюджета попыток.
+    """
+    task_id = task["id"]
+    await _finish_attempt_row(conn, attempt_id, "FAILED", category)
+    decision = retry.decide(
+        failure_category=category,
+        attempt_count=task["attempt_count"],
+        max_attempts=task["max_attempts"],
+        retry_spent_seconds=task["retry_spent_seconds"] + spent,
+        retry_budget_seconds=task["retry_budget_seconds"],
+        now=utcnow(),
+        retry_after=retry_after,
+    )
+    spent_total = min(task["retry_spent_seconds"] + spent, 2_000_000_000)
+    if decision.action == "retry":
+        extra: dict[str, Any] = {"next_attempt_at": decision.next_attempt_at, "retry_spent_seconds": spent_total}
+        if not decision.counts_attempt:
+            extra["attempt_count"] = max(task["attempt_count"] - 1, 0)
+        await store.transition_task(conn, task_id, "RETRY_WAIT", reason=category, extra=extra)
+    elif decision.action == "block":
+        await store.transition_task(
+            conn,
+            task_id,
+            "BLOCKED",
+            reason=category,
+            extra={
+                "blocked_reason": decision.blocked_reason,
+                "retry_spent_seconds": spent_total,
+                "attempt_count": max(task["attempt_count"] - 1, 0),
+            },
+        )
+    else:
+        await store.transition_task(
+            conn, task_id, "FAILED", reason=category, extra={"retry_spent_seconds": spent_total}
+        )
 
 
 async def _finish_attempt_row(conn: AsyncConnection, attempt_id: uuid.UUID, status: str, category: str | None) -> None:

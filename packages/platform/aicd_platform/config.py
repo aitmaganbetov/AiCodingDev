@@ -71,6 +71,27 @@ class Settings(BaseSettings):
     artifact_s3_secret_key_file: str | None = None
     artifact_download_ttl_seconds: int = Field(default=300, ge=10, le=3600)
 
+    # Обслуживание БД (DATABASE_DESIGN §19.6, §20): подключение роли aicd_maintenance — только из файла
+    # секрета/окружения команды `aicd maintenance …`, процессы api/worker его не получают.
+    maintenance_database_url: SecretStr | None = None
+    maintenance_database_url_file: str | None = None
+    # Сроки хранения по умолчанию (§20.3); глобальная политика policies(policy_type='retention') их переопределяет.
+    retention_run_event_log_days: int = Field(default=30, ge=1)
+    retention_agent_activity_days: int = Field(default=90, ge=1)
+    retention_agent_messages_days: int = Field(default=365, ge=1)
+    retention_audit_days: int = Field(default=400, ge=30)
+    retention_outbox_published_months: int = Field(default=2, ge=1, le=24)
+    retention_processed_events_days: int = Field(default=30, ge=1)
+    retention_user_sessions_days: int = Field(default=30, ge=1)
+    retention_provider_health_days: int = Field(default=30, ge=1)
+    # Партиции создаются на N месяцев вперёд; алерт, если впереди меньше 2 (§20.1).
+    retention_partitions_ahead_months: int = Field(default=3, ge=2, le=24)
+    # Пакетное удаление непартиционированных таблиц (§20.2): 5–10 тыс. строк с паузами.
+    retention_batch_size: int = Field(default=5000, ge=1, le=10_000)
+    retention_batch_pause_seconds: float = Field(default=0.05, ge=0, le=10)
+    # Каталог архива NDJSON.gz (FS); по умолчанию <artifact_fs_root>/archive.
+    retention_archive_root: Path | None = None
+
     log_level: str = "INFO"
     otel_exporter: Literal["none", "console"] = "none"
 
@@ -98,6 +119,8 @@ class Settings(BaseSettings):
             self.database_url = _read_secret_file(self.database_url_file)
         if self.secret_key is None:
             self.secret_key = _read_secret_file(self.secret_key_file)
+        if self.maintenance_database_url is None:
+            self.maintenance_database_url = _read_secret_file(self.maintenance_database_url_file)
         redis_from_file = _read_secret_file(self.redis_url_file)
         if redis_from_file is not None:
             self.redis_url = redis_from_file.get_secret_value()
@@ -112,6 +135,14 @@ class Settings(BaseSettings):
         if self.database_url is None:
             raise RuntimeError("AICD_DATABASE_URL или AICD_DATABASE_URL_FILE не заданы")
         return self.database_url.get_secret_value()
+
+    def require_maintenance_database_url(self) -> str:
+        if self.maintenance_database_url is None:
+            raise RuntimeError("AICD_MAINTENANCE_DATABASE_URL или AICD_MAINTENANCE_DATABASE_URL_FILE не заданы")
+        return self.maintenance_database_url.get_secret_value()
+
+    def archive_root(self) -> Path:
+        return self.retention_archive_root or self.artifact_fs_root / "archive"
 
     def require_secret_key(self) -> bytes:
         if self.secret_key is None:

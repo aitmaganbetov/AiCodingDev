@@ -3444,7 +3444,10 @@ components:
       properties:
         id: {type: string, format: uuid}
         workspace_id: {type: string, format: uuid}
-        run_id: {type: string, format: uuid}
+        run_id:
+          type: [string, 'null']
+          format: uuid
+          description: 'null — действие вне run (например, DOCS_DOWNLOAD)'
         task_id:
           type: [string, 'null']
           format: uuid

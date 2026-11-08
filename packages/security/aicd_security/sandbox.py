@@ -82,3 +82,11 @@ class SandboxRunner(Protocol):
     async def is_alive(self, ref: str) -> bool:
         """Для recovery reconciler: жив ли процесс/контейнер по ссылке."""
         ...
+
+    def owns(self, ref: str) -> bool:
+        """Ссылка относится к этому runner/хосту (иначе reconciler не может судить о процессе)."""
+        ...
+
+    async def kill(self, ref: str) -> bool:
+        """Для recovery reconciler: SIGKILL процесса/контейнера; True — процесс гарантированно мёртв."""
+        ...

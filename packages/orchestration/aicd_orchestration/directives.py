@@ -23,7 +23,6 @@ stdin; для затронутых RUNNING задач запрашивается
 
 from __future__ import annotations
 
-import io
 import json
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
@@ -34,7 +33,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from aicd_identity.rbac import Role, can_submit_directive
-from aicd_orchestration import fsm, runs, store
+from aicd_orchestration import checkpoints, fsm, runs, store
 from aicd_orchestration.approvals import Approvals
 from aicd_platform import audit, outbox
 from aicd_platform.artifacts import ArtifactStore
@@ -773,89 +772,9 @@ class Directives:
     async def _checkpoint(
         self, conn: AsyncConnection, d: dict[str, Any], run: store.RunState, artifacts: ArtifactStore
     ) -> uuid.UUID:
-        existing = (
-            await conn.execute(
-                text("SELECT id FROM checkpoints WHERE run_id = :r AND task_id IS NULL AND state_version = :v"),
-                {"r": run.id, "v": run.version},
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            return uuid.UUID(str(existing))
-        tasks = (
-            (
-                await conn.execute(
-                    text(
-                        "SELECT id, task_key, plan_version, status, version, agent_role, superseded_at IS NOT NULL AS"
-                        " superseded FROM tasks WHERE run_id = :r ORDER BY created_at, id"
-                    ),
-                    {"r": run.id},
-                )
-            )
-            .mappings()
-            .all()
+        return await checkpoints.create(
+            conn, run_id=run.id, artifacts=artifacts, reason="directive", extra={"directive_id": str(d["id"])}
         )
-        open_approvals = (
-            (
-                await conn.execute(
-                    text("SELECT id, action_type FROM approvals WHERE run_id = :r AND status = 'PENDING' ORDER BY id"),
-                    {"r": run.id},
-                )
-            )
-            .mappings()
-            .all()
-        )
-        state = {
-            "schema": 1,
-            "reason": "directive",
-            "directive_id": str(d["id"]),
-            "created_at": utcnow().isoformat(),
-            "run": {
-                "id": str(run.id),
-                "status": run.status,
-                "version": run.version,
-                "plan_version": run.plan_version,
-                "approved_plan_version": run.approved_plan_version,
-                "resume_status": run.resume_status,
-            },
-            "tasks": [{k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in t.items()} for t in tasks],
-            "open_approvals": [{"id": str(a["id"]), "action_type": a["action_type"]} for a in open_approvals],
-        }
-        data = json.dumps(state, ensure_ascii=False, sort_keys=True).encode()
-        artifact_id = uuid7()
-        stored = artifacts.put(d["workspace_id"], artifact_id, io.BytesIO(data))
-        project_id = await _project_of(conn, run.id)
-        await conn.execute(
-            text(
-                "INSERT INTO artifacts (id, workspace_id, project_id, run_id, kind, storage_ref, sha256, size_bytes,"
-                " mime_type, redaction_applied) VALUES (:id, :ws, :p, :r, 'checkpoint_state', :ref, :sha, :size,"
-                " 'application/json', true)"
-            ),
-            {
-                "id": artifact_id,
-                "ws": d["workspace_id"],
-                "p": project_id,
-                "r": run.id,
-                "ref": stored.storage_ref,
-                "sha": stored.sha256,
-                "size": stored.size_bytes,
-            },
-        )
-        checkpoint_id = uuid7()
-        await conn.execute(
-            text(
-                "INSERT INTO checkpoints (id, workspace_id, run_id, state_version, plan_version, reason, state_ref)"
-                " VALUES (:id, :ws, :r, :sv, :pv, 'directive', :ref)"
-            ),
-            {
-                "id": checkpoint_id,
-                "ws": d["workspace_id"],
-                "r": run.id,
-                "sv": run.version,
-                "pv": run.plan_version,
-                "ref": artifact_id,
-            },
-        )
-        return checkpoint_id
 
     async def _replan(
         self, conn: AsyncConnection, d: dict[str, Any], run: store.RunState, impacts: list[dict[str, Any]]

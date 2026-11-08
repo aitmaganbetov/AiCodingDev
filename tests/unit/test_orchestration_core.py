@@ -56,8 +56,14 @@ def acyclic_plans(draw: st.DrawFn) -> list[dag.PlannedTask]:
     tasks = []
     for i in range(n):
         deps = draw(st.lists(st.integers(0, max(i - 1, 0)), max_size=3, unique=True)) if i else []
-        tasks.append(dag.PlannedTask(key=f"t{i}", role=draw(st.sampled_from(["planner", "reviewer", "qa", "documentation"])),
-                                     complexity=draw(st.integers(1, 5)), depends_on=tuple(f"t{d}" for d in deps)))
+        tasks.append(
+            dag.PlannedTask(
+                key=f"t{i}",
+                role=draw(st.sampled_from(["planner", "reviewer", "qa", "documentation"])),
+                complexity=draw(st.integers(1, 5)),
+                depends_on=tuple(f"t{d}" for d in deps),
+            )
+        )
     return tasks
 
 
@@ -76,13 +82,15 @@ def test_acyclic_plans_validate_and_respect_edges(plan: list[dag.PlannedTask]) -
 def test_any_back_edge_is_detected_with_cycle_path(plan: list[dag.PlannedTask], data: st.DataObject) -> None:
     # добавляем ребро «ранняя задача зависит от поздней, достижимой из неё» ⇒ гарантированный цикл
     last = plan[-1]
-    target = data.draw(st.sampled_from(plan[:-1]))
-    if target.key not in _ancestors(plan, last.key):
-        target = plan[0] if plan[0].key in _ancestors(plan, last.key) else None  # type: ignore[assignment]
-    if target is None:
+    ancestors = _ancestors(plan, last.key)
+    candidates = [t for t in plan[:-1] if t.key in ancestors]
+    if not candidates:
         return
-    mutated = [t if t.key != target.key else dag.PlannedTask(t.key, t.role, t.complexity, (*t.depends_on, last.key))
-               for t in plan]
+    target = data.draw(st.sampled_from(candidates))
+    mutated = [
+        t if t.key != target.key else dag.PlannedTask(t.key, t.role, t.complexity, (*t.depends_on, last.key))
+        for t in plan
+    ]
     with pytest.raises(dag.PlanValidationError) as exc:
         dag.validate_plan(mutated)
     assert exc.value.code == "PLAN_CYCLE_DETECTED"
@@ -121,7 +129,7 @@ def test_plan_rejections(tasks: list[dag.PlannedTask], code: str) -> None:
 
 
 def test_limits_and_critical_path() -> None:
-    chain = [dag.PlannedTask(f"t{i}", "qa", 1, (f"t{i-1}",) if i else ()) for i in range(25)]
+    chain = [dag.PlannedTask(f"t{i}", "qa", 1, (f"t{i - 1}",) if i else ()) for i in range(25)]
     with pytest.raises(dag.PlanValidationError, match="PLAN_TOO_DEEP"):
         dag.validate_plan(chain)
     with pytest.raises(dag.PlanValidationError, match="PLAN_TOO_LARGE"):
@@ -137,8 +145,10 @@ NOW = datetime(2026, 11, 8, tzinfo=UTC)
 def test_backoff_growth_cap_and_jitter() -> None:
     rng = random.Random(1)
     values = [retry.backoff_seconds(n, rng=rng) for n in range(1, 10)]
-    assert all(0.8 * min(30 * 2 ** (n - 1), 900) <= v <= 1.2 * min(30 * 2 ** (n - 1), 900)
-               for n, v in zip(range(1, 10), values, strict=True))
+    assert all(
+        0.8 * min(30 * 2 ** (n - 1), 900) <= v <= 1.2 * min(30 * 2 ** (n - 1), 900)
+        for n, v in zip(range(1, 10), values, strict=True)
+    )
     assert retry.backoff_seconds(1, rate_limited=True, retry_after=7200, rng=rng) == 7200
 
 
@@ -146,17 +156,24 @@ def test_backoff_growth_cap_and_jitter() -> None:
     ("category", "attempts", "spent", "expected"),
     [
         ("TIMEOUT", 1, 0, "retry"),
-        ("TIMEOUT", 3, 0, "fail"),           # бюджет попыток исчерпан (AC-07)
-        ("TIMEOUT", 1, 7190, "fail"),        # бюджет времени исчерпан
-        ("RATE_LIMITED", 3, 0, "retry"),     # не расходует max_attempts
-        ("AUTH_REQUIRED", 1, 0, "block"),    # AC-16
+        ("TIMEOUT", 3, 0, "fail"),  # бюджет попыток исчерпан (AC-07)
+        ("TIMEOUT", 1, 7190, "fail"),  # бюджет времени исчерпан
+        ("RATE_LIMITED", 3, 0, "retry"),  # не расходует max_attempts
+        ("AUTH_REQUIRED", 1, 0, "block"),  # AC-16
         ("SANDBOX_DENIED", 1, 0, "fail"),
         ("UNSUPPORTED_VERSION", 1, 0, "fail"),
     ],
 )
 def test_retry_decisions(category: str, attempts: int, spent: int, expected: str) -> None:
-    d = retry.decide(failure_category=category, attempt_count=attempts, max_attempts=3, retry_spent_seconds=spent,
-                     retry_budget_seconds=7200, now=NOW, rng=random.Random(0))
+    d = retry.decide(
+        failure_category=category,
+        attempt_count=attempts,
+        max_attempts=3,
+        retry_spent_seconds=spent,
+        retry_budget_seconds=7200,
+        now=NOW,
+        rng=random.Random(0),
+    )
     assert d.action == expected
     if expected == "retry":
         assert d.next_attempt_at is not None and d.next_attempt_at > NOW

@@ -92,7 +92,7 @@
 | P3-15 | Минимальный Run view UI (вертикальный срез): статус run, задачи, лента событий SSE | FR-CHAT-07 | P3-09, P1-13 | P1 | Playwright: события отображаются, реконнект без дублей | TODO |
 | P3-16 | Chaos suite v1: kill worker, рестарт Redis, потеря аренды, дубль сообщения, разрыв SSE | NFR-REL-01, NFR-REL-02 | P3-12 | P0 | Все сценарии зелёные в CI (nightly) | TODO |
 | P3-17 | E2E-срез на Fake CLI: run → plan → DAG → exec → gate v0 → COMPLETED / BLOCKED / FAILED | AC-07, AC-11, AC-16 | P3-13, P3-14 | P0 | E2E-тест зелёный | TODO |
-| P3-18 | Retention/архивирование: партиции и job'ы для `run_event_log`, `agent_messages`, `agent_activity_events`, `outbox_events`, `audit_events` (роль `aicd_maintenance`, аудит) | NFR-REL-05 | P3-01 | P1 | Тест job'а на seeded БД; аудит использования BYPASSRLS | TODO |
+| P3-18 | Retention/архивирование: партиции и job'ы для `run_event_log`, `agent_messages`, `agent_activity_events`, `outbox_events`, `audit_events` (роль `aicd_maintenance`, аудит) | NFR-REL-05 | P3-01 | P1 | Тест job'а на seeded БД; аудит использования BYPASSRLS | IN_PROGRESS |
 
 ## Phase 4 — Multi-Agent System
 
@@ -251,3 +251,10 @@
 
 **Итог:** `uv run pytest --cov` → **421 passed** (PostgreSQL 17, Redis, S3-совместимый RustFS, Docker), покрытие 88%; ruff, mypy --strict (117 файлов), import-linter (4 контракта), deny-gate (123 py / 498 js пакетов) — без замечаний.
 
+### P3-18 — Retention/архивирование (2026-11-08)
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P3-18 | IN_PROGRESS | `infrastructure/migrations/versions/0005_retention_and_resolvers.py`, `packages/platform/aicd_platform/{retention,config}.py`, `apps/cli/aicd_cli/main.py` (`aicd maintenance retention`), `tests/integration/test_retention.py`, `tests/migrations/test_retention_migration.py` | `uv run pytest tests/migrations tests/integration/test_retention.py tests/integration/test_approvals_api.py -q` → **56 passed** (PostgreSQL 17): на засеянной БД под `aicd_maintenance` — партиции вперёд, архив audit-партиции 2002-03 в NDJSON.gz (sha256 сверен) → DETACH+DROP, опубликованная outbox-партиция удалена, партиция с неопубликованным событием сохранена, `run_event_log` отменённого run удалён пакетами (активный run не тронут), `processed_events` старше срока удалены, политика `retention` переопределяет срок; каждое действие и сессия (`maintenance.session_started/…_finished`) в `audit_events`; без `maint_begin` удаление/drop отклоняются, под `aicd_app` job не стартует. ruff, mypy, lint-imports — без замечаний. **Не закрыто (поэтому IN_PROGRESS):** расписание job не подключено (cron/systemd/воркер); `agent_activity_events` и архив run (`agent_messages`, `message_deliveries`, `chat_*`) — таблиц ещё нет, job отмечает их пропущенными; S3-приёмник архива; расписание job (cron/systemd) |
+
+В той же миграции: `sys_resolve_approval_workspace` (approvals API больше не перебирает workspace пользователя) и `sys_recovery_workspaces` для recovery reconciler (P3-12).

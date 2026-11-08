@@ -28,7 +28,7 @@ from aicd_api.routers import op
 from aicd_identity import api as identity
 from aicd_orchestration.approvals import Approvals, SelfApprovalContext, summary_for
 from aicd_orchestration.directives import Directives
-from aicd_platform.db import DbContext, apply_context, transaction
+from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
 
@@ -83,30 +83,19 @@ def approval_view(row: dict[str, Any], can_decide: bool) -> dict[str, Any]:
 
 
 async def _locate(request: Request, principal: identity.Principal, approval_id: uuid.UUID) -> Access:
-    """Workspace approval среди workspace пользователя; иначе 404 (не раскрывает чужие ресурсы, AC-12).
-
-    Отдельного SECURITY DEFINER резолвера approval → workspace в миграции 0003 нет, поэтому строка ищется
-    под RLS каждого workspace участника (число членств пользователя мало).
-    """
+    """Workspace approval через SECURITY DEFINER `sys_resolve_approval_workspace` (только для членов) —
+    иначе 404, не раскрывая чужие ресурсы (AC-12); как `_resolve` в routers/runs.py."""
     state = app_state(request)
-    header = request.headers.get("x-workspace-id")
-    found: uuid.UUID | None = None
     async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
-        memberships = await identity.list_memberships(conn)
-        for m in memberships:
-            ws = uuid.UUID(str(m["workspace_id"]))
-            if header is not None and header != str(ws):
-                continue
-            await apply_context(conn, DbContext(user_id=principal.user_id, workspace_id=ws))
-            hit = (
-                await conn.execute(text("SELECT 1 FROM approvals WHERE id = :id"), {"id": approval_id})
-            ).scalar_one_or_none()
-            if hit is not None:
-                found = ws
-                break
-    if found is None:
+        ws = (
+            await conn.execute(text("SELECT sys_resolve_approval_workspace(:id)"), {"id": approval_id})
+        ).scalar_one_or_none()
+    if ws is None:
         raise ProblemError("not_found")
-    return await workspace_access(request, principal, found)
+    header = request.headers.get("x-workspace-id")
+    if header is not None and header != str(ws):
+        raise ProblemError("not_found")
+    return await workspace_access(request, principal, ws)
 
 
 async def _load_with_ctx(

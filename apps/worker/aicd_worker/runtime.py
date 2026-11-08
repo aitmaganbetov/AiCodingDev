@@ -15,6 +15,8 @@ from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_orchestration.recovery import Reconciler
+
 
 class OrchestratorPort(Protocol):
     """Подмножество `aicd_orchestration.engine.Orchestrator`, которое вызывают акторы."""
@@ -42,6 +44,8 @@ class Runtime:
     # Постановка исполнения задачи в очередь exec (в тестах — прямой вызов).
     dispatch_execution: Callable[[dict[str, Any]], Awaitable[None]]
     stale_ready_seconds: int = 30
+    # Recovery reconciler хоста исполнения (только у воркера exec: процессы и worktrees — его).
+    reconciler: Reconciler | None = None
 
 
 _current: Runtime | None = None

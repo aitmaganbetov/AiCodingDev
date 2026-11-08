@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import BinaryIO, Protocol
 
 from aicd_platform.clock import utcnow
+from aicd_platform.config import Settings
 
 CHUNK = 1024 * 1024
 
@@ -277,3 +278,21 @@ def verify_download_token(key: bytes, token: str, artifact_id: uuid.UUID, user_i
         return False
     msg = f"{artifact_id}:{user_id}:{expires}".encode()
     return hmac.compare_digest(sig, hmac.new(key, msg, hashlib.sha256).hexdigest())
+
+
+def build_artifact_store(settings: Settings) -> ArtifactStore:
+    if settings.artifact_backend == "s3":
+        if not (
+            settings.artifact_s3_endpoint
+            and settings.artifact_s3_access_key_file
+            and settings.artifact_s3_secret_key_file
+        ):
+            raise RuntimeError("для artifact_backend=s3 нужны endpoint и файлы ключей доступа")
+        return S3ArtifactStore(
+            endpoint_url=settings.artifact_s3_endpoint,
+            bucket=settings.artifact_s3_bucket,
+            access_key=Path(settings.artifact_s3_access_key_file).read_text().strip(),
+            secret_key=Path(settings.artifact_s3_secret_key_file).read_text().strip(),
+            region=settings.artifact_s3_region,
+        )
+    return FileSystemArtifactStore(settings.artifact_fs_root)

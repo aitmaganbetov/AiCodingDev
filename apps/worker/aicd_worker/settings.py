@@ -16,6 +16,11 @@ class WorkerSettings(Settings):
     exec_adapter: Literal["fake"] = "fake"
     fake_scenario: str = "success_diff"
     worktree_root: Path = Path("/var/lib/aicd/worktrees")
+    # Verification Engine (P3-14): gates в изолированном контейнере; `local` (процессы хоста) — только dev/test.
+    verification_runner: Literal["docker", "local"] = "docker"
+    verification_image: str = "python:3.12-slim-bookworm"
+    verification_staging_root: Path = Path("/var/lib/aicd/verification")
+    docker_url: str = "unix:///var/run/docker.sock"
 
     outbox_batch_size: int = Field(default=100, ge=1, le=1000)
     outbox_poll_seconds: float = Field(default=0.5, gt=0, le=10)

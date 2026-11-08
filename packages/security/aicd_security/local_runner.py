@@ -93,6 +93,26 @@ class LocalProcessRunner:
         )
         return LocalProcess(proc)
 
+    def owns(self, ref: str) -> bool:
+        parts = ref.split(":")
+        return len(parts) == 3 and parts[0] == socket.gethostname() and parts[1].isdigit() and parts[2].isdigit()
+
+    async def kill(self, ref: str) -> bool:
+        if not self.owns(ref):
+            return False
+        _host, _pid, pgid = ref.split(":")
+        try:
+            os.killpg(int(pgid), signal.SIGKILL)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        for _ in range(50):
+            if not await self.is_alive(ref):
+                return True
+            await asyncio.sleep(0.05)
+        return False
+
     async def is_alive(self, ref: str) -> bool:
         try:
             host, pid, _pgid = ref.split(":")

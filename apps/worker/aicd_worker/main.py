@@ -1,8 +1,9 @@
 """Точки входа воркеров: `aicd-worker outbox|orchestrator|exec`.
 
 * `outbox` — опрос outbox (0,5 с без LISTEN), проекция в run_event_log, публикация в Dramatiq, сигнал SSE;
-* `orchestrator` — Dramatiq-консьюмер очереди `orchestrator` + периодический reaper аренд и tick;
-* `exec` — консьюмер очереди `exec` (исполнение задач через CLI Gateway; fake-адаптер запрещён в production).
+* `orchestrator` — Dramatiq-консьюмер очереди `orchestrator` + периодический tick/повторная постановка READY;
+* `exec` — консьюмер очереди `exec` (исполнение задач через CLI Gateway; fake-адаптер запрещён в production)
+  + reaper аренд и recovery reconciler своего хоста.
 
 SIGINT/SIGTERM — штатная остановка: новые сообщения не берутся, текущие дорабатываются.
 """
@@ -23,14 +24,16 @@ import dramatiq
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_cli_adapters.registry import register_host
 from aicd_platform import sse
-from aicd_platform.db import create_engine
+from aicd_platform.artifacts import build_artifact_store
+from aicd_platform.db import DbContext, create_engine, transaction
 from aicd_platform.logging import configure_logging
 from aicd_platform.outbox_dispatcher import dispatch_batch
 from aicd_worker import maintenance, runtime
 from aicd_worker.broker import EXEC_QUEUE, ORCHESTRATOR_QUEUE, Actors, build_broker, register_actors
 from aicd_worker.settings import WorkerSettings
-from aicd_worker.wiring import ConfigurationError, build_orchestrator, check_exec_adapter
+from aicd_worker.wiring import ConfigurationError, build_orchestrator, build_reconciler, check_exec_adapter
 
 log = logging.getLogger("aicd.worker")
 
@@ -86,24 +89,33 @@ async def run_consumers(
     actors = actors or register_actors(
         build_broker(settings.redis_url), exec_time_limit_seconds=settings.exec_time_limit_seconds
     )
+    store = build_artifact_store(settings)
+    host_id: uuid.UUID | None = None
+    if kind == "exec":
+        async with transaction(engine, DbContext(actor_type="system")) as conn:
+            host_id = await register_host(conn, "exec")
     rt = runtime.Runtime(
         engine=engine,
-        orchestrator=build_orchestrator(settings, engine),
+        orchestrator=build_orchestrator(settings, engine, store=store, worker_host_id=host_id),
         loop=asyncio.get_running_loop(),
         dispatch_execution=actors.dispatch_execution,
         stale_ready_seconds=settings.stale_ready_seconds,
+        reconciler=build_reconciler(settings, engine, host_id, store) if host_id is not None else None,
     )
     runtime.install(rt)
+    scheduler = maintenance.Scheduler()  # exec: reconcile при старте, далее reap 15 с / reconcile 60 с
     queue = ORCHESTRATOR_QUEUE if kind == "orchestrator" else EXEC_QUEUE
     worker = dramatiq.Worker(actors.broker, queues={queue}, worker_threads=settings.worker_threads)
     worker.start()
     try:
         while not stop.is_set():
-            if kind == "orchestrator":
-                try:
+            try:
+                if kind == "orchestrator":
                     await maintenance.sweep(rt)
-                except Exception:
-                    log.exception("orchestrator sweep failed")
+                else:
+                    await scheduler.run_due(rt)
+            except Exception:
+                log.exception("%s maintenance failed", kind)
             await _wait(stop, settings.tick_interval_seconds)
     finally:
         await asyncio.to_thread(worker.stop)
