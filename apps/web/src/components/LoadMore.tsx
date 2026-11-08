@@ -14,11 +14,11 @@ export function LoadMore({ shown, hasNextPage, isFetchingNextPage, nextPageError
   const { t } = useTranslation();
   return (
     <div className="mt-4 flex flex-col items-start gap-2">
-      <p role="status" aria-live="polite" className="text-sm text-slate-700">
+      <p role="status" aria-live="polite" className="text-sm text-fg-muted">
         {t('list.shown', { count: shown })}
       </p>
       {nextPageError ? (
-        <p role="alert" className="text-sm font-medium text-red-700">
+        <p role="alert" className="text-sm font-medium text-danger-text">
           {problemMessage(t, nextPageError)}
         </p>
       ) : null}

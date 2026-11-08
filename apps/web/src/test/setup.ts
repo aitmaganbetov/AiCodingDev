@@ -6,6 +6,17 @@ import '../i18n';
 
 clientConfig.retryDelayMs = 1;
 
+// jsdom не реализует API, которые использует Radix UI (floating-ui, pointer capture).
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => undefined;
+Element.prototype.scrollIntoView ??= () => undefined;
+
 afterEach(() => {
   cleanup();
   setCsrfToken(null);

@@ -140,6 +140,11 @@ export class MockApi {
   sseRetryMs = 100;
   /** Сколько SSE-подключений было и с какими Last-Event-ID / after_seq. */
   readonly sseConnections: { lastEventId: string | undefined; afterSeq: string | null }[] = [];
+  /**
+   * «Сеть недоступна» (вместе с context.setOffline): запросы обрываются, удерживаемый
+   * SSE-ответ не досылается — как при реальном обрыве (без «призрачных» подключений в журнале).
+   */
+  offline = false;
 
   addRun(project: S['Project'], init: Partial<S['Run']> = {}): S['Run'] {
     const run: S['Run'] = {
@@ -330,6 +335,10 @@ export class MockApi {
       return;
     }
     const { operationId } = match;
+    if (this.offline) {
+      await route.abort('internetdisconnected').catch(() => undefined);
+      return;
+    }
     const headers = await req.allHeaders();
     const raw = req.postData();
     const body: unknown = raw ? JSON.parse(raw) : undefined;
@@ -340,7 +349,11 @@ export class MockApi {
       const after = Number(headers['last-event-id'] ?? url.searchParams.get('after_seq') ?? 0);
       const runId = match.id;
       const hasNew = () => (this.events.get(runId) ?? []).some((e) => e.seq > after);
-      for (let waited = 0; waited < 1500 && !hasNew(); waited += 50) await new Promise((r) => setTimeout(r, 50));
+      for (let waited = 0; waited < 1500 && !hasNew() && !this.offline; waited += 50) await new Promise((r) => setTimeout(r, 50));
+      if (this.offline) {
+        await route.abort('internetdisconnected').catch(() => undefined);
+        return;
+      }
     }
     const reply = this.dispatch(operationId, url, headers, body, match.id);
 

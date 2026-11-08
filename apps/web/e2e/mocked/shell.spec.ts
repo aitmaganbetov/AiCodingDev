@@ -220,8 +220,10 @@ test('keyboard-only: login, skip link, switch workspace, create project, logout'
   const userMenu = page.getByRole('button', { name: /Меню пользователя/ });
   await tabTo(page, userMenu, { backwards: true });
   await page.keyboard.press('Enter');
-  await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: 'Выйти' })).toBeFocused();
+  // Меню (APG Menu Button): фокус на первом пункте, End — последний пункт.
+  await expect(page.getByRole('menuitemradio', { name: 'Как в системе' })).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(page.getByRole('menuitem', { name: 'Выйти' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByText('Вы вышли из системы.')).toBeVisible();
   expect(api.loggedIn).toBe(false);
@@ -242,7 +244,7 @@ test('responsive at 360px: no horizontal scroll, controls reachable', async ({ p
   await expectNoSeriousA11yViolations(page, 'projects 360px');
 
   await page.getByRole('button', { name: /Меню пользователя/ }).click();
-  await expect(page.getByRole('button', { name: 'Выйти' })).toBeInViewport();
+  await expect(page.getByRole('menuitem', { name: 'Выйти' })).toBeInViewport();
   await page.keyboard.press('Escape');
 
   await page.getByRole('link', { name: 'Создать проект' }).click();

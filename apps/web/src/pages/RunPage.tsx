@@ -3,7 +3,8 @@ import type { TFunction } from 'i18next';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
-import { api, IdempotentIntent, type Run, type RunCommand, type TaskSummary } from '../api/client';
+import { IdempotentIntent } from '../api/client';
+import { runKeys, runsApi, type Run, type RunCommand, type TaskSummary } from '../api/runs';
 import type { RunEvent } from '../api/runEvents';
 import { FEED_LIMIT, useRunEvents } from '../api/useRunEvents';
 import { LoadMore } from '../components/LoadMore';
@@ -17,13 +18,6 @@ import { useCurrentWorkspace } from '../workspace';
 import { WorkspaceNotFound } from './NotFoundPage';
 
 export const TASKS_PAGE_SIZE = 200;
-
-export function runQueryKey(runId: string) {
-  return ['run', runId] as const;
-}
-export function runTasksQueryKey(runId: string) {
-  return ['run', runId, 'tasks'] as const;
-}
 
 /** События, после которых состояние run/задач в REST могло измениться. */
 const RUN_STATE_EVENTS = new Set(['run.state_changed', 'run.completed', 'approval.requested', 'approval.decided']);
@@ -101,31 +95,31 @@ function RunHeader({ run }: { run: Run }) {
   return (
     <div className="card mb-6 flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-slate-700">{t('run.status')}:</span>
+        <span className="text-sm text-fg-muted">{t('run.status')}:</span>
         <StatusBadge kind="run" status={run.status} />
       </div>
       <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto,1fr]">
-        <dt className="text-slate-600">{t('run.objective')}</dt>
+        <dt className="text-fg-muted">{t('run.objective')}</dt>
         <dd className="whitespace-pre-line break-words">{run.objective}</dd>
-        <dt className="text-slate-600">{t('run.mode')}</dt>
+        <dt className="text-fg-muted">{t('run.mode')}</dt>
         <dd>{t(`enums.run_mode.${run.mode}`, { defaultValue: run.mode })}</dd>
         {run.blocked_reason ? (
           <>
-            <dt className="text-slate-600">{t('run.blockedReason')}</dt>
+            <dt className="text-fg-muted">{t('run.blockedReason')}</dt>
             <dd data-testid="run-blocked-reason">{enumLabel(t, 'blocked_reason', run.blocked_reason)}</dd>
           </>
         ) : null}
-        <dt className="text-slate-600">{t('run.pendingApprovals')}</dt>
+        <dt className="text-fg-muted">{t('run.pendingApprovals')}</dt>
         <dd data-testid="run-pending-approvals">{run.pending_approvals ?? 0}</dd>
         {counts.length > 0 ? (
           <>
-            <dt className="text-slate-600">{t('run.taskCounts')}</dt>
+            <dt className="text-fg-muted">{t('run.taskCounts')}</dt>
             <dd>{counts.map(([s, n]) => `${enumLabel(t, 'task_status', s)}: ${n}`).join(', ')}</dd>
           </>
         ) : null}
-        <dt className="text-slate-600">{t('run.requestedBy')}</dt>
+        <dt className="text-fg-muted">{t('run.requestedBy')}</dt>
         <dd>{run.requested_by.display_name}</dd>
-        <dt className="text-slate-600">{t('run.createdAt')}</dt>
+        <dt className="text-fg-muted">{t('run.createdAt')}</dt>
         <dd>{formatDate(run.created_at, i18n.language)}</dd>
       </dl>
     </div>
@@ -140,14 +134,14 @@ function RunControls({ run }: { run: Run }) {
   const [accepted, setAccepted] = useState<RunCommand | null>(null);
   const command = useMutation({
     mutationFn: (cmd: RunCommand) =>
-      api.runCommand(run.id, cmd, intent.current.keyFor({ run: run.id, cmd, version: run.version }), run.version),
+      runsApi.command(run.id, cmd, intent.current.keyFor({ run: run.id, cmd, version: run.version }), run.version),
     onSuccess: (_res, cmd) => {
       intent.current.complete();
       setAccepted(cmd);
       setConfirmCancel(false);
     },
     // 409/412: состояние ушло вперёд — перечитать.
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: runQueryKey(run.id) }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: runKeys.detail(run.id) }),
   });
 
   const terminal = RUN_TERMINAL.includes(run.status);
@@ -176,8 +170,8 @@ function RunControls({ run }: { run: Run }) {
         ) : null}
       </div>
       {confirmCancel && !terminal ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-300 bg-amber-50 p-3" role="alert">
-          <p className="text-sm text-amber-900">{t('run.cancelConfirm')}</p>
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-warning-border bg-warning-soft p-3" role="alert">
+          <p className="text-sm text-warning-fg">{t('run.cancelConfirm')}</p>
           <button type="button" className="btn-primary" disabled={busy} onClick={() => command.mutate('cancel')}>
             {t('run.cancelYes')}
           </button>
@@ -186,11 +180,11 @@ function RunControls({ run }: { run: Run }) {
           </button>
         </div>
       ) : null}
-      <p role="status" className="text-sm text-slate-700">
+      <p role="status" className="text-sm text-fg-muted">
         {busy ? t('run.commandSending') : accepted && !command.isError ? t(`run.commandAccepted.${accepted}`) : ''}
       </p>
       {command.isError ? (
-        <p role="alert" className="text-sm font-medium text-red-700">
+        <p role="alert" className="text-sm font-medium text-danger-text">
           {problemMessage(t, command.error)}
         </p>
       ) : null}
@@ -201,12 +195,12 @@ function RunControls({ run }: { run: Run }) {
 function TasksTable({ runId, tasks, planVersion }: { runId: string; tasks: TaskSummary[]; planVersion: number }) {
   const { t } = useTranslation();
   const titles = useMemo(() => new Map(tasks.map((x) => [x.id, x.title])), [tasks]);
-  if (tasks.length === 0) return <p className="text-slate-700">{t('run.tasksEmpty')}</p>;
+  if (tasks.length === 0) return <p className="text-fg-muted">{t('run.tasksEmpty')}</p>;
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+    <div className="overflow-x-auto rounded-lg border border-border bg-surface">
       <table className="w-full min-w-[40rem] text-left text-sm" data-run-id={runId}>
         <caption className="sr-only">{t('run.tasksCaption', { version: planVersion })}</caption>
-        <thead className="bg-slate-50 text-slate-700">
+        <thead className="bg-surface-muted text-fg-muted">
           <tr>
             <th scope="col" className="px-3 py-2 font-semibold">{t('run.col.title')}</th>
             <th scope="col" className="px-3 py-2 font-semibold">{t('run.col.role')}</th>
@@ -217,13 +211,13 @@ function TasksTable({ runId, tasks, planVersion }: { runId: string; tasks: TaskS
         </thead>
         <tbody>
           {tasks.map((task) => (
-            <tr key={task.id} className="border-t border-slate-200 align-top" data-task-id={task.id}>
+            <tr key={task.id} className="border-t border-border align-top" data-task-id={task.id}>
               <th scope="row" className="px-3 py-2 font-medium">{task.title}</th>
               <td className="px-3 py-2">{enumLabel(t, 'agent_role', task.agent_role)}</td>
               <td className="px-3 py-2">
                 <StatusBadge kind="task" status={task.status} />
                 {task.blocked_reason ? (
-                  <span className="mt-1 block text-xs text-slate-700">{enumLabel(t, 'blocked_reason', task.blocked_reason)}</span>
+                  <span className="mt-1 block text-xs text-fg-muted">{enumLabel(t, 'blocked_reason', task.blocked_reason)}</span>
                 ) : null}
               </td>
               <td className="px-3 py-2">{t('run.attempts', { count: task.attempt_count, max: task.max_attempts })}</td>
@@ -243,9 +237,9 @@ function TasksTable({ runId, tasks, planVersion }: { runId: string; tasks: TaskS
 function RunTasks({ runId }: { runId: string }) {
   const { t } = useTranslation();
   const query = useInfiniteQuery({
-    queryKey: runTasksQueryKey(runId),
+    queryKey: runKeys.tasks(runId),
     queryFn: ({ pageParam, signal }) =>
-      api.getRunTasks(runId, { limit: TASKS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
+      runsApi.tasks(runId, { limit: TASKS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
@@ -295,14 +289,14 @@ function EventFeed({
       // Одна инвалидация на пачку: replay сотен событий не порождает сотни запросов.
       const runChanged = events.some((e) => RUN_STATE_EVENTS.has(e.type));
       const tasksChanged = events.some((e) => TASK_STATE_EVENTS.has(e.type));
-      if (runChanged || tasksChanged) void queryClient.invalidateQueries({ queryKey: runQueryKey(runId), exact: true });
-      if (tasksChanged) void queryClient.invalidateQueries({ queryKey: runTasksQueryKey(runId) });
+      if (runChanged || tasksChanged) void queryClient.invalidateQueries({ queryKey: runKeys.detail(runId), exact: true });
+      if (tasksChanged) void queryClient.invalidateQueries({ queryKey: runKeys.tasks(runId) });
     },
     [queryClient, runId],
   );
   const onResync = useCallback(() => {
     setResynced(true);
-    void queryClient.invalidateQueries({ queryKey: runQueryKey(runId) });
+    void queryClient.invalidateQueries({ queryKey: runKeys.detail(runId) });
   }, [queryClient, runId]);
   const { events, state, error, reconnect } = useRunEvents(runId, { onEvents, onResync, isTerminal });
   const time = useMemo(() => new Intl.DateTimeFormat(i18n.language, { timeStyle: 'medium' }), [i18n.language]);
@@ -313,7 +307,7 @@ function EventFeed({
         {t('run.feed')}
       </h2>
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <p role="status" className="text-sm text-slate-700" data-testid="stream-state" data-state={state}>
+        <p role="status" className="text-sm text-fg-muted" data-testid="stream-state" data-state={state}>
           {t(`run.stream.${state}`)}
         </p>
         {state === 'failed' ? (
@@ -323,29 +317,29 @@ function EventFeed({
         ) : null}
       </div>
       {state === 'failed' && error ? (
-        <p role="alert" className="mb-3 text-sm font-medium text-red-700">
+        <p role="alert" className="mb-3 text-sm font-medium text-danger-text">
           {problemMessage(t, error)}
         </p>
       ) : null}
       {resynced ? (
-        <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{t('run.resynced')}</p>
+        <p className="mb-3 rounded-md border border-warning-border bg-warning-soft p-3 text-sm text-warning-fg">{t('run.resynced')}</p>
       ) : null}
       {events.length === 0 ? (
-        <p className="text-slate-700">{t('run.feedEmpty')}</p>
+        <p className="text-fg-muted">{t('run.feedEmpty')}</p>
       ) : (
         <>
           {events.length >= FEED_LIMIT ? (
-            <p className="mb-2 text-sm text-slate-700">{t('run.feedTrimmed', { count: FEED_LIMIT })}</p>
+            <p className="mb-2 text-sm text-fg-muted">{t('run.feedTrimmed', { count: FEED_LIMIT })}</p>
           ) : null}
-          <ol aria-label={t('run.feedLabel')} className="flex flex-col divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+          <ol aria-label={t('run.feedLabel')} className="flex flex-col divide-y divide-border rounded-lg border border-border bg-surface">
             {events.map((e) => {
               const text = describeEvent(t, e, taskTitle);
               return (
                 <li key={e.event_id} className="flex flex-col gap-0.5 px-3 py-2 text-sm" data-seq={e.seq} data-event-id={e.event_id}>
-                  <div className="flex flex-wrap items-baseline gap-x-2 text-slate-700">
+                  <div className="flex flex-wrap items-baseline gap-x-2 text-fg-muted">
                     <span className="font-mono text-xs">{t('event.seq', { seq: e.seq })}</span>
                     {e.timestamp ? <time dateTime={e.timestamp}>{time.format(new Date(e.timestamp))}</time> : null}
-                    <span className="font-semibold text-slate-900">{t(`event.type.${e.type}`, { defaultValue: e.type })}</span>
+                    <span className="font-semibold text-fg">{t(`event.type.${e.type}`, { defaultValue: e.type })}</span>
                   </div>
                   {text ? <p className="whitespace-pre-line break-words">{text}</p> : null}
                 </li>
@@ -364,8 +358,8 @@ export function RunPage() {
   const { workspaceId, membership } = useCurrentWorkspace();
   const queryClient = useQueryClient();
   const run = useQuery({
-    queryKey: runQueryKey(runId),
-    queryFn: ({ signal }) => api.getRun(runId, signal),
+    queryKey: runKeys.detail(runId),
+    queryFn: ({ signal }) => runsApi.get(runId, signal),
     enabled: Boolean(runId && membership),
   });
 
@@ -377,7 +371,7 @@ export function RunPage() {
   const taskTitle = useCallback(
     (id: string) =>
       queryClient
-        .getQueryData<{ pages: { tasks: TaskSummary[] }[] }>(runTasksQueryKey(runId))
+        .getQueryData<{ pages: { tasks: TaskSummary[] }[] }>(runKeys.tasks(runId))
         ?.pages.flatMap((p) => p.tasks)
         .find((x) => x.id === id)?.title,
     [queryClient, runId],

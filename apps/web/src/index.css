@@ -1,40 +1,73 @@
+@import './styles/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   html {
-    @apply bg-slate-50 text-slate-900 antialiased;
+    @apply bg-canvas font-sans text-fg antialiased;
   }
   body {
-    @apply min-h-screen bg-slate-50;
-    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    @apply min-h-screen bg-canvas;
   }
-  /* Видимый фокус для клавиатуры на всех интерактивных элементах (WCAG 2.4.7). */
+  /* Видимый фокус для клавиатуры на всех интерактивных элементах (WCAG 2.4.7, контраст ≥ 3:1). */
   :focus-visible {
-    outline: 3px solid theme('colors.blue.700');
+    outline: 3px solid rgb(var(--color-focus));
     outline-offset: 2px;
   }
+  /* Программный фокус на заголовок/контейнер после навигации — без рамки. */
   h1:focus,
-  main:focus {
+  main:focus,
+  [data-focus-target]:focus {
     outline: none;
+  }
+  a {
+    @apply text-link;
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    @apply font-mono;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
 @layer components {
   .btn {
-    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-h-touch items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium no-underline transition-colors disabled:cursor-not-allowed disabled:opacity-60;
   }
   .btn-primary {
-    @apply btn bg-blue-700 text-white hover:bg-blue-800;
+    @apply btn bg-accent text-accent-fg hover:bg-accent-hover;
   }
   .btn-secondary {
-    @apply btn border border-slate-300 bg-white text-slate-900 hover:bg-slate-100;
+    @apply btn border border-border-strong bg-surface text-fg hover:bg-surface-muted;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-fg hover:bg-surface-muted;
+  }
+  .btn-danger {
+    @apply btn border border-danger-border bg-danger-soft text-danger-fg hover:brightness-95;
+  }
+  .btn-sm {
+    @apply min-h-[36px] px-3 py-1;
   }
   .input {
-    @apply block w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-base text-slate-900 placeholder:text-slate-500 aria-[invalid=true]:border-red-700;
+    @apply block w-full rounded-md border border-input bg-surface px-3 py-2 text-base text-fg placeholder:text-fg-subtle aria-[invalid=true]:border-danger-text;
   }
   .card {
-    @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+    @apply rounded-lg border border-border bg-surface p-4 shadow-sm;
+  }
+  .link {
+    @apply text-link underline underline-offset-2 hover:no-underline;
   }
 }

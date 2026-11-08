@@ -27,7 +27,7 @@ export function PageHeading({ title, children }: Props) {
 
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <h1 id="page-title" ref={ref} tabIndex={-1} className="text-2xl font-semibold text-slate-900">
+      <h1 id="page-title" ref={ref} tabIndex={-1} className="text-2xl font-semibold text-fg">
         {title}
       </h1>
       {children}

@@ -2,7 +2,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation } from 'react-router';
-import { api, type Project } from '../api/client';
+import { projectKeys, projectsApi, type Project } from '../api/projects';
 import { LoadMore } from '../components/LoadMore';
 import { PageHeading } from '../components/PageHeading';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
@@ -14,10 +14,6 @@ import { WorkspaceNotFound } from './NotFoundPage';
 
 export const PROJECTS_PAGE_SIZE = 50;
 
-export function projectsQueryKey(workspaceId: string) {
-  return ['projects', workspaceId] as const;
-}
-
 function ProjectCard({ project }: { project: Project }) {
   const { t, i18n } = useTranslation();
   const mode = project.settings.documentation_mode;
@@ -25,20 +21,20 @@ function ProjectCard({ project }: { project: Project }) {
   return (
     <li className="card flex flex-col gap-2">
       <h2 className="break-words text-lg font-semibold">{project.name}</h2>
-      {project.description ? <p className="whitespace-pre-line break-words text-slate-700">{project.description}</p> : null}
+      {project.description ? <p className="whitespace-pre-line break-words text-fg-muted">{project.description}</p> : null}
       <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-sm">
-        <dt className="text-slate-600">{t('projects.documentationMode')}</dt>
+        <dt className="text-fg-muted">{t('projects.documentationMode')}</dt>
         <dd>{t(`enums.documentation_mode.${mode}`, { defaultValue: mode })}</dd>
-        <dt className="text-slate-600">{t('projects.qualityProfile')}</dt>
+        <dt className="text-fg-muted">{t('projects.qualityProfile')}</dt>
         <dd>{t(`enums.quality_profile.${profile}`, { defaultValue: profile })}</dd>
-        <dt className="text-slate-600">{t('projects.status')}</dt>
+        <dt className="text-fg-muted">{t('projects.status')}</dt>
         <dd>{t(`enums.project_status.${project.status}`, { defaultValue: project.status })}</dd>
-        <dt className="text-slate-600">{t('common.createdAt')}</dt>
+        <dt className="text-fg-muted">{t('common.createdAt')}</dt>
         <dd>{formatDate(project.created_at, i18n.language)}</dd>
       </dl>
       <Link
         to={`/w/${project.workspace_id}/projects/${project.id}/runs`}
-        className="self-start font-medium text-blue-800 underline"
+        className="self-start font-medium text-accent-soft-fg underline"
         aria-label={t('projects.runsLinkLabel', { name: project.name })}
       >
         {t('projects.runsLink')}
@@ -50,9 +46,9 @@ function ProjectCard({ project }: { project: Project }) {
 function ProjectsList({ workspaceId, canCreate }: { workspaceId: string; canCreate: boolean }) {
   const { t } = useTranslation();
   const query = useInfiniteQuery({
-    queryKey: projectsQueryKey(workspaceId),
+    queryKey: projectKeys.list(workspaceId),
     queryFn: ({ pageParam, signal }) =>
-      api.listProjects(workspaceId, { limit: PROJECTS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
+      projectsApi.list(workspaceId, { limit: PROJECTS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
@@ -120,7 +116,7 @@ export function ProjectsPage() {
         ) : null}
       </PageHeading>
       {state?.createdProject || state?.createdWorkspace ? (
-        <p role="status" className="mb-4 rounded-md border border-green-300 bg-green-50 p-3 text-sm text-green-900">
+        <p role="status" className="mb-4 rounded-md border border-success-border bg-success-soft p-3 text-sm text-success-fg">
           {state.createdProject
             ? t('projects.created', { name: state.createdProject })
             : t('workspaces.created', { name: state.createdWorkspace })}

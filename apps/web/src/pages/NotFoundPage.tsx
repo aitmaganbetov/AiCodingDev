@@ -7,7 +7,7 @@ export function NotFoundPage() {
   return (
     <section aria-labelledby="page-title">
       <PageHeading title={t('notFound.title')} />
-      <p className="mb-4 text-slate-700">{t('notFound.description')}</p>
+      <p className="mb-4 text-fg-muted">{t('notFound.description')}</p>
       <Link to="/" className="btn-secondary">
         {t('notFound.home')}
       </Link>
@@ -21,7 +21,7 @@ export function WorkspaceNotFound() {
   return (
     <section aria-labelledby="page-title">
       <PageHeading title={t('notFound.workspaceTitle')} />
-      <p className="mb-4 text-slate-700">{t('notFound.workspaceDescription')}</p>
+      <p className="mb-4 text-fg-muted">{t('notFound.workspaceDescription')}</p>
       <Link to="/workspaces" className="btn-secondary">
         {t('layout.allWorkspaces')}
       </Link>

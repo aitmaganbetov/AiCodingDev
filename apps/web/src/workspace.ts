@@ -1,5 +1,5 @@
 import { useMatch } from 'react-router';
-import type { WorkspaceMembership } from './api/client';
+import type { WorkspaceMembership } from './api/auth';
 import { useSession } from './auth/session';
 
 /** Текущий workspace берётся из URL (/w/:workspaceId/...), роль — из членств сессии. */

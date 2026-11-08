@@ -2,7 +2,9 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router';
-import { api, IdempotentIntent, isApiError, type RunCreateRequest, type RunMode, type RunSummary } from '../api/client';
+import { IdempotentIntent, isApiError } from '../api/client';
+import { projectKeys, projectsApi } from '../api/projects';
+import { runKeys, runsApi, type RunCreateRequest, type RunMode, type RunSummary } from '../api/runs';
 import { FormAlert, TextAreaField, focusFirstInvalid } from '../components/form';
 import { LoadMore } from '../components/LoadMore';
 import { PageHeading } from '../components/PageHeading';
@@ -30,10 +32,6 @@ const RUN_MODES = [
   'REVIEW',
 ] as const satisfies readonly RunMode[];
 
-export function runsQueryKey(workspaceId: string, projectId: string) {
-  return ['runs', workspaceId, projectId] as const;
-}
-
 export function runPath(workspaceId: string, projectId: string, runId: string): string {
   return `/w/${workspaceId}/projects/${projectId}/runs/${runId}`;
 }
@@ -44,13 +42,13 @@ function RunItem({ run, workspaceId }: { run: RunSummary; workspaceId: string })
     <li className="card flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge kind="run" status={run.status} />
-        <span className="text-sm text-slate-700">{t(`enums.run_mode.${run.mode}`, { defaultValue: run.mode })}</span>
-        <span className="text-sm text-slate-700">
+        <span className="text-sm text-fg-muted">{t(`enums.run_mode.${run.mode}`, { defaultValue: run.mode })}</span>
+        <span className="text-sm text-fg-muted">
           {t('runs.createdAt')}: {formatDate(run.created_at, i18n.language)}
         </span>
       </div>
       <p className="line-clamp-3 whitespace-pre-line break-words">{run.objective}</p>
-      <Link to={runPath(workspaceId, run.project_id, run.id)} className="self-start font-medium text-blue-800 underline">
+      <Link to={runPath(workspaceId, run.project_id, run.id)} className="self-start font-medium text-accent-soft-fg underline">
         {t('runs.open')}
         <span className="sr-only">: {run.objective.slice(0, 80)}</span>
       </Link>
@@ -61,9 +59,9 @@ function RunItem({ run, workspaceId }: { run: RunSummary; workspaceId: string })
 function RunsList({ workspaceId, projectId, canCreate }: { workspaceId: string; projectId: string; canCreate: boolean }) {
   const { t } = useTranslation();
   const query = useInfiniteQuery({
-    queryKey: runsQueryKey(workspaceId, projectId),
+    queryKey: runKeys.list(workspaceId, projectId),
     queryFn: ({ pageParam, signal }) =>
-      api.listRuns(
+      runsApi.list(
         workspaceId,
         { project_id: projectId, limit: RUNS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) },
         signal,
@@ -113,10 +111,10 @@ function StartRunForm({ workspaceId, projectId }: { workspaceId: string; project
   const [formErrors, setFormErrors] = useState<string[]>([]);
 
   const create = useMutation({
-    mutationFn: (body: RunCreateRequest) => api.createRun(body, intent.current.keyFor(body)),
+    mutationFn: (body: RunCreateRequest) => runsApi.create(body, intent.current.keyFor(body)),
     onSuccess: async (created) => {
       intent.current.complete();
-      await queryClient.invalidateQueries({ queryKey: runsQueryKey(workspaceId, projectId) });
+      await queryClient.invalidateQueries({ queryKey: runKeys.list(workspaceId, projectId) });
       navigate(runPath(workspaceId, projectId, created.run_id));
     },
     onError: (error) => {
@@ -155,7 +153,7 @@ function StartRunForm({ workspaceId, projectId }: { workspaceId: string; project
       </h2>
       <FormAlert messages={formErrors} />
       <div className="flex flex-col gap-1">
-        <label htmlFor="run-mode" className="text-sm font-medium text-slate-900">
+        <label htmlFor="run-mode" className="text-sm font-medium text-fg">
           {t('runs.mode')}
         </label>
         <select
@@ -197,8 +195,8 @@ export function ProjectRunsPage() {
   const { projectId = '' } = useParams();
   const { workspaceId, membership } = useCurrentWorkspace();
   const project = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: ({ signal }) => api.getProject(projectId, signal),
+    queryKey: projectKeys.detail(projectId),
+    queryFn: ({ signal }) => projectsApi.get(projectId, signal),
     enabled: Boolean(projectId && membership),
   });
 

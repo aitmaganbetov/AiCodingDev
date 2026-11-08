@@ -2,7 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
-import { api, IdempotentIntent, isApiError, type WorkspaceCreateRequest } from '../api/client';
+import { IdempotentIntent, isApiError } from '../api/client';
+import { workspaceKeys, workspacesApi, type WorkspaceCreateRequest } from '../api/workspaces';
 import { sessionQueryKey } from '../auth/session';
 import { FormAlert, TextField, focusFirstInvalid } from '../components/form';
 import { PageHeading } from '../components/PageHeading';
@@ -37,13 +38,13 @@ export function WorkspaceCreatePage() {
   const [formErrors, setFormErrors] = useState<string[]>([]);
 
   const create = useMutation({
-    mutationFn: (body: WorkspaceCreateRequest) => api.createWorkspace(body, intent.current.keyFor(body)),
+    mutationFn: (body: WorkspaceCreateRequest) => workspacesApi.create(body, intent.current.keyFor(body)),
     onSuccess: async (ws) => {
       intent.current.complete();
       // Роль в новом workspace приходит в членствах сессии — обновляем её до перехода.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: sessionQueryKey }),
-        queryClient.invalidateQueries({ queryKey: ['workspaces'] }),
+        queryClient.invalidateQueries({ queryKey: workspaceKeys.all }),
       ]);
       navigate(`/w/${ws.id}/projects`, { state: { createdWorkspace: ws.name } });
     },

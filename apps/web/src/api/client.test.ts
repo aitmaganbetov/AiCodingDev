@@ -3,12 +3,14 @@ import { problem, json, mockFetch, WS_ID } from '../test/utils';
 import {
   ApiError,
   IdempotentIntent,
-  api,
   parseProblem,
   readCsrfCookie,
   setCsrfToken,
   setUnauthorizedHandler,
 } from './client';
+import { authApi } from './auth';
+import { projectsApi } from './projects';
+import { workspacesApi } from './workspaces';
 
 const workspace = {
   id: WS_ID,
@@ -25,8 +27,8 @@ describe('api client: CSRF', () => {
       'POST /api/v1/workspaces': () => json(201, workspace),
     });
     setCsrfToken('tok-123');
-    await api.listWorkspaces();
-    await api.createWorkspace({ name: 'Команда', slug: 'team' }, 'key-00000001');
+    await workspacesApi.list();
+    await workspacesApi.create({ name: 'Команда', slug: 'team' }, 'key-00000001');
 
     expect(calls[0]?.url.pathname).toBe('/api/v1/workspaces');
     expect(calls[0]?.headers.get('X-CSRF-Token')).toBeNull();
@@ -39,14 +41,14 @@ describe('api client: CSRF', () => {
     const { calls } = mockFetch({ 'POST /api/v1/auth/logout': () => new Response(null, { status: 204 }) });
     document.cookie = 'other=1';
     document.cookie = 'aicd_csrf=cookie-tok%3D';
-    await api.logout();
+    await authApi.logout();
     expect(calls[0]?.headers.get('X-CSRF-Token')).toBe('cookie-tok=');
   });
 
   it('does not send X-CSRF-Token on login (no session yet)', async () => {
     const { calls } = mockFetch({ 'POST /api/v1/auth/login': () => problem(401, 'unauthenticated') });
     setCsrfToken('stale');
-    await expect(api.login({ email: 'a@b.c', password: 'x' })).rejects.toBeInstanceOf(ApiError);
+    await expect(authApi.login({ email: 'a@b.c', password: 'x' })).rejects.toBeInstanceOf(ApiError);
     expect(calls[0]?.headers.get('X-CSRF-Token')).toBeNull();
   });
 
@@ -66,7 +68,7 @@ describe('api client: Idempotency-Key and tenant header', () => {
         return json(201, {});
       },
     });
-    await api.createProject(WS_ID, { name: 'P' }, 'intent-key-1');
+    await projectsApi.create(WS_ID, { name: 'P' }, 'intent-key-1');
     expect(calls).toHaveLength(2);
     expect(calls[0]?.headers.get('Idempotency-Key')).toBe('intent-key-1');
     expect(calls[1]?.headers.get('Idempotency-Key')).toBe('intent-key-1');
@@ -81,7 +83,7 @@ describe('api client: Idempotency-Key and tenant header', () => {
         return n === 1 ? problem(409, 'idempotency_key_in_flight', { retry_after_seconds: 0 }) : json(201, workspace);
       },
     });
-    await expect(api.createWorkspace({ name: 'Команда', slug: 'team' }, 'k-12345678')).resolves.toMatchObject({ id: WS_ID });
+    await expect(workspacesApi.create({ name: 'Команда', slug: 'team' }, 'k-12345678')).resolves.toMatchObject({ id: WS_ID });
     expect(calls.map((c) => c.headers.get('Idempotency-Key'))).toEqual(['k-12345678', 'k-12345678']);
   });
 
@@ -91,7 +93,7 @@ describe('api client: Idempotency-Key and tenant header', () => {
         throw new TypeError('offline');
       },
     });
-    await expect(api.logout()).rejects.toMatchObject({ code: 'network_error', status: 0 });
+    await expect(authApi.logout()).rejects.toMatchObject({ code: 'network_error', status: 0 });
     expect(calls).toHaveLength(1);
   });
 
@@ -108,7 +110,7 @@ describe('api client: Idempotency-Key and tenant header', () => {
 
   it('sends X-Workspace-Id and cursor/limit for listProjects', async () => {
     const { calls } = mockFetch({ 'GET /api/v1/projects': () => json(200, { items: [], next_cursor: null }) });
-    await api.listProjects(WS_ID, { cursor: 'abc', limit: 20 });
+    await projectsApi.list(WS_ID, { cursor: 'abc', limit: 20 });
     expect(calls[0]?.headers.get('X-Workspace-Id')).toBe(WS_ID);
     expect(calls[0]?.url.searchParams.get('cursor')).toBe('abc');
     expect(calls[0]?.url.searchParams.get('limit')).toBe('20');
@@ -124,7 +126,7 @@ describe('api client: problem+json', () => {
           errors: [{ pointer: '/slug', code: 'pattern', message: 'bad slug' }, { bogus: true }],
         }),
     });
-    const err = await api.createWorkspace({ name: 'x', slug: 'y' }, 'k-12345678').catch((e: unknown) => e);
+    const err = await workspacesApi.create({ name: 'x', slug: 'y' }, 'k-12345678').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     const e = err as ApiError;
     expect(e.status).toBe(422);
@@ -154,9 +156,9 @@ describe('api client: 401 handling', () => {
       'GET /api/v1/workspaces': () => problem(401, 'session_expired'),
       'GET /api/v1/auth/session': () => problem(401, 'unauthenticated'),
     });
-    await expect(api.listWorkspaces()).rejects.toMatchObject({ code: 'session_expired' });
+    await expect(workspacesApi.list()).rejects.toMatchObject({ code: 'session_expired' });
     expect(handler).toHaveBeenCalledTimes(1);
-    await expect(api.getSession()).rejects.toMatchObject({ status: 401 });
+    await expect(authApi.getSession()).rejects.toMatchObject({ status: 401 });
     expect(handler).toHaveBeenCalledTimes(1);
     restore();
   });

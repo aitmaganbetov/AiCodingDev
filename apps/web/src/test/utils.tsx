@@ -1,8 +1,11 @@
 import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import { App } from '../App';
-import type { Project, SessionInfo, WorkspaceRole } from '../api/client';
+import type { SessionInfo } from '../api/auth';
+import type { Project } from '../api/projects';
+import type { WorkspaceRole } from '../api/workspaces';
+import { StreamManager } from '../api/streamManager';
 import { createQueryClient } from '../queryClient';
 
 export interface RecordedRequest {
@@ -78,11 +81,22 @@ export function project(n: number, overrides: Partial<Project> = {}): Project {
   };
 }
 
+const managers: StreamManager[] = [];
+afterEach(() => {
+  for (const m of managers.splice(0)) m.dispose();
+});
+
+/** Свой StreamManager на каждый тест: потоки предыдущего теста не переиспользуются. */
 export function renderApp(path: string) {
   const queryClient = createQueryClient();
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <App queryClient={queryClient} />
-    </MemoryRouter>,
-  );
+  const streamManager = new StreamManager({ lingerMs: 0, environment: null, streamOptions: { retryMs: 1 } });
+  managers.push(streamManager);
+  return {
+    streamManager,
+    ...render(
+      <MemoryRouter initialEntries={[path]}>
+        <App queryClient={queryClient} streamManager={streamManager} />
+      </MemoryRouter>,
+    ),
+  };
 }

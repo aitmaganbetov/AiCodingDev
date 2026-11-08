@@ -2,7 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
-import { api, isApiError } from '../api/client';
+import { authApi } from '../api/auth';
+import { isApiError } from '../api/client';
 import { safeNextPath, storeSession, useSession, wasLoggedOut } from '../auth/session';
 import { FormAlert, TextField, focusFirstInvalid } from '../components/form';
 import { PageHeading } from '../components/PageHeading';
@@ -30,7 +31,7 @@ export function LoginPage() {
   const [loggedOut] = useState(wasLoggedOut);
 
   const login = useMutation({
-    mutationFn: api.login,
+    mutationFn: authApi.login,
     onSuccess: (s) => {
       storeSession(queryClient, s);
       navigate(landingPath(params.get('next')), { replace: true });
@@ -73,10 +74,10 @@ export function LoginPage() {
 
   return (
     <main id="main" tabIndex={-1} className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-10">
-      <p className="mb-2 text-lg font-semibold text-slate-900">{t('app.name')}</p>
+      <p className="mb-2 text-lg font-semibold text-fg">{t('app.name')}</p>
       <PageHeading title={t('auth.loginTitle')} />
       {loggedOut ? (
-        <p role="status" className="mb-4 rounded-md bg-slate-100 p-3 text-sm text-slate-800">
+        <p role="status" className="mb-4 rounded-md bg-surface-muted p-3 text-sm text-fg">
           {t('auth.loggedOut')}
         </p>
       ) : null}

@@ -1,0 +1,141 @@
+/*
+ * Дизайн-токены AiCodingDev (P7-01). Значения — RGB-тройки, чтобы Tailwind мог добавлять
+ * прозрачность (`bg-accent/50`). Компоненты используют только семантические имена
+ * (tailwind.config.ts → theme.extend.colors), а не палитру slate/blue напрямую.
+ *
+ * Тема: по умолчанию следует prefers-color-scheme; `<html data-theme="light|dark">`
+ * принудительно задаёт тему (переключатель в меню пользователя, src/lib/theme.ts).
+ *
+ * Контраст (WCAG 2.1 AA; посчитано по относительной яркости, светлая / тёмная тема):
+ *  - fg / surface: 17.9 / 16.3; fg-muted / surface: 10.4 / 12.0 (на surface-muted ≥ 9.5 / 9.9);
+ *  - fg-subtle / surface: 7.6 / 7.0 (на surface-muted/raised ≥ 6.9 / 5.7) — подсказки, плейсхолдеры;
+ *  - accent-fg / accent (кнопка primary): 6.7 / 7.9; link / surface: 8.7 / 9.9; danger-text / surface: 6.5 / 9.4;
+ *  - {tone}-fg / {tone}-soft (бейджи, баннеры, toast): ≥ 8.7 / ≥ 10.3;
+ *  - input (граница поля) / surface: 4.8 / 7.0, focus (кольцо) / surface: 6.7 / 9.9 — ≥ 3:1 (WCAG 1.4.11).
+ */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-canvas: 248 250 252; /* slate-50 */
+  --color-surface: 255 255 255;
+  --color-surface-muted: 241 245 249; /* slate-100 */
+  --color-surface-raised: 255 255 255;
+  --color-fg: 15 23 42; /* slate-900 */
+  --color-fg-muted: 51 65 85; /* slate-700 */
+  --color-fg-subtle: 71 85 105; /* slate-600 */
+  --color-border: 226 232 240; /* slate-200 */
+  --color-border-strong: 203 213 225; /* slate-300 */
+  --color-input: 100 116 139; /* slate-500 */
+  --color-accent: 29 78 216; /* blue-700 */
+  --color-accent-hover: 30 64 175; /* blue-800 */
+  --color-accent-fg: 255 255 255;
+  --color-accent-soft: 239 246 255; /* blue-50 */
+  --color-accent-soft-fg: 30 58 138; /* blue-900 */
+  --color-link: 30 64 175; /* blue-800 */
+  --color-focus: 29 78 216; /* blue-700 */
+  --color-overlay: 15 23 42;
+
+  --color-neutral-soft: 241 245 249;
+  --color-neutral-border: 203 213 225;
+  --color-neutral-fg: 30 41 59;
+  --color-info-soft: 239 246 255;
+  --color-info-border: 147 197 253;
+  --color-info-fg: 30 58 138;
+  --color-success-soft: 240 253 244;
+  --color-success-border: 134 239 172;
+  --color-success-fg: 20 83 45;
+  --color-warning-soft: 255 251 235;
+  --color-warning-border: 252 211 77;
+  --color-warning-fg: 120 53 15;
+  --color-danger-soft: 254 242 242;
+  --color-danger-border: 252 165 165;
+  --color-danger-fg: 127 29 29;
+  --color-danger-text: 185 28 28; /* red-700: текст ошибки на surface, 6.5:1 */
+
+  --shadow-elevated: 0 10px 30px -10px rgb(15 23 42 / 0.25);
+}
+
+/* Тёмная тема: системная (если явно не выбрана светлая) или принудительная. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --color-canvas: 2 6 23; /* slate-950 */
+    --color-surface: 15 23 42; /* slate-900 */
+    --color-surface-muted: 30 41 59; /* slate-800 */
+    --color-surface-raised: 30 41 59;
+    --color-fg: 241 245 249;
+    --color-fg-muted: 203 213 225;
+    --color-fg-subtle: 148 163 184;
+    --color-border: 51 65 85;
+    --color-border-strong: 71 85 105;
+    --color-input: 148 163 184;
+    --color-accent: 96 165 250; /* blue-400 */
+    --color-accent-hover: 147 197 253;
+    --color-accent-fg: 2 6 23;
+    --color-accent-soft: 23 37 84; /* blue-950 */
+    --color-accent-soft-fg: 191 219 254;
+    --color-link: 147 197 253;
+    --color-focus: 147 197 253;
+    --color-overlay: 0 0 0;
+
+    --color-neutral-soft: 30 41 59;
+    --color-neutral-border: 71 85 105;
+    --color-neutral-fg: 226 232 240;
+    --color-info-soft: 23 37 84;
+    --color-info-border: 30 64 175;
+    --color-info-fg: 191 219 254;
+    --color-success-soft: 5 46 22;
+    --color-success-border: 22 101 52;
+    --color-success-fg: 187 247 208;
+    --color-warning-soft: 69 26 3;
+    --color-warning-border: 146 64 14;
+    --color-warning-fg: 253 230 138;
+    --color-danger-soft: 69 10 10;
+    --color-danger-border: 153 27 27;
+    --color-danger-fg: 254 202 202;
+    --color-danger-text: 252 165 165;
+
+    --shadow-elevated: 0 10px 30px -10px rgb(0 0 0 / 0.7);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-canvas: 2 6 23;
+  --color-surface: 15 23 42;
+  --color-surface-muted: 30 41 59;
+  --color-surface-raised: 30 41 59;
+  --color-fg: 241 245 249;
+  --color-fg-muted: 203 213 225;
+  --color-fg-subtle: 148 163 184;
+  --color-border: 51 65 85;
+  --color-border-strong: 71 85 105;
+  --color-input: 148 163 184;
+  --color-accent: 96 165 250;
+  --color-accent-hover: 147 197 253;
+  --color-accent-fg: 2 6 23;
+  --color-accent-soft: 23 37 84;
+  --color-accent-soft-fg: 191 219 254;
+  --color-link: 147 197 253;
+  --color-focus: 147 197 253;
+  --color-overlay: 0 0 0;
+
+  --color-neutral-soft: 30 41 59;
+  --color-neutral-border: 71 85 105;
+  --color-neutral-fg: 226 232 240;
+  --color-info-soft: 23 37 84;
+  --color-info-border: 30 64 175;
+  --color-info-fg: 191 219 254;
+  --color-success-soft: 5 46 22;
+  --color-success-border: 22 101 52;
+  --color-success-fg: 187 247 208;
+  --color-warning-soft: 69 26 3;
+  --color-warning-border: 146 64 14;
+  --color-warning-fg: 253 230 138;
+  --color-danger-soft: 69 10 10;
+  --color-danger-border: 153 27 27;
+  --color-danger-fg: 254 202 202;
+  --color-danger-text: 252 165 165;
+
+  --shadow-elevated: 0 10px 30px -10px rgb(0 0 0 / 0.7);
+}

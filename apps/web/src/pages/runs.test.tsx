@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import type { Run, TaskSummary } from '../api/client';
+import type { Run, TaskSummary } from '../api/runs';
 import { json, mockFetch, problem, project, renderApp, session, WS_ID } from '../test/utils';
 
 const PROJECT = project(1);
