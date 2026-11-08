@@ -5636,24 +5636,39 @@ components:
       description: Полный payload — GET /tasks/{task_id}/messages.
     CliOutputPayload:
       type: object
+      additionalProperties: false
+      description: >-
+        Живой вывод CLI (API_DESIGN §14): санитизированное нормализованное событие исполнения. Нормативная схема —
+        sse-event.schema.json `cli_output`. Не более 20 событий/с на run: избыток коалесцируется (`coalesced_count`,
+        `dropped_chunks` > 0); полный санитизированный вывод — artifact `cli_output` (`artifact_id` события `finished`).
       properties:
         execution_id: {type: string, format: uuid}
         task_id: {type: string, format: uuid}
         provider: {$ref: '#/components/schemas/CliProvider'}
         agent_role: {$ref: '#/components/schemas/AgentRole'}
-        normalized_event: {$ref: '#/components/schemas/NormalizedCliEvent'}
+        cli_seq: {type: integer, minimum: 1, description: seq нормализованного события (последнего из коалесцированных)}
+        cli_event_type: {$ref: '#/components/schemas/NormalizedCliEvent'}
         stream:
           type: string
-          enum: [stdout, stderr, normalized]
-        chunk_index: {type: integer, minimum: 0}
-        text: {type: string, maxLength: 8192, description: ≤ 8 KiB UTF-8 после редактирования секретов}
+          enum: [stdout, stderr, agent_message]
+        text: {type: string, maxLength: 4096, description: Санитизированный текст (секреты отредактированы)}
         redactions: {type: integer, minimum: 0}
         truncated: {type: boolean}
+        coalesced_count: {type: integer, minimum: 1}
         dropped_chunks: {type: integer, minimum: 0}
-        artifact_id:
-          type: [string, 'null']
-          format: uuid
-      required: [execution_id, task_id, provider, normalized_event, chunk_index, text, redactions, truncated]
+        tool_kind:
+          type: string
+          enum: [file_read, file_write, file_patch, command, search, network, other]
+        tool_phase:
+          type: string
+          enum: [requested, started, completed, denied, failed]
+        target: {type: string, maxLength: 1024}
+        artifact_id: {type: string, format: uuid}
+        warning_code: {type: string, maxLength: 50}
+        execution_status:
+          type: string
+          enum: [EXITED, TIMED_OUT, CANCELLED, CRASHED, AUTH_REQUIRED, RATE_LIMITED]
+      required: [execution_id, task_id, provider, agent_role, cli_seq, cli_event_type]
     DirectiveImpactReadyPayload:
       type: object
       properties:

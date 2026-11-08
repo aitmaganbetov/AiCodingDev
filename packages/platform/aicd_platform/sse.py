@@ -141,6 +141,7 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "redactions",
             "truncated",
             "coalesced_count",
+            "dropped_chunks",
             "tool_kind",
             "tool_phase",
             "target",

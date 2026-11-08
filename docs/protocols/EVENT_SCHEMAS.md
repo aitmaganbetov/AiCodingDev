@@ -75,8 +75,9 @@ flowchart LR
 | `run.completed` | run | переход run в `COMPLETED`/`FAILED`/`CANCELLED` (вместе с `run.state_changed`) | `final_status` | `run.completed` (`required_gates_total`/`_passed` — из `gate_executions` при проекции) | — |
 | `task.state_changed` | task | переход Task FSM (`store.transition_task`); обновление причины блокировки (`BLOCKED → BLOCKED`) | `task_id`, `from`, `to`, `reason?`, `blocked_reason?` | `task.state_changed` (`title`, `agent_role`, версия, попытка, сложность — из `tasks`) | orchestrator (`to = READY` → постановка в `exec`) |
 | `agent.message` | agent_message | шаг 7 конвейера ACP — сообщение принято (`aicd_collaboration.acp.broker`) | `message_id`, `message_type`, `task_id?`, `from{role, provider?}`, `to{role}`, `correlation_id`, `reply_to_id?`, `summary`, `suspected_injection`, `severity?`; только для потребителей — `recipient_task_id?`, `loop_limit_exceeded`, `consumers[]` | `agent.message` | orchestrator (доставки ACP `message_deliveries`, в т. ч. `chat.projector`) |
+| `cli.output` | cli_execution | worker-exec, исполнение CLI (`aicd_orchestration.cli_output.CliOutputPublisher`, sink `ExecutionGateway.run`): санитизированное нормализованное событие; ≤ 20 событий/с на run, избыток — одним коалесцированным событием | форма SSE `cli_output`: `execution_id`, `task_id`, `provider`, `agent_role`, `cli_seq`, `cli_event_type`, `stream?`, `text?`, `redactions?`, `truncated?`, `coalesced_count?`, `dropped_chunks?`, `tool_kind?`, `tool_phase?`, `target?`, `warning_code?`, `execution_status?`, `artifact_id?` (у `finished` — полный санитизированный вывод, artifact `cli_output`) | `cli.output` | — |
 | `acp.message_rejected` | agent_message | отказ валидации ACP | `rejection_code`, `reason`, `type`, `from_role`, `payload_sha256` | — (только activity/audit) | — |
-| `chat.message` | chat_message | `INSERT chat_messages`: сообщение пользователя (`USER_TEXT`), сообщение поручения (`DIRECTIVE`), проекция ACP (`AGENT_MESSAGE`) | форма SSE `chat_message`: `chat_message_id`, `thread_id`, `scope`, `message_kind`, `sender_type`, `sender_id?`, `sender_role?`, `provider?`, `task_id?`, `target_role?`, `mentions[]`, `body`, `created_at`, `directive_id?`, `approval_id?`, `acp_type?`, `links?`, `source_event_id?` | `chat.message` | — |
+| `chat.message` | chat_message | `INSERT chat_messages`: сообщение пользователя (`USER_TEXT`), сообщение поручения (`DIRECTIVE`), проекция ACP (`AGENT_MESSAGE`), выдержка CLI (`CLI_HIGHLIGHT`, worker-exec) | форма SSE `chat_message`: `chat_message_id`, `thread_id`, `scope`, `message_kind`, `sender_type`, `sender_id?`, `sender_role?`, `provider?`, `task_id?`, `target_role?`, `mentions[]`, `body`, `created_at`, `directive_id?`, `approval_id?`, `acp_type?`, `links?`, `source_event_id?` | `chat.message` | — |
 | `directive.state_changed` | directive | переход Directive FSM (в т. ч. `RECEIVED → IMPACT_ANALYSIS_PENDING` при приёме) | `directive_id`, `directive_type`, `from`/`from_status`, `to`/`to_status`, `version`, `reason?` | `directive.state_changed` | orchestrator (шаги `IMPACT_ANALYSIS_PENDING`, `CONFIRMED`) |
 | `directive.ack_changed` | directive | изменение `directive_acknowledgements` | `directive_id`, `directive_type`, `status`, `recipient_role`, `recipient_task_id?`, `ack_status`, `execution_id?`, `at` | `directive.state_changed` (поле `recipients`) | — |
 | `directive.impact_ready` | directive | impact analysis завершён (`directive_impacts` записаны) | `directive_id`, `summary`, `impacts[{task_id, impact_type}]`, `requires_confirmation`, `approval_id?`, `expected_run_version` | `directive.impact_ready` | — |
@@ -105,7 +106,7 @@ flowchart LR
 | `directive.received` | приём поручения — `chat.message` (`DIRECTIVE`) + `directive.state_changed` (`RECEIVED → IMPACT_ANALYSIS_PENDING`) |
 | `run.plan_materialized`, `task.created` | материализация плана видна через `task.state_changed` и API задач |
 | `task_attempt.started`, `task_attempt.finished`, `routing.decision_recorded`, `checkpoint.created`, `context_pack.created` | строки БД + `agent_activity_events`/audit; Task Detail через API |
-| `cli_execution.state_changed`, `cli_execution.finished`, `cli_execution.output_batch` | исполнение CLI — `cli_executions`, лента `agent_activity_events`; SSE `cli.output` в домене `run_event_log` есть, но производителя в v1 нет |
+| `cli_execution.state_changed`, `cli_execution.finished`, `cli_execution.output_batch` | статусы исполнения — `cli_executions`; вывод и завершение — `cli.output` (по событию на нормализованное событие CLI, `cli_event_type` = `output`/`tool_event`/`warning`/`artifact`/`finished`; пакеты не используются) |
 | `gate.started`, `evidence.recorded`, `evidence.verification_changed`, `finding.created`, `finding.status_changed`, `compliance.result_recorded` | строки БД (Quality API); итог гейта — `gate.completed` |
 | `provider.health_changed`, `provider.auth_restored` | `provider_health`, audit `provider.probe_completed`; UI CLI Providers опрашивает API |
 | `code_index.snapshot_ready`, `documentation.snapshot_fetched` | статусы `code_index_snapshots`/`documentation_snapshots` (API индекса и документации) |
@@ -128,7 +129,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 - `id` = `seq` (bigint, монотонно возрастает в рамках run, ADR-0011). Переподключение: браузер передаёт `Last-Event-ID`; сервер отдаёт `run_event_log WHERE run_id=? AND seq > ?` по возрастанию, затем переходит в live-режим (ожидание wake-up из Redis pub/sub + опрос раз в 5 с как страховка).
 - Если `Last-Event-ID` меньше минимального сохранённого `seq` (retention), сервер первым отправляет синтетический `run.state_changed` с `payload.resync = true` (снимок текущего статуса, `id` = текущий максимальный `seq`), после чего клиент обязан перезагрузить состояние через REST.
 - `heartbeat` каждые 15 с; **не** сохраняется в `run_event_log`, отправляется без строки `id:` (чтобы не сдвигать `Last-Event-ID`).
-- Ограничения: ≤ 3 одновременных SSE-соединения на пользователя на run; `cli.output` поток прореживается сервером до ≤ 20 событий/с на соединение (лишние объединяются; полный поток — в Task Detail через `/activity` с пагинацией).
+- Ограничения: ≤ 3 одновременных SSE-соединения на пользователя на run; `cli.output` прореживается в worker-exec до записи в outbox — ≤ 20 событий/с на run (лишние объединяются в одно событие с `coalesced_count`/`dropped_chunks`; история — `/activity` с пагинацией, полный санитизированный вывод — artifact `cli_output`).
 
 ### 3.2 Схема SSE-события
 
@@ -248,6 +249,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
         "redactions": {"type": "integer", "minimum": 0},
         "truncated": {"type": "boolean"},
         "coalesced_count": {"type": "integer", "minimum": 1},
+        "dropped_chunks": {"type": "integer", "minimum": 0, "description": "сколько из coalesced_count нормализованных событий не вошло в text (лимит 20 событий/с на run); полный вывод — artifact cli_output"},
         "tool_kind": {"enum": ["file_read", "file_write", "file_patch", "command", "search", "network", "other"]},
         "tool_phase": {"enum": ["requested", "started", "completed", "denied", "failed"]},
         "target": {"type": "string", "maxLength": 1024},
@@ -407,7 +409,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 
 1. Проекцию выполняет `worker-outbox` в той же транзакции, где выставляется `outbox_events.published_at` для событий из каталога с непустой колонкой «SSE»: `INSERT run_event_log(workspace_id, run_id, seq, event_id, event_type, schema_version, payload)`.
 2. `seq` назначается под per-run advisory lock (`pg_advisory_xact_lock(hashtext(run_id))`) как `max(seq)+1` (или счётчик `runs.last_event_seq`); откат транзакции откатывает и `seq` → разрывов нет, но клиенты не обязаны на это полагаться.
-3. `run_event_log.event_id` = новый UUIDv7, `source_event_id` = outbox `event_id`; `UNIQUE(source_event_id, event_type)` обеспечивает идемпотентность повторной публикации (проектное событие пакета вывода CLI, давшее бы несколько `cli.output`, в v1 не порождается — §2.2a).
+3. `run_event_log.event_id` = новый UUIDv7, `source_event_id` = outbox `event_id`; `UNIQUE(source_event_id, event_type)` обеспечивает идемпотентность повторной публикации (`cli.output` пишется в outbox по одному событию на SSE-событие — пакетов вывода нет, §2.2).
 4. После коммита — `PUBLISH run:{run_id} <seq>` в Redis (только сигнал; потеря сигнала компенсируется опросом раз в 5 с); для потока уведомлений workspace — также `PUBLISH aicd:ws:{workspace_id}` (Phase 8).
 5. Payload SSE не содержит секретов, полных промптов, raw log, скрытых рассуждений; тексты прошли санитизацию CLI Gateway (CLI_ADAPTER_CONTRACT §11) и ограничены по длине.
 
@@ -455,7 +457,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 |---|---|---|
 | ACP `agent.message` | 1 сообщение `AGENT_MESSAGE` в тред: `TASK` (если `task_id`) иначе `RUN`; `body` = шаблонное резюме по типу (например, для `FINDING`: severity, title, файл), ссылки → `links` | outbox `event_id` |
 | ACP к/от `user` | в тред `ROLE` (роль-собеседник) | outbox `event_id` |
-| пакет вывода CLI (проект, в v1 не порождается — §2.2a) | только события из 4.2 `CLI_HIGHLIGHT`; не более 1 сообщения на 10 с на execution (коалесцирование) | outbox `event_id` + индекс |
+| `cli.output` (worker-exec, `CliOutputPublisher`) | `CLI_HIGHLIGHT` (`chat_messages.message_kind = 'cli_excerpt'`, тред задачи): инструмент `file_patch`/`file_write`/`command` в фазе `completed`/`denied`/`failed`, предупреждение, завершение; не более 1 сообщения на 10 с на execution (кроме завершения), остальные — пропускаются | — (пишется в момент исполнения, до outbox) |
 | `task.state_changed` | только переходы в `RUNNING`, `VERIFYING`, `SUCCEEDED`, `BLOCKED`, `FAILED`, `CANCELLED` | outbox `event_id` |
 | `gate.completed` | только `required = true` или `status ∈ {FAIL, ERROR}` | outbox `event_id` |
 | `approval.*` | всегда | outbox `event_id` |

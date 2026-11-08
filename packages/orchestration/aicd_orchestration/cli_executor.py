@@ -36,6 +36,7 @@ from aicd_orchestration import agent_io, directives
 from aicd_orchestration import worktrees as wt
 from aicd_orchestration.agent_io import AgentContext, AgentIoSummary, InboxMessage
 from aicd_orchestration.agents.prompt import AssembledPrompt
+from aicd_orchestration.cli_output import CliOutputContext, CliOutputPublisher
 from aicd_orchestration.engine import TaskExecution
 from aicd_platform import metrics as prom
 from aicd_platform.artifacts import ArtifactStore
@@ -263,8 +264,19 @@ class CliTaskExecutor:
             context_pack_id=stored_pack.context_pack_id if stored_pack else None,
             context_pack=pack_metrics,
         )
+        # Живой вывод CLI (API_DESIGN §14): санитизированные события → outbox `cli.output` (≤ 20/с на run).
+        live = CliOutputPublisher(
+            self.engine,
+            CliOutputContext(
+                workspace_id=ws, run_id=run["id"], task_id=task["id"], execution_id=request.execution_id,
+                provider=provider, agent_role=role,
+            ),
+        )  # fmt: skip
         try:
-            outcome = await self.gateway.run(request, adapter, installation_id=installation_id)
+            try:
+                outcome = await self.gateway.run(request, adapter, installation_id=installation_id, on_event=live)
+            finally:
+                await live.close()
             result = outcome.result
             # Итог агента лежит вне worktree; остатки `.aicd/`/`output/` в дереве — не изменения кода задачи.
             self.worktrees.clear_agent_io(info.path)

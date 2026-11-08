@@ -286,6 +286,7 @@ def test_untrusted_wrong_host_and_expiring_certificates_fail(serve: Any, pki: Pk
     assert not untrusted["certificate"].ok and "не прошёл проверку" in untrusted["certificate"].detail
     # Без доверия к сертификату HTTP-проверки тоже не проходят (заголовки не читаются по недоверенному каналу).
     assert not untrusted["hsts"].ok
+    assert untrusted["tls-versions"].ok  # политика версий проверяется отдельно от доверия к сертификату
     wrong_host = _by_check(pf.run_checks(dep.target("127.0.0.1"), ca_file=pki.ca_file))["certificate"]
     assert not wrong_host.ok and "127.0.0.1" in wrong_host.detail
     expiring = serve(cert_days=5)

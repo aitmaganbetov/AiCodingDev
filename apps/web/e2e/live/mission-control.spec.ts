@@ -88,6 +88,15 @@ test('AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into
   await expect(canvas.locator('[data-task-id][data-status="SUCCEEDED"]')).toHaveCount(0);
   await watchGraphStatuses(graph);
 
+  // Task Detail → «События и логи» (только вывод CLI) открыт до исполнения: живой вывод Fake CLI приходит
+  // по SSE (worker-exec → outbox `cli.output` → run_event_log → SSE) без перезагрузки.
+  const taskId = await canvas.locator('[data-task-id]').first().getAttribute('data-task-id');
+  const logs = await context.newPage();
+  await logs.goto(`${base}/tasks/${taskId}?tab=events`);
+  await logs.getByRole('checkbox', { name: 'Только вывод CLI' }).check();
+  const cliItems = logs.getByTestId('task-events').getByRole('listitem');
+  await logs.evaluate(() => ((window as unknown as { __noReload: boolean }).__noReload = true));
+
   // Маркер окна: лента обновляется без перезагрузки страницы.
   await page.evaluate(() => ((window as unknown as { __noReload: boolean }).__noReload = true));
   await stack.startExec();
@@ -125,6 +134,17 @@ test('AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into
   await graph.goto(base);
   await expect(runStatus(graph)).toHaveText('Завершён', { timeout: 90_000 });
   await graph.close();
+
+  // Живой вывод CLI задачи: первая строка Fake CLI, событие завершения (`exit 0`), порядок по seq, без перезагрузки.
+  await expect(cliItems.filter({ hasText: 'Получена задача' }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(cliItems.filter({ hasText: 'exit 0' }).first()).toBeVisible({ timeout: 30_000 });
+  const types = await cliItems.evaluateAll((els) => els.map((el) => el.getAttribute('data-type')));
+  expect(new Set(types)).toEqual(new Set(['cli.output']));
+  const seqs = await cliItems.evaluateAll((els) => els.map((el) => Number(el.getAttribute('data-seq'))));
+  expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  expect(await logs.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true);
+  await expectNoSeriousA11yViolations(logs, 'task events: live CLI output (real stack)');
+  await logs.close();
 });
 
 test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; CHANGE_REQUEST impact preview → confirm → replan (new plan version) → acknowledged by agents → completed', async ({

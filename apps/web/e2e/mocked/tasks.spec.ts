@@ -249,8 +249,29 @@ test('task detail: summary, attempts, events/logs with live CLI output, ACP mess
   });
   await expect(events.getByRole('listitem')).toHaveCount(3);
   await expect(events.getByRole('listitem').last()).toContainText('npm test: 42 passed');
+  // Коалесцированное событие в форме, которую пишет worker-exec (aicd_orchestration.cli_output, ≤ 20/с на run):
+  // несколько строк вывода одним событием, секрет уже отредактирован, dropped_chunks > 0.
+  api.addEvent(run, 'cli.output', {
+    execution_id: '01900000-0000-7000-d000-0000000000c2',
+    task_id: task.id,
+    provider: 'codex',
+    agent_role: 'developer',
+    cli_seq: 9,
+    cli_event_type: 'output',
+    stream: 'stderr',
+    text: 'warn: token=[REDACTED]\nbuild ok',
+    redactions: 1,
+    truncated: true,
+    coalesced_count: 7,
+    dropped_chunks: 5,
+  });
+  await expect(events.getByRole('listitem')).toHaveCount(4);
+  const coalesced = events.getByRole('listitem').last();
+  await expect(coalesced).toContainText('warn: token=[REDACTED]');
+  await expect(coalesced).toContainText('build ok');
+  await expect(coalesced).toContainText('+5 фрагментов вывода объединено');
   await page.getByRole('checkbox', { name: 'Только вывод CLI' }).check();
-  await expect(events.getByRole('listitem')).toHaveCount(2);
+  await expect(events.getByRole('listitem')).toHaveCount(3);
   await expectNoSeriousA11yViolations(page, 'task events');
 
   await page.getByRole('tab', { name: 'Сообщения ACP' }).click();

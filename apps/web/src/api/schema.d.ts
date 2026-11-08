@@ -3367,24 +3367,35 @@ export interface components {
             summary: string;
             truncated: boolean;
         };
+        /** @description Живой вывод CLI (API_DESIGN §14): санитизированное нормализованное событие исполнения. Нормативная схема — sse-event.schema.json `cli_output`. Не более 20 событий/с на run: избыток коалесцируется (`coalesced_count`, `dropped_chunks` > 0); полный санитизированный вывод — artifact `cli_output` (`artifact_id` события `finished`). */
         CliOutputPayload: {
             /** Format: uuid */
             execution_id: string;
             /** Format: uuid */
             task_id: string;
             provider: components["schemas"]["CliProvider"];
-            agent_role?: components["schemas"]["AgentRole"];
-            normalized_event: components["schemas"]["NormalizedCliEvent"];
+            agent_role: components["schemas"]["AgentRole"];
+            /** @description seq нормализованного события (последнего из коалесцированных) */
+            cli_seq: number;
+            cli_event_type: components["schemas"]["NormalizedCliEvent"];
             /** @enum {string} */
-            stream?: "stdout" | "stderr" | "normalized";
-            chunk_index: number;
-            /** @description ≤ 8 KiB UTF-8 после редактирования секретов */
-            text: string;
-            redactions: number;
-            truncated: boolean;
+            stream?: "stdout" | "stderr" | "agent_message";
+            /** @description Санитизированный текст (секреты отредактированы) */
+            text?: string;
+            redactions?: number;
+            truncated?: boolean;
+            coalesced_count?: number;
             dropped_chunks?: number;
+            /** @enum {string} */
+            tool_kind?: "file_read" | "file_write" | "file_patch" | "command" | "search" | "network" | "other";
+            /** @enum {string} */
+            tool_phase?: "requested" | "started" | "completed" | "denied" | "failed";
+            target?: string;
             /** Format: uuid */
-            artifact_id?: string | null;
+            artifact_id?: string;
+            warning_code?: string;
+            /** @enum {string} */
+            execution_status?: "EXITED" | "TIMED_OUT" | "CANCELLED" | "CRASHED" | "AUTH_REQUIRED" | "RATE_LIMITED";
         };
         /** @description Payload SSE (sse-event.schema.json#/$defs/directive_impact_ready); итоговое влияние — Directive.impact_status. */
         DirectiveImpactReadyPayload: {

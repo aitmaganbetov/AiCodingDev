@@ -21,7 +21,7 @@ docker compose -f infrastructure/docker/compose.yaml --profile observability up 
 | `aicd-worker <outbox, orchestrator, exec, index>` | `:${AICD_METRICS_PORT}` (рекомендуется 9464; 0 — выключено) | тот же токен |
 
 Без `AICD_METRICS_TOKEN_FILE` в `production` endpoint отвечает `404` (fail closed); в `development`/`test` — открыт.
-Prometheus находит воркеры по DNS-именам сервисов `worker-outbox`, `worker-orchestrator`, `worker-exec`, `worker-index` (порт 9464); сервисы воркеров в compose появятся вместе с их профилем развёртывания — до этого цели просто отсутствуют.
+Prometheus находит воркеры по DNS-именам сервисов `worker-outbox`, `worker-orchestrator`, `worker-exec`, `worker-index` (порт 9464) — это сервисы `compose.yaml` (`AICD_METRICS_PORT=9464`, токен — secret `metrics_token`); остановленный сервис просто не даёт цели. Тот же endpoint — healthcheck воркера.
 
 Каталог метрик — `packages/platform/aicd_platform/metrics.py` (все с префиксом `aicd_`). Соответствие ТЗ §16:
 

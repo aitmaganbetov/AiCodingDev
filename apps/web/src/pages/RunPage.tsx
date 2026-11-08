@@ -65,10 +65,13 @@ export function describeEvent(t: TFunction, e: RunEvent, taskTitle: (id: string)
         to: enumLabel(t, 'agent_role', isRecord(p.to) ? p.to.role : p.to),
         summary: str(p.summary),
       });
-    case 'cli.output':
-      return [str(p.provider), enumLabel(t, 'agent_role', p.agent_role), str(p.text) || str(p.cli_event_type)]
+    case 'cli.output': {
+      // Коалесцированное событие (≤ 20/с на run): dropped_chunks — фрагменты, не вошедшие в text.
+      const dropped = typeof p.dropped_chunks === 'number' && p.dropped_chunks > 0 ? t('event.cliDropped', { count: p.dropped_chunks }) : '';
+      return [str(p.provider), enumLabel(t, 'agent_role', p.agent_role), str(p.text) || str(p.cli_event_type), dropped]
         .filter(Boolean)
         .join(' · ');
+    }
     case 'approval.requested':
       return str(p.summary);
     case 'approval.decided':

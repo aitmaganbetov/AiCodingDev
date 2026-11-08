@@ -435,6 +435,21 @@ def main() -> int:
         sys.stderr.write("AKIAABCDEFGHIJKLMNOP\n")
         emit({"event": "result", "claims": [{"type": "analysis_completed"}], "usage": None})
         return 0
+    if s == "live_output":
+        # Живой вывод (API_DESIGN §14): нумерованные сообщения, stderr с ANSI и секретом, разрезанным между
+        # двумя записями (построчная буферизация), скрытое рассуждение (не должно попасть никуда), инструмент.
+        emit({"event": "message", "type": "reasoning", "text": "HIDDEN-REASONING-CANARY думаю о задаче"})
+        for i in range(1, 31):
+            emit({"event": "message", "text": f"live line {i:02d}"})
+            time.sleep(0.02)
+        sys.stderr.write("\x1b[31mwarn\x1b[0m: token=ghp_SPLITsplitSPLITsplit")
+        sys.stderr.flush()
+        time.sleep(0.05)
+        sys.stderr.write("SPLIT0123456789 done\n")
+        sys.stderr.flush()
+        emit({"event": "tool", "tool_kind": "command", "phase": "completed", "target": "npm test"})
+        emit({"event": "result", "claims": [{"type": "analysis_completed"}], "usage": None})
+        return 0
     if s == "claims_without_evidence":
         emit({"event": "result", "claims": [{"type": "tests_passed", "summary": "все тесты прошли"}], "usage": None})
         return 0

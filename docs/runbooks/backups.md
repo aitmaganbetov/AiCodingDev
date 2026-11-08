@@ -116,8 +116,9 @@ Dangerous action (ТЗ §15): решение о восстановлении и 
    `missing`/`mismatched` должны быть пусты (иначе — повреждение: стоп, эскалация). `missing_after_snapshot` — артефакты,
    созданные после последнего снимка: их run/задачи перечислить в журнале инцидента и перезапустить (скачивание таких
    артефактов вернёт ошибку, sha256 не подменяется).
-6. **Приложение:** `$C -f infrastructure/docker/compose.restore.yaml up -d --no-build --wait` (воркеры — как развёрнуты у
-   оператора, `aicd-worker outbox|orchestrator|exec|index`), затем `curl -fsS http://localhost:8080/api/v1/health/ready`.
+6. **Приложение:** `$C -f infrastructure/docker/compose.restore.yaml up -d --no-build --wait` (вместе с сервисами
+   воркеров `worker-*`; для gates worker-exec добавить `-f infrastructure/docker/compose.sandbox.yaml`), затем
+   `curl -fsS http://localhost:8080/api/v1/health/ready`.
 7. **CLI:** повторный вход оператора в Codex/Claude CLI ([cli-auth.md](cli-auth.md)); до этого задачи с CLI — `BLOCKED (AUTH_REQUIRED)`.
 8. **Проверки:** run «в полёте» продолжаются (tick + reconciler); `aicd_worker_leases_expired` → 0; outbox без отставания
    (`AicdOutboxLag` не горит); вход пользователей; аудит восстановления — запись в журнале инцидента с `backup_id`, `key_id`,
@@ -131,6 +132,9 @@ Dangerous action (ТЗ §15): решение о восстановлении и 
 * Каждая команда обновляет `status.json` репозитория и `AICD_BACKUP_STATUS_FILE` (компоненты `postgres_base`, `postgres_wal`,
   `postgres_dump`, `artifacts`, `secrets`; время последней попытки/успеха, текст ошибки без секретов).
 * worker-outbox читает файл, если смонтирован только для чтения и задан `AICD_BACKUP_STATUS_FILE`, и экспортирует
+  (в `compose.yaml` — каталог `AICD_BACKUP_STATUS_DIR`, по умолчанию `/srv/aicd-backup/status`, смонтирован `ro` в
+  `/run/aicd-backup`, `AICD_BACKUP_STATUS_FILE=/run/aicd-backup/status.json`; задания бэкапа на хосте пишут
+  `--status-file "$AICD_BACKUP_STATUS_DIR/status.json"`, файл 0644, каталог 0755)
   `aicd_backup_last_success_timestamp_seconds{component}`, `aicd_backup_last_attempt_failed{component}`; из `pg_stat_archiver` —
   `aicd_postgres_wal_archived`, `aicd_postgres_wal_archive_failures`.
 * Алерты (`infrastructure/monitoring/prometheus/rules/aicd-alerts.yml`, группа `aicd-backup`, promtool-тесты):
@@ -147,4 +151,5 @@ Dangerous action (ТЗ §15): решение о восстановлении и 
 
 * Шифрование «на покое» самих томов хоста — LUKS/шифрование диска (SECURITY_ARCHITECTURE §14); бэкапы шифруются независимо.
 * Права `aicd_maintenance` для `pg_dump` — миграция 0016 (см. §1).
-* Метрики бэкапа требуют сервиса worker-outbox в развёртывании (в `compose.yaml` сервисов воркеров пока нет — P1-02).
+* Метрики бэкапа экспортирует сервис `worker-outbox` из `compose.yaml` (OQ-51 (d), проверено на одноразовой копии
+  профиля: `aicd_backup_last_attempt_failed{component}` в Prometheus из смонтированного файла статуса).

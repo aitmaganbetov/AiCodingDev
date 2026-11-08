@@ -15,5 +15,5 @@
 | [github-app.md](github-app.md) | создание и подключение GitHub App, ротация ключа и webhook secret | P9-06, IN_REVIEW |
 | [secrets-rotation.md](secrets-rotation.md) | ротация паролей БД, Redis, ключей приложения, токенов | P9-06, IN_REVIEW |
 | [upgrades.md](upgrades.md) | обновление версии, dry-run миграций, откат | P9-06, IN_REVIEW |
-| [release.md](release.md) | сборка релиза, SBOM, подпись/provenance (cosign, ключ), проверка; образы verification платформы | P9-08 |
+| [release.md](release.md) | сборка релиза, SBOM, подпись/provenance (cosign, ключ), проверка; образы verification платформы; предрелизная проверка TLS/HSTS развёртывания (TH-46) | P9-08 |
 | [vulndb-update.md](vulndb-update.md) | одобренное обновление офлайн-БД уязвимостей (OSV, Trivy) | OQ-43 (f), IN_REVIEW |

@@ -703,6 +703,11 @@
           "type": "integer",
           "minimum": 1
         },
+        "dropped_chunks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "сколько из coalesced_count нормализованных событий не вошло в text (лимит 20 событий/с на run); полный вывод — artifact cli_output"
+        },
         "tool_kind": {
           "enum": [
             "file_read",

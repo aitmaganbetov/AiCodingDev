@@ -120,7 +120,16 @@ def _legacy_context(version: ssl.TLSVersion) -> ssl.SSLContext:
     return ctx
 
 
-def check_tls_versions(target: Target, ctx: ssl.SSLContext) -> Result:
+def _modern_context() -> ssl.SSLContext:
+    """TLS 1.2+ без проверки сертификата: версии проверяются отдельно от доверия (оно — проверка `certificate`)."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
+def check_tls_versions(target: Target) -> Result:
     problems: list[str] = []
     for label, version in LEGACY_VERSIONS:
         try:
@@ -133,7 +142,7 @@ def check_tls_versions(target: Target, ctx: ssl.SSLContext) -> Result:
             continue  # соединение сброшено/закрыто сервером на ClientHello — тоже отказ
         problems.append(f"{label} принят сервером (согласовано {negotiated})")
     try:
-        modern, _ = _handshake(target, ctx)
+        modern, _ = _handshake(target, _modern_context())
     except (ssl.SSLError, OSError) as exc:
         problems.append(f"TLS 1.2+ не установлен: {exc}")
         modern = None
@@ -258,7 +267,7 @@ def run_checks(
     expected: dict[str, str] | None = None,
 ) -> list[Result]:
     ctx = client_context(ca_file)
-    results = [check_tls_versions(target, ctx), check_certificate(target, ctx, min_days=min_days)]
+    results = [check_tls_versions(target), check_certificate(target, ctx, min_days=min_days)]
     expected = expected_headers() if expected is None else expected
     try:
         with httpx.Client(verify=ctx, trust_env=False, timeout=TIMEOUT_SECONDS) as client:

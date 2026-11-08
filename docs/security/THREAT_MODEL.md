@@ -180,7 +180,7 @@ flowchart LR
 | TH-14 | P5, P2 SSE, логи | I | **Утечка секретов в логи/SSE**: CLI выводит env, токены, содержимое `.env`; трассировки ошибок с DSN; логирование заголовков `Cookie`/`Authorization` | 3 | 3 | critical | SC-SEC-03, SC-SEC-07, SC-OBS-01, SC-API-04 | medium — обфусцированные секреты (base64, разбитые на части) могут пройти | Security: ST-SEC-03 (secret leakage, ТЗ §20) |
 | TH-15 | P7, D3 | I | **Утечка секретов в артефакты/индекс/context packs**: `.env`, ключи, `credentials.json` из репозитория индексируются и отправляются провайдеру или сохраняются в MinIO | 3 | 3 | critical | SC-SEC-05, SC-SEC-03, SC-SEC-04 | medium — секреты в нестандартных файлах | Security: ST-SEC-05 |
 | TH-47 | D1, D3, бэкапы | I | **Кража бэкапов/дисков** с кодом, аудитом, ПДн | 1 | 3 | medium | SC-DATA-02, SC-DATA-03 | low | Integration: ST-DATA-03 (бэкап зашифрован; восстановление) |
-| TH-46 | F1, внутренние потоки | I, T | **MITM**: перехват трафика браузер↔proxy в недоверенной сети; межхостовой трафик к PG/Redis в профиле `server` | 2 | 3 | high | SC-NET-03, SC-IAM-03 | low | Integration: ST-NET-03 (TLS-конфигурация, HSTS) |
+| TH-46 | F1, внутренние потоки | I, T | **MITM**: перехват трафика браузер↔proxy в недоверенной сети; межхостовой трафик к PG/Redis в профиле `server` | 2 | 3 | high | SC-NET-03, SC-IAM-03; предрелизная проверка edge `scripts/release/preflight_tls.py` (TLS ≥ 1.2, сертификат ≥ 14 дней, HSTS ≥ 1 год + includeSubDomains, HTTP → HTTPS, заголовки nginx, `/metrics` не публичен) — условие принятия OQ-48 (b) | low | Integration: ST-NET-03 (TLS-конфигурация, HSTS); `tests/unit/test_preflight_tls.py`; прогон скрипта на целевом развёртывании — RG-11 (TH-46) чек-листа релиза |
 
 ### 5.4 Изоляция арендаторов и веб-безопасность
 
@@ -360,7 +360,7 @@ flowchart LR
 | TH-14 | critical | medium | `closed` | SC-SEC-03, SC-SEC-07, SC-OBS-01, SC-API-04 |
 | TH-15 | critical | medium | `closed` | SC-SEC-05, SC-SEC-03, SC-SEC-04 |
 | TH-47 | medium | low | `monitored` | SC-DATA-02, SC-DATA-03 |
-| TH-46 | high | low | `accepted:OQ-48` | SC-NET-03, SC-IAM-03 — TLS/HSTS на edge и внутренний TLS — конфигурация развёртывания, автоматически не проверяется (OQ-48 (b)) |
+| TH-46 | high | low | `accepted:OQ-48` | SC-NET-03, SC-IAM-03 — TLS/HSTS на edge — конфигурация развёртывания: риск принят (OQ-48 (b)) при обязательном прогоне `scripts/release/preflight_tls.py` на целевом edge до выпуска и после изменений edge (RELEASE_CHECKLIST RG-11 (TH-46), release.md §5); внутренний TLS профиля server — чек-лист развёртывания |
 | TH-16 | critical | low | `closed` | SC-IAM-07, SC-TEN-01, SC-TEN-04, SC-TEN-05 |
 | TH-17 | high | low | `closed` | SC-TEN-01, SC-TEN-02, SC-TEN-03, SC-TEN-08 |
 | TH-18 | high | low | `closed` | SC-API-07, SC-TEN-04, SC-TEN-06 |
