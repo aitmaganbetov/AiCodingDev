@@ -143,7 +143,7 @@ def _doc_transitions() -> set[tuple[str, str, str]]:
     rows: set[tuple[str, str, str]] = set()
     for line in section.splitlines():
         m = re.match(
-            r"^\| (run|task|execution|directive|approval|external_action|indexing_job) \| `([A-Z_a-z]+)` \| (.+) \|$",
+            r"^\| (run|task|execution|directive|approval|external_action|indexing_job|finding) \| `([A-Z_a-z]+)` \| (.+) \|$",
             line,
         )
         if m:
@@ -163,6 +163,7 @@ def test_allowed_transitions_match_design(admin: psycopg.Connection) -> None:
         "approval",
         "external_action",
         "indexing_job",
+        "finding",
     }
     actual = {tuple(r) for r in admin.execute("SELECT entity, from_status, to_status FROM allowed_transitions")}
     assert actual == expected

@@ -16,6 +16,7 @@ import aicd_identity
 import aicd_orchestration
 import aicd_platform
 import aicd_projects
+import aicd_standards
 import aicd_verification
 from tests.support import db as testdb
 
@@ -26,6 +27,7 @@ MODULES = {
     "cli_adapters": aicd_cli_adapters,
     "orchestration": aicd_orchestration,
     "verification": aicd_verification,
+    "standards": aicd_standards,
     "collaboration": aicd_collaboration,
     "code_intelligence": aicd_code_intelligence,
 }

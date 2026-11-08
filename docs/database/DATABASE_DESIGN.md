@@ -1866,7 +1866,8 @@ CREATE TABLE artifacts (
   run_id           uuid,
   kind             text        NOT NULL CHECK (kind IN
                      ('git_diff','cli_raw_log','cli_output','test_report','coverage_report','scan_report','sbom',
-                      'context_pack','checkpoint_state','documentation','knowledge','report','archive','other')),
+                      'context_pack','checkpoint_state','documentation','knowledge','report','archive','other',
+                      'gate_log','applicability_report','signature')),   -- последние три: QUALITY_GATES §9, миграция 0008
   storage_ref      text        NOT NULL CHECK (storage_ref ~ '^(s3|file)://[A-Za-z0-9._/-]+$' AND length(storage_ref) <= 1100),
   sha256           sha256_hex  NOT NULL,
   size_bytes       bigint      NOT NULL CHECK (size_bytes >= 0),
@@ -1955,6 +1956,9 @@ CREATE TABLE gate_executions (
   evidence_id            uuid,
   not_applicable_reason  text                    CHECK (length(not_applicable_reason) <= 2000),
   error_message          text                    CHECK (length(error_message) <= 4000),
+  error_code             text                    CHECK (error_code IN       -- QUALITY_GATES §9, миграция 0008
+                           ('TOOL_UNAVAILABLE','TIMEOUT','INFRA','SHA_MISMATCH','REPORT_UNPARSABLE','EMPTY_SUITE',
+                            'WORKTREE_DIRTY','NO_BASE_COMMIT','UNSUPPORTED_GATE')),
   superseded_at          timestamptz,            -- заменён повторным запуском (после fix)
   created_at             timestamptz             NOT NULL DEFAULT now(),
   started_at             timestamptz,
@@ -2715,7 +2719,7 @@ END $$;
 CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
   FOR EACH ROW EXECUTE FUNCTION trg_fn_check_transition('run');
 -- аналогично: tasks('task'), cli_executions('execution'), user_directives('directive'),
--- approvals('approval'), external_actions('external_action'), indexing_jobs('indexing_job').
+-- approvals('approval'), external_actions('external_action'), indexing_jobs('indexing_job'), findings('finding').
 ```
 
 Начальное содержимое `allowed_transitions` (из ТЗ §6 и Directive/Approval/Ledger FSM; сверено с DATA_FLOW.md §3 — **эта таблица является консолидированным нормативным списком переходов**; в коде источник — `transitions.py`, CI сравнивает множества). `__new__` — допустимое начальное состояние при `INSERT`.
@@ -2764,8 +2768,15 @@ CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
 | indexing_job | `__new__` | `QUEUED` |
 | indexing_job | `QUEUED` | `RUNNING`, `CANCELLED`, `FAILED` |
 | indexing_job | `RUNNING` | `SUCCEEDED`, `FAILED`, `CANCELLED`, `QUEUED` (повтор после потери аренды, `attempt_count + 1`) |
+| finding | `__new__` | `OPEN` |
+| finding | `OPEN` | `ACKNOWLEDGED`, `FIXED`, `VERIFIED_FIXED` (повторный прогон gate не воспроизвёл), `FALSE_POSITIVE`, `ACCEPTED_RISK` |
+| finding | `ACKNOWLEDGED` | `OPEN`, `FIXED`, `VERIFIED_FIXED`, `FALSE_POSITIVE`, `ACCEPTED_RISK` |
+| finding | `FIXED` | `VERIFIED_FIXED`, `OPEN` (повторный прогон воспроизвёл находку) |
+| finding | `VERIFIED_FIXED` | `OPEN` (регрессия на более позднем commit run) |
+| finding | `FALSE_POSITIVE` | `OPEN` (решение человека отозвано) |
+| finding | `ACCEPTED_RISK` | `OPEN` (принятие риска отозвано/истекло) |
 
-Терминальные состояния (нет исходящих строк): run `COMPLETED/FAILED/CANCELLED`; task `SUCCEEDED/FAILED/CANCELLED`; execution `COLLECTED/TIMED_OUT/CANCELLED/CRASHED/AUTH_REQUIRED/RATE_LIMITED`; directive `COMPLETED/REJECTED/CANCELLED/FAILED`; approval — все, кроме `PENDING`; external_action `COMPENSATED`; indexing_job `SUCCEEDED/FAILED/CANCELLED` (строки indexing_job — миграция 0007, P5-01; в §10.9 FSM не задан). Дополнительно `trg_runs_resume_guard`: выход из `PAUSED`/`BLOCKED` в нетерминальное состояние допустим только в `resume_status` (или `PAUSED` из `BLOCKED`).
+Терминальные состояния (нет исходящих строк): run `COMPLETED/FAILED/CANCELLED`; task `SUCCEEDED/FAILED/CANCELLED`; execution `COLLECTED/TIMED_OUT/CANCELLED/CRASHED/AUTH_REQUIRED/RATE_LIMITED`; directive `COMPLETED/REJECTED/CANCELLED/FAILED`; approval — все, кроме `PENDING`; external_action `COMPENSATED`; indexing_job `SUCCEEDED/FAILED/CANCELLED` (строки indexing_job — миграция 0007, P5-01; в §10.9 FSM не задан). У finding терминальных состояний нет: любое закрытие может быть отозвано (`→ OPEN`); строки finding — миграция 0008 (P6-01; в §12.6 FSM не задан). Дополнительно `trg_findings_guard`: `FALSE_POSITIVE`/`ACCEPTED_RISK` — только `resolved_by = app_current_user()` (человек сессии, ТЗ §10), `VERIFIED_FIXED` — только с `VERIFIED` evidence. Дополнительно `trg_runs_resume_guard`: выход из `PAUSED`/`BLOCKED` в нетерминальное состояние допустим только в `resume_status` (или `PAUSED` из `BLOCKED`).
 
 ### 18.4 `COMPLETED` только при успешных обязательных gates и выполненной approval policy (ТЗ §6, §14, AC-11)
 
