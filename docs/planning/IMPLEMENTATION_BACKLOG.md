@@ -169,15 +169,15 @@
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P8-01 | Миграции GitHub-таблиц | FR-GH-01 | P1-08 | P0 | Migration + RLS | TODO |
-| P8-02 | GitHub App (минимальные права), установка, привязка репозиториев | FR-GH-01, FR-PRJ-03 | P8-01 | P0 | Integration на тестовой организации (opt-in) | TODO |
-| P8-03 | Webhooks: HMAC SHA-256, constant-time, дедуп, защита от replay | FR-GH-02 | P8-01 | P0 | Security-тесты spoofing/replay | TODO |
-| P8-04 | PR workflow через `external_actions`: push, PR, комментарии ревью, статусы | FR-GH-03 | P8-02, P3-11 | P0 | Crash-тест: PR не создаётся дважды | TODO |
-| P8-05 | Merge только с approval, с уважением branch protection | FR-GH-03, FR-APR-01 | P8-04 | P0 | AC-13 | TODO |
+| P8-01 | Миграции GitHub-таблиц | FR-GH-01 | P1-08 | P0 | Migration + RLS | DONE |
+| P8-02 | GitHub App (минимальные права), установка, привязка репозиториев | FR-GH-01, FR-PRJ-03 | P8-01 | P0 | Integration на тестовой организации (opt-in) | IN_REVIEW |
+| P8-03 | Webhooks: HMAC SHA-256, constant-time, дедуп, защита от replay | FR-GH-02 | P8-01 | P0 | Security-тесты spoofing/replay | DONE |
+| P8-04 | PR workflow через `external_actions`: push, PR, комментарии ревью, статусы | FR-GH-03 | P8-02, P3-11 | P0 | Crash-тест: PR не создаётся дважды | DONE |
+| P8-05 | Merge только с approval, с уважением branch protection | FR-GH-03, FR-APR-01 | P8-04 | P0 | AC-13 | DONE |
 | P8-06 | Метрики ТЗ §16 (Prometheus), OTel трассы end-to-end | FR-OBS-02, FR-OBS-03 | P1-06 | P0 | Метрики видны в Prometheus | IN_REVIEW |
 | P8-07 | Analytics API + экран | FR-OBS-05, FR-CI-08 | P8-06, P7-01 | P0 | E2E | IN_REVIEW |
 | P8-08 | Grafana dashboards + алерты | FR-OBS-04 | P8-06 | P1 | Тестовый алерт срабатывает | IN_REVIEW |
-| P8-09 | Permission-тесты GitHub-действий | FR-GH-03 | P8-05 | P0 | Зелёные | TODO |
+| P8-09 | Permission-тесты GitHub-действий | FR-GH-03 | P8-05 | P0 | Зелёные | DONE |
 
 ## Phase 9 — Verification & Release
 
@@ -368,12 +368,26 @@
 
 В той же миграции: `sys_resolve_approval_workspace` (approvals API больше не перебирает workspace пользователя) и `sys_recovery_workspaces` для recovery reconciler (P3-12).
 
+### Phase 8 — GitHub и пробелы API (P8-01…P8-05, P8-09, OQ-45, 2026-11-08)
+
+Итоговая проверка всей фазы (ведущий, после завершения всех агентов): `uv run pytest` → **2622 passed, 4 skipped** (PHPStan ×2, офлайн-БД Trivy, opt-in реальный GitHub); ruff, ruff format (445 файлов), mypy (372), import-linter (4 kept), запрет AI SDK, `gen_contract_models --check` — OK. Web: `check:api`, `typecheck`, `lint`, `test` → 151 passed, `build`, mocked `e2e` → 59 passed, `e2e:live` → 4 passed (AC-05, AC-06, AC-08, smoke).
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P8-01 | DONE | `infrastructure/migrations/versions/0012_github_integration.py` | `tests/migrations/test_github_migration.py`: up/down/up, offline SQL, RLS по таблицам, гранты, SECURITY DEFINER `sys_resolve_installation_workspace`/`sys_github_webhook_receive`, дедуп, триггер `pull_requests` |
+| P8-02 | IN_REVIEW | `packages/integrations_github/**` (App JWT RS256, токены установки на операцию/репозиторий, минимальные права), `routers/github.py` | Unit + integration против локального двойника GitHub API (`tests/support/github_double.py`); реальная организация — opt-in `tests/integration/test_github_real.py` **skipped (нет доступа)**; отступления — OQ-47 |
+| P8-03 | DONE | `integrations_github/webhooks.py`, `routers/github.py`, `middleware.py` | `test_github_api.py`: подмена/отсутствие/чужой секрет/sha1/изменённое тело/повтор/подделка-затем-оригинал GUID/размер/неизвестное событие — отклонено или без эффекта; метрика `aicd_webhook_signature_invalid_total` |
+| P8-04 | DONE | `aicd_orchestration/github_flow.py`, `aicd_security/git.py` (`push_ref`), `apps/worker/aicd_worker/github.py` | `test_github_workflow.py`: сбой между «PR создан» и CONFIRMED (kill и исключение) → ровно один PR; сбой после push → без второго push; токен только через одноразовый GIT_ASKPASS |
+| P8-05 | DONE | `github_flow.py` (merge), approvals MERGE (четыре глаза) | AC-13: PENDING → отказ; автор запроса → 403; branch protection блокирует до прохождения обязательного check; смещённый head → отказ; сбой после merge → без второго merge |
+| P8-09 | DONE | `aicd_identity/rbac.py` (`github:read`, `github:manage`, `pull_request:create`, `pull_request:merge`) | Матрица ролей по 8 GitHub-операциям, 404 чужим, минимальные права токена по операции, запрет `GITHUB_TOKEN`/`GH_TOKEN` в окружении CLI агента, токенов нет в БД/логах/`.git/config` |
+| OQ-45 (c)–(f) | DONE | `explorer.py` (ветки/коммиты), `routers/{providers,technologies,events,quality,workspaces}.py`, `aicd_worker` (`exec.probe_provider`) | `tests/integration/test_oq45_api.py`, `test_workspace_events.py`, `tests/e2e/test_provider_settings_routing.py` (выключенный провайдер, запрещённая роль, лимит сессий → WAIT, таймаут workspace); web e2e projects/knowledge/providers/quality/compliance/settings/approvals |
+
 ### Phase 8 — наблюдаемость и Analytics (P8-06…P8-08, 2026-11-08)
 
 | Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
 |---|---|---|---|
-| P8-06 | IN_REVIEW | `aicd_platform/{metrics,telemetry,outbox,outbox_dispatcher,sse,config}.py`, `aicd_api/{middleware,deps}.py`, `routers/{metrics,auth,events}.py`, `aicd_worker/{observability,runtime,broker,handlers,main,indexing}.py`, `cli_adapters/{gateway,registry}.py`, `orchestration/{cli_executor,approvals}.py`; зависимость `prometheus-client==0.26.0` | `tests/unit/test_metrics.py`, `test_telemetry.py` → 20 passed; `tests/e2e/test_analytics_observability.py::test_one_trace_from_api_request_to_cli_execution` → passed (одна трасса POST /runs → outbox → worker → exec → `cli.execution`, in-memory exporter). Отклонения — OQ-46 |
-| P8-07 | IN_REVIEW | `packages/analytics/**`, `routers/analytics.py`, `openapi.yaml` (`getAnalyticsSummary`), `API_DESIGN.md` §2.1/§5.2/§15b; web: `routes/analytics.tsx`, `api/analytics.ts`, `i18n/analytics.json`, `features/analytics/**`, `e2e/mocked/analytics.spec.ts` | e2e analytics (значения по реальным run, проект/окно, RBAC/tenancy, валидация, Schemathesis 40 случаев) → 9 passed; vitest 151 passed; Playwright mocked 59 passed (axe light/dark, 360px) |
-| P8-08 | IN_REVIEW | `infrastructure/monitoring/**`, `compose.yaml` (профиль observability), `init-secrets.sh`, `docs/runbooks/observability.md` | `tests/contract/test_observability.py` → 62 passed (метрики/метки выражений ⊂ реестра); `promtool test rules` (prom/prometheus:v3.15.1 по digest) → SUCCESS, негативный контроль отвергается, `amtool check-config` → OK (3 passed) |
-| P8-07 (доп.) | IN_REVIEW | `infrastructure/migrations/versions/0013_analytics_views.py`, `aicd_analytics/summary.py` (только `v_*`), `aicd_api/__init__.py` (0013) | `tests/migrations/test_analytics_views_migration.py` (up/down/up, offline SQL, security_invoker + RLS через представления, права только aicd_app) + аналитические e2e без изменений → 15 passed |
-| P8-06 (доп.) | IN_REVIEW | `metrics.py` (`aicd_webhook_signature_invalid_total`, `stream` у SSE-метрик), `routers/{github,events}.py`, алерт AicdWebhookSignatureInvalid, дашборд | `tests/integration/test_observability_signals.py`, promtool (новый алерт срабатывает/фон — нет), `test_observability.py` → passed |
+| P8-06 | DONE | `aicd_platform/{metrics,telemetry,outbox,outbox_dispatcher,sse,config}.py`, `aicd_api/{middleware,deps}.py`, `routers/{metrics,auth,events}.py`, `aicd_worker/{observability,runtime,broker,handlers,main,indexing}.py`, `cli_adapters/{gateway,registry}.py`, `orchestration/{cli_executor,approvals}.py`; зависимость `prometheus-client==0.26.0` | `tests/unit/test_metrics.py`, `test_telemetry.py` → 20 passed; `tests/e2e/test_analytics_observability.py::test_one_trace_from_api_request_to_cli_execution` → passed (одна трасса POST /runs → outbox → worker → exec → `cli.execution`, in-memory exporter). Отклонения — OQ-46 |
+| P8-07 | DONE | `packages/analytics/**`, `routers/analytics.py`, `openapi.yaml` (`getAnalyticsSummary`), `API_DESIGN.md` §2.1/§5.2/§15b; web: `routes/analytics.tsx`, `api/analytics.ts`, `i18n/analytics.json`, `features/analytics/**`, `e2e/mocked/analytics.spec.ts` | e2e analytics (значения по реальным run, проект/окно, RBAC/tenancy, валидация, Schemathesis 40 случаев) → 9 passed; vitest 151 passed; Playwright mocked 59 passed (axe light/dark, 360px) |
+| P8-08 | DONE | `infrastructure/monitoring/**`, `compose.yaml` (профиль observability), `init-secrets.sh`, `docs/runbooks/observability.md` | `tests/contract/test_observability.py` → 62 passed (метрики/метки выражений ⊂ реестра); `promtool test rules` (prom/prometheus:v3.15.1 по digest) → SUCCESS, негативный контроль отвергается, `amtool check-config` → OK (3 passed) |
+| P8-07 (доп.) | DONE | `infrastructure/migrations/versions/0013_analytics_views.py`, `aicd_analytics/summary.py` (только `v_*`), `aicd_api/__init__.py` (0013) | `tests/migrations/test_analytics_views_migration.py` (up/down/up, offline SQL, security_invoker + RLS через представления, права только aicd_app) + аналитические e2e без изменений → 15 passed |
+| P8-06 (доп.) | DONE | `metrics.py` (`aicd_webhook_signature_invalid_total`, `stream` у SSE-метрик), `routers/{github,events}.py`, алерт AicdWebhookSignatureInvalid, дашборд | `tests/integration/test_observability_signals.py`, promtool (новый алерт срабатывает/фон — нет), `test_observability.py` → passed |
