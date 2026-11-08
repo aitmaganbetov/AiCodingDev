@@ -15,6 +15,9 @@
       Объекты артефактов удаляются через хранилище из настроек (AICD_ARTIFACT_*). `--every` — расписание
       без внешнего cron: проход сразу и затем каждые SECONDS до SIGTERM/SIGINT (ошибка прохода не
       останавливает цикл; код выхода — последнего прохода).
+  aicd maintenance orphan-objects [--grace-hours H] [--dry-run] [--reason R]
+      Удаляет объекты хранилища артефактов (FS/S3) без строки `artifacts` старше H часов (по умолчанию 24);
+      `--dry-run` — только подсчёт. Роль aicd_maintenance, сессия и пакеты аудируются.
 """
 
 from __future__ import annotations
@@ -27,15 +30,17 @@ import json
 import os
 import signal
 import sys
+from datetime import timedelta
 
 from sqlalchemy import text
 
 from aicd_identity import api as identity
 from aicd_identity.passwords import WeakPasswordError
 from aicd_orchestration.agents.profiles import sync_profiles
+from aicd_platform.artifact_gc import sweep_orphan_objects
 from aicd_platform.artifacts import FileSystemArtifactStore, S3ArtifactStore, build_artifact_store
 from aicd_platform.config import get_settings
-from aicd_platform.db import DbContext, apply_context, create_engine, transaction
+from aicd_platform.db import DbContext, TcpKeepalive, apply_context, create_engine, transaction
 from aicd_platform.errors import ProblemError
 from aicd_platform.ids import uuid7
 from aicd_platform.retention import run_retention
@@ -54,7 +59,7 @@ def _read_password(from_stdin: bool) -> str:
 async def _create_owner(args: argparse.Namespace) -> int:
     settings = get_settings()
     password = _read_password(args.password_stdin)
-    engine = create_engine(settings.require_database_url(), pool_size=1)
+    engine = create_engine(settings.require_database_url(), pool_size=1, keepalive=TcpKeepalive.from_settings(settings))
     try:
         async with transaction(engine, DbContext(actor_type="system")) as conn:
             user_id = await identity.create_user(conn, email=args.email, display_name=args.name, password=password)
@@ -80,7 +85,7 @@ async def _ensure_partitions(args: argparse.Namespace) -> int:
     if not url:
         print("Задайте AICD_MIGRATOR_DATABASE_URL (роль aicd_migrator)", file=sys.stderr)
         return 2
-    engine = create_engine(url, pool_size=1)
+    engine = create_engine(url, pool_size=1, keepalive=TcpKeepalive.from_settings(get_settings()))
     try:
         async with engine.begin() as conn:
             created = (
@@ -99,7 +104,7 @@ async def _sync_agent_profiles(args: argparse.Namespace) -> int:
     if not url:
         print("Задайте AICD_MIGRATOR_DATABASE_URL (роль aicd_migrator)", file=sys.stderr)
         return 2
-    engine = create_engine(url, pool_size=1)
+    engine = create_engine(url, pool_size=1, keepalive=TcpKeepalive.from_settings(get_settings()))
     try:
         async with engine.begin() as conn:
             results = await sync_profiles(conn)
@@ -117,7 +122,7 @@ async def _retention_pass(args: argparse.Namespace) -> int:
     except RuntimeError as err:
         print(f"Ошибка: {err}", file=sys.stderr)
         return 2
-    engine = create_engine(url, pool_size=1)
+    engine = create_engine(url, pool_size=1, keepalive=TcpKeepalive.from_settings(settings))
     try:
         store = build_artifact_store(settings)
         deleter = store if isinstance(store, FileSystemArtifactStore | S3ArtifactStore) else None
@@ -153,6 +158,31 @@ async def _retention(args: argparse.Namespace) -> int:
     return code
 
 
+async def _orphan_objects(args: argparse.Namespace) -> int:
+    settings = get_settings()
+    if args.grace_hours < 1:
+        print("Ошибка: --grace-hours должен быть не меньше 1", file=sys.stderr)
+        return 2
+    try:
+        url = settings.require_maintenance_database_url()
+    except RuntimeError as err:
+        print(f"Ошибка: {err}", file=sys.stderr)
+        return 2
+    store = build_artifact_store(settings)
+    if not isinstance(store, FileSystemArtifactStore | S3ArtifactStore):  # pragma: no cover — других хранилищ нет
+        print("Ошибка: хранилище не поддерживает перечисление объектов", file=sys.stderr)
+        return 2
+    engine = create_engine(url, pool_size=1, keepalive=TcpKeepalive.from_settings(settings))
+    try:
+        report = await sweep_orphan_objects(
+            engine, store, grace=timedelta(hours=args.grace_hours), dry_run=args.dry_run, reason=args.reason
+        )
+    finally:
+        await engine.dispose()
+    print(json.dumps({"maintenance_run_id": str(report.session_id), **report.summary()}, ensure_ascii=False))
+    return 0 if not report.failed else 3
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aicd", description="Администрирование AiCodingDev")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -182,6 +212,11 @@ def build_parser() -> argparse.ArgumentParser:
     retention.add_argument("--every", type=float, default=0, metavar="SECONDS",
                            help="Повторять проход каждые SECONDS (≥ 60) до SIGTERM; по умолчанию — один проход")  # fmt: skip
     retention.set_defaults(handler=_retention)
+    orphans = maint_sub.add_parser("orphan-objects", help="Удалить объекты хранилища артефактов без строки artifacts")
+    orphans.add_argument("--grace-hours", type=float, default=24.0, help="Не трогать объекты моложе (часов)")
+    orphans.add_argument("--dry-run", action="store_true", help="Только подсчитать сирот, не удалять")
+    orphans.add_argument("--reason", default="orphan artifact objects sweep", help="Причина (пишется в аудит)")
+    orphans.set_defaults(handler=_orphan_objects)
     return parser
 
 

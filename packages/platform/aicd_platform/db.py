@@ -11,10 +11,13 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+
+if TYPE_CHECKING:
+    from aicd_platform.config import Settings
 
 ActorType = Literal["user", "agent", "system"]
 
@@ -26,7 +29,48 @@ class DbContext:
     actor_type: ActorType = "user"
 
 
-def create_engine(url: str, *, pool_size: int = 10) -> AsyncEngine:
+@dataclass(frozen=True)
+class TcpKeepalive:
+    """Обнаружение «мёртвого» соединения с PostgreSQL на уровне TCP (P9-03, NFR-REL-01).
+
+    Без keepalive соединение, у которого сеть молча теряет пакеты (без RST: сбой маршрута, failover за NAT/LB),
+    висит до таймаута ядра (~2 ч): запрос ждёт ответа, `statement_timeout` сервера не помогает — сервер запрос
+    не получил. `keepalives_*` — проба простаивающего соединения; `tcp_user_timeout` — предел для неподтверждённых
+    отправленных данных (запрос ушёл, ответа нет). Значения — `Settings.db_keepalives_*`, `db_tcp_user_timeout_ms`.
+    """
+
+    idle_seconds: int = 30
+    interval_seconds: int = 10
+    count: int = 3
+    tcp_user_timeout_ms: int = 60_000
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> TcpKeepalive:
+        return cls(
+            idle_seconds=settings.db_keepalives_idle_seconds,
+            interval_seconds=settings.db_keepalives_interval_seconds,
+            count=settings.db_keepalives_count,
+            tcp_user_timeout_ms=settings.db_tcp_user_timeout_ms,
+        )
+
+    def libpq_params(self) -> dict[str, int]:
+        params = {
+            "keepalives": 1,
+            "keepalives_idle": self.idle_seconds,
+            "keepalives_interval": self.interval_seconds,
+            "keepalives_count": self.count,
+        }
+        if self.tcp_user_timeout_ms:
+            params["tcp_user_timeout"] = self.tcp_user_timeout_ms
+        return params
+
+
+def connect_args(keepalive: TcpKeepalive | None = None) -> dict[str, Any]:
+    """Параметры libpq для каждого соединения пула: UTC, statement_timeout и TCP keepalive."""
+    return {"options": "-c timezone=UTC -c statement_timeout=15000", **(keepalive or TcpKeepalive()).libpq_params()}
+
+
+def create_engine(url: str, *, pool_size: int = 10, keepalive: TcpKeepalive | None = None) -> AsyncEngine:
     if url.startswith("postgresql://"):
         url = "postgresql+psycopg://" + url.removeprefix("postgresql://")
     return create_async_engine(
@@ -34,7 +78,7 @@ def create_engine(url: str, *, pool_size: int = 10) -> AsyncEngine:
         pool_size=pool_size,
         max_overflow=pool_size,
         pool_pre_ping=True,
-        connect_args={"options": "-c timezone=UTC -c statement_timeout=15000"},
+        connect_args=connect_args(keepalive),
     )
 
 

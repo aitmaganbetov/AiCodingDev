@@ -32,7 +32,7 @@ from aicd_cli_adapters.registry import register_host
 from aicd_orchestration import directives
 from aicd_platform import sse
 from aicd_platform.artifacts import build_artifact_store
-from aicd_platform.db import DbContext, create_engine, transaction
+from aicd_platform.db import DbContext, TcpKeepalive, create_engine, transaction
 from aicd_platform.logging import configure_logging
 from aicd_platform.outbox_dispatcher import dispatch_batch
 from aicd_worker import docs, github, indexing, maintenance, observability, runtime
@@ -181,7 +181,11 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError, RuntimeError):
             loop.add_signal_handler(sig, stop.set)
-    engine = create_engine(settings.require_database_url(), pool_size=settings.worker_threads + 2)
+    engine = create_engine(
+        settings.require_database_url(),
+        pool_size=settings.worker_threads + 2,
+        keepalive=TcpKeepalive.from_settings(settings),
+    )
     metrics_server = observability.start(settings, kind)
     try:
         if kind == "outbox":

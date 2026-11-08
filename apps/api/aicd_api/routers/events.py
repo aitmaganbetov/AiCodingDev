@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import time
@@ -20,13 +19,14 @@ from typing import Annotated, Any, Literal
 import anyio
 from fastapi import APIRouter, Depends, Path, Query, Request
 from redis.asyncio import Redis
-from redis.asyncio.client import PubSub
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from starlette.responses import Response, StreamingResponse
 
 from aicd_api.deps import Access, app_state, authorize, current_principal, workspace_access
 from aicd_api.responses import json_response
 from aicd_api.routers import op
+from aicd_api.sse_hub import SignalHub, Subscription
 from aicd_identity import api as identity
 from aicd_identity.rbac import Role, has_permission
 from aicd_platform import audit, metrics, sse
@@ -118,13 +118,36 @@ async def _check_replay_window(access: Access, request: Request, run_id: uuid.UU
     return bool(row[2])
 
 
+RETRY_AFTER_SECONDS = 5
+
+
+def _unavailable(detail: str) -> ProblemError:
+    return ProblemError("service_unavailable", detail=detail, headers={"Retry-After": str(RETRY_AFTER_SECONDS)})
+
+
+def signal_hub(request: Request) -> SignalHub:
+    """Один pub/sub-приёмник на процесс (приложение) — общий для всех SSE-потоков (`aicd_api.sse_hub`)."""
+    hub: SignalHub | None = getattr(request.app.state, "aicd_sse_hub", None)
+    if hub is None:
+        hub = SignalHub(app_state(request).redis)
+        request.app.state.aicd_sse_hub = hub
+    return hub
+
+
 async def _acquire_slot(redis: Redis, user_id: uuid.UUID) -> str:
+    """Слот потока: лимит процесса ⇒ 503 + Retry-After; сбой Redis при учёте — тоже 503, не 500."""
     global _active_streams
     if _active_streams >= CONFIG.max_streams_per_process:
-        raise ProblemError("service_unavailable", detail="Превышен лимит SSE-соединений сервера")
+        metrics.SSE_REJECTED.labels("process_limit").inc()
+        raise _unavailable("Превышен лимит SSE-соединений сервера")
     key = f"aicd:sse:streams:{user_id}"
-    count = int(await redis.incr(key))
-    await redis.expire(key, int(CONFIG.max_lifetime_seconds * 2) + 60)
+    try:
+        count = int(await redis.incr(key))
+        await redis.expire(key, int(CONFIG.max_lifetime_seconds * 2) + 60)
+    except (RedisError, OSError, IndexError) as exc:
+        metrics.SSE_REJECTED.labels("redis_unavailable").inc()
+        log.warning("sse slot accounting failed", extra={"error": type(exc).__name__})
+        raise _unavailable("Учёт SSE-потоков временно недоступен") from None
     if count > CONFIG.max_streams_per_user:
         await redis.decr(key)
         raise ProblemError("rate_limited", detail="Не более 5 одновременных SSE-потоков", headers={"Retry-After": "5"})
@@ -205,22 +228,9 @@ async def _shielded[T](operation: Coroutine[Any, Any, T]) -> T:
     return result
 
 
-async def _wait_signal(pubsub: PubSub | None, wait_seconds: float) -> str | None:
-    """Ждёт сигнал Redis не дольше `wait_seconds`; возвращает канал сигнала или None."""
-    if wait_seconds <= 0:
-        return None
-    if pubsub is None:
-        await asyncio.sleep(wait_seconds)
-        return None
-    try:
-        message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=wait_seconds)
-    except Exception:  # noqa: BLE001 — Redis недоступен: деградация до опроса
-        await asyncio.sleep(wait_seconds)
-        return None
-    if message is None:
-        return None
-    channel = message.get("channel")
-    return channel.decode() if isinstance(channel, bytes) else str(channel)
+async def _wait_signal(subscription: Subscription, wait_seconds: float) -> str | None:
+    """Ждёт сигнал Redis не дольше `wait_seconds`; возвращает канал сигнала или None (без Redis — опрос)."""
+    return await subscription.wait(wait_seconds)
 
 
 async def _stream(
@@ -238,13 +248,9 @@ async def _stream(
     cfg = CONFIG
     metrics.SSE_CONNECTIONS.labels("run").inc()
     metrics.SSE_CONNECTIONS_OPENED.labels("run").inc()
-    subscription = state.redis.pubsub()
-    pubsub: PubSub | None = subscription
-    try:
-        await subscription.subscribe(sse.run_channel(run_id), access_channel(access.principal.user_id))
-    except Exception:  # noqa: BLE001 — без Redis поток работает опросом
-        log.warning("sse pubsub unavailable")
-        pubsub = None
+    subscription = await signal_hub(request).subscribe(
+        (sse.run_channel(run_id), access_channel(access.principal.user_id))
+    )
     try:
         yield f"retry: {cfg.retry_ms}\n\n"
         last = start
@@ -273,7 +279,7 @@ async def _stream(
                 now + cfg.poll_seconds,
                 opened + cfg.max_lifetime_seconds,
             )
-            signal = await _wait_signal(pubsub, deadline - now)
+            signal = await _wait_signal(subscription, deadline - now)
             now = time.monotonic()
             if signal == access_channel(access.principal.user_id) or now - last_check >= cfg.access_recheck_seconds:
                 last_check = now
@@ -288,7 +294,7 @@ async def _stream(
         metrics.SSE_CONNECTIONS.labels("run").dec()
         with anyio.CancelScope(shield=True):
             with contextlib.suppress(Exception):
-                await subscription.aclose()  # type: ignore[no-untyped-call]
+                await subscription.close()
             await _release_slot(state.redis, slot)
 
 
@@ -436,15 +442,9 @@ async def _stream_workspace(
     cfg = CONFIG
     metrics.SSE_CONNECTIONS.labels("workspace").inc()
     metrics.SSE_CONNECTIONS_OPENED.labels("workspace").inc()
-    subscription = state.redis.pubsub()
-    pubsub: PubSub | None = subscription
-    try:
-        await subscription.subscribe(
-            sse.workspace_channel(access.workspace_id), access_channel(access.principal.user_id)
-        )
-    except Exception:  # noqa: BLE001 — без Redis поток работает опросом
-        log.warning("sse pubsub unavailable")
-        pubsub = None
+    subscription = await signal_hub(request).subscribe(
+        (sse.workspace_channel(access.workspace_id), access_channel(access.principal.user_id))
+    )
     sent: dict[str, datetime] = {}
     watermark = since
     try:
@@ -482,7 +482,7 @@ async def _stream_workspace(
                 now + cfg.poll_seconds,
                 opened + cfg.max_lifetime_seconds,
             )
-            signal = await _wait_signal(pubsub, deadline - now)
+            signal = await _wait_signal(subscription, deadline - now)
             now = time.monotonic()
             if signal == access_channel(access.principal.user_id) or now - last_check >= cfg.access_recheck_seconds:
                 last_check = now
@@ -495,7 +495,7 @@ async def _stream_workspace(
         metrics.SSE_CONNECTIONS.labels("workspace").dec()
         with anyio.CancelScope(shield=True):
             with contextlib.suppress(Exception):
-                await subscription.aclose()  # type: ignore[no-untyped-call]
+                await subscription.close()
             await _release_slot(state.redis, slot)
 
 

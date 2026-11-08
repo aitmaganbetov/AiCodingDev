@@ -184,12 +184,12 @@
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
 | P9-01 | Полный acceptance-набор AC-01…AC-16 (Fake + opt-in real CLI) | все AC | P1…P8 | P0 | 100% зелёные, evidence | TODO |
-| P9-02 | Security suite ТЗ §20 (SSRF, prompt injection, traversal, command injection, cross-tenant, secret leakage, webhook spoofing) | NFR-SEC-*, NFR-ISO-01 | P1…P8 | P0 | 0 открытых critical | TODO |
+| P9-02 | Security suite ТЗ §20 (SSRF, prompt injection, traversal, command injection, cross-tenant, secret leakage, webhook spoofing) | NFR-SEC-*, NFR-ISO-01 | P1…P8 | P0 | 0 открытых critical | IN_REVIEW |
 | P9-03 | Chaos/recovery suite полный | NFR-REL-01, NFR-REL-02 | P3-16 | P0 | Зелёный | IN_REVIEW |
 | P9-04 | Performance baseline и предложение SLO | NFR-PERF-01 | P9-01 | P1 | Отчёт с методикой | IN_REVIEW |
 | P9-05 | Backup/restore + DR drill | NFR-REL-03 | P1-02 | P0 | Протокол восстановления | DONE |
 | P9-06 | Runbooks: recovery, backups, CLI auth, incident response | NFR-MAINT-01 | P9-05 | P0 | Ревью оператором | IN_REVIEW |
-| P9-07 | Ревизия threat model, закрытие critical/high | NFR-SEC-04, NFR-SEC-06 | P9-02 | P0 | Release security gate | TODO |
+| P9-07 | Ревизия threat model, закрытие critical/high | NFR-SEC-04, NFR-SEC-06 | P9-02 | P0 | Release security gate | IN_REVIEW |
 | P9-08 | Supply chain релиза: SBOM, подпись, provenance | NFR-SEC-05 | P6-07 | P1 | Проверяемая подпись | IN_REVIEW |
 | P9-09 | Release checklist, инструкция установки, README | NFR-MAINT-01 | P9-01…08 | P0 | Утверждение владельцем | TODO |
 | P9-10 | Подтверждение coverage core ≥ 85% и 100% обязательных тестов | FR-QG-06 | P9-01 | P0 | Отчёт покрытия | TODO |
@@ -415,3 +415,8 @@
 | OQ-43 (b) | TODO (дизайн) | `docs/agents/QUALITY_GATES.md` §4.3 | шаг `prepare`: только дизайн, не реализован |
 | OQ-43 (f) | IN_REVIEW | `scripts/vulndb/update.py`, `docs/runbooks/vulndb-update.md`, `tests/unit/test_vulndb_update.py` | обновление OSV PyPI (26 829 записей, md5 GCS сверен) + Trivy (свежая БД, `--download-db-only` rc 0), атомарная замена, `audit.jsonl`; osv-scanner `--offline` с этой БД находит GHSA для `jinja2==2.10`; unit 3 passed |
 | P9-09 | TODO (черновик, утверждение владельцем) | `docs/release/RELEASE_CHECKLIST.md`, `docs/runbooks/installation.md`, `README.md`, `docs/README.md` | чеклист ТЗ §23 + RG-01…15 со ссылками на отчёты; `tests/contract/test_docs_links.py` passed |
+| P9-02 | IN_REVIEW | `tests/security/{catalog,test_cross_tenant_all_operations,test_secret_leakage,test_command_injection,test_step_up,test_rate_limits,test_audit_coverage,test_catalog,test_security_gate}.py`, `tests/conftest.py` (маркер `security`), `scripts/security_report.py`, `reports/security/{SECURITY_REPORT.md,junit.xml}`; найдено и исправлено (TH-62): `aicd_security/git.py` (`GIT_ATTR_SOURCE`, `protocol.ext.allow=never`), `orchestration/worktrees.py` (проверка gitlink) | `uv run pytest -m security --junitxml=reports/security/junit.xml` → 1744 passed, 1 skipped (trivy без офлайн-БД); `scripts/security_report.py --strict` → 110 контролей: 101 PASS, 9 MANUAL |
+| P9-07 | IN_REVIEW | `docs/security/THREAT_MODEL.md` (§5.11 TH-53…TH-65, §10 реестр статусов, §11 пересмотр), `scripts/security_gate.py`, OQ-48 | `scripts/security_gate.py --junit reports/security/junit.xml` → 65 угроз, 53 high/critical, 0 нарушений, 3 принятых риска ждут решения владельца (OQ-48); `--require-decisions` (релиз) — падает до решения |
+| OQ-47 (2) | IN_REVIEW | миграция 0014 (`github_verification_requests`, статус установки `PENDING`), `integrations_github/{verifications,store,client}.py`, `orchestration/github_verification.py`, `apps/worker/aicd_worker/github.py`, `routers/github.py` (`getGitHubVerification`; connect — 201 PENDING, attach github — 202) | `tests/integration/test_github_api.py` (в т. ч. API не обращается к GitHub, ключ App не читается) — passed |
+| OQ-45 (f) step-up, тайм-аут | IN_REVIEW | миграция 0014 (`user_sessions.reauthenticated_at`, `tasks.timeout_seconds` nullable), `identity/api.py`, `routers/{auth,workspaces,providers,approvals,directives}.py`, web `src/auth/StepUp.tsx` | `tests/security/test_step_up.py`, `tests/migrations/test_security_hardening_migration.py`, web vitest settings + mocked e2e `settings.spec.ts` (step-up) — passed |
+

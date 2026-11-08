@@ -13,12 +13,13 @@ import hashlib
 import hmac
 import os
 import re
+import stat
 import tempfile
 import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
@@ -51,6 +52,23 @@ _KEY_RE = re.compile(
 
 def object_key(workspace_id: uuid.UUID, artifact_id: uuid.UUID, created: datetime) -> str:
     return f"{workspace_id}/{created:%Y}/{created:%m}/{artifact_id}"
+
+
+# Ключ объекта артефакта: `<workspace_id>/<YYYY>/<MM>/<artifact_id>` (object_key). Только такие объекты — кандидаты
+# сборки сирот: архивы retention (`archive/…`) и прочие префиксы хранилища не трогаются.
+_OBJECT_KEY_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/\d{4}/\d{2}/"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    """Объект хранилища артефактов (для сборки сирот, P9-03)."""
+
+    storage_ref: str
+    modified_at: datetime
+    size_bytes: int
 
 
 def _validate_key(key: str) -> str:
@@ -140,6 +158,19 @@ class FileSystemArtifactStore:
         except FileNotFoundError:
             return False
         return True
+
+    def iter_objects(self) -> Iterator[StoredObject]:
+        """Объекты артефактов (ключи формата `object_key`); временные файлы и архивы не перечисляются."""
+        for path in self._root.glob("*/*/*/*"):
+            key = path.relative_to(self._root).as_posix()
+            if not _OBJECT_KEY_RE.fullmatch(key):
+                continue
+            try:
+                st = path.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                yield StoredObject(self.prefix + key, datetime.fromtimestamp(st.st_mtime, UTC), st.st_size)
 
     def healthy(self) -> bool:
         return self._root.is_dir() and os.access(self._root, os.W_OK)
@@ -240,6 +271,16 @@ class S3ArtifactStore:
             return False
         self._client.delete_object(Bucket=self._bucket, Key=key)
         return True
+
+    def iter_objects(self) -> Iterator[StoredObject]:
+        """Объекты артефактов bucket (ключи формата `object_key`), постранично."""
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket):
+            for item in page.get("Contents", []):
+                key = str(item["Key"])
+                if _OBJECT_KEY_RE.fullmatch(key):
+                    modified = item["LastModified"]
+                    yield StoredObject(self._prefix + key, modified.astimezone(UTC), int(item.get("Size", 0)))
 
     def healthy(self) -> bool:
         self._client.head_bucket(Bucket=self._bucket)

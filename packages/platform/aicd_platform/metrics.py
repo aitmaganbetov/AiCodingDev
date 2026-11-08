@@ -102,6 +102,13 @@ SSE_CONNECTIONS = Gauge(
 SSE_CONNECTIONS_OPENED = Counter(
     "sse_connections_opened_total", "Открытые SSE-потоки по виду потока (накопительно)", ["stream"], namespace=NAMESPACE
 )
+SSE_REJECTED = Counter(
+    "sse_rejected_total",
+    "Отклонённые SSE-подключения с 503 (P9-04): process_limit — лимит потоков процесса API,"
+    " redis_unavailable — сбой учёта слотов в Redis",
+    ["reason"],
+    namespace=NAMESPACE,
+)
 WEBHOOK_SIGNATURE_INVALID = Counter(
     "webhook_signature_invalid_total",
     "Отклонённые доставки вебхука GitHub с неверной подписью (SC-OBS-02): missing — нет заголовка,"

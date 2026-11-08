@@ -181,19 +181,38 @@ async def scenario_sse(stand: Stand, ws: str, run: str, clients_n: int, events_n
     connected = asyncio.Event()
     ready = 0
 
+    failures: dict[str, int] = {}
+
+    def settled() -> None:
+        if ready + sum(failures.values()) == len(sessions):
+            connected.set()
+
     async def listen(idx: int, client: httpx.AsyncClient) -> None:
         nonlocal ready
-        async with client.stream("GET", f"/api/v1/runs/{run}/events", params={"after_seq": after_seq},
-                                 timeout=httpx.Timeout(None, connect=30)) as resp:  # fmt: skip
-            resp.raise_for_status()
-            ready += 1
-            if ready == len(sessions):
-                connected.set()
-            async for line in resp.aiter_lines():
-                if line.startswith("data:"):
-                    env = json.loads(line[5:])
-                    if env.get("type") == "run.state_changed":
-                        received[idx].append((env["event_id"], time.time(), env["timestamp"]))
+        try:
+            async with client.stream("GET", f"/api/v1/runs/{run}/events", params={"after_seq": after_seq},
+                                     timeout=httpx.Timeout(None, connect=60)) as resp:  # fmt: skip
+                if resp.status_code != 200:
+                    failures[str(resp.status_code)] = failures.get(str(resp.status_code), 0) + 1
+                    settled()
+                    return
+                ready += 1
+                settled()
+                await consume(idx, resp)
+        except httpx.HTTPError as exc:
+            if idx not in connected_idx:
+                failures[type(exc).__name__] = failures.get(type(exc).__name__, 0) + 1
+                settled()
+
+    connected_idx: set[int] = set()
+
+    async def consume(idx: int, resp: httpx.Response) -> None:
+        connected_idx.add(idx)
+        async for line in resp.aiter_lines():
+            if line.startswith("data:"):
+                env = json.loads(line[5:])
+                if env.get("type") == "run.state_changed":
+                    received[idx].append((env["event_id"], time.time(), env["timestamp"]))
 
     listeners = [asyncio.create_task(listen(i, s[0])) for i, s in enumerate(sessions)]
     try:
@@ -201,7 +220,7 @@ async def scenario_sse(stand: Stand, ws: str, run: str, clients_n: int, events_n
     except TimeoutError:
         for t in listeners:
             t.cancel()
-        raise RuntimeError(f"подключилось {ready} из {len(sessions)} SSE-клиентов") from None
+        raise RuntimeError(f"подключилось {ready} из {len(sessions)} SSE-клиентов, отказы {failures}") from None
     await asyncio.sleep(1.0)
     emitted = await asyncio.to_thread(_emit_events, stand, ws, run, events_n, rate)
     deadline = time.monotonic() + 30
@@ -226,6 +245,8 @@ async def scenario_sse(stand: Stand, ws: str, run: str, clients_n: int, events_n
         "expected_deliveries": clients_n * events_n,
         "delivered": delivered,
         "delivery_ratio": round(delivered / (clients_n * events_n), 4),
+        "connected": ready,
+        "connect_failures": failures,
         "p50_ms": round(percentile(latencies, 50), 1),
         "p95_ms": round(percentile(latencies, 95), 1),
         "p99_ms": round(percentile(latencies, 99), 1),
@@ -402,10 +423,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             stats = await scenario_reads(stand.base, client, ws, project, created[:200], c, args.duration)
             results["scenarios"].append(stats.summary())
             print(json.dumps(results["scenarios"][-1]), flush=True)
-        results["scenarios"].append(
-            await asyncio.to_thread(scenario_outbox, stand, ws, created[:20], args.outbox_events)
-        )
-        print(json.dumps(results["scenarios"][-1]), flush=True)
+        if not created:  # сценарии SSE/outbox нуждаются хотя бы в одном run
+            r = await client.post("/api/v1/runs", json={"project_id": project, "mode": "DEVELOP", "objective": "perf"},
+                                  headers={**csrf, **idem()})  # fmt: skip
+            created.append(r.json()["run_id"])
+        if args.outbox_events > 0:
+            results["scenarios"].append(
+                await asyncio.to_thread(scenario_outbox, stand, ws, created[:20], args.outbox_events)
+            )
+            print(json.dumps(results["scenarios"][-1]), flush=True)
         for n in args.sse_clients:
             results["scenarios"].append(await scenario_sse(stand, ws, created[0], n, args.sse_events,
                                                            args.sse_rate))  # fmt: skip
@@ -424,9 +450,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="perf-baseline", description=__doc__.splitlines()[0])
     parser.add_argument("--duration", type=float, default=20.0, help="секунд измерения на сценарий закрытого цикла")
-    parser.add_argument("--read-concurrency", type=int, nargs="+", default=[1, 16, 64])
-    parser.add_argument("--create-concurrency", type=int, nargs="+", default=[1, 8])
-    parser.add_argument("--sse-clients", type=int, nargs="+", default=[50, 200])
+    parser.add_argument("--read-concurrency", type=int, nargs="*", default=[1, 16, 64])
+    parser.add_argument("--create-concurrency", type=int, nargs="*", default=[1, 8])
+    parser.add_argument("--sse-clients", type=int, nargs="*", default=[50, 200])
     parser.add_argument("--sse-events", type=int, default=50)
     parser.add_argument("--sse-rate", type=float, default=10.0, help="событий в секунду")
     parser.add_argument("--outbox-events", type=int, default=5000)

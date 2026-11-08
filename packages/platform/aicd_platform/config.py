@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     database_url_file: str | None = None
     db_pool_size: int = Field(default=10, ge=1, le=200)
+    # TCP keepalive / tcp_user_timeout соединений libpq (P9-03): «чёрная дыра» сети (пакеты теряются без RST)
+    # обнаруживается за idle + interval × count секунд вместо ~2 ч по умолчанию ядра; 0 в tcp_user_timeout — выкл.
+    db_keepalives_idle_seconds: int = Field(default=30, ge=1, le=7200)
+    db_keepalives_interval_seconds: int = Field(default=10, ge=1, le=600)
+    db_keepalives_count: int = Field(default=3, ge=1, le=60)
+    db_tcp_user_timeout_ms: int = Field(default=60_000, ge=0, le=3_600_000)
 
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_url_file: str | None = None  # URL с паролем — из файла секрета

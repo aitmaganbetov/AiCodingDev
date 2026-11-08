@@ -36,7 +36,7 @@ from aicd_api.routers import (
 from aicd_api.state import AppState
 from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.config import Settings, get_settings
-from aicd_platform.db import create_engine
+from aicd_platform.db import TcpKeepalive, create_engine
 from aicd_platform.logging import configure_logging
 from aicd_platform.telemetry import configure_tracing
 
@@ -50,7 +50,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        engine = create_engine(settings.require_database_url(), pool_size=settings.db_pool_size)
+        engine = create_engine(
+            settings.require_database_url(),
+            pool_size=settings.db_pool_size,
+            keepalive=TcpKeepalive.from_settings(settings),
+        )
         redis = Redis.from_url(settings.redis_url, socket_timeout=1.0, socket_connect_timeout=1.0)
         app.state.aicd = AppState(
             settings=settings,
@@ -63,6 +67,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            hub = getattr(app.state, "aicd_sse_hub", None)  # общий pub/sub SSE-потоков (aicd_api.sse_hub)
+            if hub is not None:
+                await hub.close()
             client = getattr(app.state, "aicd_github", None)
             if client is not None:
                 await client.aclose()
