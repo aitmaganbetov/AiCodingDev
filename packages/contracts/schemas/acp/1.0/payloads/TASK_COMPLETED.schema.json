@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/TASK_COMPLETED.schema.json",
+  "title": "TASK_COMPLETED payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "claims",
+    "artifact_refs"
+  ],
+  "properties": {
+    "summary": {
+      "$ref": "../common.schema.json#/$defs/text_long"
+    },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "$ref": "../common.schema.json#/$defs/claim"
+      }
+    },
+    "artifact_refs": {
+      "$ref": "../common.schema.json#/$defs/refs"
+    },
+    "commit_sha": {
+      "$ref": "../common.schema.json#/$defs/commit_sha"
+    },
+    "review_verdict": {
+      "enum": [
+        "approved",
+        "changes_requested",
+        "rejected"
+      ],
+      "description": "обязателен для задач reviewer/security"
+    },
+    "open_finding_refs": {
+      "$ref": "../common.schema.json#/$defs/refs"
+    },
+    "follow_ups": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    }
+  }
+}

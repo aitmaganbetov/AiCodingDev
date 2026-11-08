@@ -1,0 +1,185 @@
+# CI AiCodingDev (P1-04). Обычный CI не требует авторизации CLI-подписок (ТЗ §20, NFR-TEST-01).
+# Действия сторонних авторов закреплены по версиям; закрепление по commit SHA — задача
+# P9-08 (supply chain релиза), после чего обновления сопровождает Dependabot.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 2 * * *"  # nightly: полный прогон, включая chaos suite (P3-16)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: aicd_admin
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aicd_admin" --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
+    env:
+      AICD_TEST_DATABASE_ADMIN_URL: postgresql://aicd_admin:ci-only-password@127.0.0.1:5432/postgres
+      AICD_TEST_REDIS_URL: redis://127.0.0.1:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - run: uv sync --frozen
+      - name: redis-server для chaos-теста рестарта Redis (tests/chaos)
+        # Только бинарник: автозапуск службы запрещён (порт 6379 занят сервисным контейнером Redis).
+        run: |
+          printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d >/dev/null
+          sudo chmod +x /usr/sbin/policy-rc.d
+          sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
+      - name: Lint (ruff)
+        run: uv run ruff check . && uv run ruff format --check packages apps tests scripts
+      - name: Typecheck (mypy --strict)
+        run: uv run mypy
+      - name: Module boundaries (import-linter)
+        run: uv run lint-imports --no-cache
+      - name: Deny-gate SDK AI-провайдеров (ТЗ §1)
+        run: uv run python scripts/check_no_ai_sdk.py
+      - name: Drift-check моделей контрактов (gen_contract_models --check)
+        run: uv run python scripts/gen_contract_models.py --check
+      - name: Traceability (требования → задачи)
+        run: uv run python scripts/traceability.py --report traceability.md
+      - name: Tests (unit, contract, migrations, RLS, integration, security, e2e, chaos)
+        run: uv run pytest --cov --cov-report=xml --cov-report=term -q
+      - name: Migration dry-run (offline SQL)
+        run: |
+          AICD_MIGRATOR_DATABASE_URL=postgresql://dry:run@localhost/dry \
+            uv run alembic -c infrastructure/migrations/alembic.ini upgrade head --sql > migration-dry-run.sql
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-reports
+          path: |
+            coverage.xml
+            traceability.md
+            migration-dry-run.sql
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:api
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+
+  # P1-18: breaking-change detection контракта против базовой ветки PR (oasdiff, падение на ERR).
+  # Пересмотр severity — по API_DESIGN §16: клиенты обязаны терпеть новые значения enum в ответах,
+  # поэтому расширение/открытие enum ответа — INFO, а не ERR. Остальные проверки — по умолчанию.
+  contract-breaking:
+    if: github.event_name == 'pull_request' && github.base_ref != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      OASDIFF_IMAGE: tufin/oasdiff:v1.35.0
+      SPEC: packages/contracts/openapi.yaml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Базовая версия контракта (${{ github.base_ref }})
+        id: base
+        run: |
+          mkdir -p "$RUNNER_TEMP/oasdiff"
+          if git cat-file -e "origin/${{ github.base_ref }}:$SPEC" 2>/dev/null; then
+            git show "origin/${{ github.base_ref }}:$SPEC" > "$RUNNER_TEMP/oasdiff/base.yaml"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "В базовой ветке нет $SPEC — сравнивать не с чем"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+          cp "$SPEC" "$RUNNER_TEMP/oasdiff/revision.yaml"
+          printf '%s\n' \
+            'response-property-enum-value-added INFO' \
+            'response-property-became-not-enum INFO' > "$RUNNER_TEMP/oasdiff/severity.txt"
+      - name: oasdiff breaking (fail on ERR)
+        if: steps.base.outputs.present == 'true'
+        run: |
+          # Сначала читаемый отчёт в лог, затем аннотации PR с падением на ERR.
+          docker run --rm -v "$RUNNER_TEMP/oasdiff:/specs:ro" "$OASDIFF_IMAGE" \
+            breaking /specs/base.yaml /specs/revision.yaml --severity-levels /specs/severity.txt
+          docker run --rm -v "$RUNNER_TEMP/oasdiff:/specs:ro" "$OASDIFF_IMAGE" \
+            breaking /specs/base.yaml /specs/revision.yaml \
+            --fail-on ERR --severity-levels /specs/severity.txt --format githubactions
+
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: SCA (OSV-Scanner) — uv.lock и pnpm-lock.yaml
+        uses: google/osv-scanner-action/osv-scanner-action@v2.0.2
+        with:
+          scan-args: |-
+            --lockfile=uv.lock
+            --lockfile=apps/web/pnpm-lock.yaml
+      - name: SBOM (Syft, SPDX JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: sbom.spdx.json
+
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend and web images
+        run: |
+          docker build -f infrastructure/docker/backend.Dockerfile -t aicodingdev/backend:ci .
+          docker build -f infrastructure/docker/web.Dockerfile -t aicodingdev/web:ci .
+      - name: Compose smoke
+        run: |
+          cd infrastructure/docker
+          ./init-secrets.sh
+          mkdir -p repos
+          docker tag aicodingdev/backend:ci aicodingdev/backend:local
+          docker tag aicodingdev/web:ci aicodingdev/web:local
+          AICD_COOKIE_SECURE=false docker compose up -d --no-build --wait --wait-timeout 180
+          curl -fsS http://localhost:8080/api/v1/health/ready
+          docker compose down -v

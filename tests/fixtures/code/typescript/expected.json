@@ -1,0 +1,180 @@
+{
+  "model.ts": {
+    "language": "typescript",
+    "symbols": [
+      {
+        "name": "model.ts",
+        "qualified_name": "model.ts",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 36,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "User",
+        "qualified_name": "model.ts#User",
+        "kind": "interface",
+        "start_line": 6,
+        "end_line": 9,
+        "signature": "interface User",
+        "doc": "Пользователь."
+      },
+      {
+        "name": "Role",
+        "qualified_name": "model.ts#Role",
+        "kind": "type",
+        "start_line": 11,
+        "end_line": 11,
+        "signature": "type Role = \"admin\" | \"viewer\"",
+        "doc": null
+      },
+      {
+        "name": "Status",
+        "qualified_name": "model.ts#Status",
+        "kind": "enum",
+        "start_line": 13,
+        "end_line": 16,
+        "signature": "enum Status",
+        "doc": null
+      },
+      {
+        "name": "DEFAULT_ROLE",
+        "qualified_name": "model.ts#DEFAULT_ROLE",
+        "kind": "constant",
+        "start_line": 18,
+        "end_line": 18,
+        "signature": "const DEFAULT_ROLE: Role = \"viewer\";",
+        "doc": null
+      },
+      {
+        "name": "schema",
+        "qualified_name": "model.ts#schema",
+        "kind": "constant",
+        "start_line": 19,
+        "end_line": 19,
+        "signature": "const schema = z.object({});",
+        "doc": null
+      },
+      {
+        "name": "Repository",
+        "qualified_name": "model.ts#Repository",
+        "kind": "class",
+        "start_line": 21,
+        "end_line": 30,
+        "signature": "abstract class Repository<T extends { id: Id }>",
+        "doc": null
+      },
+      {
+        "name": "find",
+        "qualified_name": "model.ts#Repository.find",
+        "kind": "method",
+        "start_line": 24,
+        "end_line": 24,
+        "signature": "abstract find(id: Id): Promise<T | undefined>",
+        "doc": null
+      },
+      {
+        "name": "save",
+        "qualified_name": "model.ts#Repository.save",
+        "kind": "method",
+        "start_line": 27,
+        "end_line": 29,
+        "signature": "async save(item: T): Promise<void>",
+        "doc": "Сохранить."
+      },
+      {
+        "name": "isAdmin",
+        "qualified_name": "model.ts#isAdmin",
+        "kind": "function",
+        "start_line": 32,
+        "end_line": 34,
+        "signature": "function isAdmin(user: User, role: Role = \"viewer\"): boolean",
+        "doc": null
+      },
+      {
+        "name": "ambient",
+        "qualified_name": "model.ts#ambient",
+        "kind": "function",
+        "start_line": 36,
+        "end_line": 36,
+        "signature": "function ambient(x: number): void",
+        "doc": null
+      }
+    ],
+    "imports": [
+      [
+        "./ids.js",
+        1
+      ],
+      [
+        "zod",
+        2
+      ],
+      [
+        "../util",
+        3
+      ]
+    ]
+  },
+  "view.tsx": {
+    "language": "tsx",
+    "symbols": [
+      {
+        "name": "view.tsx",
+        "qualified_name": "view.tsx",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 12,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "Props",
+        "qualified_name": "view.tsx#Props",
+        "kind": "type",
+        "start_line": 4,
+        "end_line": 4,
+        "signature": "type Props = { user: User }",
+        "doc": null
+      },
+      {
+        "name": "UserCard",
+        "qualified_name": "view.tsx#UserCard",
+        "kind": "function",
+        "start_line": 6,
+        "end_line": 6,
+        "signature": "const UserCard = ({ user }: Props) =>",
+        "doc": null
+      },
+      {
+        "name": "UserList",
+        "qualified_name": "view.tsx#UserList",
+        "kind": "class",
+        "start_line": 8,
+        "end_line": 12,
+        "signature": "class UserList extends React.Component<{ users: User[] }>",
+        "doc": null
+      },
+      {
+        "name": "render",
+        "qualified_name": "view.tsx#UserList.render",
+        "kind": "method",
+        "start_line": 9,
+        "end_line": 11,
+        "signature": "render()",
+        "doc": null
+      }
+    ],
+    "imports": [
+      [
+        "react",
+        1
+      ],
+      [
+        "./model",
+        2
+      ]
+    ]
+  }
+}

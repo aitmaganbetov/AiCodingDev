@@ -1,0 +1,148 @@
+"""RBAC как код (FR-IAM-03, API_DESIGN §5). Единственный источник матрицы прав.
+
+Тест P1-10 сверяет каталог с `x-required-permission` каждой операции OpenAPI.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from typing import Final
+
+
+class Role(StrEnum):
+    OWNER = "owner"
+    ADMIN = "admin"
+    DEVELOPER = "developer"
+    REVIEWER = "reviewer"
+    VIEWER = "viewer"
+
+
+RANK: Final[dict[Role, int]] = {
+    Role.OWNER: 5,
+    Role.ADMIN: 4,
+    Role.DEVELOPER: 3,
+    Role.REVIEWER: 2,
+    Role.VIEWER: 1,
+}
+
+# Псевдо-права, не требующие членства в workspace.
+PUBLIC: Final = "public"
+AUTHENTICATED: Final = "authenticated"
+
+_ALL = frozenset(Role)
+_ADMIN_UP = frozenset({Role.OWNER, Role.ADMIN})
+_DEV_UP = frozenset({Role.OWNER, Role.ADMIN, Role.DEVELOPER})
+_REVIEWER_UP = frozenset({Role.OWNER, Role.ADMIN, Role.DEVELOPER, Role.REVIEWER})
+
+# API_DESIGN §5.1. Права с условиями (directive:create по типу, directive:confirm «своё»,
+# approval:decide по action_type) здесь задают минимальный допуск; уточнение — в доменных сервисах.
+PERMISSIONS: Final[dict[str, frozenset[Role]]] = {
+    "workspace:create": _ALL,
+    "member:read": _ALL,
+    "member:manage": frozenset({Role.OWNER}),
+    "project:read": _ALL,
+    "project:create": _ADMIN_UP,
+    "project:update": _ADMIN_UP,
+    "repository:attach": _ADMIN_UP,
+    "run:read": _ALL,
+    "chat:read": _ALL,
+    "evidence:read": _ALL,
+    "quality:read": _ALL,
+    "approval:read": _ALL,
+    "provider:read": _ALL,
+    "documentation:read": _ALL,
+    "artifact:download": _ALL,
+    "artifact:download_raw": _ADMIN_UP,
+    "run:create": _DEV_UP,
+    "run:control": _DEV_UP,
+    "chat:write": _REVIEWER_UP,
+    "directive:create": _REVIEWER_UP,
+    "directive:confirm": _REVIEWER_UP,
+    "approval:decide": _REVIEWER_UP,
+    "provider:probe": _ADMIN_UP,
+    "provider:settings": _ADMIN_UP,
+    "documentation:register": _ADMIN_UP,
+    "documentation:refresh": _DEV_UP,
+    "audit:read": _ADMIN_UP,
+}
+
+# API_DESIGN §5.3 — минимальная роль для решения по approval (иерархия ролей).
+APPROVAL_MIN_ROLE: Final[dict[str, Role]] = {
+    "MANUAL_REVIEW": Role.REVIEWER,
+    "SELF_REVIEW_FALLBACK": Role.REVIEWER,
+    "PLAN_APPROVAL": Role.DEVELOPER,
+    "DOCS_DOWNLOAD": Role.DEVELOPER,
+    "MERGE": Role.ADMIN,
+    "DESTRUCTIVE_MIGRATION": Role.ADMIN,
+    "CRITICAL_DIRECTIVE": Role.ADMIN,
+    "PRODUCTION_DEPLOY": Role.OWNER,
+    "SECRET_CHANGE": Role.OWNER,
+    "UNRESTRICTED_NETWORK": Role.OWNER,
+    "DATA_DELETION": Role.OWNER,
+    "LOCAL_EXECUTION_FALLBACK": Role.OWNER,
+}
+
+# Действия, для которых инициатор не может утвердить сам (four-eyes, API_DESIGN §5.3, OQ-10/OQ-18).
+FOUR_EYES_ACTIONS: Final = frozenset(
+    {
+        "MERGE",
+        "PRODUCTION_DEPLOY",
+        "DESTRUCTIVE_MIGRATION",
+        "DATA_DELETION",
+        "SECRET_CHANGE",
+        "UNRESTRICTED_NETWORK",
+        "CRITICAL_DIRECTIVE",
+        "LOCAL_EXECUTION_FALLBACK",
+    }
+)
+# Для этих действий исключение single-member workspace не применяется (OQ-10).
+NEVER_SELF_APPROVE: Final = frozenset({"PRODUCTION_DEPLOY", "SECRET_CHANGE"})
+
+# API_DESIGN §5.4 — типы директив, доступные reviewer (остальные — developer и выше).
+REVIEWER_DIRECTIVES: Final = frozenset({"ASK", "REVIEW", "APPROVE", "REJECT"})
+
+
+def has_permission(role: Role | str | None, permission: str) -> bool:
+    if permission not in PERMISSIONS:
+        raise KeyError(f"неизвестное право: {permission}")
+    if role is None:
+        return False
+    return Role(role) in PERMISSIONS[permission]
+
+
+def effective_role(workspace_role: Role | str, project_override: Role | str | None) -> Role:
+    """Эффективная роль = min(роль workspace, понижающее переопределение проекта)."""
+    ws = Role(workspace_role)
+    if project_override is None:
+        return ws
+    override = Role(project_override)
+    return override if RANK[override] < RANK[ws] else ws
+
+
+def can_decide_approval(
+    role: Role | str,
+    action_type: str,
+    *,
+    is_requester: bool,
+    single_member_self_approval_allowed: bool = False,
+) -> tuple[bool, str | None]:
+    """Возвращает (разрешено, код отказа). Код — `forbidden` или `four_eyes_violation`."""
+    min_role = APPROVAL_MIN_ROLE[action_type]
+    if RANK[Role(role)] < RANK[min_role]:
+        return False, "forbidden"
+    if (
+        is_requester
+        and action_type in FOUR_EYES_ACTIONS
+        and (action_type in NEVER_SELF_APPROVE or not single_member_self_approval_allowed)
+    ):
+        return False, "four_eyes_violation"
+    return True, None
+
+
+def can_submit_directive(role: Role | str, directive_type: str) -> bool:
+    r = Role(role)
+    if r is Role.VIEWER:
+        return False
+    if r is Role.REVIEWER:
+        return directive_type in REVIEWER_DIRECTIVES
+    return True

@@ -1,0 +1,22 @@
+version = 1
+requires-python = ">=3.12"
+
+[[package]]
+name = "fastapi"
+version = "0.115.0"
+
+[[package]]
+name = "sqlalchemy"
+version = "2.0.30"
+
+[[package]]
+name = "httpx"
+version = "0.28.1"
+
+[[package]]
+name = "pytest"
+version = "8.3.3"
+
+[[package]]
+name = "starlette"
+version = "0.38.6"

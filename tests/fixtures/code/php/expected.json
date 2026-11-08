@@ -1,0 +1,210 @@
+{
+  "User.php": {
+    "language": "php",
+    "symbols": [
+      {
+        "name": "User.php",
+        "qualified_name": "User.php",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 59,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "VERSION",
+        "qualified_name": "App\\Models\\VERSION",
+        "kind": "constant",
+        "start_line": 14,
+        "end_line": 14,
+        "signature": "const VERSION = '1.0';",
+        "doc": null
+      },
+      {
+        "name": "format_name",
+        "qualified_name": "App\\Models\\format_name",
+        "kind": "function",
+        "start_line": 16,
+        "end_line": 19,
+        "signature": "function format_name(string $name): string",
+        "doc": null
+      },
+      {
+        "name": "User",
+        "qualified_name": "App\\Models\\User",
+        "kind": "class",
+        "start_line": 25,
+        "end_line": 44,
+        "signature": "final class User extends Model implements HasName",
+        "doc": "Модель пользователя."
+      },
+      {
+        "name": "MAX_NAME",
+        "qualified_name": "App\\Models\\User::MAX_NAME",
+        "kind": "constant",
+        "start_line": 27,
+        "end_line": 27,
+        "signature": "public const MAX_NAME = 255;",
+        "doc": null
+      },
+      {
+        "name": "SECRET",
+        "qualified_name": "App\\Models\\User::SECRET",
+        "kind": "constant",
+        "start_line": 28,
+        "end_line": 28,
+        "signature": "private const SECRET = 'x';",
+        "doc": null
+      },
+      {
+        "name": "__construct",
+        "qualified_name": "App\\Models\\User::__construct",
+        "kind": "method",
+        "start_line": 30,
+        "end_line": 32,
+        "signature": "public function __construct(private string $name)",
+        "doc": null
+      },
+      {
+        "name": "getName",
+        "qualified_name": "App\\Models\\User::getName",
+        "kind": "method",
+        "start_line": 35,
+        "end_line": 38,
+        "signature": "public function getName(): string",
+        "doc": "Имя пользователя."
+      },
+      {
+        "name": "make",
+        "qualified_name": "App\\Models\\User::make",
+        "kind": "method",
+        "start_line": 40,
+        "end_line": 43,
+        "signature": "public static function make(string $name): self",
+        "doc": null
+      },
+      {
+        "name": "Repository",
+        "qualified_name": "App\\Models\\Repository",
+        "kind": "interface",
+        "start_line": 46,
+        "end_line": 49,
+        "signature": "interface Repository",
+        "doc": null
+      },
+      {
+        "name": "find",
+        "qualified_name": "App\\Models\\Repository::find",
+        "kind": "method",
+        "start_line": 48,
+        "end_line": 48,
+        "signature": "public function find(int $id): ?User",
+        "doc": null
+      },
+      {
+        "name": "Timestamps",
+        "qualified_name": "App\\Models\\Timestamps",
+        "kind": "class",
+        "start_line": 51,
+        "end_line": 54,
+        "signature": "trait Timestamps",
+        "doc": null
+      },
+      {
+        "name": "touch",
+        "qualified_name": "App\\Models\\Timestamps::touch",
+        "kind": "method",
+        "start_line": 53,
+        "end_line": 53,
+        "signature": "public function touch(): void",
+        "doc": null
+      },
+      {
+        "name": "Status",
+        "qualified_name": "App\\Models\\Status",
+        "kind": "enum",
+        "start_line": 56,
+        "end_line": 59,
+        "signature": "enum Status: string",
+        "doc": null
+      }
+    ],
+    "imports": [
+      [
+        "App\\Contracts\\HasName",
+        7
+      ],
+      [
+        "App\\Support\\Str",
+        8
+      ],
+      [
+        "App\\Support\\Arr",
+        8
+      ],
+      [
+        "App\\Support\\helper",
+        9
+      ],
+      [
+        "file:./bootstrap.php",
+        11
+      ],
+      [
+        "file:config/app.php",
+        12
+      ]
+    ]
+  },
+  "UserTest.php": {
+    "language": "php",
+    "symbols": [
+      {
+        "name": "UserTest.php",
+        "qualified_name": "UserTest.php",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 16,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "UserTest",
+        "qualified_name": "Tests\\Unit\\UserTest",
+        "kind": "class",
+        "start_line": 8,
+        "end_line": 16,
+        "signature": "class UserTest extends TestCase",
+        "doc": null
+      },
+      {
+        "name": "testName",
+        "qualified_name": "Tests\\Unit\\UserTest::testName",
+        "kind": "test",
+        "start_line": 10,
+        "end_line": 13,
+        "signature": "public function testName(): void",
+        "doc": null
+      },
+      {
+        "name": "helper",
+        "qualified_name": "Tests\\Unit\\UserTest::helper",
+        "kind": "method",
+        "start_line": 15,
+        "end_line": 15,
+        "signature": "private function helper(): void",
+        "doc": null
+      }
+    ],
+    "imports": [
+      [
+        "App\\Models\\User",
+        5
+      ],
+      [
+        "PHPUnit\\Framework\\TestCase",
+        6
+      ]
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "role": "devops",
+  "version": "1.0.0",
+  "acp_protocol": "acp/1.0",
+  "cli_contract": "1.0",
+  "output_contract": "agent/1.0/agent-result.schema.json",
+  "files": {
+    "role.md": "a293623f74c80d1b0272a6b5180609dac2aa7078283c08cdb9728d4a2b13013b"
+  },
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "changes": "Первая версия шаблона (P4-02)."
+    }
+  ]
+}

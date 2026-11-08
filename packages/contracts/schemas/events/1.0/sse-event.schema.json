@@ -1,0 +1,1296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/events/1.0/sse-event.schema.json",
+  "title": "SseEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "run_id",
+    "seq",
+    "type",
+    "timestamp",
+    "schema_version",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "seq": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "null только для heartbeat"
+    },
+    "type": {
+      "enum": [
+        "run.state_changed",
+        "task.state_changed",
+        "agent.message",
+        "cli.output",
+        "directive.impact_ready",
+        "directive.state_changed",
+        "approval.requested",
+        "approval.decided",
+        "gate.completed",
+        "run.completed",
+        "chat.message",
+        "heartbeat"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "source_event_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid",
+      "description": "outbox event_id, из которого спроецировано"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "heartbeat"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "seq": {
+            "type": "null"
+          },
+          "payload": {
+            "$ref": "#/$defs/heartbeat"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "seq": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "run.state_changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/run_state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.state_changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/task_state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent.message"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/agent_message"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cli.output"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/cli_output"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "directive.impact_ready"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/directive_impact_ready"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "directive.state_changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/directive_state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "approval.requested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/approval_requested"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "approval.decided"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/approval_decided"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "gate.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/gate_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "run.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/run_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "chat.message"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/chat_message"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "run_status": {
+      "enum": [
+        "CREATED",
+        "DISCOVERY",
+        "PLANNED",
+        "AWAITING_APPROVAL",
+        "RUNNING",
+        "VERIFYING",
+        "COMPLETED",
+        "PAUSED",
+        "BLOCKED",
+        "FAILED",
+        "CANCELLED"
+      ]
+    },
+    "task_status": {
+      "enum": [
+        "PENDING",
+        "READY",
+        "LEASED",
+        "RUNNING",
+        "VERIFYING",
+        "SUCCEEDED",
+        "BLOCKED",
+        "RETRY_WAIT",
+        "FAILED",
+        "CANCELLED"
+      ]
+    },
+    "blocked_reason": {
+      "enum": [
+        "APPROVAL_REQUIRED",
+        "PROVIDER_UNAVAILABLE",
+        "AUTH_REQUIRED",
+        "DIRECTIVE_REPLAN",
+        "RUN_PAUSED",
+        "DOCS_REQUIRED",
+        "MANUAL_REVIEW",
+        "REVIEW_LOOP_EXHAUSTED",
+        "DEPENDENCY_FAILED",
+        null
+      ]
+    },
+    "agent_role": {
+      "enum": [
+        "requirements",
+        "architect",
+        "planner",
+        "developer",
+        "reviewer",
+        "security",
+        "qa",
+        "database",
+        "performance",
+        "devops",
+        "maintenance",
+        "documentation"
+      ]
+    },
+    "acp_participant": {
+      "enum": [
+        "requirements",
+        "architect",
+        "planner",
+        "developer",
+        "reviewer",
+        "security",
+        "qa",
+        "database",
+        "performance",
+        "devops",
+        "maintenance",
+        "documentation",
+        "orchestrator",
+        "user"
+      ]
+    },
+    "provider": {
+      "enum": [
+        "codex",
+        "claude"
+      ]
+    },
+    "directive_status": {
+      "enum": [
+        "RECEIVED",
+        "IMPACT_ANALYSIS_PENDING",
+        "IMPACT_READY",
+        "AWAITING_CONFIRMATION",
+        "CONFIRMED",
+        "CHECKPOINTING",
+        "REPLANNING",
+        "DISPATCHED",
+        "ACKNOWLEDGED",
+        "COMPLETED",
+        "REJECTED",
+        "CANCELLED",
+        "FAILED"
+      ]
+    },
+    "severity_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "info": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "low": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "medium": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "critical": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "heartbeat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "server_time",
+        "last_seq"
+      ],
+      "properties": {
+        "server_time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "run_state_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_status",
+        "to_status",
+        "run_version"
+      ],
+      "properties": {
+        "from_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/run_status"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to_status": {
+          "$ref": "#/$defs/run_status"
+        },
+        "blocked_reason": {
+          "$ref": "#/$defs/blocked_reason"
+        },
+        "run_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "resync": {
+          "type": "boolean"
+        }
+      }
+    },
+    "task_state_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "agent_role",
+        "from_status",
+        "to_status",
+        "task_version"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "agent_role": {
+          "$ref": "#/$defs/agent_role"
+        },
+        "from_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/task_status"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to_status": {
+          "$ref": "#/$defs/task_status"
+        },
+        "blocked_reason": {
+          "$ref": "#/$defs/blocked_reason"
+        },
+        "task_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempt_no": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/provider"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complexity": {
+          "enum": [
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5"
+          ]
+        },
+        "failure_category": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "CLI_NOT_INSTALLED",
+            "AUTH_REQUIRED",
+            "RATE_LIMITED",
+            "TIMEOUT",
+            "SANDBOX_DENIED",
+            "PROCESS_FAILED",
+            "OUTPUT_PARSE_ERROR",
+            "UNSUPPORTED_VERSION",
+            "CANCELLED",
+            "GATE_FAILED",
+            "REVIEW_REJECTED",
+            "LEASE_LOST",
+            "WORKER_CRASH",
+            "POLICY_DENIED",
+            "INTERNAL_ERROR",
+            null
+          ]
+        }
+      }
+    },
+    "agent_message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_id",
+        "message_type",
+        "from",
+        "to",
+        "correlation_id",
+        "summary"
+      ],
+      "properties": {
+        "message_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "message_type": {
+          "enum": [
+            "TASK_ASSIGN",
+            "HANDOFF",
+            "QUESTION",
+            "ANSWER",
+            "REVIEW_REQUEST",
+            "FINDING",
+            "FIX_REQUEST",
+            "EVIDENCE_SUBMITTED",
+            "DECISION_PROPOSAL",
+            "DECISION_RECORDED",
+            "BLOCKED",
+            "TASK_COMPLETED"
+          ]
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "from": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "role"
+          ],
+          "properties": {
+            "role": {
+              "$ref": "#/$defs/acp_participant"
+            },
+            "provider": {
+              "$ref": "#/$defs/provider"
+            }
+          }
+        },
+        "to": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "role"
+          ],
+          "properties": {
+            "role": {
+              "$ref": "#/$defs/acp_participant"
+            }
+          }
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reply_to_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "санитизированная выдержка; полный payload — GET /tasks/{task_id}/messages"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "suspected_injection": {
+          "type": "boolean"
+        }
+      }
+    },
+    "cli_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_id",
+        "task_id",
+        "provider",
+        "agent_role",
+        "cli_seq",
+        "cli_event_type"
+      ],
+      "properties": {
+        "execution_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "task_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "agent_role": {
+          "$ref": "#/$defs/agent_role"
+        },
+        "cli_seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cli_event_type": {
+          "enum": [
+            "started",
+            "output",
+            "tool_event",
+            "artifact",
+            "warning",
+            "finished"
+          ]
+        },
+        "stream": {
+          "enum": [
+            "stdout",
+            "stderr",
+            "agent_message"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "redactions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "coalesced_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tool_kind": {
+          "enum": [
+            "file_read",
+            "file_write",
+            "file_patch",
+            "command",
+            "search",
+            "network",
+            "other"
+          ]
+        },
+        "tool_phase": {
+          "enum": [
+            "requested",
+            "started",
+            "completed",
+            "denied",
+            "failed"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "artifact_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "warning_code": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "execution_status": {
+          "enum": [
+            "EXITED",
+            "TIMED_OUT",
+            "CANCELLED",
+            "CRASHED",
+            "AUTH_REQUIRED",
+            "RATE_LIMITED"
+          ]
+        }
+      }
+    },
+    "directive_impact_ready": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directive_id",
+        "impacts",
+        "requires_confirmation",
+        "expected_run_version"
+      ],
+      "properties": {
+        "directive_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "impacts": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "task_id",
+              "impact_type"
+            ],
+            "properties": {
+              "task_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid",
+                "description": "null для TASK_ADD (новая задача ещё не создана)"
+              },
+              "impact_type": {
+                "enum": [
+                  "NONE",
+                  "CONTEXT_ONLY",
+                  "REPLAN_REQUIRED",
+                  "TASK_CANCEL",
+                  "TASK_ADD",
+                  "RESTART_REQUIRED"
+                ]
+              },
+              "resolution": {
+                "type": "string",
+                "maxLength": 500
+              }
+            }
+          }
+        },
+        "requires_confirmation": {
+          "type": "boolean"
+        },
+        "approval_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "expected_run_version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "directive_state_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directive_id",
+        "directive_type",
+        "from_status",
+        "to_status"
+      ],
+      "properties": {
+        "directive_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "directive_type": {
+          "enum": [
+            "ASK",
+            "NEW_TASK",
+            "CHANGE_REQUEST",
+            "STOP",
+            "PAUSE",
+            "RESUME",
+            "REVIEW",
+            "APPROVE",
+            "REJECT"
+          ]
+        },
+        "from_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/directive_status"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to_status": {
+          "$ref": "#/$defs/directive_status"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "recipients": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "ack_status"
+            ],
+            "properties": {
+              "role": {
+                "$ref": "#/$defs/agent_role"
+              },
+              "ack_status": {
+                "enum": [
+                  "PENDING",
+                  "DELIVERED",
+                  "ACKNOWLEDGED",
+                  "COMPLETED",
+                  "FAILED"
+                ]
+              },
+              "execution_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    },
+    "approval_requested": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approval_id",
+        "action_type",
+        "summary",
+        "required_role",
+        "expires_at"
+      ],
+      "properties": {
+        "approval_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "action_type": {
+          "enum": [
+            "PLAN_APPROVAL",
+            "MERGE",
+            "PRODUCTION_DEPLOY",
+            "DESTRUCTIVE_MIGRATION",
+            "DATA_DELETION",
+            "SECRET_CHANGE",
+            "UNRESTRICTED_NETWORK",
+            "DOCS_DOWNLOAD",
+            "CRITICAL_DIRECTIVE",
+            "MANUAL_REVIEW",
+            "SELF_REVIEW_FALLBACK",
+            "LOCAL_EXECUTION_FALLBACK"
+          ]
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "required_role": {
+          "enum": [
+            "owner",
+            "admin",
+            "developer",
+            "reviewer"
+          ]
+        },
+        "requested_by": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "user",
+                "agent",
+                "system"
+              ]
+            },
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "approval_decided": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approval_id",
+        "action_type",
+        "status"
+      ],
+      "properties": {
+        "approval_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "action_type": {
+          "enum": [
+            "PLAN_APPROVAL",
+            "MERGE",
+            "PRODUCTION_DEPLOY",
+            "DESTRUCTIVE_MIGRATION",
+            "DATA_DELETION",
+            "SECRET_CHANGE",
+            "UNRESTRICTED_NETWORK",
+            "DOCS_DOWNLOAD",
+            "CRITICAL_DIRECTIVE",
+            "MANUAL_REVIEW",
+            "SELF_REVIEW_FALLBACK",
+            "LOCAL_EXECUTION_FALLBACK"
+          ]
+        },
+        "status": {
+          "enum": [
+            "APPROVED",
+            "REJECTED",
+            "EXPIRED",
+            "CANCELLED"
+          ]
+        },
+        "decided_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "decision_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2000
+        }
+      }
+    },
+    "gate_completed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gate_execution_id",
+        "gate_type",
+        "status",
+        "required",
+        "commit_sha"
+      ],
+      "properties": {
+        "gate_execution_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "gate_type": {
+          "type": "string",
+          "pattern": "^[A-Z_]+$"
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "ERROR",
+            "SKIPPED",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+        },
+        "evidence_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "findings": {
+          "$ref": "#/$defs/severity_counts"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool": {
+          "type": "string",
+          "maxLength": 100
+        }
+      }
+    },
+    "run_completed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "final_status",
+        "required_gates_total",
+        "required_gates_passed"
+      ],
+      "properties": {
+        "final_status": {
+          "enum": [
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED"
+          ]
+        },
+        "required_gates_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "required_gates_passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "open_findings": {
+          "$ref": "#/$defs/severity_counts"
+        },
+        "report_artifact_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "chat_message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chat_message_id",
+        "thread_id",
+        "scope",
+        "message_kind",
+        "sender_type",
+        "body",
+        "created_at"
+      ],
+      "properties": {
+        "chat_message_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "thread_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "scope": {
+          "enum": [
+            "RUN",
+            "ROLE",
+            "TASK"
+          ]
+        },
+        "message_kind": {
+          "enum": [
+            "USER_TEXT",
+            "DIRECTIVE",
+            "AGENT_MESSAGE",
+            "CLI_HIGHLIGHT",
+            "STATUS",
+            "APPROVAL",
+            "DIRECTIVE_STATUS",
+            "SYSTEM_NOTICE"
+          ]
+        },
+        "sender_type": {
+          "enum": [
+            "user",
+            "agent",
+            "system"
+          ]
+        },
+        "sender_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sender_role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/acp_participant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/provider"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "target_role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/agent_role"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mentions": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/agent_role"
+          }
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 8000
+        },
+        "source_event_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "directive_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "approval_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "diff",
+                  "test_report",
+                  "evidence",
+                  "finding",
+                  "artifact",
+                  "task",
+                  "approval",
+                  "gate_execution"
+                ]
+              },
+              "id": {
+                "$ref": "#/$defs/uuid"
+              }
+            }
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

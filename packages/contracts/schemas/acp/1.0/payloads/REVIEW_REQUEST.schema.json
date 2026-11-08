@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/REVIEW_REQUEST.schema.json",
+  "title": "REVIEW_REQUEST payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "review_kind",
+    "diff_ref",
+    "commit_sha",
+    "scope_summary",
+    "acceptance_criteria",
+    "loop_iteration"
+  ],
+  "properties": {
+    "review_kind": {
+      "enum": [
+        "code",
+        "security",
+        "test",
+        "migration",
+        "architecture",
+        "documentation",
+        "performance"
+      ]
+    },
+    "diff_ref": {
+      "$ref": "../common.schema.json#/$defs/ref"
+    },
+    "commit_sha": {
+      "$ref": "../common.schema.json#/$defs/commit_sha"
+    },
+    "scope_summary": {
+      "$ref": "../common.schema.json#/$defs/text_long"
+    },
+    "changed_files": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "../common.schema.json#/$defs/file_path"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "maxLength": 2000
+      }
+    },
+    "review_focus": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "loop_iteration": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "resolved_finding_refs": {
+      "$ref": "../common.schema.json#/$defs/refs"
+    },
+    "gate_refs": {
+      "$ref": "../common.schema.json#/$defs/refs"
+    }
+  }
+}

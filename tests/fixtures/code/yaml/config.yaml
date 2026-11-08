@@ -1,0 +1,12 @@
+# Конфигурация
+name: demo
+services:
+  api:
+    image: app:latest
+    command: ["serve"]
+anchors: &base
+  retries: 3
+copy: *base
+unsafe: !!python/object/apply:os.system ["echo pwned"]
+---
+second_doc: true

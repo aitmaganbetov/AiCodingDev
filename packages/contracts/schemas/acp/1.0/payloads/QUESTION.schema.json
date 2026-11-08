@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/QUESTION.schema.json",
+  "title": "QUESTION payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "question",
+    "question_kind",
+    "blocking"
+  ],
+  "properties": {
+    "question": {
+      "$ref": "../common.schema.json#/$defs/text_long"
+    },
+    "question_kind": {
+      "enum": [
+        "clarification",
+        "missing_context",
+        "decision_needed",
+        "docs_permission",
+        "user_ask"
+      ]
+    },
+    "blocking": {
+      "type": "boolean",
+      "description": "true — задача отправителя не может продолжаться без ответа"
+    },
+    "options": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "context_refs": {
+      "$ref": "../common.schema.json#/$defs/refs"
+    },
+    "answer_deadline": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

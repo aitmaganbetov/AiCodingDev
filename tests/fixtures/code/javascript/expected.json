@@ -1,0 +1,175 @@
+{
+  "api.js": {
+    "language": "javascript",
+    "symbols": [
+      {
+        "name": "api.js",
+        "qualified_name": "api.js",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 38,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "API_ROOT",
+        "qualified_name": "api.js#API_ROOT",
+        "kind": "constant",
+        "start_line": 6,
+        "end_line": 6,
+        "signature": "const API_ROOT = \"/api\";",
+        "doc": null
+      },
+      {
+        "name": "handler",
+        "qualified_name": "api.js#handler",
+        "kind": "function",
+        "start_line": 8,
+        "end_line": 8,
+        "signature": "const handler = async (req) =>",
+        "doc": null
+      },
+      {
+        "name": "ApiClient",
+        "qualified_name": "api.js#ApiClient",
+        "kind": "class",
+        "start_line": 14,
+        "end_line": 26,
+        "signature": "class ApiClient",
+        "doc": "Клиент API."
+      },
+      {
+        "name": "constructor",
+        "qualified_name": "api.js#ApiClient.constructor",
+        "kind": "method",
+        "start_line": 15,
+        "end_line": 17,
+        "signature": "constructor(base)",
+        "doc": null
+      },
+      {
+        "name": "get",
+        "qualified_name": "api.js#ApiClient.get",
+        "kind": "method",
+        "start_line": 19,
+        "end_line": 21,
+        "signature": "async get(path)",
+        "doc": null
+      },
+      {
+        "name": "create",
+        "qualified_name": "api.js#ApiClient.create",
+        "kind": "method",
+        "start_line": 23,
+        "end_line": 25,
+        "signature": "static create()",
+        "doc": null
+      },
+      {
+        "name": "ids",
+        "qualified_name": "api.js#ids",
+        "kind": "function",
+        "start_line": 28,
+        "end_line": 30,
+        "signature": "function* ids()",
+        "doc": null
+      },
+      {
+        "name": "loadPlugin",
+        "qualified_name": "api.js#loadPlugin",
+        "kind": "function",
+        "start_line": 32,
+        "end_line": 34,
+        "signature": "function loadPlugin(name)",
+        "doc": null
+      },
+      {
+        "name": "main",
+        "qualified_name": "api.js#main",
+        "kind": "function",
+        "start_line": 36,
+        "end_line": 38,
+        "signature": "function main()",
+        "doc": null
+      }
+    ],
+    "imports": [
+      [
+        "./http",
+        1
+      ],
+      [
+        "../config.js",
+        2
+      ],
+      [
+        "fs",
+        3
+      ],
+      [
+        "./types",
+        4
+      ],
+      [
+        "./lazy",
+        37
+      ]
+    ]
+  },
+  "api.test.js": {
+    "language": "javascript",
+    "symbols": [
+      {
+        "name": "api.test.js",
+        "qualified_name": "api.test.js",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 11,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "ApiClient",
+        "qualified_name": "api.test.js#ApiClient",
+        "kind": "test",
+        "start_line": 3,
+        "end_line": 9,
+        "signature": "describe",
+        "doc": null
+      },
+      {
+        "name": "creates client",
+        "qualified_name": "api.test.js#ApiClient > creates client",
+        "kind": "test",
+        "start_line": 4,
+        "end_line": 6,
+        "signature": "it",
+        "doc": null
+      },
+      {
+        "name": "template title",
+        "qualified_name": "api.test.js#ApiClient > template title",
+        "kind": "test",
+        "start_line": 8,
+        "end_line": 8,
+        "signature": "test.skip",
+        "doc": null
+      },
+      {
+        "name": "top level",
+        "qualified_name": "api.test.js#top level",
+        "kind": "test",
+        "start_line": 11,
+        "end_line": 11,
+        "signature": "test",
+        "doc": null
+      }
+    ],
+    "imports": [
+      [
+        "./api",
+        1
+      ]
+    ]
+  }
+}

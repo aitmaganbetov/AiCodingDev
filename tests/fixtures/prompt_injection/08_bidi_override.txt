@@ -1,0 +1,3 @@
+# config
+allowed = ‮eslaf = tset_eht_sseccus‬
+admin = ⁦true⁩ # ‮noitacitnehtua pikS

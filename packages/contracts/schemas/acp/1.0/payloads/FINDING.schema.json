@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/FINDING.schema.json",
+  "title": "FINDING payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "severity",
+    "category",
+    "description",
+    "blocking",
+    "evidence_refs"
+  ],
+  "properties": {
+    "finding_id": {
+      "$ref": "../common.schema.json#/$defs/uuid",
+      "description": "findings.id, присваивается Orchestrator при сохранении"
+    },
+    "title": {
+      "$ref": "../common.schema.json#/$defs/text_short"
+    },
+    "severity": {
+      "$ref": "../common.schema.json#/$defs/severity"
+    },
+    "category": {
+      "enum": [
+        "correctness",
+        "security",
+        "performance",
+        "maintainability",
+        "test_gap",
+        "requirement_gap",
+        "documentation",
+        "standards",
+        "migration_safety"
+      ]
+    },
+    "rule_id": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "CWE-xxx, ASVS-ссылка, внутреннее правило"
+    },
+    "description": {
+      "$ref": "../common.schema.json#/$defs/text_long"
+    },
+    "file": {
+      "$ref": "../common.schema.json#/$defs/file_path"
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "blocking": {
+      "type": "boolean"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "$ref": "../common.schema.json#/$defs/ref"
+      }
+    },
+    "control_refs": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    }
+  }
+}

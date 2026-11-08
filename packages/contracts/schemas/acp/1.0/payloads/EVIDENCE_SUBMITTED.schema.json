@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/EVIDENCE_SUBMITTED.schema.json",
+  "title": "EVIDENCE_SUBMITTED payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "artifact_ref",
+          "sha256"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "git_diff",
+              "test_report",
+              "benchmark",
+              "analysis_report",
+              "review_report",
+              "migration_plan",
+              "rollback_plan",
+              "adr",
+              "diagram",
+              "requirements_doc",
+              "threat_model",
+              "documentation",
+              "other"
+            ]
+          },
+          "artifact_ref": {
+            "$ref": "../common.schema.json#/$defs/ref"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "commit_sha": {
+            "$ref": "../common.schema.json#/$defs/commit_sha"
+          },
+          "command": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "команда, которую агент заявляет выполненной; не доверяется, гейт перезапускает"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "$ref": "../common.schema.json#/$defs/claim"
+      }
+    }
+  }
+}

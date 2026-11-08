@@ -1,0 +1,165 @@
+{
+  "service.py": {
+    "language": "python",
+    "symbols": [
+      {
+        "name": "service.py",
+        "qualified_name": "service",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 44,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "MAX_USERS",
+        "qualified_name": "service.MAX_USERS",
+        "kind": "constant",
+        "start_line": 10,
+        "end_line": 10,
+        "signature": "MAX_USERS = 100",
+        "doc": null
+      },
+      {
+        "name": "UserService",
+        "qualified_name": "service.UserService",
+        "kind": "class",
+        "start_line": 14,
+        "end_line": 36,
+        "signature": "class UserService(BaseService)",
+        "doc": "Операции над пользователями."
+      },
+      {
+        "name": "DEFAULT_ROLE",
+        "qualified_name": "service.UserService.DEFAULT_ROLE",
+        "kind": "constant",
+        "start_line": 21,
+        "end_line": 21,
+        "signature": "DEFAULT_ROLE = \"viewer\"",
+        "doc": null
+      },
+      {
+        "name": "__init__",
+        "qualified_name": "service.UserService.__init__",
+        "kind": "method",
+        "start_line": 23,
+        "end_line": 24,
+        "signature": "def __init__(self, repo: \"Repo\") -> None",
+        "doc": null
+      },
+      {
+        "name": "size",
+        "qualified_name": "service.UserService.size",
+        "kind": "method",
+        "start_line": 26,
+        "end_line": 28,
+        "signature": "def size(self) -> int",
+        "doc": null
+      },
+      {
+        "name": "fetch",
+        "qualified_name": "service.UserService.fetch",
+        "kind": "method",
+        "start_line": 30,
+        "end_line": 36,
+        "signature": "async def fetch(self, user_id: int, *, include_deleted: bool = False) -> \"User | None\"",
+        "doc": "Загрузить пользователя."
+      },
+      {
+        "name": "make_service",
+        "qualified_name": "service.make_service",
+        "kind": "function",
+        "start_line": 39,
+        "end_line": 44,
+        "signature": "def make_service(repo)",
+        "doc": null
+      }
+    ],
+    "imports": [
+      [
+        "os.path",
+        5
+      ],
+      [
+        "collections.OrderedDict",
+        6
+      ],
+      [
+        ".models",
+        7
+      ],
+      [
+        "..core.base.BaseService",
+        8
+      ],
+      [
+        "..core.base.helper",
+        8
+      ],
+      [
+        "json",
+        41
+      ]
+    ]
+  },
+  "test_service.py": {
+    "language": "python",
+    "symbols": [
+      {
+        "name": "test_service.py",
+        "qualified_name": "test_service",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 15,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "TestUserService",
+        "qualified_name": "test_service.TestUserService",
+        "kind": "class",
+        "start_line": 6,
+        "end_line": 11,
+        "signature": "class TestUserService",
+        "doc": null
+      },
+      {
+        "name": "test_size",
+        "qualified_name": "test_service.TestUserService.test_size",
+        "kind": "test",
+        "start_line": 7,
+        "end_line": 8,
+        "signature": "def test_size(self) -> None",
+        "doc": null
+      },
+      {
+        "name": "helper",
+        "qualified_name": "test_service.TestUserService.helper",
+        "kind": "method",
+        "start_line": 10,
+        "end_line": 11,
+        "signature": "def helper(self)",
+        "doc": null
+      },
+      {
+        "name": "test_make",
+        "qualified_name": "test_service.test_make",
+        "kind": "test",
+        "start_line": 14,
+        "end_line": 15,
+        "signature": "def test_make() -> None",
+        "doc": null
+      }
+    ],
+    "imports": [
+      [
+        "pytest",
+        1
+      ],
+      [
+        "app.service.UserService",
+        3
+      ]
+    ]
+  }
+}

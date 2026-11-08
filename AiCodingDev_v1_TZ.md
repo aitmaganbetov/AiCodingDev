@@ -327,6 +327,7 @@ Content-Type: application/json
 ```python
 from typing import Protocol
 
+
 class CLIExecutor(Protocol):
     async def probe(self) -> dict: ...
     async def check_auth(self) -> dict: ...

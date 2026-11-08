@@ -1,0 +1,3 @@
+# Docs
+
+See `src/app`.

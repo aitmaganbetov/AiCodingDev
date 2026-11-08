@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/cli/1.0/probe-result.schema.json",
+  "title": "ProbeResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "provider",
+    "installation_id",
+    "installed",
+    "checked_at",
+    "compatibility",
+    "capabilities",
+    "adapter_version"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "provider": {
+      "enum": [
+        "codex",
+        "claude"
+      ]
+    },
+    "installation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "host_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "worker_hosts.id"
+    },
+    "installed": {
+      "type": "boolean"
+    },
+    "binary_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1024
+    },
+    "binary_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "detected_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 100,
+      "description": "нормализованный SemVer, если извлекается"
+    },
+    "version_raw": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500,
+      "description": "санитизированная строка версии"
+    },
+    "compatibility": {
+      "enum": [
+        "SUPPORTED",
+        "UNTESTED",
+        "UNSUPPORTED"
+      ]
+    },
+    "compatibility_matrix_entry": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "id строки матрицы (раздел 5.3)"
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "noninteractive_mode",
+        "machine_readable_output",
+        "sandbox_modes",
+        "resume_session",
+        "token_usage_exposed",
+        "auth_status_command",
+        "cancel_signal_safe"
+      ],
+      "properties": {
+        "noninteractive_mode": {
+          "type": "boolean"
+        },
+        "machine_readable_output": {
+          "enum": [
+            "none",
+            "json",
+            "jsonl_stream"
+          ]
+        },
+        "sandbox_modes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "read_only",
+              "workspace_write",
+              "cli_managed_none"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "resume_session": {
+          "type": "boolean"
+        },
+        "token_usage_exposed": {
+          "type": "boolean"
+        },
+        "auth_status_command": {
+          "type": "boolean"
+        },
+        "cancel_signal_safe": {
+          "type": "boolean",
+          "description": "корректно завершается по SIGTERM"
+        },
+        "tool_events_exposed": {
+          "type": "boolean"
+        },
+        "model_selection": {
+          "type": "boolean"
+        },
+        "max_prompt_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "auth_status": {
+      "enum": [
+        "UNKNOWN",
+        "AUTHENTICATED",
+        "AUTH_REQUIRED",
+        "EXPIRED",
+        "ERROR"
+      ]
+    },
+    "adapter_version": {
+      "type": "string"
+    },
+    "checked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "enum": [
+              "CLI_NOT_INSTALLED",
+              "UNSUPPORTED_VERSION",
+              "PROCESS_FAILED",
+              "OUTPUT_PARSE_ERROR",
+              "TIMEOUT",
+              "SANDBOX_DENIED"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "installed": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "compatibility": {
+            "const": "UNSUPPORTED"
+          }
+        }
+      }
+    }
+  ]
+}

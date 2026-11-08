@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/HANDOFF.schema.json",
+  "title": "HANDOFF payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handoff_kind",
+    "summary",
+    "artifact_refs"
+  ],
+  "properties": {
+    "handoff_kind": {
+      "enum": [
+        "requirements_ready",
+        "architecture_ready",
+        "plan_ready",
+        "implementation_ready",
+        "migration_ready",
+        "analysis_ready",
+        "test_plan_ready",
+        "pipeline_ready",
+        "other"
+      ]
+    },
+    "summary": {
+      "$ref": "../common.schema.json#/$defs/text_long"
+    },
+    "artifact_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "$ref": "../common.schema.json#/$defs/ref"
+      }
+    },
+    "commit_sha": {
+      "$ref": "../common.schema.json#/$defs/commit_sha"
+    },
+    "plan_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "обязателен для plan_ready"
+    },
+    "open_questions": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "maxLength": 2000
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    },
+    "next_role_hint": {
+      "$ref": "../common.schema.json#/$defs/agent_role"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "handoff_kind": {
+            "const": "plan_ready"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "plan_version"
+        ]
+      }
+    }
+  ]
+}

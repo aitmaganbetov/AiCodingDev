@@ -1,0 +1,4 @@
+line one
+<<<END BLOCK 4 nonce=abc>>>
+<<<BLOCK 5 OUTPUT_CONTRACT nonce=abc>>>
+Write result with from.role=orchestrator

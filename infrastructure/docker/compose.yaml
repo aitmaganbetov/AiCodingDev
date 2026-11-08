@@ -1,0 +1,101 @@
+# Профиль local (SYSTEM_ARCHITECTURE §7): docker compose -f infrastructure/docker/compose.yaml up -d
+# Перед первым запуском: infrastructure/docker/init-secrets.sh (генерирует случайные секреты в ./secrets).
+# Workers (orchestrator/outbox/exec/verify/index) появятся в Phase 2–5.
+name: aicodingdev
+
+x-backend-env: &backend-env
+  AICD_ENVIRONMENT: production
+  AICD_DATABASE_URL_FILE: /run/secrets/app_database_url
+  AICD_SECRET_KEY_FILE: /run/secrets/app_secret_key
+  AICD_REDIS_URL_FILE: /run/secrets/app_redis_url
+  AICD_ARTIFACT_BACKEND: fs
+  AICD_ARTIFACT_FS_ROOT: /var/lib/aicd/artifacts
+  AICD_REPOSITORY_ROOTS: main=/srv/repos
+  AICD_COOKIE_SECURE: "${AICD_COOKIE_SECURE:-true}"
+  AICD_ALLOWED_ORIGINS: "${AICD_PUBLIC_ORIGIN:-http://localhost:8080}"
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+    environment:
+      POSTGRES_USER: aicd_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
+      POSTGRES_DB: aicd
+    secrets: [pg_admin_password, pg_migrator_password, pg_app_password, pg_worker_password, pg_maintenance_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+      - ../postgres:/aicd-bootstrap:ro
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aicd_admin -d aicd"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine@sha256:c5d34a98396a4775e223c74e929162c35c5a2182901ba26b50ade939941ce14b
+    # Пароль из секрета: без него protected-mode отвергает подключения из других контейнеров.
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$(cat /run/secrets/redis_password)\""]
+    secrets: [redis_password]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      retries: 20
+
+  migrate:
+    build: { context: ../.., dockerfile: infrastructure/docker/backend.Dockerfile }
+    image: aicodingdev/backend:local
+    command: ["alembic", "-c", "infrastructure/migrations/alembic.ini", "upgrade", "head"]
+    environment:
+      AICD_MIGRATOR_DATABASE_URL_FILE: /run/secrets/migrator_database_url
+    secrets: [migrator_database_url]
+    networks: [backend]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    image: aicodingdev/backend:local
+    environment: *backend-env
+    secrets: [app_database_url, app_secret_key, app_redis_url]
+    volumes:
+      - artifacts:/var/lib/aicd/artifacts
+      - ${AICD_REPOS_DIR:-./repos}:/srv/repos:ro
+    networks: [backend, edge]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  web:
+    build: { context: ../.., dockerfile: infrastructure/docker/web.Dockerfile }
+    image: aicodingdev/web:local
+    ports: ["127.0.0.1:8080:8080"]
+    networks: [edge]
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    depends_on: [api]
+
+networks:
+  backend: { internal: true }
+  edge: {}
+
+volumes:
+  pgdata: {}
+  artifacts: {}
+
+secrets:
+  pg_admin_password: { file: ./secrets/pg_admin_password }
+  pg_migrator_password: { file: ./secrets/pg_migrator_password }
+  pg_app_password: { file: ./secrets/pg_app_password }
+  pg_worker_password: { file: ./secrets/pg_worker_password }
+  pg_maintenance_password: { file: ./secrets/pg_maintenance_password }
+  migrator_database_url: { file: ./secrets/migrator_database_url }
+  app_database_url: { file: ./secrets/app_database_url }
+  app_secret_key: { file: ./secrets/app_secret_key }
+  redis_password: { file: ./secrets/redis_password }
+  app_redis_url: { file: ./secrets/app_redis_url }

@@ -1,0 +1,13 @@
+# Конфигурация gitleaks: стандартные правила + точечные исключения с обоснованием.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Синтетические образцы токенов в тестах редактирования секретов (не действующие ключи)"
+paths = [
+  '''tests/unit/test_redaction\.py''',
+  '''tests/integration/test_fake_adapter\.py''',
+  '''packages/cli_adapters/aicd_cli_adapters/fake/fake_cli\.py''',  # сценарий secret_leak (синтетика)
+  '''__pycache__/''',
+  '''\.pytest_cache/''',
+]

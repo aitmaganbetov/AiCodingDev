@@ -1,0 +1,16 @@
+{
+  "role": "planner",
+  "version": "1.0.0",
+  "acp_protocol": "acp/1.0",
+  "cli_contract": "1.0",
+  "output_contract": "agent/1.0/agent-result.schema.json",
+  "files": {
+    "role.md": "c6c140059a09a9aef78c8ae5c50298c53aecbf1bef338d5c5408a42586258097"
+  },
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "changes": "Первая версия шаблона (P4-02)."
+    }
+  ]
+}

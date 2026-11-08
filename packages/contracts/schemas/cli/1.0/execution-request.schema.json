@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/cli/1.0/execution-request.schema.json",
+  "title": "ExecutionRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "execution_id",
+    "task_id",
+    "provider",
+    "agent_role",
+    "workspace",
+    "input",
+    "limits",
+    "permissions",
+    "run_id",
+    "task_attempt_id",
+    "workspace_id",
+    "command_profile"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "execution_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "task_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "provider": {
+      "enum": [
+        "codex",
+        "claude"
+      ]
+    },
+    "agent_role": {
+      "enum": [
+        "requirements",
+        "architect",
+        "planner",
+        "developer",
+        "reviewer",
+        "security",
+        "qa",
+        "database",
+        "performance",
+        "devops",
+        "maintenance",
+        "documentation"
+      ]
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "worktree_id",
+        "base_commit"
+      ],
+      "properties": {
+        "worktree_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "worktrees.id"
+        },
+        "base_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$",
+          "description": "Полный SHA-1 или SHA-256"
+        },
+        "branch_name": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "доп."
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "objective",
+        "context_refs",
+        "acceptance_criteria"
+      ],
+      "properties": {
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "context_refs": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "pattern": "^(artifact|context_pack|adr|knowledge|requirement|message|finding|evidence|task|decision):[0-9a-f-]{36}$"
+          }
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "context_pack": {
+          "type": "object",
+          "description": "доп. Ссылка на собранный Context Pack (context_packs)",
+          "additionalProperties": false,
+          "required": [
+            "context_pack_id",
+            "artifact_ref",
+            "sha256"
+          ],
+          "properties": {
+            "context_pack_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "artifact_ref": {
+              "type": "string",
+              "pattern": "^artifact:[0-9a-f-]{36}$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "instruction_template_version": {
+          "type": "string",
+          "pattern": "^[a-z_]+@[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "доп. например developer@1.2.0"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timeout_seconds",
+        "max_attempts"
+      ],
+      "properties": {
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 14400
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Информативно: адаптер исполняет запрос один раз; повторы решает Orchestrator"
+        },
+        "idle_timeout_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 3600,
+          "description": "доп. нет вывода/heartbeat дольше → TIMEOUT"
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 268435456,
+          "description": "доп. лимит raw log"
+        },
+        "cpu_limit": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 16,
+          "description": "доп."
+        },
+        "memory_limit_mb": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 65536,
+          "description": "доп."
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network",
+        "write_scope",
+        "production_access"
+      ],
+      "properties": {
+        "network": {
+          "enum": [
+            "none",
+            "restricted",
+            "unrestricted"
+          ],
+          "description": "restricted = только allowlist egress-proxy (endpoints провайдера); unrestricted требует approval UNRESTRICTED_NETWORK"
+        },
+        "write_scope": {
+          "enum": [
+            "none",
+            "worktree"
+          ],
+          "description": "none = worktree монтируется read-only (reviewer, security, qa-анализ)"
+        },
+        "production_access": {
+          "const": false
+        },
+        "approval_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "доп. approvals.id, разрешающие расширение прав"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "network": {
+                "const": "unrestricted"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "approval_refs"
+            ],
+            "properties": {
+              "approval_refs": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "task_attempt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "доп. ACP correlation"
+    },
+    "command_profile": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+/[a-z0-9_.-]+@[0-9]+$",
+      "description": "Ключ allowlisted профиля, например codex/agent_task@1"
+    },
+    "installation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "доп. выбранная Router установка cli_installations.id"
+    },
+    "session_ref_hint": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "доп. только если probe подтвердил resume_session и policy разрешает"
+    }
+  }
+}

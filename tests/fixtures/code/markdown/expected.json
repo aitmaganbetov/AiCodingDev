@@ -1,0 +1,62 @@
+{
+  "README.md": {
+    "language": "markdown",
+    "symbols": [
+      {
+        "name": "README.md",
+        "qualified_name": "README.md",
+        "kind": "module",
+        "start_line": 1,
+        "end_line": 20,
+        "signature": null,
+        "doc": null
+      },
+      {
+        "name": "Demo Project",
+        "qualified_name": "Demo Project",
+        "kind": "other",
+        "start_line": 4,
+        "end_line": 19,
+        "signature": "# Demo Project",
+        "doc": null
+      },
+      {
+        "name": "Install",
+        "qualified_name": "Demo Project > Install",
+        "kind": "other",
+        "start_line": 8,
+        "end_line": 14,
+        "signature": "## Install",
+        "doc": null
+      },
+      {
+        "name": "Usage",
+        "qualified_name": "Demo Project > Usage",
+        "kind": "other",
+        "start_line": 15,
+        "end_line": 19,
+        "signature": "## Usage",
+        "doc": null
+      },
+      {
+        "name": "Advanced",
+        "qualified_name": "Demo Project > Usage > Advanced",
+        "kind": "other",
+        "start_line": 18,
+        "end_line": 19,
+        "signature": "### Advanced",
+        "doc": null
+      },
+      {
+        "name": "Appendix",
+        "qualified_name": "Appendix",
+        "kind": "other",
+        "start_line": 20,
+        "end_line": 20,
+        "signature": "# Appendix",
+        "doc": null
+      }
+    ],
+    "imports": []
+  }
+}
