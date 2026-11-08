@@ -6,3 +6,4 @@ blob-report/
 *.tsbuildinfo
 .env
 .env.*
+dist-e2e-*/

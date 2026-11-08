@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 4173;
+// AICD_E2E_PORT позволяет параллельные прогоны (отдельный порт и каталог сборки).
+const PORT = Number(process.env.AICD_E2E_PORT ?? 4173);
+const OUT_DIR = PORT === 4173 ? 'dist' : `dist-e2e-${PORT}`;
 
 /** E2E против `vite preview` со всеми ответами API из контрактно-валидированных моков (page.route). */
 export default defineConfig({
@@ -17,7 +19,7 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `pnpm exec vite build --logLevel warn && pnpm exec vite preview --port ${PORT} --strictPort`,
+    command: `pnpm exec vite build --logLevel warn --outDir ${OUT_DIR} && pnpm exec vite preview --outDir ${OUT_DIR} --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
