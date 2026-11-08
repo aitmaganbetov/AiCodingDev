@@ -152,18 +152,18 @@
 |---|---|---|---|---|---|---|
 | P7-01 | Дизайн-система, layout, состояния пусто/ошибка/загрузка, responsive, клавиатура | FR-CHAT-08, NFR-UX-01 | P1-13 | P0 | axe + keyboard Playwright | DONE |
 | P7-02 | SSE-клиент: менеджер потоков, Last-Event-ID, дедуп, реконнект | FR-CHAT-07 | P3-09 | P0 | Тест обрыва сети | DONE |
-| P7-03 | Dashboard | FR-CHAT-08 | P7-01 | P0 | E2E | TODO |
-| P7-04 | Projects + Repository Explorer | FR-PRJ-05 | P7-01, P5-02 | P0 | E2E | TODO |
-| P7-05 | Run Graph (React Flow, статусы, текущий исполнитель) | FR-CHAT-06 | P7-02 | P0 | E2E | TODO |
-| P7-06 | Live Agent Chat: потоки, фильтры, поиск, timeline, упоминания ролей | FR-CHAT-01, FR-CHAT-02, FR-CHAT-06, FR-CHAT-09 | P7-02, P4-12 | P0 | AC-05 E2E | TODO |
-| P7-07 | Директивы UI: команды, impact preview, подтверждение, статусы delivered/acknowledged/completed | FR-CHAT-03, FR-CHAT-05 | P7-06, P3-13 | P0 | AC-06 E2E | TODO |
-| P7-08 | Task Detail + diff viewer + ссылки на evidence | FR-CHAT-06 | P7-05, P6-11 | P0 | E2E | TODO |
-| P7-09 | CLI Providers screen | FR-CLI-10 | P2-12 | P0 | E2E | TODO |
-| P7-10 | Evidence & Quality, Standards & Compliance screens | FR-QG-07, FR-STD-05 | P6-11 | P0 | E2E | TODO |
-| P7-11 | Approvals screen/поток | FR-APR-03 | P3-10 | P0 | AC-13 E2E | TODO |
-| P7-12 | Knowledge/Documentation screen | FR-DOC-06 | P5-10 | P1 | E2E | TODO |
-| P7-13 | Settings/Audit screen | FR-AUD-02 | P1-11 | P0 | E2E | TODO |
-| P7-14 | E2E-набор Mission Control + impact/replan UI тесты | AC-05, AC-06, AC-08 | P7-* | P0 | Зелёный | TODO |
+| P7-03 | Dashboard | FR-CHAT-08 | P7-01 | P0 | E2E | DONE |
+| P7-04 | Projects + Repository Explorer | FR-PRJ-05 | P7-01, P5-02 | P0 | E2E | DONE |
+| P7-05 | Run Graph (React Flow, статусы, текущий исполнитель) | FR-CHAT-06 | P7-02 | P0 | E2E | DONE |
+| P7-06 | Live Agent Chat: потоки, фильтры, поиск, timeline, упоминания ролей | FR-CHAT-01, FR-CHAT-02, FR-CHAT-06, FR-CHAT-09 | P7-02, P4-12 | P0 | AC-05 E2E | DONE |
+| P7-07 | Директивы UI: команды, impact preview, подтверждение, статусы delivered/acknowledged/completed | FR-CHAT-03, FR-CHAT-05 | P7-06, P3-13 | P0 | AC-06 E2E | DONE |
+| P7-08 | Task Detail + diff viewer + ссылки на evidence | FR-CHAT-06 | P7-05, P6-11 | P0 | E2E | DONE |
+| P7-09 | CLI Providers screen | FR-CLI-10 | P2-12 | P0 | E2E | DONE |
+| P7-10 | Evidence & Quality, Standards & Compliance screens | FR-QG-07, FR-STD-05 | P6-11 | P0 | E2E | DONE |
+| P7-11 | Approvals screen/поток | FR-APR-03 | P3-10 | P0 | AC-13 E2E | DONE |
+| P7-12 | Knowledge/Documentation screen | FR-DOC-06 | P5-10 | P1 | E2E | DONE |
+| P7-13 | Settings/Audit screen | FR-AUD-02 | P1-11 | P0 | E2E | DONE |
+| P7-14 | E2E-набор Mission Control + impact/replan UI тесты | AC-05, AC-06, AC-08 | P7-* | P0 | Зелёный | IN_PROGRESS |
 
 ## Phase 8 — GitHub Integrations & Analytics
 
@@ -276,6 +276,29 @@
 | P3-17 | DONE | `tests/e2e/test_phase3_slice.py`, `tests/support/phase3.py` | 7 passed: COMPLETED с VERIFIED evidence; FAILED (gate/CLI); BLOCKED `PROVIDER_UNAVAILABLE`/`AUTH_REQUIRED` без обхода; AWAITING_APPROVAL → решение → COMPLETED |
 
 Исправления, найденные сквозными тестами: повтор задачи падал на существующей ветке worktree; run не переходил в BLOCKED, пока оставались PENDING-потомки заблокированной задачи; verifier не создавал staging-каталог.
+
+### Phase 7 — Mission Control & Live Agent Chat (2026-11-08)
+
+Окружение проверки: PostgreSQL 17, Redis 7, RustFS (S3), Docker; Chromium + Playwright; агенты — Fake CLI. Итог: `uv run pytest` → **2402 passed, 3 skipped** (PHPStan ×2, офлайн-БД Trivy — OQ-43); ruff, ruff format, mypy, import-linter (4 kept), запрет AI SDK, `gen_contract_models --check` — OK. Web (`apps/web`): `pnpm check:api`, `typecheck`, `lint` (0), `test` → 138 passed, `build`, `e2e` (mocked, ответы сверяются с контрактом, axe светлая/тёмная) → 56 passed, `e2e:live` (реальные API + воркеры outbox/orchestrator/exec + PG + Redis + S3 + Fake CLI) → 4 passed.
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P7-01 | DONE | `apps/web/src/{components/ui,layout,styles,routes,i18n}/**` | Токены WCAG AA (≥4.5:1, рамки/фокус ≥3:1) в обеих темах — unit; `e2e/mocked/layout.spec.ts`: axe без serious/critical на layout и всех разделах, навигация только клавиатурой, мобильное меню, тема |
+| P7-02 | DONE | `src/api/{sse,streamManager,useEventStream}.ts*` | `streamManager.test.ts`, `e2e/mocked/sse.spec.ts`: офлайн → онлайн и обрыв посреди кадра — продолжение с `Last-Event-ID`, каждое событие ровно один раз, без пропусков; 410 → перечитывание REST |
+| P7-03 | DONE | `src/features/dashboard/**` | `dashboard.spec.ts` (стартовая страница, «требуют внимания», состояния, axe) |
+| P7-04 | DONE | `src/features/projects/**`, `aicd_projects/explorer.py`, `aicd_security/git.py` (`run_git_bytes_prefix`), операции `listRepositoryTree`/`getRepositoryFile` | `tests/integration/test_repository_explorer.py` → 19 passed (обход путей ×9, инъекции commit ×5, бинарный/усечённый файл, symlink, изоляция workspace); `projects.spec.ts` |
+| P7-05 | DONE | `src/features/runs/**` (`@xyflow/react` 12.12.0, ленивая загрузка) | `run-graph.spec.ts`: живое обновление по SSE, табличный вид с клавиатуры, axe |
+| P7-06 | DONE | `src/features/chat/**`; `getRunChat` refs/seq, `acp_type` в `chat.message` | `chat.spec.ts` (AC-05 mocked), `test_chat_api.py`; live AC-05 |
+| P7-07 | DONE | `src/features/directives/**`; `Directive.impact_summary`; воркер обрабатывает `directive.state_changed` | `chat.spec.ts` (AC-06 mocked, 409 → повтор), `test_directives.py`, `test_worker_actors.py`; live AC-06 (PAUSE/RESUME: доставлено → подтверждено → выполнено; CHANGE_REQUEST: impact → confirm → план v2) |
+| P7-08 | DONE | `src/features/tasks/**` (Monaco 0.57.0 локально, без CDN); `GET /artifacts/{id}/download` (поток через API), миграция 0011 | `tasks.spec.ts` (нет внешних запросов), `tests/integration/test_artifact_download.py` → 4 passed (RBAC `cli_raw_log`, 404 чужой/истёкший/пропавший, audit, обрыв при неверном sha256) |
+| P7-09 | DONE | `src/features/providers/**` | `providers.spec.ts`: нет полей секретов, перепроверка с Idempotency-Key, настройки с If-Match |
+| P7-10 | DONE | `src/features/{quality,compliance}/**` | `quality.spec.ts`, `compliance.spec.ts`: SKIPPED/ERROR ≠ PASS явно, переходы findings по FSM, ручной вердикт контроля, утверждение контролей проекта; обрыв SSE (AC-08 mocked) |
+| P7-11 | DONE | `src/features/approvals/**` | `approvals.spec.ts`: AC-13 (утверждение плана → RUNNING по SSE), четыре глаза, отклонение с причиной |
+| P7-12 | DONE | `src/features/knowledge/**` | `knowledge.spec.ts`: обновление кэша только после согласия, политика OFF/SMART/STRICT |
+| P7-13 | DONE | `src/features/{settings,audit}/**` | `settings.spec.ts`, `audit.spec.ts`: участники, фильтры аудита в URL, фокус сохраняется |
+| P7-14 | IN_PROGRESS | `apps/web/e2e/live/**`, `tests/support/web_live_stack.py`, `playwright.live.config.ts` | `pnpm e2e:live` → 4 passed (AC-05, AC-06, AC-08 — обрыв API посреди run, seq 1..N без дублей; smoke). Не закрыто: этапы поручения DELIVERED/ACKNOWLEDGED/COMPLETED для CHANGE_REQUEST в backend (см. OQ-45) — в работе |
+
+Найдено и исправлено при сведении: compliance.evaluate(run) не вызывался перед guard завершения (блокирующие контроли не учитывались); шаги поручений не обрабатывались ни одним воркером (поручения оставались в IMPACT_ANALYSIS_PENDING); `downloadArtifact` не имел обработчика; заголовок страницы перехватывал фокус при смене вкладки/фильтра.
 
 ### Phase 6 — Quality, Security & Standards (2026-11-08)
 
