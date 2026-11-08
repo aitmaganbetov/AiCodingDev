@@ -10,7 +10,19 @@ from aicd_orchestration.dag import PlannedTask, PlanValidationError, validate_pl
 from aicd_orchestration.pipelines import PIPELINES, SIGNALS, PipelineError, build_pipeline, effective_level
 from aicd_orchestration.planner import TaskSpec, pipeline_plan, template_plan
 
-MODES = ["CREATE", "DEVELOP", "DEBUG", "MODERNIZE", "MAINTAIN", "OPTIMIZE", "TEST", "DOCUMENT", "AUDIT", "REVIEW", "SECURITY"]
+MODES = [
+    "CREATE",
+    "DEVELOP",
+    "DEBUG",
+    "MODERNIZE",
+    "MAINTAIN",
+    "OPTIMIZE",
+    "TEST",
+    "DOCUMENT",
+    "AUDIT",
+    "REVIEW",
+    "SECURITY",
+]
 NO_CODE = {"AUDIT", "REVIEW"}
 VERIFIERS = {"reviewer", "qa", "security"}
 
@@ -82,7 +94,10 @@ def test_mode_level_generates_valid_dag(mode: str, complexity: int) -> None:
 def test_develop_l3_keeps_stable_keys() -> None:
     """E2E Phase 3 опирается на DEVELOP L3: developer `main` → reviewer `review`."""
     specs = template_plan("DEVELOP", "Добавить эндпоинт")
-    assert [(t.key, t.role, t.depends_on) for t in specs] == [("main", "developer", ()), ("review", "reviewer", ("main",))]
+    assert [(t.key, t.role, t.depends_on) for t in specs] == [
+        ("main", "developer", ()),
+        ("review", "reviewer", ("main",)),
+    ]
     assert specs[0].title == "DEVELOP: Добавить эндпоинт" and "Добавить эндпоинт" in specs[0].instructions
 
 
@@ -90,12 +105,13 @@ def test_develop_l3_keeps_stable_keys() -> None:
     ("mode", "signals", "risk", "expected"),
     [
         ("DEVELOP", {"criteria_missing", "needs_database", "public_api_change"}, "high",
-         ["requirements", "database", "main", "review", "security", "docs"]),
+         ["requirements", "database", "main", "review", "security", "docs", "final_review"]),
         ("DEVELOP", set(), "low", ["main", "review"]),
         ("CREATE", {"needs_database"}, "medium",
-         ["requirements", "architecture", "database", "main", "test_plan", "review", "security", "pipeline", "docs"]),
+         ["requirements", "architecture", "database", "main", "test_plan", "review", "security", "pipeline", "docs",
+          "final_review"]),
         ("TEST", {"needs_test_hooks"}, "medium", ["main", "hooks", "review"]),
-        ("MAINTAIN", {"ci_change"}, "medium", ["impact", "main", "tests", "sca_triage", "review", "pipeline"]),
+        ("MAINTAIN", {"ci_change"}, "medium", ["impact", "main", "tests", "sca_triage", "review", "pipeline", "final_review"]),
         ("DOCUMENT", {"adr_needed"}, "medium", ["main", "adr", "review"]),
         ("REVIEW", {"tests_review"}, "medium", ["main", "security", "tests", "report"]),
     ],
@@ -110,6 +126,12 @@ def test_skipped_dependencies_are_closed_transitively() -> None:
     by = {t.key: t for t in plan.tasks}
     assert by["main"].depends_on == ("architecture",), "database исключён — зависимость перенесена на architecture"
     assert "database:signal:needs_database" in plan.skipped
+
+
+def test_final_review_covers_trailing_changes() -> None:
+    plan = build_pipeline("CREATE", "x", complexity=3)
+    final = plan.tasks[-1]
+    assert final.key == "final_review" and final.role == "reviewer" and final.depends_on == ("docs",)
 
 
 def test_merge_approval_required_for_high_risk() -> None:

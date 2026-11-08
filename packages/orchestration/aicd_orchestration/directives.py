@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from aicd_identity.rbac import Role, can_submit_directive
 from aicd_orchestration import checkpoints, fsm, runs, store
-from aicd_orchestration.agents.prompt import fence_untrusted
+from aicd_orchestration.agents.prompt import fence_untrusted as fence_untrusted  # реэкспорт (P3-13 API)
 from aicd_orchestration.approvals import Approvals
 from aicd_platform import audit, outbox
 from aicd_platform.artifacts import ArtifactStore

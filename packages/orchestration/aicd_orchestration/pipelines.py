@@ -29,6 +29,7 @@ from aicd_orchestration.classification import MODE_MINIMUM
 from aicd_orchestration.dag import PlannedTask, validate_plan
 
 RISK_ORDER: Final = ("low", "medium", "high", "critical")
+_VERIFIER_ROLES: Final = frozenset({"reviewer", "qa", "security"})
 SIGNALS: Final = frozenset(
     {
         "criteria_missing",  # критерии приёмки не заданы пользователем
@@ -772,6 +773,27 @@ def _ensure_verifiers(pipe: ModePipeline, steps: list[Step]) -> list[Step]:
     return out[:pos] + extra + out[pos:]
 
 
+def _ensure_final_review(steps: list[Step]) -> list[Step]:
+    """L3+: изменения, после которых в конвейере нет проверки (devops/documentation в конце AGENT_ROLES §4),
+    закрываются итоговым независимым ревью (QG-REVIEW для этих ролей на L3+, AGENT_ROLES §2.10/§2.12)."""
+    unverified = [
+        s.key
+        for s in steps
+        if s.writes_code and not any(o.role in _VERIFIER_ROLES and s.key in _ancestors(steps, o.key) for o in steps)
+    ]
+    if not unverified:
+        return steps
+    sinks = tuple(k for k in unverified if not any(k in _ancestors(steps, u) for u in unverified))
+    key = _free_key("final_review", {s.key for s in steps})
+    final = replace(
+        _review(sinks, min_level=1),
+        key=key,
+        title="Итоговое независимое ревью",
+        instruction="Независимо проверить изменения задач, выполненных после основного ревью (CI, документация).",
+    )
+    return [*steps, final]
+
+
 def _free_key(key: str, used: set[str]) -> str:
     candidate, n = key, 2
     while candidate in used:
@@ -922,6 +944,8 @@ def build_pipeline(
     steps, skipped = _select(pipe, level, risk_level, sig)
     if level >= 4:
         steps = _ensure_verifiers(pipe, steps)
+    if level >= 3 and pipe.modifies_code:
+        steps = _ensure_final_review(steps)
     used = {s.key for s in steps}
     approvals: list[ApprovalPoint] = []
     entry_keys = tuple(s.key for s in _entries(steps))

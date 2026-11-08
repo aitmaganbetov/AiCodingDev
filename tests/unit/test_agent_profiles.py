@@ -148,7 +148,13 @@ def test_template_content_rules(role: str) -> None:
     assert f"write_scope: {WRITE_SCOPE[role]}" in constraints
     assert "network: restricted" in constraints
     # Общие запреты (защищённые действия, секреты, AI-сервисы, лимиты, самоутверждение) — в каждом шаблоне.
-    for phrase in ("защищённые действия", "секреты", "внешним AI-сервисам", "лимиты подписки", "Не утверждай собственные"):
+    for phrase in (
+        "защищённые действия",
+        "секреты",
+        "внешним AI-сервисам",
+        "лимиты подписки",
+        "Не утверждай собственные",
+    ):
         assert phrase in constraints, f"{role}: нет запрета «{phrase}»"
     assert "AgentResult" in sections["OUTPUT"] and "UNTRUSTED" in sections["INPUTS"]
 

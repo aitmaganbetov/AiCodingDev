@@ -37,7 +37,11 @@ def valid_payload(message_type: str, **overrides: Any) -> dict[str, Any]:
             "instruction_template_version": "developer@1.0.0",
             "permissions": {"write_scope": "worktree", "network": "none"},
         },
-        "HANDOFF": {"handoff_kind": "implementation_ready", "summary": "Готово к ревью", "artifact_refs": [ref("artifact")]},
+        "HANDOFF": {
+            "handoff_kind": "implementation_ready",
+            "summary": "Готово к ревью",
+            "artifact_refs": [ref("artifact")],
+        },
         "QUESTION": {"question": "Какой формат даты?", "question_kind": "clarification", "blocking": True},
         "ANSWER": {"answer": "ISO 8601"},
         "REVIEW_REQUEST": {

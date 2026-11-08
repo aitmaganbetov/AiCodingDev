@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from aicd_orchestration import checkpoints, directives, plans, retry, routing_service, store
+from aicd_orchestration.classification import Signals, classify
 from aicd_orchestration.dag import PlannedTask, critical_path_lengths
 from aicd_orchestration.planner import template_plan
 from aicd_platform import context, leases
@@ -137,7 +138,12 @@ class Orchestrator:
                 )
                 return
             await store.transition_run(conn, run_id, "DISCOVERY", reason="start")
-            specs = template_plan(run["mode"], run["objective"])
+            # Классификация L1–L5/риска (ROUTING_POLICY §2–§3). До сигналов Code Intelligence (Phase 5) оценка
+            # planner консервативна — L3; уровень не бывает ниже минимума режима и floor-правил.
+            classified = classify(Signals(), run["mode"], planner_estimate=DEFAULT_PLANNER_ESTIMATE)
+            specs = template_plan(
+                run["mode"], run["objective"], complexity=classified.level, risk_level=classified.risk_level
+            )
             plan_version, _ = await plans.install_plan(conn, run_id, specs)
             await store.transition_run(conn, run_id, "PLANNED", reason="plan_validated")
             needs_approval = _plan_needs_approval(run["approval_policy"], specs)
@@ -183,7 +189,7 @@ class Orchestrator:
 
         * SELF_REVIEW_FALLBACK одобрен → задача снова READY; Router выберет провайдера-автора (маркировка self_review);
         * MANUAL_REVIEW одобрен → ревью выполнено человеком: задача SUCCEEDED (маркировка human_review);
-          отклонён → задача FAILED (REVIEW_REJECTED).
+          отклонён → задача FAILED (REVIEW_REJECTED). То же — после исчерпания review/fix циклов (ACP §6).
         Идемпотентно: действует только на задачу в ожидаемом состоянии BLOCKED.
         """
         async with transaction(self.engine, self._ctx(ws)) as conn:
@@ -209,7 +215,7 @@ class Orchestrator:
                 and row["blocked_reason"] == "APPROVAL_REQUIRED"
             ):
                 await store.transition_task(conn, task_id, "READY", reason="self_review_approved")
-            elif action == "MANUAL_REVIEW" and row["blocked_reason"] == "MANUAL_REVIEW":
+            elif action == "MANUAL_REVIEW" and row["blocked_reason"] in ("MANUAL_REVIEW", "REVIEW_LOOP_EXHAUSTED"):
                 if status == "APPROVED":
                     await store.transition_task(conn, task_id, "SUCCEEDED", reason="manual_review_approved")
                 elif status == "REJECTED":
@@ -668,6 +674,7 @@ async def _cancel_open_tasks(conn: AsyncConnection, run_id: uuid.UUID) -> None:
 
 
 DEFAULT_MAX_PARALLEL_TASKS = 4
+DEFAULT_PLANNER_ESTIMATE = 3
 
 
 async def _dispatchable(conn: AsyncConnection, run: dict[str, Any]) -> list[uuid.UUID]:

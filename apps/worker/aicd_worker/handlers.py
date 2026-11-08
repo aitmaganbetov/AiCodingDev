@@ -17,6 +17,7 @@ from typing import Any, Literal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_collaboration import acp
 from aicd_platform import consumer, context
 from aicd_platform.db import DbContext, apply_context, transaction
 from aicd_platform.ids import uuid7
@@ -28,9 +29,14 @@ ORCHESTRATOR_CONSUMER = "orchestrator.handle_event"
 EXEC_CONSUMER = "exec.execute_task"
 
 # Типы, которые диспетчер outbox направляет в очередь оркестратора (остальные — только SSE/прочие потребители).
-ORCHESTRATOR_EVENT_TYPES = frozenset({"run.created", "run.state_changed", "task.state_changed", "approval.decided"})
+ORCHESTRATOR_EVENT_TYPES = frozenset(
+    {"run.created", "run.state_changed", "task.state_changed", "approval.decided", "agent.message"}
+)
+# Потребители доставки ACP (ACP §7), обслуживаемые воркером: проекции в чат run и ленту активности.
+ACP_PROJECTORS = ((acp.CONSUMER_CHAT, acp.project_chat), (acp.CONSUMER_ACTIVITY, acp.project_activity))
 
 Outcome = Literal[
+    "acp_delivered",
     "duplicate",
     "ignored",
     "on_run_created",
@@ -76,6 +82,11 @@ async def _route(rt: Runtime, event: dict[str, Any], event_id: uuid.UUID, run_id
     etype = event.get("event_type")
     payload = event.get("payload") or {}
     orch = rt.orchestrator
+    if etype == "agent.message":
+        # Каждая доставка идемпотентна сама (message_deliveries: блокировка строки, ack); сбой → backoff/DLQ.
+        for consumer_id, handler in ACP_PROJECTORS:
+            await acp.handle_outbox_event(rt.engine, event, consumer_id=consumer_id, handler=handler)
+        return "acp_delivered"
     if etype == "run.created":
         await orch.on_run_created(run_id, ws)
         return "on_run_created"

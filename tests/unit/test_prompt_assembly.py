@@ -38,7 +38,9 @@ TASK = TaskInput(
 
 
 def test_blocks_order_and_manifest() -> None:
-    p = build_prompt(PROFILES["developer"], TASK, [UntrustedFragment("code", "print(1)", path="app/main.py")], nonce=NONCE)
+    p = build_prompt(
+        PROFILES["developer"], TASK, [UntrustedFragment("code", "print(1)", path="app/main.py")], nonce=NONCE
+    )
     heads = [line.split()[2] for line in p.text.splitlines() if line.startswith("<<<BLOCK ")]
     assert heads == ["SYSTEM_POLICY", "ROLE_INSTRUCTIONS", "TASK_SPEC", "UNTRUSTED_DATA", "OUTPUT_CONTRACT"]
     tpl = load_template("developer")
@@ -50,7 +52,9 @@ def test_blocks_order_and_manifest() -> None:
     assert "complexity: L3" in p.text and "base_commit: " + "b" * 40 in p.text
     assert '"agent_result_version"' in p.text  # схема AgentResult в блоке 5
     # детерминированность при фиксированном nonce
-    again = build_prompt(PROFILES["developer"], TASK, [UntrustedFragment("code", "print(1)", path="app/main.py")], nonce=NONCE)
+    again = build_prompt(
+        PROFILES["developer"], TASK, [UntrustedFragment("code", "print(1)", path="app/main.py")], nonce=NONCE
+    )
     assert again.text == p.text
 
 
@@ -142,7 +146,7 @@ def test_budgets_truncate_and_omit_by_priority() -> None:
 )
 def test_task_fields_validated(change: dict[str, object]) -> None:
     with pytest.raises(PromptAssemblyError):
-        build_prompt(PROFILES["developer"], TaskInput(**{**TASK.__dict__, **change}), nonce=NONCE)  # type: ignore[arg-type]
+        build_prompt(PROFILES["developer"], TaskInput(**{**TASK.__dict__, **change}), nonce=NONCE)
 
 
 def test_unknown_section_and_foreign_template_rejected() -> None:

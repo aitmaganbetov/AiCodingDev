@@ -45,7 +45,9 @@ def _assemble(role: str, payload: str, nonce: str) -> AssembledPrompt:
         base_commit="a" * 40,
     )
     fragments = [
-        UntrustedFragment(kind=kind, content=payload, ref=f"artifact:{payload[:40]}", path=payload[:80], commit=payload[:20])
+        UntrustedFragment(
+            kind=kind, content=payload, ref=f"artifact:{payload[:40]}", path=payload[:80], commit=payload[:20]
+        )
         for kind in SECTION_PRIORITY
     ]
     return build_prompt(PROFILES[role], task, fragments, nonce=nonce)
@@ -66,7 +68,17 @@ def _marker_lines(text: str, nonce: str) -> list[str]:
 def test_corpus_size_and_diversity() -> None:
     assert len(CORPUS) >= 20
     names = " ".join(p.stem for p in CORPUS)
-    for kind in ("ignore_previous", "fence", "roleplay", "unicode", "bidi", "policy", "base64", "nonce", "self_approval"):
+    for kind in (
+        "ignore_previous",
+        "fence",
+        "roleplay",
+        "unicode",
+        "bidi",
+        "policy",
+        "base64",
+        "nonce",
+        "self_approval",
+    ):
         assert kind in names, f"в корпусе нет образцов типа {kind}"
 
 
