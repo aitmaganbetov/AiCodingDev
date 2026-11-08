@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
 import signal
 import tempfile
 import time
@@ -37,6 +38,9 @@ from aicd_platform.clock import utcnow
 from aicd_security.sandbox import ContainerSpec, Mount, ResourceLimits, SandboxProcess, SandboxRunner
 
 STDERR_TAIL = 64 * 1024
+PROMPT_TEXT_FILE = "prompt.md"
+# Каталоги ввода-вывода агента (AGENT_ROLES §3.4): относительно cwd CLI, физически — вне worktree.
+AGENT_IO_DIRS = (".aicd", "output")
 
 
 @dataclass(frozen=True)
@@ -87,6 +91,8 @@ class _Execution:
     cancel_reason: CancelReason | None = None
     done: asyncio.Event = field(default_factory=asyncio.Event)
     started_or_done: asyncio.Event = field(default_factory=asyncio.Event)
+    io_dir: Path | None = None
+    io_links: list[Path] = field(default_factory=list)  # символические ссылки/точки монтирования в worktree
 
 
 class SubprocessCLIAdapter:
@@ -108,6 +114,8 @@ class SubprocessCLIAdapter:
         image: str = "local",
         terminate_grace_seconds: float = 10.0,
         container: ContainerLayout | None = None,
+        agent_io: bool = False,
+        agent_io_root: Path | None = None,
     ) -> None:
         self.provider = provider
         self.adapter_version = adapter_version
@@ -124,8 +132,72 @@ class SubprocessCLIAdapter:
         self._image = image
         self._grace = terminate_grace_seconds
         self._container = container
+        self._agent_io = agent_io
+        self._agent_io_root = agent_io_root
+        self._prompt_texts: dict[UUID, str] = {}
         self._executions: dict[UUID, _Execution] = {}
         self._lock = asyncio.Lock()
+
+    # --- ввод-вывод агента (Phase 4: промпт роли и `.aicd/result.json`) -------------------------
+    def stage_prompt(self, execution_id: UUID, text: str) -> None:
+        """Текст собранного промпта роли: пишется рядом с task.json как `prompt.md` (`{prompt_text_file}`)."""
+        self._prompt_texts[execution_id] = text
+
+    def agent_io_dir(self, execution_id: UUID) -> Path | None:
+        """Каталог вывода агента (содержит `.aicd/` и `output/`), если исполнение его создавало."""
+        ex = self._executions.get(execution_id)
+        return ex.io_dir if ex is not None else None
+
+    def release_agent_io(self, execution_id: UUID) -> None:
+        """Удалить каталог вывода агента после того, как оркестратор забрал результат."""
+        ex = self._executions.get(execution_id)
+        if ex is None or ex.io_dir is None:
+            return
+        shutil.rmtree(ex.io_dir, ignore_errors=True)
+        ex.io_dir = None
+
+    def _request_placeholders(self, request: ExecutionRequest) -> dict[str, str]:
+        """Значения плейсхолдеров, зависящие от запроса (переопределяют адаптеры; по умолчанию — нет)."""
+        del request
+        return {}
+
+    def _wire_agent_io(self, ex: _Execution, cwd: Path) -> tuple[Mount, ...]:
+        """Отдельный каталог вывода на исполнение (вне worktree): `.aicd/` и `output/` в cwd CLI ведут в него.
+
+        В контейнере — rw bind-монтирования поверх (возможно read-only) worktree; локально — symlink. Пути,
+        уже существующие в worktree (отслеживаются репозиторием), не подменяются.
+        """
+        root = self._agent_io_root or cwd.parent / ".aicd-io"
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        io_dir = root / str(ex.request.execution_id)
+        io_dir.mkdir(mode=0o700)
+        ex.io_dir = io_dir
+        mounts: list[Mount] = []
+        for name in AGENT_IO_DIRS:
+            target = io_dir / name
+            target.mkdir(mode=0o700)
+            link = cwd / name
+            if os.path.lexists(link):
+                continue
+            if self._container is None:
+                link.symlink_to(target, target_is_directory=True)
+            else:
+                os.chmod(io_dir, 0o755)  # noqa: S103 — каталог исполнения; запись — только в подкаталоги
+                os.chmod(target, 0o777)  # noqa: S103 — пишет uid runner-контейнера
+                link.mkdir()  # точка монтирования (worktree может быть смонтирован read-only)
+                mounts.append(Mount(target, f"{self._profile.cwd}/{name}", read_only=False))
+            ex.io_links.append(link)
+        return tuple(mounts)
+
+    @staticmethod
+    def _unwire_agent_io(ex: _Execution) -> None:
+        for link in ex.io_links:
+            with contextlib.suppress(OSError):
+                if link.is_symlink():
+                    link.unlink()
+                elif link.is_dir():
+                    link.rmdir()  # только пустая точка монтирования
+        ex.io_links.clear()
 
     # --- probe / auth: реализуют конкретные адаптеры --------------------------------------
     async def probe(self, *, installation_id: UUID) -> ProbeResult:
@@ -228,20 +300,39 @@ class SubprocessCLIAdapter:
                 # Задача передаётся данными (файл), никогда — через argv (CLI_ADAPTER_CONTRACT §8.2).
                 prompt_file.write_text(req.input.model_dump_json(), encoding="utf-8")
                 os.chmod(prompt_file, 0o444 if self._container else 0o400)
+                # Промпт роли (AGENT_ROLES §3.3) — тоже файл; без собранного промпта — только objective.
+                text_file = Path(prompt_dir) / PROMPT_TEXT_FILE
+                text_file.write_text(
+                    self._prompt_texts.pop(req.execution_id, "") or req.input.objective, encoding="utf-8"
+                )
+                os.chmod(text_file, 0o444 if self._container else 0o400)
+                io_mounts = self._wire_agent_io(ex, cwd) if self._agent_io else ()
+                # При расхождении профиля команды и запроса действует более строгое ограничение (SC-CLI-07).
+                read_only = self._profile.write_scope == "none" or req.permissions.write_scope == "none"
                 mounts: tuple[Mount, ...] = ()
+                request_values = self._request_placeholders(req)
                 if self._container is None:
-                    values = {"binary": self._binary, "prompt_file": str(prompt_file), **self._extra}
+                    values = {
+                        "binary": self._binary,
+                        "prompt_file": str(prompt_file),
+                        "prompt_text_file": str(text_file),
+                        **self._extra,
+                        **request_values,
+                    }
                 else:
                     os.chmod(prompt_dir, 0o755)  # noqa: S103 — каталог задачи читает uid runner; файл 0444
                     layout = self._container
                     values = {
                         **self._extra,
+                        **request_values,
                         **layout.placeholder_overrides,
                         "binary": layout.binary,
                         "prompt_file": f"{layout.prompt_mount}/task.json",
+                        "prompt_text_file": f"{layout.prompt_mount}/{PROMPT_TEXT_FILE}",
                     }
                     mounts = (
-                        Mount(cwd, self._profile.cwd, read_only=self._profile.write_scope == "none"),
+                        Mount(cwd, self._profile.cwd, read_only=read_only),
+                        *io_mounts,
                         Mount(Path(prompt_dir), layout.prompt_mount, read_only=True),
                         *layout.extra_mounts,
                     )
@@ -383,8 +474,10 @@ class SubprocessCLIAdapter:
                 with contextlib.suppress(Exception):
                     await ex.process.terminate(self._grace)
         finally:
+            self._prompt_texts.pop(req.execution_id, "")
+            self._unwire_agent_io(ex)
             with contextlib.suppress(OSError):
-                for f in Path(prompt_dir).glob("*"):  # noqa: ASYNC240 — один маленький файл
+                for f in Path(prompt_dir).glob("*"):  # noqa: ASYNC240 — пара маленьких файлов
                     os.chmod(f, 0o600)
                     f.unlink()
                 os.rmdir(prompt_dir)

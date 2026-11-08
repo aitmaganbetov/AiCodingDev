@@ -4,6 +4,8 @@
 * каталог worktree — внутри выделенного корня платформы, вне основного клона;
 * git вызывается без хуков/конфигов репозитория (aicd_security.git.run_git);
 * diff вычисляет платформа сама (CLI_ADAPTER_CONTRACT §11.4), включая новые файлы;
+* каталоги ввода-вывода агента (`.aicd/`, `output/`, AGENT_ROLES §3.4) в коммит/diff задачи не попадают и
+  удаляются из рабочего дерева до проверок (если не отслеживаются репозиторием в базовом коммите);
 * осиротевшие каталоги обнаруживаются для recovery reconciler (DATA_FLOW §7).
 """
 
@@ -23,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from aicd_security.git import GitRepositoryError, run_git, validate_branch_name
 
 _SHA = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+# Каталоги ввода-вывода агента в корне worktree (AGENT_ROLES §3.4): результат и отчёты — не изменения кода.
+AGENT_IO_PATHS: tuple[str, ...] = (".aicd", "output")
 
 
 class WorktreeError(RuntimeError):
@@ -86,7 +90,7 @@ class WorktreeManager:
     def diff(self, info_path: Path, base_commit_sha: str) -> bytes:
         """Полный бинарный diff рабочего дерева относительно базового коммита (вкл. новые файлы)."""
         path = self._checked(info_path)
-        run_git(path, "add", "--all")
+        self._stage(path)
         return (
             run_git(path, "diff", "--cached", "--binary", "--no-color", "--no-ext-diff", base_commit_sha) + "\n"
         ).encode()
@@ -94,8 +98,8 @@ class WorktreeManager:
     def commit_snapshot(self, info_path: Path, message: str) -> str | None:
         """WIP/итоговый коммит платформы в ветке задачи (safe point, DATA_FLOW §6.2). None — нет изменений."""
         path = self._checked(info_path)
-        run_git(path, "add", "--all")
-        if not run_git(path, "status", "--porcelain"):
+        self._stage(path)
+        if not run_git(path, "diff", "--cached", "--name-only"):
             return None
         run_git(
             path,
@@ -110,6 +114,31 @@ class WorktreeManager:
             message[:500],
         )
         return run_git(path, "rev-parse", "HEAD")
+
+    def clear_agent_io(self, info_path: Path) -> list[str]:
+        """Удалить из рабочего дерева неотслеживаемые каталоги ввода-вывода агента (до проверок gates)."""
+        path = self._checked(info_path)
+        removed: list[str] = []
+        for name in self._agent_io_excludes(path):
+            target = path / name
+            if target.is_symlink() or target.is_file():
+                target.unlink()
+            elif target.is_dir():
+                shutil.rmtree(target)
+            else:
+                continue
+            removed.append(name)
+        return removed
+
+    @staticmethod
+    def _agent_io_excludes(path: Path) -> list[str]:
+        """Каталоги AGENT_IO_PATHS, не отслеживаемые в HEAD (отслеживаемые репозиторием — обычный код)."""
+        tracked = run_git(path, "ls-tree", "--name-only", "HEAD", "--", *AGENT_IO_PATHS).splitlines()
+        return [p for p in AGENT_IO_PATHS if p not in tracked]
+
+    def _stage(self, path: Path) -> None:
+        excludes = [f":(top,exclude,literal){p}" for p in self._agent_io_excludes(path)]
+        run_git(path, "add", "--all", "--", ".", *excludes)
 
     def remove(self, repo: Path, info_path: Path) -> None:
         path = self._checked(info_path)

@@ -60,6 +60,11 @@ class ExecutionGateway:
         self._store = store
         self._diff_provider = diff_provider
 
+    @property
+    def store(self) -> ArtifactStore:
+        """Хранилище артефактов gateway (оркестратор сохраняет в него промпт и выводы агента)."""
+        return self._store
+
     def _ctx(self, request: ExecutionRequest) -> DbContext:
         return DbContext(workspace_id=request.workspace_id, actor_type="system")
 

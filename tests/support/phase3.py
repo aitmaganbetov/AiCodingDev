@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from aicd_cli_adapters.fake.adapter import FakeCLIExecutor
+from aicd_cli_adapters.fake.adapter import FakeCLIExecutor, ScenarioSpec
 from aicd_cli_adapters.gateway import ExecutionGateway, worktree_resolver
 from aicd_orchestration.approvals import Approvals
 from aicd_orchestration.cli_executor import CliTaskExecutor
@@ -37,9 +37,10 @@ from tests.support import db as testdb
 from tests.support.contract import validate_response
 
 
-def build_orchestrator(
-    worker: AsyncEngine, tmp: Path, repository_roots: dict[str, Path], scenario: str
-) -> Orchestrator:
+def build_executor(
+    worker: AsyncEngine, tmp: Path, repository_roots: dict[str, Path], scenario: ScenarioSpec
+) -> CliTaskExecutor:
+    """Исполнитель задач с Fake CLI: каталог вывода агента (`.aicd/`, `output/`) — вне worktree."""
     store = FileSystemArtifactStore(tmp / "artifacts")
     gateway = ExecutionGateway(engine=worker, store=store)
 
@@ -51,15 +52,23 @@ def build_orchestrator(
             artifact_sink=gateway.store_artifact,
             worktree_path=worktree_resolver(worktree_root),
             env_source={"PATH": os.environ["PATH"]},
+            agent_io=True,
         )
 
-    executor = CliTaskExecutor(
+    return CliTaskExecutor(
         engine=worker,
         gateway=gateway,
         worktrees=WorktreeManager(tmp / "wt"),
         repository_roots=repository_roots,
         adapter_factory=factory,
     )
+
+
+def build_orchestrator(
+    worker: AsyncEngine, tmp: Path, repository_roots: dict[str, Path], scenario: ScenarioSpec
+) -> Orchestrator:
+    executor = build_executor(worker, tmp, repository_roots, scenario)
+    store = FileSystemArtifactStore(tmp / "artifacts")
     verifier = VerificationEngine(
         engine=worker,
         store=store,

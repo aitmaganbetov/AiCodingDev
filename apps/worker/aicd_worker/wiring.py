@@ -48,6 +48,7 @@ def fake_adapter_factory(settings: WorkerSettings) -> AdapterFactory:
             artifact_sink=gateway.store_artifact,
             worktree_path=worktree_resolver(worktree_root),
             env_source={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            agent_io=True,  # `.aicd/`, `output/` агента — в отдельный каталог вывода исполнения
         )
 
     return factory
