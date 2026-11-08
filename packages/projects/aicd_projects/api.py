@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +72,92 @@ async def create_workspace(
         .mappings()
         .one()
     )
+    return dict(row)
+
+
+_WORKSPACE_SELECT = "SELECT id, name, slug, settings, version, created_at FROM workspaces WHERE id = :id"
+
+
+async def get_workspace(conn: AsyncConnection, workspace_id: uuid.UUID) -> dict[str, Any] | None:
+    """Workspace текущего RLS-контекста (`app.workspace_id`); чужой — None."""
+    row = (await conn.execute(text(_WORKSPACE_SELECT), {"id": workspace_id})).mappings().first()
+    return dict(row) if row else None
+
+
+async def update_workspace(
+    conn: AsyncConnection,
+    *,
+    workspace_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    expected_version: int,
+    name: str | None,
+    settings: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge-patch названия и настроек workspace (OQ-45 (f)) с optimistic locking и аудитом в той же транзакции.
+
+    Права проверяет вызывающий слой (`workspace:update`, для `settings` — `workspace:policy`). Несовпадение версии ⇒
+    412 с актуальным ETag. Аудит: `workspace.update` (имена изменённых полей) и `policy.changed` на каждый ключ политики
+    (`from`/`to`), SECURITY_ARCHITECTURE §11.
+    """
+    current = await get_workspace(conn, workspace_id)
+    if current is None:
+        raise ProblemError("not_found")
+    if int(current["version"]) != expected_version:
+        raise ProblemError("precondition_failed", headers={"ETag": f'"v{current["version"]}"'})
+    old_settings: dict[str, Any] = dict(current["settings"] or {})
+    changed: list[str] = []
+    policy_changes: dict[str, tuple[Any, Any]] = {}
+    if name is not None and name != current["name"]:
+        changed.append("name")
+    for key, value in (settings or {}).items():
+        if old_settings.get(key) != value:
+            policy_changes[key] = (old_settings.get(key), value)
+    if policy_changes:
+        changed.append("settings")
+    if not changed:
+        return current  # no-op: версия не меняется
+    row = (
+        (
+            await conn.execute(
+                text(
+                    "UPDATE workspaces SET name = :name, settings = settings || CAST(:patch AS jsonb),"
+                    " version = version + 1 WHERE id = :id AND version = :v"
+                    " RETURNING id, name, slug, settings, version, created_at"
+                ),
+                {
+                    "id": workspace_id,
+                    "v": expected_version,
+                    "name": name if name is not None else current["name"],
+                    "patch": json.dumps({k: v[1] for k, v in policy_changes.items()}),
+                },
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise ProblemError("precondition_failed")
+    await audit.record(
+        conn,
+        action="workspace.update",
+        resource_type="workspace",
+        resource_id=workspace_id,
+        actor_type="user",
+        actor_id=actor_id,
+        workspace_id=workspace_id,
+        metadata={"changed": changed, "version": int(row["version"])},
+    )
+    for key, (before, after) in sorted(policy_changes.items()):
+        await audit.record(
+            conn,
+            action="policy.changed",
+            resource_type="workspace",
+            resource_id=workspace_id,
+            actor_type="user",
+            actor_id=actor_id,
+            workspace_id=workspace_id,
+            metadata={"policy": f"workspace.{key}", "from": before, "to": after},
+        )
     return dict(row)
 
 
@@ -310,6 +397,79 @@ async def attach_local_repository(
         actor_id=actor_id,
         workspace_id=workspace_id,
         metadata={"provider": "local", "local_root_ref": resolved.ref, "project_id": str(project_id)},
+    )
+    row = (await conn.execute(text(_REPO_SELECT + " WHERE r.id = :id"), {"id": repo_id})).mappings().one()
+    return dict(row)
+
+
+async def attach_github_repository(
+    conn: AsyncConnection,
+    *,
+    project_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    local_path: str,
+    remote_url: str,
+    full_name: str,
+    github_repo_id: int,
+    github_installation_id: uuid.UUID,
+    default_branch: str,
+    roots: dict[str, Path],
+) -> dict[str, Any]:
+    """Привязка GitHub-репозитория (FR-PRJ-03, P8-02): локальная рабочая копия из allowlist-корней + репозиторий
+    GitHub, доступ к которому подтверждён установкой GitHub App (проверяет вызывающий через GitHub API)."""
+    if not roots:
+        raise ProblemError("policy_denied", detail="Корни локальных репозиториев не настроены")
+    try:
+        resolved = resolve_in_roots(local_path, roots)
+        info = git_guard.inspect_repository(resolved.absolute)
+        branch = git_guard.validate_branch_name(default_branch)
+    except (UnsafePathError, git_guard.GitRepositoryError) as exc:
+        raise ProblemError(
+            "validation_error", errors=[FieldError("/local_path", "invalid_repository", str(exc))]
+        ) from exc
+    repo_id = uuid7()
+    try:
+        async with conn.begin_nested():
+            await conn.execute(
+                text(
+                    "INSERT INTO repositories (id, workspace_id, project_id, provider, remote_url, default_branch,"
+                    " local_root_ref, github_installation_id, github_repo_id, full_name, last_synced_at,"
+                    " last_synced_commit_sha)"
+                    " VALUES (:id, :ws, :p, 'github', :url, :b, :ref, :inst, :gid, :fn, now(), :sha)"
+                ),
+                {
+                    "id": repo_id,
+                    "ws": workspace_id,
+                    "p": project_id,
+                    "url": remote_url,
+                    "b": branch,
+                    "ref": resolved.ref,
+                    "inst": github_installation_id,
+                    "gid": github_repo_id,
+                    "fn": full_name,
+                    "sha": info.head_sha,
+                },
+            )
+    except IntegrityError as exc:
+        if not _is_unique_violation(exc):
+            raise
+        raise ProblemError("conflict", detail="Репозиторий уже привязан в этом workspace") from exc
+    await audit.record(
+        conn,
+        action="repository.attach",
+        resource_type="repository",
+        resource_id=repo_id,
+        actor_type="user",
+        actor_id=actor_id,
+        workspace_id=workspace_id,
+        metadata={
+            "provider": "github",
+            "full_name": full_name,
+            "github_repo_id": github_repo_id,
+            "local_root_ref": resolved.ref,
+            "project_id": str(project_id),
+        },
     )
     row = (await conn.execute(text(_REPO_SELECT + " WHERE r.id = :id"), {"id": repo_id})).mappings().one()
     return dict(row)

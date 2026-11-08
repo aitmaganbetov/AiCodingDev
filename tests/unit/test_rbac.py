@@ -17,6 +17,8 @@ EXPECTED = {
     "workspace:create": {O, A, D, R, V},
     "member:read": {O, A, D, R, V},
     "member:manage": {O},
+    "workspace:update": {O, A},
+    "workspace:policy": {O},
     "project:read": {O, A, D, R, V},
     "project:create": {O, A},
     "project:update": {O, A},
@@ -43,6 +45,10 @@ EXPECTED = {
     "documentation:register": {O, A},
     "documentation:refresh": {O, A, D},
     "audit:read": {O, A},
+    "github:read": {O, A, D, R, V},
+    "github:manage": {O, A},
+    "pull_request:create": {O, A, D},
+    "pull_request:merge": {O, A, D},
 }
 
 

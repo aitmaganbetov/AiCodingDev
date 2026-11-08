@@ -11,13 +11,26 @@ const SECTIONS = [
   { name: 'Evidence и качество', path: 'quality' },
   { name: 'Стандарты и соответствие', path: 'compliance' },
   { name: 'Знания и документация', path: 'knowledge' },
+  { name: 'Аналитика', path: 'analytics' },
   { name: 'CLI-провайдеры', path: 'providers' },
   { name: 'Настройки', path: 'settings' },
   { name: 'Аудит', path: 'audit' },
 ];
 
 /** Разделы, реализованные экранами (axe — в их собственных spec); остальные пока заглушки «в разработке». */
-const IMPLEMENTED = new Set(['projects', 'dashboard', 'runs', 'knowledge', 'providers', 'settings', 'audit', 'approvals', 'quality', 'compliance']);
+const IMPLEMENTED = new Set([
+  'projects',
+  'dashboard',
+  'runs',
+  'knowledge',
+  'providers',
+  'settings',
+  'audit',
+  'approvals',
+  'quality',
+  'compliance',
+  'analytics',
+]);
 
 const PLACEHOLDERS = [
   ...SECTIONS.filter((s) => !IMPLEMENTED.has(s.path)).map((s) => ({ path: s.path, title: s.name })),

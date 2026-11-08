@@ -22,6 +22,8 @@ export interface StreamSpec {
   path: string;
   query?: StreamQuery;
   terminalEventTypes?: readonly string[];
+  /** Режим возобновления (см. EventStreamOptions.resume). */
+  resume?: 'seq' | 'cursor';
 }
 
 export interface StreamSubscriber {
@@ -184,6 +186,7 @@ export class StreamManager {
       path: entry.spec.path,
       query: entry.spec.query,
       terminalEventTypes: entry.spec.terminalEventTypes,
+      ...(entry.spec.resume ? { resume: entry.spec.resume } : {}),
       onEvents: (events) => {
         if (entry.stream !== stream) return;
         entry.buffer.push(...events);

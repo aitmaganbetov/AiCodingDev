@@ -40,6 +40,10 @@ PERMISSIONS: Final[dict[str, frozenset[Role]]] = {
     "workspace:create": _ALL,
     "member:read": _ALL,
     "member:manage": frozenset({Role.OWNER}),
+    # OQ-45 (f): название workspace — owner/admin; политики workspace (four-eyes исключение) — только owner
+    # (SECURITY_ARCHITECTURE §11, x-permission-depends-on: settings у updateWorkspace).
+    "workspace:update": _ADMIN_UP,
+    "workspace:policy": frozenset({Role.OWNER}),
     "project:read": _ALL,
     "project:create": _ADMIN_UP,
     "project:update": _ADMIN_UP,
@@ -66,6 +70,13 @@ PERMISSIONS: Final[dict[str, frozenset[Role]]] = {
     "documentation:register": _ADMIN_UP,
     "documentation:refresh": _DEV_UP,
     "audit:read": _ADMIN_UP,
+    # GitHub (P8, SECURITY_ARCHITECTURE §4.2 «Управление GitHub-установкой» — owner/admin): просмотр установок
+    # и PR — все участники; запрос PR из проверенного run — как управление run (developer+); запрос merge —
+    # developer+, само решение — approval MERGE (admin, four-eyes, §5.3).
+    "github:read": _ALL,
+    "github:manage": _ADMIN_UP,
+    "pull_request:create": _DEV_UP,
+    "pull_request:merge": _DEV_UP,
 }
 
 # API_DESIGN §5.3 — минимальная роль для решения по approval (иерархия ролей).

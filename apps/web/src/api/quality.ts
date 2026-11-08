@@ -2,7 +2,7 @@
  * Evidence & Quality (API_DESIGN §11, QUALITY_GATES): сводка gates/verdict run, evidence и отчёт run.
  * Находки — src/api/findings.ts; матрица соответствия — src/api/compliance.ts.
  */
-import { API_BASE, request, seg, type JsonResponse, type Query, type Schemas } from './client';
+import { API_BASE, request, requestText, seg, type JsonResponse, type Query, type Schemas, type TextResponse } from './client';
 
 export type QualityReport = Schemas['QualityReport'];
 export type QualityVerdict = QualityReport['verdict'];
@@ -14,12 +14,14 @@ export type EvidenceVerificationStatus = Schemas['EvidenceVerificationStatus'];
 export type ArtifactRef = Schemas['ArtifactRef'];
 export type RunReport = Schemas['RunReport'];
 export type TaskEvidenceQuery = Query<'listTaskEvidence'>;
+export type RunEvidenceQuery = Query<'listRunEvidence'>;
 
 export const qualityKeys = {
   run: (runId: string) => ['quality', runId] as const,
   report: (runId: string) => ['quality', runId, 'report'] as const,
   evidence: (evidenceId: string) => ['evidence', evidenceId] as const,
   taskEvidence: (taskId: string, query: TaskEvidenceQuery = {}) => ['evidence', 'task', taskId, query] as const,
+  runEvidence: (runId: string, query: RunEvidenceQuery = {}) => ['evidence', 'run', runId, query] as const,
 };
 
 /**
@@ -41,6 +43,16 @@ export const qualityApi = {
   /** Полный отчёт run (application/json). */
   runReport(runId: string, signal?: AbortSignal): Promise<RunReport> {
     return request({ method: 'GET', path: `/runs/${seg(runId)}/report`, signal });
+  },
+
+  /** Тот же отчёт в text/markdown (content negotiation по Accept, API_DESIGN §1). */
+  runReportMarkdown(runId: string, signal?: AbortSignal): Promise<TextResponse> {
+    return requestText({ method: 'GET', path: `/runs/${seg(runId)}/report`, accept: 'text/markdown', signal });
+  },
+
+  /** OQ-45 (c): все evidence run (keyset по времени создания), фильтры статуса/задачи/вида. */
+  runEvidence(runId: string, query: RunEvidenceQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listRunEvidence', 200>> {
+    return request({ method: 'GET', path: `/runs/${seg(runId)}/evidence`, query, signal });
   },
 
   evidence(evidenceId: string, signal?: AbortSignal): Promise<Evidence> {

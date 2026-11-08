@@ -18,6 +18,10 @@ export type RepositoryTreeEntry = Schemas['RepositoryTreeEntry'];
 export type RepositoryFile = Schemas['RepositoryFile'];
 export type RepositoryTreeQuery = Query<'listRepositoryTree'>;
 export type RepositoryFileQuery = Query<'getRepositoryFile'>;
+export type RepositoryBranch = Schemas['RepositoryBranch'];
+export type RepositoryCommitSummary = Schemas['RepositoryCommitSummary'];
+export type RepositoryBranchesQuery = Query<'listRepositoryBranches'>;
+export type RepositoryCommitsQuery = Query<'listRepositoryCommits'>;
 
 export const projectKeys = {
   list: (workspaceId: string) => ['projects', workspaceId] as const,
@@ -31,6 +35,9 @@ export const projectKeys = {
     ['project', projectId, 'repository', repositoryId, 'tree', commit, path] as const,
   file: (projectId: string, repositoryId: string, commit: string, path: string) =>
     ['project', projectId, 'repository', repositoryId, 'file', commit, path] as const,
+  branches: (projectId: string, repositoryId: string) => ['project', projectId, 'repository', repositoryId, 'branches'] as const,
+  commits: (projectId: string, repositoryId: string, ref: string) =>
+    ['project', projectId, 'repository', repositoryId, 'commits', ref] as const,
 };
 
 export const projectsApi = {
@@ -63,6 +70,16 @@ export const projectsApi = {
   /** FR-PRJ-05: файл как текст (усечённый до max_bytes) или признак бинарного содержимого. */
   file(projectId: string, repositoryId: string, query: RepositoryFileQuery, signal?: AbortSignal): Promise<JsonResponse<'getRepositoryFile', 200>> {
     return request({ method: 'GET', path: `/projects/${seg(projectId)}/repositories/${seg(repositoryId)}/file`, query, signal });
+  },
+
+  /** OQ-45 (c): локальные ветки (ветка по умолчанию — первой). */
+  branches(projectId: string, repositoryId: string, query: RepositoryBranchesQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listRepositoryBranches', 200>> {
+    return request({ method: 'GET', path: `/projects/${seg(projectId)}/repositories/${seg(repositoryId)}/branches`, query, signal });
+  },
+
+  /** OQ-45 (c): история от ветки/SHA (без commit — HEAD ветки по умолчанию), глубина ≤ 1000. */
+  commits(projectId: string, repositoryId: string, query: RepositoryCommitsQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listRepositoryCommits', 200>> {
+    return request({ method: 'GET', path: `/projects/${seg(projectId)}/repositories/${seg(repositoryId)}/commits`, query, signal });
   },
 
   technologies(projectId: string, query: ListTechnologiesQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listTechnologies', 200>> {

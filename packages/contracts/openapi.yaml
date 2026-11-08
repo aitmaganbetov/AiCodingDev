@@ -26,6 +26,8 @@ tags:
 - {name: approvals}
 - {name: documentation}
 - {name: audit}
+- {name: analytics}
+- {name: github}
 paths:
   /auth/login:
     post:
@@ -208,6 +210,130 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: workspace:create
       x-audit-action: workspace.create
+  /workspaces/{workspace_id}:
+    get:
+      operationId: getWorkspace
+      summary: Workspace с настройками и версией [дополнение к ТЗ]
+      tags: [workspaces]
+      description: 'Название, slug, роль текущего пользователя, настройки (`WorkspaceSettings`) и `version` (ETag `"v<version>"`).
+        Не член workspace ⇒ 404 (OQ-45 (f)).'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Workspace'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: member:read
+      x-audit-action: none
+      x-tz-addition: true
+    patch:
+      operationId: updateWorkspace
+      summary: Изменить название и политики workspace [дополнение к ТЗ]
+      tags: [workspaces]
+      description: 'Merge-patch: отсутствующее поле не меняется. `name` — owner/admin (`workspace:update`); `settings.allow_single_member_self_approval`
+        — только owner (SECURITY_ARCHITECTURE §11, иначе 403 и `authz.denied`). `If-Match` обязателен (428/412). Аудит `workspace.update`
+        (metadata `changed` — имена полей, `from`/`to` для политик) и `policy.changed` при изменении политики.'
+      parameters:
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/WorkspaceId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WorkspaceUpdateRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Workspace'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: workspace:update
+      x-permission-depends-on: settings
+      x-audit-action: workspace.update
+      x-tz-addition: true
+  /workspaces/{workspace_id}/events:
+    get:
+      operationId: streamWorkspaceEvents
+      summary: SSE-поток уведомлений workspace (approvals, статусы run) [дополнение к ТЗ]
+      tags: [workspaces]
+      description: 'Уведомления workspace (API_DESIGN §13.1, EVENT_SCHEMAS §5.1): события `approval.requested`, `approval.decided`,
+        `run.state_changed`, `run.completed` всех run workspace из `run_event_log`. Кадр: `id: <cursor>` (UTC-время записи события в
+        журнал, микросекунды epoch), `event: <type>`, `data: SseEnvelope` (поле `seq` — номер события в его run). Возобновление —
+        `Last-Event-ID`: сервер повторяет события с перекрытием 60 с, клиент обязан дедуплицировать по `event_id`. Без `Last-Event-ID`
+        — с текущего момента (минус перекрытие); состояние экрана клиент берёт из REST. Курсор старше 24 ч ⇒ 410 (перечитать REST и
+        подключиться без Last-Event-ID). Heartbeat каждые 15 с без `id:`. Доступ проверяется при подключении, каждые 60 с и по сигналу
+        отзыва; лимиты — общие с потоками run (5 на пользователя, 30 мин). Approvals вне run (`DOCS_DOWNLOAD` без run) в поток не попадают.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceId'}
+      - name: Last-Event-ID
+        in: header
+        schema: {type: string, pattern: '^[0-9]{1,19}$'}
+        description: '`id:` последнего полученного кадра (курсор потока workspace)'
+      - name: types
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/WorkspaceSseEventType'}
+        description: Фильтр типов (heartbeat всегда)
+      responses:
+        '200':
+          description: 'text/event-stream. Кадры: `id: <cursor>`, `event: <type>`, `data: <SseEnvelope JSON>`; heartbeat каждые 15 с; `retry: 3000`.'
+          content:
+            text/event-stream:
+              schema: {type: string}
+              x-sse-event-schema: {$ref: '#/components/schemas/WorkspaceSseEvent'}
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+            X-Accel-Buffering:
+              schema: {type: string, const: 'no'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '410':
+          description: 410 replay_window_exceeded — курсор старше окна повтора; перечитать состояние REST и подключиться без Last-Event-ID
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: sse.connect
+      x-tz-addition: true
   /workspaces/{workspace_id}/members:
     get:
       operationId: listMembers
@@ -603,6 +729,80 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/RepositoryFile'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/repositories/{repository_id}/branches:
+    get:
+      operationId: listRepositoryBranches
+      summary: Ветки репозитория (Repository Explorer, FR-PRJ-05) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Локальные ветки (`refs/heads/`) локальной копии репозитория: имя, commit, время commit. Ветка по умолчанию — первой,
+        остальные — по времени commit (новые первыми), затем по имени. Имена, не проходящие проверку имени ветки, не отображаются. Не
+        более 1000 веток (`truncated: true`, если больше). Курсор привязан к снимку списка. 409 — у репозитория нет локальной копии.'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RepositoryBranchPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/repositories/{repository_id}/commits:
+    get:
+      operationId: listRepositoryCommits
+      summary: Последние commit ветки или от commit (Repository Explorer, FR-PRJ-05) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'История от `commit` (ветка или SHA; без параметра — HEAD ветки по умолчанию, как у listRepositoryTree) в порядке git
+        log (первым — сам commit). Поля: SHA, родители, имя автора (email не отдаётся), время автора/commit, первая строка сообщения
+        (≤ 500 символов, секреты редактируются). Глубина обхода — не более 1000 commit от начала (`next_cursor: null` дальше). Курсор
+        фиксирует разрешённый SHA: сдвиг ветки не смешивает страницы.'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      - {$ref: '#/components/parameters/RepositoryCommit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RepositoryCommitPage'}
           headers:
             RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
             RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
@@ -1749,6 +1949,50 @@ paths:
       - cookieAuth: []
       x-required-permission: quality:read
       x-audit-action: none
+  /runs/{run_id}/evidence:
+    get:
+      operationId: listRunEvidence
+      summary: Все evidence run [дополнение к ТЗ]
+      tags: [evidence]
+      description: 'Evidence run (`evidence.run_id`) в порядке создания (keyset по `created_at`, `id`), с фильтрами по статусу проверки,
+        задаче и виду. Используется экранами качества и compliance для выбора доказательств (OQ-45 (c)). Чужой run ⇒ 404.'
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - name: verification_status
+        in: query
+        schema: {$ref: '#/components/schemas/EvidenceVerificationStatus'}
+      - name: task_id
+        in: query
+        schema: {type: string, format: uuid}
+        description: Только evidence этой задачи
+      - name: kind
+        in: query
+        schema: {type: string, minLength: 1, maxLength: 64}
+        description: Вид evidence (`Evidence.kind`), точное совпадение
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidencePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: evidence:read
+      x-audit-action: none
+      x-tz-addition: true
   /runs/{run_id}/findings:
     get:
       operationId: listRunFindings
@@ -1981,6 +2225,43 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: provider:probe
       x-audit-action: provider.probe_requested
+  /providers/{provider_id}/probes/{probe_request_id}:
+    get:
+      operationId: getProviderProbe
+      summary: Статус запроса проверки провайдера [дополнение к ТЗ]
+      tags: [providers]
+      description: '`ProbeAccepted.status_url`. `PENDING` — запрос принят, worker-exec ещё не записал результат; `COMPLETED` — установка
+        проверена (результат — `installation`, тот же вид, что в `GET /providers`); `FAILED` — проверка не выполнена (`error_category`);
+        `EXPIRED` — результата нет дольше 15 мин (нет живого worker-exec). Запрос другого workspace или другого провайдера ⇒ 404.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      - name: probe_request_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProviderProbeStatus'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: provider:read
+      x-audit-action: none
+      x-tz-addition: true
   /providers/{provider_id}/settings:
     patch:
       operationId: updateProviderSettings
@@ -2135,6 +2416,44 @@ paths:
       x-required-permission: approval:decide
       x-audit-action: approval.decide
       x-permission-depends-on: action_type
+  /technologies:
+    get:
+      operationId: listWorkspaceTechnologies
+      summary: Технологии workspace (стек проектов и источники документации) [дополнение к ТЗ]
+      tags: [documentation]
+      description: 'Версии технологий, определённые в любом проекте workspace или указанные в его источниках документации (без
+        глобального каталога других workspace). `project_count`, `source_count` — число проектов и источников workspace с этой версией.
+        Сортировка (ecosystem, name, technology_version_id), cursor-пагинация (OQ-45 (c)).'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: q
+        in: query
+        schema: {type: string, minLength: 1, maxLength: 100}
+        description: Подстрока имени технологии (без учёта регистра)
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkspaceTechnologyPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: documentation:read
+      x-audit-action: none
+      x-tz-addition: true
   /documentation/sources:
     get:
       operationId: listDocumentationSources
@@ -2287,6 +2606,341 @@ paths:
       - cookieAuth: []
       x-required-permission: audit:read
       x-audit-action: audit.query
+  /analytics/summary:
+    get:
+      operationId: getAnalyticsSummary
+      summary: Сводка Analytics workspace за окно времени [дополнение к ТЗ]
+      tags: [analytics]
+      description: 'Экран Analytics (ТЗ §11, FR-OBS-05) и метрики ТЗ §16: run success rate, verified completion rate, retry count, task
+        latency, gate failures, использование и ограничения провайдеров CLI, review loops, agent message count, approval wait time, размер
+        Context Pack, доля stale-фрагментов и полезность контекста (FR-CI-08). Агрегаты считаются из БД под RLS workspace; межтенантной
+        агрегации нет. Окно — по времени создания run (задачи/gates — по завершению, approvals — по запросу); по умолчанию последние 30
+        дней, не больше 366. Токены CLI — только достоверно сообщённые CLI (иначе tokens.total = null, UI показывает «unknown»).'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: from
+        in: query
+        description: Начало окна (включительно), UTC ISO 8601. По умолчанию to − 30 дней.
+        schema: {type: string, format: date-time}
+      - name: to
+        in: query
+        description: Конец окна (не включая), UTC ISO 8601. По умолчанию — текущее время.
+        schema: {type: string, format: date-time}
+      - name: project_id
+        in: query
+        description: Только run этого проекта (проект другого workspace ⇒ 404).
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AnalyticsSummary'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+      x-tz-addition: true
+  /integrations/github/installations:
+    get:
+      operationId: listGitHubInstallations
+      summary: Установки GitHub App workspace (FR-GH-01) [дополнение к ТЗ]
+      tags: [github]
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubInstallationList'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: github:read
+      x-audit-action: none
+      x-tz-addition: true
+    post:
+      operationId: connectGitHubInstallation
+      summary: Подключить установку GitHub App к workspace (P8-02) [дополнение к ТЗ]
+      tags: [github]
+      description: 'Вызывается UI со страницы Setup URL App с installation_id и state из startGitHubInstallation. Сервер проверяет state
+        (HMAC, workspace и пользователь сессии, срок, однократность), читает установку через GitHub API (JWT App) и отклоняет установки,
+        права которых шире минимального набора App или содержат workflows/administration/secrets/environments/actions (SC-GH-04) ⇒ 422.
+        Установка другого workspace ⇒ 409. Повторное подключение REVOKED-установки этого workspace — реактивация.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GitHubInstallationConnectRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubInstallation'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: github:manage
+      x-audit-action: github.installation.connect
+      x-tz-addition: true
+  /integrations/github/installations/setup:
+    post:
+      operationId: startGitHubInstallation
+      summary: Начать установку GitHub App (state + URL установки) [дополнение к ТЗ]
+      tags: [github]
+      description: state — HMAC-токен, привязанный к workspace и пользователю сессии, однократный, срок 10 мин (защита от CSRF/подмены
+        установки). 503 — GitHub App не настроен.
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubInstallationSetup'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: github:manage
+      x-audit-action: none
+      x-tz-addition: true
+  /integrations/github/installations/{github_installation_id}:
+    delete:
+      operationId: disconnectGitHubInstallation
+      summary: Отключить установку GitHub App от workspace [дополнение к ТЗ]
+      tags: [github]
+      description: Статус REVOKED (строка сохраняется для истории PR); новые PR и merge через неё невозможны. Вебхук не реактивирует
+        отключённую установку.
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/GitHubInstallationRef'}
+      responses:
+        '204':
+          description: Отключена
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: github:manage
+      x-audit-action: github.installation.disconnect
+      x-tz-addition: true
+  /integrations/github/webhook:
+    post:
+      operationId: receiveGitHubWebhook
+      summary: Приём вебхуков GitHub (FR-GH-02, SC-GH-01…03) [дополнение к ТЗ]
+      tags: [github]
+      security: []
+      description: 'Без сессии и CSRF. X-Hub-Signature-256 = HMAC-SHA256(webhook secret, сырое тело) проверяется до разбора JSON
+        (constant-time, два секрета на время ротации); неверная/отсутствующая подпись ⇒ 401 и запись REJECTED без payload. Дедупликация
+        по X-GitHub-Delivery ⇒ повтор 200 duplicate без обработки. Событие вне allowlist ⇒ 202 ignored. Тело ≤ 25 MiB (413).
+        Payload — подсказка: обработчик перечитывает состояние через GitHub API. Обработка асинхронна (outbox).'
+      parameters:
+      - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, maxLength: 64}}
+      - {name: X-GitHub-Delivery, in: header, required: true, schema: {type: string, maxLength: 64}}
+      - {name: X-Hub-Signature-256, in: header, required: false, schema: {type: string, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200':
+          description: Повторная доставка (дедупликация, без обработки)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubWebhookAck'}
+        '202':
+          description: Принято к обработке или проигнорировано (событие вне allowlist)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubWebhookAck'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413':
+          description: 413 payload_too_large
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '415':
+          description: 415 unsupported_media_type (вебхук должен быть настроен с content type application/json)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: public
+      x-audit-action: github.webhook.received
+      x-tz-addition: true
+  /runs/{run_id}/pull-requests:
+    post:
+      operationId: requestPullRequest
+      summary: Открыть PR в GitHub из проверенного результата run (FR-GH-03, P8-04) [дополнение к ТЗ]
+      tags: [github]
+      description: 'Только COMPLETED run, репозиторий которого привязан к активной установке GitHub App; источник — последний worktree
+        задачи SUCCEEDED с коммитом, на котором есть PASS gate (несколько задач с изменениями ⇒ task_id обязателен, 422). Изменения
+        CI-конфигурации (.github/workflows/** и аналоги) без APPROVED MANUAL_REVIEW ⇒ 403 policy_denied + approval_id (approval создаётся).
+        Внешние действия (push ветки aicd/*, создание PR, ревью-комментарий с итогами gates, commit status aicd/verification)
+        исполняет воркер через ledger external_actions; повтор/сбой не создаёт второй PR.'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/RunId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PullRequestCreateRequest'}
+      responses:
+        '202':
+          description: Запрос принят (исполняется воркером)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PullRequestJob'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: pull_request:create
+      x-audit-action: github.pr.request
+      x-tz-addition: true
+  /projects/{project_id}/pull-requests:
+    get:
+      operationId: listPullRequests
+      summary: PR проекта в GitHub [дополнение к ТЗ]
+      tags: [github]
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {name: run_id, in: query, schema: {type: string, format: uuid}}
+      - {name: state, in: query, schema: {$ref: '#/components/schemas/PullRequestState'}}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PullRequestPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: github:read
+      x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/pull-requests/{pull_request_id}/merge-request:
+    post:
+      operationId: requestPullRequestMerge
+      summary: Запросить merge PR (approval MERGE, AC-13) [дополнение к ТЗ]
+      tags: [github]
+      description: 'Создаёт approval MERGE (admin, four-eyes: инициатор не может утвердить) на конкретный предмет — PR, head SHA,
+        базовая ветка, метод. После APPROVED воркер перечитывает PR и защиту ветки через GitHub API и выполняет merge только при
+        выполненных required checks и mergeable_state без обхода branch protection и без admin merge; head SHA сдвинулся ⇒ нужен новый
+        approval. Повтор для того же предмета возвращает тот же PENDING approval.'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/PullRequestId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PullRequestMergeRequest'}
+      responses:
+        '202':
+          description: Approval MERGE запрошен
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PullRequestMergeAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: pull_request:merge
+      x-audit-action: github.pr.merge_request
+      x-tz-addition: true
 components:
   securitySchemes:
     cookieAuth: {type: apiKey, in: cookie, name: aicd_session, description: 'Серверная сессия (ADR-0009), HttpOnly, Secure, SameSite=Strict'}
@@ -2401,6 +3055,17 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    GitHubInstallationRef:
+      name: github_installation_id
+      in: path
+      required: true
+      description: id строки установки в платформе (не числовой installation_id GitHub)
+      schema: {type: string, format: uuid}
+    PullRequestId:
+      name: pull_request_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
   headers:
     ETag:
       description: Сильный ETag "v<version>"
@@ -2492,6 +3157,304 @@ components:
       headers:
         Retry-After: {$ref: '#/components/headers/RetryAfter'}
   schemas:
+    GitHubInstallation:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        installation_id: {type: integer, minimum: 1}
+        account_login: {type: string}
+        account_type: {type: string, enum: [user, organization]}
+        repository_selection: {type: string, enum: [all, selected]}
+        permissions:
+          type: object
+          additionalProperties: {type: string}
+          description: Права установки (подмножество минимального набора App, SC-GH-04)
+        status: {type: string, enum: [ACTIVE, SUSPENDED, REVOKED]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+      required: [id, installation_id, account_login, account_type, repository_selection, permissions, status, created_at, updated_at]
+    GitHubInstallationList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/GitHubInstallation'}
+      required: [items]
+    GitHubInstallationSetup:
+      type: object
+      properties:
+        install_url: {type: string, description: URL установки App на GitHub со state}
+        state: {type: string}
+        expires_at: {type: string, format: date-time}
+      required: [install_url, state, expires_at]
+    GitHubInstallationConnectRequest:
+      type: object
+      properties:
+        installation_id: {type: integer, minimum: 1, maximum: 9007199254740992}
+        state: {type: string, minLength: 1, maxLength: 1024}
+        setup_action: {type: string, enum: [install, update]}
+      required: [installation_id, state]
+      additionalProperties: false
+    GitHubWebhookAck:
+      type: object
+      properties:
+        status: {type: string, enum: [accepted, ignored, duplicate]}
+      required: [status]
+    PullRequestState:
+      type: string
+      enum: [OPEN, CLOSED, MERGED]
+    PullRequest:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        repository_id: {type: string, format: uuid}
+        repository_full_name: {type: string}
+        run_id:
+          type: [string, 'null']
+          format: uuid
+        pr_number: {type: integer, minimum: 1}
+        url: {type: string}
+        state: {$ref: '#/components/schemas/PullRequestState'}
+        head_branch: {type: string}
+        base_branch: {type: string}
+        head_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        merged_commit_sha:
+          type: [string, 'null']
+        create_action_id:
+          type: [string, 'null']
+          format: uuid
+        merge_action_id:
+          type: [string, 'null']
+          format: uuid
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        merged_at:
+          type: [string, 'null']
+          format: date-time
+        closed_at:
+          type: [string, 'null']
+          format: date-time
+      required: [id, project_id, repository_id, repository_full_name, run_id, pr_number, url, state, head_branch, base_branch,
+        head_sha, merged_commit_sha, create_action_id, merge_action_id, created_at, updated_at, merged_at, closed_at]
+    PullRequestPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/PullRequest'}
+        next_cursor:
+          type: [string, 'null']
+      required: [items, next_cursor]
+    PullRequestCreateRequest:
+      type: object
+      properties:
+        task_id: {type: string, format: uuid, description: Обязателен, если в run несколько задач с изменениями}
+        base_branch: {type: string, minLength: 1, maxLength: 255, pattern: '^[A-Za-z0-9._/-]+$', description: По умолчанию — ветка по умолчанию
+            репозитория}
+        title: {type: string, minLength: 1, maxLength: 256, pattern: '^[^\x00-\x1f\x7f]+$', description: 'Без управляющих символов'}
+      additionalProperties: false
+    PullRequestJob:
+      type: object
+      properties:
+        run_id: {type: string, format: uuid}
+        task_id: {type: string, format: uuid}
+        repository_id: {type: string, format: uuid}
+        repository_full_name: {type: string}
+        head_branch: {type: string}
+        head_sha: {type: string}
+        base_branch: {type: string}
+        title: {type: string}
+        status: {type: string, enum: [QUEUED]}
+      required: [run_id, task_id, repository_id, repository_full_name, head_branch, head_sha, base_branch, title, status]
+    PullRequestMergeRequest:
+      type: object
+      properties:
+        merge_method: {type: string, enum: [merge, squash, rebase], default: merge}
+      additionalProperties: false
+    PullRequestMergeAccepted:
+      type: object
+      properties:
+        pull_request_id: {type: string, format: uuid}
+        approval_id: {type: string, format: uuid}
+        status: {type: string, enum: [AWAITING_APPROVAL]}
+      required: [pull_request_id, approval_id, status]
+    AnalyticsRate:
+      type: [number, 'null']
+      minimum: 0
+      maximum: 1
+      description: Доля 0..1; null — знаменатель равен нулю (нет данных).
+    AnalyticsDurationStats:
+      type: object
+      properties:
+        p50: {type: [number, 'null'], minimum: 0}
+        p90: {type: [number, 'null'], minimum: 0}
+        avg: {type: [number, 'null'], minimum: 0}
+      required: [p50, p90, avg]
+      description: Секунды; null — нет завершённых элементов в окне.
+    AnalyticsSummary:
+      type: object
+      properties:
+        window:
+          type: object
+          properties:
+            from: {type: string, format: date-time}
+            to: {type: string, format: date-time}
+          required: [from, to]
+        project_id: {type: [string, 'null'], format: uuid}
+        runs:
+          type: object
+          properties:
+            total: {type: integer, minimum: 0}
+            finished: {type: integer, minimum: 0}
+            completed: {type: integer, minimum: 0}
+            success_rate: {$ref: '#/components/schemas/AnalyticsRate'}
+            by_status:
+              type: object
+              additionalProperties: {type: integer, minimum: 0}
+              description: Ключи — RunStatus.
+            duration_seconds: {$ref: '#/components/schemas/AnalyticsDurationStats'}
+            by_mode:
+              type: array
+              description: Время и исход по режиму run (cost/time per mode; стоимость в деньгах CLI не сообщают).
+              items:
+                type: object
+                properties:
+                  mode: {$ref: '#/components/schemas/RunMode'}
+                  total: {type: integer, minimum: 0}
+                  finished: {type: integer, minimum: 0}
+                  completed: {type: integer, minimum: 0}
+                  success_rate: {$ref: '#/components/schemas/AnalyticsRate'}
+                  avg_duration_seconds: {type: [number, 'null'], minimum: 0}
+                required: [mode, total, finished, completed, success_rate, avg_duration_seconds]
+          required: [total, finished, completed, success_rate, by_status, duration_seconds, by_mode]
+        daily:
+          type: array
+          maxItems: 400
+          items:
+            type: object
+            properties:
+              date: {type: string, format: date}
+              runs_created: {type: integer, minimum: 0}
+              runs_completed: {type: integer, minimum: 0}
+              runs_failed: {type: integer, minimum: 0}
+              runs_cancelled: {type: integer, minimum: 0}
+            required: [date, runs_created, runs_completed, runs_failed, runs_cancelled]
+        tasks:
+          type: object
+          properties:
+            attempts: {type: integer, minimum: 0}
+            succeeded: {type: integer, minimum: 0}
+            failed: {type: integer, minimum: 0}
+            retries: {type: integer, minimum: 0, description: Попытки с attempt_no > 1 (retry count).}
+            verified_completion_rate: {$ref: '#/components/schemas/AnalyticsRate'}
+            tasks_finished: {type: integer, minimum: 0}
+            latency_seconds: {$ref: '#/components/schemas/AnalyticsDurationStats'}
+            by_role:
+              type: array
+              items:
+                type: object
+                properties:
+                  role: {type: string}
+                  attempts: {type: integer, minimum: 0}
+                  succeeded: {type: integer, minimum: 0}
+                  failed: {type: integer, minimum: 0}
+                  retries: {type: integer, minimum: 0}
+                  verified_completion_rate: {$ref: '#/components/schemas/AnalyticsRate'}
+                required: [role, attempts, succeeded, failed, retries, verified_completion_rate]
+          required: [attempts, succeeded, failed, retries, verified_completion_rate, tasks_finished, latency_seconds, by_role]
+        gates:
+          type: array
+          items:
+            type: object
+            properties:
+              gate_type: {type: string}
+              total: {type: integer, minimum: 0}
+              passed: {type: integer, minimum: 0}
+              failed: {type: integer, minimum: 0}
+              errored: {type: integer, minimum: 0}
+              skipped: {type: integer, minimum: 0, description: SKIPPED/NOT_APPLICABLE — не входят в pass_rate (SKIPPED ≠ PASS).}
+              pass_rate: {$ref: '#/components/schemas/AnalyticsRate'}
+              avg_duration_seconds: {type: [number, 'null'], minimum: 0}
+            required: [gate_type, total, passed, failed, errored, skipped, pass_rate, avg_duration_seconds]
+        providers:
+          type: array
+          items:
+            type: object
+            properties:
+              provider: {type: string}
+              executions: {type: integer, minimum: 0}
+              collected: {type: integer, minimum: 0}
+              errors: {type: integer, minimum: 0, description: TIMED_OUT + CRASHED}
+              rate_limited: {type: integer, minimum: 0}
+              auth_required: {type: integer, minimum: 0}
+              cancelled: {type: integer, minimum: 0}
+              in_progress: {type: integer, minimum: 0}
+              success_rate: {$ref: '#/components/schemas/AnalyticsRate'}
+              avg_duration_seconds: {type: [number, 'null'], minimum: 0}
+              failures_by_category:
+                type: object
+                additionalProperties: {type: integer, minimum: 0}
+              tokens:
+                type: object
+                properties:
+                  total: {type: [integer, 'null'], minimum: 0, description: Сумма токенов, сообщённых CLI; null — CLI не сообщали.}
+                  source: {type: string, enum: [cli_reported, not_exposed_by_cli, mixed]}
+                  executions_reported: {type: integer, minimum: 0}
+                required: [total, source, executions_reported]
+            required: [provider, executions, collected, errors, rate_limited, auth_required, cancelled, in_progress, success_rate,
+              avg_duration_seconds, failures_by_category, tokens]
+        review_loops:
+          type: object
+          properties:
+            review_requests: {type: integer, minimum: 0}
+            fix_requests: {type: integer, minimum: 0}
+            review_chains: {type: integer, minimum: 0, description: Цепочки correlation_id с REVIEW_REQUEST.}
+            chains_with_fixes: {type: integer, minimum: 0}
+            avg_fix_rounds: {type: [number, 'null'], minimum: 0}
+            max_fix_rounds: {type: integer, minimum: 0}
+            loops_exhausted: {type: integer, minimum: 0, description: Задачи в BLOCKED(REVIEW_LOOP_EXHAUSTED), обновлённые в окне.}
+          required: [review_requests, fix_requests, review_chains, chains_with_fixes, avg_fix_rounds, max_fix_rounds, loops_exhausted]
+        agent_messages:
+          type: object
+          properties:
+            total: {type: integer, minimum: 0}
+            by_type:
+              type: object
+              additionalProperties: {type: integer, minimum: 0}
+              description: Ключи — тип ACP-сообщения.
+          required: [total, by_type]
+        approvals:
+          type: object
+          properties:
+            requested: {type: integer, minimum: 0}
+            pending: {type: integer, minimum: 0}
+            by_status:
+              type: object
+              additionalProperties: {type: integer, minimum: 0}
+            wait_seconds: {$ref: '#/components/schemas/AnalyticsDurationStats'}
+          required: [requested, pending, by_status, wait_seconds]
+        context:
+          type: object
+          properties:
+            packs: {type: integer, minimum: 0}
+            avg_size_bytes: {type: [number, 'null'], minimum: 0}
+            max_size_bytes: {type: [integer, 'null'], minimum: 0}
+            fragments: {type: integer, minimum: 0}
+            stale_fragment_ratio: {$ref: '#/components/schemas/AnalyticsRate'}
+            usefulness:
+              type: object
+              description: 'FR-CI-08: доля уникальных путей фрагментов Context Pack, на которые сослались заявления итога попыток,
+                подтверждённых платформой (SUCCEEDED после обязательных gates).'
+              properties:
+                rate: {$ref: '#/components/schemas/AnalyticsRate'}
+                packs_evaluated: {type: integer, minimum: 0}
+                fragments_referenced: {type: integer, minimum: 0}
+                fragments_total: {type: integer, minimum: 0}
+                truncated: {type: boolean, description: Оценено не больше 2000 последних пакетов окна.}
+              required: [rate, packs_evaluated, fragments_referenced, fragments_total, truncated]
+          required: [packs, avg_size_bytes, max_size_bytes, fragments, stale_fragment_ratio, usefulness]
+      required: [window, project_id, runs, daily, tasks, gates, providers, review_loops, agent_messages, approvals, context]
     RunMode:
       type: string
       enum: [CREATE, DEVELOP, DEBUG, AUDIT, MODERNIZE, SECURITY, OPTIMIZE, TEST, MAINTAIN, DOCUMENT, REVIEW]
@@ -2791,9 +3754,37 @@ components:
         name: {type: string}
         slug: {type: string}
         role: {$ref: '#/components/schemas/WorkspaceRole'}
-        settings: {type: object}
+        settings: {$ref: '#/components/schemas/WorkspaceSettings'}
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 'Версия для If-Match (ETag `"v<version>"`); присутствует в ответах getWorkspace/updateWorkspace/createWorkspace'
         created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
       required: [id, name, slug, role, created_at]
+    WorkspaceSettings:
+      type: object
+      properties:
+        allow_single_member_self_approval:
+          type: boolean
+          description: 'Исключение four-eyes для workspace с единственным участником (API_DESIGN §5.3); по умолчанию false. Меняет только
+            owner.'
+      additionalProperties: true
+      description: Настройки и политики workspace; неизвестные ключи клиент игнорирует (API_DESIGN §16).
+    WorkspaceUpdateRequest:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        settings: {$ref: '#/components/schemas/WorkspaceSettingsUpdate'}
+      minProperties: 1
+      additionalProperties: false
+      description: Merge-patch workspace (OQ-45 (f)); slug неизменяем.
+    WorkspaceSettingsUpdate:
+      type: object
+      properties:
+        allow_single_member_self_approval: {type: boolean}
+      minProperties: 1
+      additionalProperties: false
     WorkspaceCreateRequest:
       type: object
       properties:
@@ -2976,6 +3967,57 @@ components:
           type: [string, 'null']
           description: Текст файла (усечённый при truncated); null для бинарного файла. Отображается только как текст.
       required: [repository_id, commit_sha, path, type, mode, size, max_bytes, truncated, is_binary, encoding, content]
+    RepositoryBranch:
+      type: object
+      properties:
+        name: {type: string, description: Имя ветки без refs/heads/}
+        commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        committed_at:
+          type: [string, 'null']
+          format: date-time
+        is_default: {type: boolean}
+      required: [name, commit_sha, committed_at, is_default]
+    RepositoryBranchPage:
+      type: object
+      properties:
+        repository_id: {type: string, format: uuid}
+        default_branch: {type: string}
+        truncated: {type: boolean, description: В репозитории больше веток, чем отображается (лимит 1000)}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RepositoryBranch'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [repository_id, default_branch, truncated, items, next_cursor]
+    RepositoryCommitSummary:
+      type: object
+      properties:
+        sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        parents:
+          type: array
+          items: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        author_name: {type: string, maxLength: 200}
+        authored_at:
+          type: [string, 'null']
+          format: date-time
+        committed_at:
+          type: [string, 'null']
+          format: date-time
+        subject: {type: string, maxLength: 500, description: Первая строка сообщения commit (секреты редактируются); только текст}
+      required: [sha, parents, author_name, authored_at, committed_at, subject]
+    RepositoryCommitPage:
+      type: object
+      properties:
+        repository_id: {type: string, format: uuid}
+        commit_sha: {type: string, description: Полный SHA, от которого строится история}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RepositoryCommitSummary'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки (или лимит глубины 1000).
+      required: [repository_id, commit_sha, items, next_cursor]
     RepositoryPage:
       type: object
       properties:
@@ -2996,7 +4038,8 @@ components:
         default_branch: {type: string, maxLength: 255}
       required: [provider]
       additionalProperties: false
-      description: provider=local требует local_path; provider=github требует remote_url и установленный GitHub App.
+      description: 'provider=local требует local_path; provider=github (P8-02, FR-PRJ-03) требует remote_url, local_path (локальная рабочая
+        копия в allowlist-корнях) и активную установку GitHub App workspace с доступом к репозиторию (проверяется через GitHub API).'
     Technology:
       type: object
       properties:
@@ -3025,6 +4068,30 @@ components:
           description: Opaque base64url cursor; null — конец выборки.
       required: [items, next_cursor]
       description: Страница Technology (cursor pagination).
+    WorkspaceTechnology:
+      type: object
+      properties:
+        technology_id: {type: string, format: uuid}
+        name: {type: string}
+        ecosystem: {type: string}
+        technology_version_id: {type: string, format: uuid}
+        version_label: {type: string}
+        support_status:
+          type: [string, 'null']
+        project_count: {type: integer, minimum: 0, description: Проекты workspace с этой версией в определённом стеке}
+        source_count: {type: integer, minimum: 0, description: Источники документации workspace для этой версии}
+      required: [technology_id, name, ecosystem, technology_version_id, version_label, support_status, project_count, source_count]
+    WorkspaceTechnologyPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/WorkspaceTechnology'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница WorkspaceTechnology (cursor pagination).
     DocumentationPolicy:
       type: object
       properties:
@@ -3313,7 +4380,7 @@ components:
           type: [string, 'null']
           format: uuid
         schema_version: {type: string}
-        payload: {type: object, description: Типизированный payload ACP (AGENT_COMMUNICATION_PROTOCOL.md); ≤ 32 KiB}
+        payload: {type: object, additionalProperties: true, description: Типизированный payload ACP (AGENT_COMMUNICATION_PROTOCOL.md); ≤ 32 KiB}
         created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
       required: [message_id, protocol, run_id, from, to, type, schema_version, payload, created_at]
     AcpMessagePage:
@@ -4072,7 +5139,7 @@ components:
         compatibility: {$ref: '#/components/schemas/CompatibilityStatus'}
         auth_status: {$ref: '#/components/schemas/AuthStatus'}
         availability: {$ref: '#/components/schemas/ProviderAvailability'}
-        capabilities: {type: object, description: Результат feature detection (probe)}
+        capabilities: {type: object, additionalProperties: true, description: Результат feature detection (probe)}
         last_error_category:
           oneOf:
           - {$ref: '#/components/schemas/CliErrorCode'}
@@ -4135,8 +5202,32 @@ components:
         provider_id: {type: string, format: uuid}
         probe_request_id: {type: string, format: uuid}
         accepted_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
-        status_url: {type: string}
+        status_url: {type: string, description: 'URL статуса запроса: /api/v1/providers/{provider_id}/probes/{probe_request_id} (getProviderProbe)'}
       required: [provider_id, probe_request_id, accepted_at, status_url]
+    ProviderProbeStatus:
+      type: object
+      properties:
+        probe_request_id: {type: string, format: uuid}
+        provider_id: {type: string, format: uuid}
+        status:
+          type: string
+          enum: [PENDING, COMPLETED, FAILED, EXPIRED]
+          x-proposed-enum: true
+          description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+        requested_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        completed_at:
+          type: [string, 'null']
+          format: date-time
+        installation:
+          oneOf:
+          - {$ref: '#/components/schemas/ProviderInstallation'}
+          - {type: 'null'}
+          description: Проверенная установка (COMPLETED/FAILED); без учётных данных и путей
+        error_category:
+          oneOf:
+          - {$ref: '#/components/schemas/CliErrorCode'}
+          - {type: 'null'}
+      required: [probe_request_id, provider_id, status, requested_at, completed_at, installation, error_category]
     Approval:
       type: object
       properties:
@@ -4280,7 +5371,8 @@ components:
         action: {type: string}
         resource_type: {type: string}
         resource_id: {type: string}
-        metadata: {type: object, description: 'request_id, ip (усечённый), outcome, idempotency_key hash; без секретов'}
+        metadata: {type: object, additionalProperties: true, description: 'request_id, ip (усечённый), outcome, idempotency_key hash;
+            без секретов'}
         created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
       required: [id, workspace_id, actor_type, action, resource_type, resource_id, metadata, created_at]
     AuditEventPage:
@@ -4316,7 +5408,7 @@ components:
         type: {$ref: '#/components/schemas/SseEventType'}
         timestamp: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
         schema_version: {type: string, const: '1.0'}
-        payload: {type: object}
+        payload: {type: object, additionalProperties: true}
       required: [event_id, run_id, seq, type, timestamp, schema_version, payload]
       description: 'data: каждого SSE-события (кроме heartbeat). id: = seq.'
       discriminator:
@@ -4707,3 +5799,23 @@ components:
       - {$ref: '#/components/schemas/SseChatMessage'}
       - {$ref: '#/components/schemas/SseHeartbeat'}
       description: 'Значение поля data: SSE-кадра. event: = type.'
+    WorkspaceSseEventType:
+      type: string
+      enum: [run.state_changed, approval.requested, approval.decided, run.completed]
+      description: Подмножество SseEventType, доставляемое потоком уведомлений workspace (streamWorkspaceEvents).
+    WorkspaceSseHeartbeat:
+      type: object
+      properties:
+        type: {const: heartbeat}
+        workspace_id: {type: string, format: uuid}
+        timestamp: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [type, workspace_id, timestamp]
+      description: 'Каждые 15 с простоя; без id: (не сдвигает Last-Event-ID).'
+    WorkspaceSseEvent:
+      oneOf:
+      - {$ref: '#/components/schemas/SseRunStateChanged'}
+      - {$ref: '#/components/schemas/SseApprovalRequested'}
+      - {$ref: '#/components/schemas/SseApprovalDecided'}
+      - {$ref: '#/components/schemas/SseRunCompleted'}
+      - {$ref: '#/components/schemas/WorkspaceSseHeartbeat'}
+      description: 'Значение поля data: кадра потока workspace (streamWorkspaceEvents). event: = type; id: = курсор потока.'

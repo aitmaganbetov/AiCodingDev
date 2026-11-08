@@ -245,16 +245,17 @@ function EvidencePanel({ runId, workspaceId, gates }: { runId: string; workspace
   const tasks = useQuery({ queryKey: runKeys.tasks(runId), queryFn: ({ signal }) => runsApi.tasks(runId, { limit: 200 }, signal) });
   const [taskId, setTaskId] = useState('');
   const [verification, setVerification] = useState<EvidenceVerificationStatus | ''>('');
-  const query = verification ? { verification_status: verification } : {};
+  // OQ-45 (c): все evidence run одной операцией; задача и статус — необязательные фильтры.
+  const query = { ...(verification ? { verification_status: verification } : {}), ...(taskId ? { task_id: taskId } : {}) };
   const evidence = useInfiniteQuery({
-    queryKey: qualityKeys.taskEvidence(taskId, query),
+    queryKey: qualityKeys.runEvidence(runId, query),
     queryFn: ({ pageParam, signal }) =>
-      qualityApi.taskEvidence(taskId, { ...query, limit: EVIDENCE_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
+      qualityApi.runEvidence(runId, { ...query, limit: EVIDENCE_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
-    enabled: Boolean(taskId),
   });
   const items = evidence.data?.pages.flatMap((p) => p.items) ?? [];
+  const taskTitles = useMemo(() => new Map((tasks.data?.tasks ?? []).map((task) => [task.id, task.title])), [tasks.data]);
   const gateEvidence = gates.filter((g) => g.evidence_id);
 
   return (
@@ -317,9 +318,7 @@ function EvidencePanel({ runId, workspaceId, gates }: { runId: string; workspace
           </div>
         </div>
         {tasks.isError ? <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} /> : null}
-        {!taskId ? (
-          <p className="text-sm text-fg-muted">{t('quality.evidence.chooseTaskHint')}</p>
-        ) : evidence.isPending ? (
+        {evidence.isPending ? (
           <LoadingState label={t('quality.evidence.loading')} />
         ) : evidence.isError && items.length === 0 ? (
           <ErrorState error={evidence.error} onRetry={() => void evidence.refetch()} />
@@ -337,6 +336,11 @@ function EvidencePanel({ runId, workspaceId, gates }: { runId: string; workspace
                       <span className="font-mono text-xs">{e.kind}</span>
                     </TextLink>
                   ),
+                },
+                {
+                  id: 'task',
+                  header: t('quality.evidence.task'),
+                  cell: (e) => (e.task_id ? (taskTitles.get(e.task_id) ?? e.task_id.slice(0, 8)) : t('quality.evidence.runLevel')),
                 },
                 { id: 'producer', header: t('quality.evidence.producer'), cell: (e) => <span className="break-all">{e.producer}</span> },
                 {
@@ -368,9 +372,9 @@ function EvidencePanel({ runId, workspaceId, gates }: { runId: string; workspace
   );
 }
 
-/** Сохранение JSON в файл через object URL (без внешних зависимостей). */
-function saveJson(data: unknown, filename: string): void {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+/** Сохранение текста в файл через object URL (без внешних зависимостей). */
+function saveFile(content: string, type: string, filename: string): void {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -381,33 +385,59 @@ function saveJson(data: unknown, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function saveJson(data: unknown, filename: string): void {
+  saveFile(JSON.stringify(data, null, 2), 'application/json', filename);
+}
+
+type ReportFormat = 'json' | 'markdown';
+
 function ReportPanel({ runId }: { runId: string }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ loading: boolean; error: unknown; artifact: ArtifactRef | null; generatedAt: string | null; disclaimer: string | null }>(
-    { loading: false, error: null, artifact: null, generatedAt: null, disclaimer: null },
-  );
+  const [state, setState] = useState<{
+    loading: ReportFormat | null;
+    error: unknown;
+    artifact: ArtifactRef | null;
+    generatedAt: string | null;
+    disclaimer: string | null;
+    markdownReady: boolean;
+  }>({ loading: null, error: null, artifact: null, generatedAt: null, disclaimer: null, markdownReady: false });
+  // OQ-45 (d): тот же отчёт в text/markdown (Accept) — сервер рендерит и экранирует содержимое; UI только сохраняет файл.
+  const downloadMarkdown = async () => {
+    setState((s) => ({ ...s, loading: 'markdown', error: null }));
+    try {
+      const report = await qualityApi.runReportMarkdown(runId);
+      saveFile(report.text, 'text/markdown;charset=utf-8', report.filename ?? `run-${runId}-report.md`);
+      setState((s) => ({ ...s, loading: null, markdownReady: true }));
+    } catch (error) {
+      setState((s) => ({ ...s, loading: null, error }));
+    }
+  };
   const download = async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
+    setState((s) => ({ ...s, loading: 'json', error: null }));
     try {
       const report = await qualityApi.runReport(runId);
       saveJson(report, `run-${runId}-report.json`);
-      setState({
-        loading: false,
+      setState((s) => ({
+        ...s,
+        loading: null,
         error: null,
         artifact: report.report_artifact ?? null,
         generatedAt: report.generated_at,
         disclaimer: report.disclaimer ?? null,
-      });
+      }));
     } catch (error) {
-      setState((s) => ({ ...s, loading: false, error }));
+      setState((s) => ({ ...s, loading: null, error }));
     }
   };
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-fg-muted">{t('quality.report.description')}</p>
-      <div>
-        <Button variant="primary" loading={state.loading} onClick={() => void download()}>
+      <div className="flex flex-wrap gap-3">
+        <Button variant="primary" loading={state.loading === 'json'} disabled={state.loading !== null} onClick={() => void download()}>
           {t('quality.report.download')}
+        </Button>
+        <Button loading={state.loading === 'markdown'} disabled={state.loading !== null} onClick={() => void downloadMarkdown()}>
+          {t('quality.report.downloadMarkdown')}
         </Button>
       </div>
       <p role="status" className="text-sm text-fg-muted">
@@ -416,6 +446,7 @@ function ReportPanel({ runId }: { runId: string }) {
             {t('quality.report.ready')} <Timestamp value={state.generatedAt} />
           </>
         ) : null}
+        {state.markdownReady ? <span className="ml-2">{t('quality.report.markdownReady')}</span> : null}
       </p>
       {state.error ? (
         <p role="alert" className="text-sm font-medium text-danger-text">

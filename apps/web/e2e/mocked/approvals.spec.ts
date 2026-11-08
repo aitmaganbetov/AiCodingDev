@@ -290,3 +290,54 @@ test('approvals: switching tabs and filters keeps keyboard focus on the control 
   await expect(mine).toBeFocused();
   await expect(page.getByRole('heading', { level: 1, name: 'Одобрения' })).not.toBeFocused();
 });
+
+test('approvals list updates live from the workspace notification stream (no 30 s polling, OQ-45 (c))', async ({ page, api }) => {
+  const { ws, run, approvals } = seed(api);
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/approvals`);
+  const list = page.getByRole('list', { name: 'Ожидающие подтверждения' });
+  await expect(list.getByRole('listitem')).toHaveCount(3);
+  // Мок закрывает поток через 1,5 с (как сервер по max lifetime) — клиент переподключается сам.
+  await expect(page.getByTestId('live-state')).toHaveAttribute('data-state', /^(open|reconnecting|connecting)$/);
+  const listCalls = () => api.requests.filter((r) => r.operationId === 'listApprovals').length;
+  const before = listCalls();
+
+  // Новый approval другого run появляется без перезагрузки: approval.requested в потоке workspace.
+  const other = api.addRun(api.projects.get(ws.id)![0]!, { status: 'RUNNING' });
+  const created = approval({
+    id: '01900000-0000-7000-8000-0000000a0009',
+    workspace_id: ws.id,
+    run_id: other.id,
+    action_type: 'MANUAL_REVIEW',
+    risk_level: 'low',
+    summary: 'Ручная проверка отчёта',
+  });
+  approvals.push(created);
+  api.addWorkspaceEvent(
+    ws.id,
+    'approval.requested',
+    {
+      approval_id: created.id,
+      action_type: 'MANUAL_REVIEW',
+      task_id: null,
+      summary: created.summary,
+      required_role: 'reviewer',
+      requested_by: { type: 'agent', id: null },
+      expires_at: '2026-11-15T09:00:00Z',
+    },
+    other.id,
+  );
+  await expect(list.getByRole('listitem')).toHaveCount(4);
+  expect(listCalls()).toBeGreaterThan(before);
+  const connections = api.workspaceStreamConnections.filter((c) => c.workspaceId === ws.id);
+  expect(connections.length).toBeGreaterThanOrEqual(1);
+  // Переподключение (сервер закрывает поток) идёт с курсором последнего кадра.
+  await expect.poll(() => api.workspaceStreamConnections.some((c) => c.lastEventId !== undefined)).toBe(true);
+  const streamReq = api.requests.find((r) => r.operationId === 'streamWorkspaceEvents');
+  expect(streamReq?.headers.accept).toBe('text/event-stream');
+  expect(run.id).toBeTruthy();
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expectNoSeriousA11yViolations(page, `approvals live (${scheme})`);
+  }
+});

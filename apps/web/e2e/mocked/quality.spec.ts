@@ -175,7 +175,7 @@ function seed(api: MockApi, role: S['WorkspaceRole'] = 'owner') {
     const items = [evidence, bareEvidence].filter((e) => e.task_id === tid && (!v || e.verification_status === v));
     return { status: 200, body: { items, next_cursor: null } };
   });
-  api.route('GET', '/api/v1/runs/{id}/report', 'getRunReport', () => ({
+  const reportJson = (): Reply => ({
     status: 200,
     body: {
       run,
@@ -188,7 +188,21 @@ function seed(api: MockApi, role: S['WorkspaceRole'] = 'owner') {
       disclaimer: 'Автоматические проверки не являются официальной сертификацией.',
       report_artifact: null,
     } satisfies S['RunReport'],
-  }));
+  });
+  // OQ-45 (c): все evidence run одной операцией (фильтры задачи и статуса).
+  api.route('GET', '/api/v1/runs/{id}/evidence', 'listRunEvidence', ({ id: rid, url }) => {
+    if (rid !== run.id) return problem(404, 'not_found');
+    const v = url.searchParams.get('verification_status');
+    const t = url.searchParams.get('task_id');
+    const items = [evidence, bareEvidence].filter((e) => (!t || e.task_id === t) && (!v || e.verification_status === v));
+    return { status: 200, body: { items, next_cursor: null } };
+  });
+  api.route('GET', '/api/v1/runs/{id}/report', 'getRunReport', ({ headers }) =>
+    // OQ-45 (d): тот же отчёт в text/markdown по Accept.
+    (headers.accept ?? '').startsWith('text/markdown')
+      ? { status: 200, raw: `# Отчёт run ${run.id}\n\nАвтоматические проверки не являются официальной сертификацией.\n`, headers: { 'content-type': 'text/markdown; charset=utf-8', Vary: 'Accept' } }
+      : reportJson(),
+  );
   return { ws, project, run, task, findings, transitions, evidence, bareEvidence };
 }
 
@@ -297,9 +311,11 @@ test('quality: reviewer cannot accept risk; FIXED is engine-only; task evidence 
   await expect(page.getByText('Статус выставляет Verification Engine: ручных переходов из него нет.')).toBeVisible();
 
   await page.goto(`/w/${ws.id}/quality/runs/${run.id}?tab=evidence`);
-  await page.getByLabel('Задача').selectOption({ label: 'Реализовать экспорт' });
-  const table = page.getByRole('table', { name: 'Evidence задачи' });
+  // OQ-45 (c): все evidence run видны сразу, задача — необязательный фильтр.
+  const table = page.getByRole('table', { name: 'Evidence запуска' });
   await expect(table.locator('tbody tr')).toHaveCount(2);
+  await page.getByLabel('Задача').selectOption({ label: 'Реализовать экспорт' });
+  await expect.poll(() => api.requests.some((r) => r.operationId === 'listRunEvidence')).toBe(true);
   await page.getByLabel('Проверка').selectOption('VERIFIED');
   await expect(table.locator('tbody tr')).toHaveCount(1);
   await expectNoSeriousA11yViolations(page, 'evidence tab');
@@ -312,6 +328,15 @@ test('quality: reviewer cannot accept risk; FIXED is engine-only; task evidence 
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Скачать отчёт (JSON)' }).click();
   expect((await download).suggestedFilename()).toBe(`run-${run.id}-report.json`);
+  const md = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Скачать отчёт (Markdown)' }).click();
+  const mdFile = await md;
+  expect(mdFile.suggestedFilename()).toBe(`run-${run.id}-report.md`);
+  const text = await (await mdFile.createReadStream()).toArray();
+  expect(Buffer.concat(text).toString('utf8')).toContain(`# Отчёт run ${run.id}`);
+  const mdReq = api.requests.filter((r) => r.operationId === 'getRunReport').at(-1);
+  expect(mdReq?.headers.accept).toMatch(/^text\/markdown/);
+  await expect(page.getByText('Отчёт в Markdown сохранён.')).toBeVisible();
   await expect(page.getByText('Автоматические проверки не являются официальной сертификацией.')).toBeVisible();
   await expectNoSeriousA11yViolations(page, 'report tab');
 });

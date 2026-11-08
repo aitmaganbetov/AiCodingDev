@@ -12,6 +12,7 @@ from aicd_api import errors
 from aicd_api.middleware import BodyLimitMiddleware, request_context_middleware
 from aicd_api.ratelimit import RateLimiter
 from aicd_api.routers import (
+    analytics,
     approvals,
     artifacts,
     audit,
@@ -21,7 +22,9 @@ from aicd_api.routers import (
     documentation,
     events,
     findings,
+    github,
     health,
+    metrics,
     projects,
     providers,
     quality,
@@ -60,6 +63,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            client = getattr(app.state, "aicd_github", None)
+            if client is not None:
+                await client.aclose()
             await redis.aclose()
             await engine.dispose()
 
@@ -72,7 +78,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.middleware("http")(request_context_middleware)
-    app.add_middleware(BodyLimitMiddleware)
+    # Вебхуки GitHub — до 25 MiB (SC-GH-01); остальные тела — 256 KiB (API_DESIGN §6).
+    app.add_middleware(
+        BodyLimitMiddleware, overrides={API_PREFIX + github.WEBHOOK_PATH: settings.github_webhook_max_bytes}
+    )
     errors.install(app)
     for router in (
         health.router,
@@ -80,6 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         workspaces.router,
         projects.router,
         technologies.router,
+        technologies.workspace_router,
         documentation.router,
         providers.router,
         runs.router,
@@ -92,6 +102,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         events.router,
         audit.router,
         artifacts.router,
+        github.router,
+        analytics.router,
     ):
         app.include_router(router, prefix=API_PREFIX)
+    app.include_router(metrics.router)  # /metrics вне /api/v1: только внутренняя сеть (P8-06)
     return app

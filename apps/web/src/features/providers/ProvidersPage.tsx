@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IdempotentIntent } from '../../api/client';
 import {
@@ -9,6 +9,7 @@ import {
   type Provider,
   type ProviderAvailability,
   type ProviderInstallation,
+  type ProviderProbeStatus,
   type ProviderSettings,
   type ProviderSettingsUpdateRequest,
 } from '../../api/providers';
@@ -259,33 +260,77 @@ function SettingsForm({ workspaceId, provider }: { workspaceId: string; provider
   );
 }
 
+/** Интервал опроса статуса запроса проверки (ProbeAccepted.status_url), пока он PENDING. */
+export const PROBE_POLL_MS = 2_000;
+const PROBE_FINAL: readonly ProviderProbeStatus['status'][] = ['COMPLETED', 'FAILED', 'EXPIRED'];
+
 function ProbeAction({ workspaceId, provider }: { workspaceId: string; provider: Provider }) {
   const { t } = useTranslation();
   const toast = useToast();
   const queryClient = useQueryClient();
   const intent = useRef(new IdempotentIntent());
-  const [status, setStatus] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
   const probe = useMutation({
     mutationFn: () => providersApi.probe(workspaceId, provider.provider_id, intent.current.keyFor({ provider: provider.provider_id })),
-    onSuccess: async () => {
+    onSuccess: (accepted) => {
       intent.current.complete();
-      const text = t('providers.probeAccepted', { name: provider.display_name });
-      setStatus({ tone: 'ok', text });
-      toast({ title: text, tone: 'info' });
-      await queryClient.invalidateQueries({ queryKey: providerKeys.list(workspaceId) });
+      setError(null);
+      setRequestId(accepted.probe_request_id);
+      toast({ title: t('providers.probeAccepted', { name: provider.display_name }), tone: 'info' });
     },
-    onError: (error) => setStatus({ tone: 'error', text: problemMessage(t, error) }),
+    onError: (e) => setError(problemMessage(t, e)),
   });
+  // OQ-45 (c): статус запроса опрашивается до финального состояния; затем перечитывается список установок.
+  const status = useQuery({
+    queryKey: providerKeys.probe(workspaceId, provider.provider_id, requestId ?? ''),
+    queryFn: ({ signal }) => providersApi.probeStatus(workspaceId, provider.provider_id, requestId ?? '', signal),
+    enabled: requestId !== null,
+    refetchInterval: (q) => (q.state.data && PROBE_FINAL.includes(q.state.data.status) ? false : PROBE_POLL_MS),
+  });
+  const final = status.data && PROBE_FINAL.includes(status.data.status) ? status.data.status : null;
+  useEffect(() => {
+    if (final) void queryClient.invalidateQueries({ queryKey: providerKeys.list(workspaceId) });
+  }, [final, queryClient, workspaceId]);
+
+  let text: string | null = error;
+  let tone: 'ok' | 'error' = error ? 'error' : 'ok';
+  if (!error && requestId) {
+    const s = status.data;
+    if (status.isError) {
+      text = problemMessage(t, status.error);
+      tone = 'error';
+    } else if (!s || s.status === 'PENDING') text = t('providers.probeStatus.PENDING', { name: provider.display_name });
+    else if (s.status === 'COMPLETED')
+      text = t('providers.probeStatus.COMPLETED', {
+        host: s.installation?.host ?? '—',
+        auth: t(`providers.enums.auth_status.${s.installation?.auth_status ?? 'UNKNOWN'}`),
+      });
+    else {
+      tone = 'error';
+      text = t(`providers.probeStatus.${s.status}`, {
+        error: s.error_category ? t(`providers.enums.cli_error.${s.error_category}`, { defaultValue: s.error_category }) : '—',
+      });
+    }
+  }
   return (
     <div className="flex flex-col items-start gap-1">
-      <Button onClick={() => probe.mutate()} loading={probe.isPending} aria-describedby={`probe-hint-${provider.provider_id}`}>
+      <Button
+        onClick={() => probe.mutate()}
+        loading={probe.isPending || (requestId !== null && !final && !status.isError)}
+        aria-describedby={`probe-hint-${provider.provider_id}`}
+      >
         {t('providers.probe')}
       </Button>
       <p id={`probe-hint-${provider.provider_id}`} className="text-xs text-fg-muted">
         {t('providers.probeHint')}
       </p>
-      <p role="status" className={status?.tone === 'error' ? 'text-sm font-medium text-danger-text' : 'text-sm text-fg-muted'}>
-        {status?.text}
+      <p
+        role="status"
+        data-probe-status={status.data?.status ?? (requestId ? 'PENDING' : undefined)}
+        className={tone === 'error' ? 'text-sm font-medium text-danger-text' : 'text-sm text-fg-muted'}
+      >
+        {text}
       </p>
     </div>
   );

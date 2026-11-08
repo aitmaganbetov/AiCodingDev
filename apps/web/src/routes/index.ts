@@ -3,6 +3,7 @@
  * (маршруты + пункт навигации); здесь — только список импортов.
  * Новая область: создать файл с `AreaModule` и добавить одну строку импорта и элемент в AREAS.
  */
+import { analyticsArea } from './analytics';
 import { approvalsArea } from './approvals';
 import { auditArea } from './audit';
 import { chatArea } from './chat';
@@ -28,6 +29,7 @@ export const AREAS: readonly AreaModule[] = [
   qualityArea,
   complianceArea,
   knowledgeArea,
+  analyticsArea,
   providersArea,
   settingsArea,
   auditArea,

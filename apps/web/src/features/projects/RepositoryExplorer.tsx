@@ -7,15 +7,25 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { projectKeys, projectsApi, type Repository, type RepositoryTreeEntry } from '../../api/projects';
+import { projectKeys, projectsApi, type Repository, type RepositoryCommitSummary, type RepositoryTreeEntry } from '../../api/projects';
 import { TextField } from '../../components/form';
 import { Badge, Button, Callout, ErrorState, Icon, LoadMore, LoadingState } from '../../components/ui';
 
 export const TREE_PAGE_SIZE = 100;
+/** Сколько последних commit выбранной ветки предлагает селектор (сервер отдаёт до 1000 по курсору). */
+export const RECENT_COMMITS = 30;
+export const BRANCHES_PAGE_SIZE = 200;
 /** Ввод commit: hex SHA (7–64) или имя ветки — та же грамматика, что проверяет сервер (422 иначе). */
 const COMMIT_RE = /^(?:[0-9a-f]{7,64}|(?!-)(?!.*\.\.)(?!.*@\{)(?!.*\/\/)[A-Za-z0-9._/-]{1,255})$/;
 
-type CommitMode = 'default' | 'index' | 'custom';
+/** Выбор commit: '' — HEAD выбранной ветки, 'index' — снимок индекса, 'custom' — ввод, иначе — SHA из истории. */
+type CommitChoice = '' | 'index' | 'custom' | (string & {});
+
+/** Подпись commit в селекторе: короткий SHA и тема (тема — недоверенный текст, выводится как текст). */
+export function commitLabel(c: RepositoryCommitSummary): string {
+  const subject = c.subject.length > 60 ? `${c.subject.slice(0, 59)}…` : c.subject;
+  return subject ? `${c.sha.slice(0, 12)} — ${subject}` : c.sha.slice(0, 12);
+}
 const SCROLL_FOCUSABLE = 0;
 
 export function formatBytes(n: number, locale: string): string {
@@ -136,13 +146,33 @@ export function RepositoryExplorer({ projectId, repo }: { projectId: string; rep
   const { t } = useTranslation();
   const uid = useId();
   const snapshot = repo.latest_index_snapshot ?? null;
-  const [mode, setMode] = useState<CommitMode>('default');
+  const [branch, setBranch] = useState(repo.default_branch);
+  const [choice, setChoice] = useState<CommitChoice>('');
   const [draft, setDraft] = useState('');
   const [draftError, setDraftError] = useState<string | undefined>(undefined);
   const [custom, setCustom] = useState('');
   const [path, setPath] = useState('');
   const [file, setFile] = useState<string | null>(null);
-  const commit = mode === 'index' && snapshot ? snapshot.commit_sha : mode === 'custom' ? custom : '';
+  // HEAD ветки по умолчанию — без параметра (сервер разрешает сам, с fallback на снимок индекса).
+  const branchRef = branch === repo.default_branch ? '' : branch;
+  const commit =
+    choice === '' ? branchRef : choice === 'index' ? (snapshot?.commit_sha ?? '') : choice === 'custom' ? custom : choice;
+  const mode = choice === 'custom' ? 'custom' : 'other';
+
+  // OQ-45 (c): ветки и последние commit выбранной ветки — вместо ручного ввода SHA.
+  const branches = useQuery({
+    queryKey: projectKeys.branches(projectId, repo.id),
+    queryFn: ({ signal }) => projectsApi.branches(projectId, repo.id, { limit: BRANCHES_PAGE_SIZE }, signal),
+    staleTime: 30_000,
+  });
+  const recent = useQuery({
+    queryKey: projectKeys.commits(projectId, repo.id, branch),
+    queryFn: ({ signal }) => projectsApi.commits(projectId, repo.id, { limit: RECENT_COMMITS, ...(branchRef ? { commit: branchRef } : {}) }, signal),
+    staleTime: 30_000,
+  });
+  const branchNames = branches.data?.items.map((b) => b.name) ?? [];
+  if (!branchNames.includes(repo.default_branch)) branchNames.unshift(repo.default_branch);
+  const recentCommits = recent.data?.items ?? [];
 
   const tree = useInfiniteQuery({
     queryKey: projectKeys.tree(projectId, repo.id, commit, path),
@@ -166,8 +196,13 @@ export function RepositoryExplorer({ projectId, repo }: { projectId: string; rep
     setFile(null);
   };
   const onOpen = (e: RepositoryTreeEntry) => (e.type === 'directory' ? navigate(e.path) : setFile(e.path));
-  const onModeChange = (next: CommitMode) => {
-    setMode(next);
+  const onBranchChange = (next: string) => {
+    setBranch(next);
+    setChoice('');
+    setFile(null);
+  };
+  const onChoiceChange = (next: CommitChoice) => {
+    setChoice(next);
     setFile(null);
     if (next !== 'custom') setDraftError(undefined);
   };
@@ -188,15 +223,41 @@ export function RepositoryExplorer({ projectId, repo }: { projectId: string; rep
     <div className="flex flex-col gap-3" data-testid="repository-explorer">
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
+          <label htmlFor={`${uid}-branch`} className="text-sm font-medium text-fg">
+            {t('projects.explorer.branch')}
+          </label>
+          <select id={`${uid}-branch`} className="input" value={branch} onChange={(e) => onBranchChange(e.target.value)} data-testid="explorer-branch">
+            {branchNames.map((name) => (
+              <option key={name} value={name}>
+                {name === repo.default_branch ? t('projects.explorer.branchDefault', { branch: name }) : name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
           <label htmlFor={`${uid}-commit`} className="text-sm font-medium text-fg">
             {t('projects.explorer.commit')}
           </label>
-          <select id={`${uid}-commit`} className="input" value={mode} onChange={(e) => onModeChange(e.target.value as CommitMode)}>
-            <option value="default">{t('projects.explorer.commitDefault', { branch: repo.default_branch })}</option>
+          <select id={`${uid}-commit`} className="input max-w-[28rem]" value={choice} onChange={(e) => onChoiceChange(e.target.value)} data-testid="explorer-commit">
+            <option value="">{t('projects.explorer.commitDefault', { branch })}</option>
+            {recentCommits.length > 0 ? (
+              <optgroup label={t('projects.explorer.recentCommits', { branch })}>
+                {recentCommits.map((c) => (
+                  <option key={c.sha} value={c.sha}>
+                    {commitLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
             {snapshot ? <option value="index">{t('projects.explorer.commitIndex', { sha: snapshot.commit_sha.slice(0, 12) })}</option> : null}
             <option value="custom">{t('projects.explorer.commitCustom')}</option>
           </select>
         </div>
+        {branches.isError || recent.isError ? (
+          <p className="text-sm text-fg-muted" role="status">
+            {t('projects.explorer.historyUnavailable')}
+          </p>
+        ) : null}
         {mode === 'custom' ? (
           <form className="flex flex-wrap items-end gap-2" onSubmit={applyCustom} noValidate aria-label={t('projects.explorer.commitCustom')}>
             <TextField

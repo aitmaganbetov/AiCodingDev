@@ -8,6 +8,8 @@ import type { WorkspaceRole } from '../api/workspaces';
  */
 export type Permission =
   | 'workspace:create'
+  | 'workspace:update'
+  | 'workspace:policy'
   | 'member:read'
   | 'member:manage'
   | 'project:read'
@@ -44,6 +46,9 @@ const PARTICIPANTS: readonly WorkspaceRole[] = ['owner', 'admin', 'developer', '
 
 const MATRIX: Record<Permission, readonly WorkspaceRole[]> = {
   'workspace:create': ALL,
+  // OQ-45 (f): название — owner/admin; политики workspace — только owner (x-permission-depends-on: settings).
+  'workspace:update': ADMINS,
+  'workspace:policy': ['owner'],
   'member:read': ALL,
   'member:manage': ['owner'],
   'project:read': ALL,

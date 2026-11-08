@@ -13,6 +13,7 @@ import aicd_cli_adapters
 import aicd_code_intelligence
 import aicd_collaboration
 import aicd_identity
+import aicd_integrations_github
 import aicd_orchestration
 import aicd_platform
 import aicd_projects
@@ -30,6 +31,7 @@ MODULES = {
     "standards": aicd_standards,
     "collaboration": aicd_collaboration,
     "code_intelligence": aicd_code_intelligence,
+    "integrations_github": aicd_integrations_github,
 }
 ROOT = Path(__file__).resolve().parents[2]
 

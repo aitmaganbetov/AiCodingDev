@@ -1,0 +1,25 @@
+# Alertmanager профиля observability (P8-08). Получатели — решение оператора инсталляции: по умолчанию алерты
+# только видны в Alertmanager/Grafana (receiver без интеграций). Для доставки добавьте webhook/email-конфигурацию
+# в receiver `operators` (URL/учётные данные — через файлы секретов, *_file, не в этом файле).
+route:
+  receiver: operators
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: operators-critical
+      matchers: ['severity="critical"']
+      repeat_interval: 1h
+
+receivers:
+  - name: operators
+  - name: operators-critical
+
+inhibit_rules:
+  # Цель недоступна ⇒ производные алерты её метрик не дублируются.
+  - source_matchers: ['alertname="AicdTargetDown"']
+    target_matchers: ['severity=~"warning|info"']
+    equal: [instance]
+  - source_matchers: ['alertname="AicdArtifactStorageCritical"']
+    target_matchers: ['alertname="AicdArtifactStorageLow"']

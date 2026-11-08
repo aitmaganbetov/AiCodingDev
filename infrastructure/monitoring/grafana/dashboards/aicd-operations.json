@@ -1,0 +1,751 @@
+{
+  "uid": "aicd-operations",
+  "title": "AiCodingDev — эксплуатация",
+  "description": "API, безопасность, доставка outbox, очереди, аренды, хранилище (P8-08).",
+  "tags": [
+    "aicodingdev",
+    "operations"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "API",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Запросы API по коду ответа",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (status) (rate(aicd_http_requests_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Латентность API p95 по маршруту",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(aicd_http_request_duration_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Доля 5xx",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(rate(aicd_http_requests_total{status=~\"5..\"}[5m])) / sum(rate(aicd_http_requests_total[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "SSE-потоки",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 9,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(aicd_sse_connections)",
+          "refId": "A",
+          "legendFormat": "открыто"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(rate(aicd_sse_connections_opened_total[5m])) * 60",
+          "refId": "B",
+          "legendFormat": "подключений/мин"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Безопасность: отказы",
+      "description": "В минуту: неудачные входы, недействительные сессии, CSRF; отказы прав и обращения к чужим workspace.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (reason) (rate(aicd_auth_failures_total[5m])) * 60",
+          "refId": "A",
+          "legendFormat": "auth {{reason}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (reason) (rate(aicd_authz_denied_total[5m])) * 60",
+          "refId": "B",
+          "legendFormat": "authz {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Доставка событий и очереди",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Queue lag (outbox → очередь)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(aicd_outbox_lag_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(aicd_outbox_lag_seconds_bucket[5m])))",
+          "refId": "B",
+          "legendFormat": "p99"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "max(aicd_outbox_oldest_pending_age_seconds)",
+          "refId": "C",
+          "legendFormat": "старейшее неопубликованное"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Outbox: ожидают / ошибки публикации",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "max(aicd_outbox_pending_events)",
+          "refId": "A",
+          "legendFormat": "ожидают"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(increase(aicd_outbox_publish_failures_total[5m]))",
+          "refId": "B",
+          "legendFormat": "ошибки за 5 мин"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Глубина очередей Dramatiq",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "max by (queue) (aicd_queue_depth)",
+          "refId": "A",
+          "legendFormat": "{{queue}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "max by (queue) (aicd_queue_dead_letters)",
+          "refId": "B",
+          "legendFormat": "DLQ {{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Обработка сообщений воркерами",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (actor, outcome) (rate(aicd_worker_messages_total[5m])) * 60",
+          "refId": "A",
+          "legendFormat": "{{actor}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Длительность обработки p90",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.9, sum by (le, actor) (rate(aicd_worker_message_duration_seconds_bucket[15m])))",
+          "refId": "A",
+          "legendFormat": "{{actor}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "Ресурсы",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Stuck leases",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "max by (resource_type) (aicd_worker_leases_expired)",
+          "refId": "A",
+          "legendFormat": "{{resource_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Хранилище артефактов: свободно",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "min(aicd_artifact_storage_free_bytes / aicd_artifact_storage_size_bytes)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Размер БД",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "max(aicd_database_size_bytes)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Цели скрейпа",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 51,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "up{job=~\"aicd-.*\"}",
+          "refId": "A",
+          "legendFormat": "{{job}} {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bool_yes_no"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Ошибки сбора gauge",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 51,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(increase(aicd_metrics_sampler_errors_total[15m]))",
+          "refId": "A",
+          "legendFormat": "за 15 мин"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}

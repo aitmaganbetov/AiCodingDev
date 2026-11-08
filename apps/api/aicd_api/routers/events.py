@@ -14,6 +14,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 import anyio
@@ -23,12 +24,12 @@ from redis.asyncio.client import PubSub
 from sqlalchemy import text
 from starlette.responses import Response, StreamingResponse
 
-from aicd_api.deps import Access, app_state, authorize, current_principal
+from aicd_api.deps import Access, app_state, authorize, current_principal, workspace_access
 from aicd_api.responses import json_response
 from aicd_api.routers import op
 from aicd_identity import api as identity
 from aicd_identity.rbac import Role, has_permission
-from aicd_platform import audit, sse
+from aicd_platform import audit, metrics, sse
 from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import FieldError, ProblemError
@@ -234,6 +235,8 @@ async def _stream(
 ) -> AsyncIterator[str]:
     state = app_state(request)
     cfg = CONFIG
+    metrics.SSE_CONNECTIONS.inc()
+    metrics.SSE_CONNECTIONS_OPENED.inc()
     subscription = state.redis.pubsub()
     pubsub: PubSub | None = subscription
     try:
@@ -281,6 +284,7 @@ async def _stream(
                     run_id, max(last, await _shielded(_max_seq(request, access, run_id))), utcnow()
                 )
     finally:
+        metrics.SSE_CONNECTIONS.dec()
         with anyio.CancelScope(shield=True):
             with contextlib.suppress(Exception):
                 await subscription.aclose()  # type: ignore[no-untyped-call]
@@ -368,3 +372,181 @@ async def get_run_activity(
     page = rows[:limit]
     next_cursor = encode_cursor(state.secret_key, [int(page[-1]["seq"])], filters) if len(rows) > limit else None
     return json_response({"items": [_activity_item(r) for r in page], "next_cursor": next_cursor})
+
+
+# --- Поток уведомлений workspace (OQ-45 (c), API_DESIGN §13.1) --------------------------------------------
+
+WorkspaceSseEventType = Literal["run.state_changed", "approval.requested", "approval.decided", "run.completed"]
+# Перекрытие повтора: строка run_event_log получает created_at = начало транзакции worker-outbox и становится
+# видимой только после commit, поэтому событие с меньшим временем может появиться позже уже отданного.
+WORKSPACE_OVERLAP = timedelta(seconds=60)
+WORKSPACE_REPLAY_WINDOW = timedelta(hours=24)
+_SENT_IDS_MAX = 5000
+
+
+def _workspace_cursor(last_event_id: str | None) -> int | None:
+    if last_event_id is None:
+        return None
+    value = last_event_id.strip()
+    if not value.isdigit() or len(value) > 19:
+        raise ProblemError(
+            "validation_error", errors=[FieldError("/headers/Last-Event-ID", "pattern", "ожидается курсор (число)")]
+        )
+    return int(value)
+
+
+async def _still_member(request: Request, token: str, workspace_id: uuid.UUID) -> bool:
+    state = app_state(request)
+    async with transaction(state.engine, DbContext()) as conn:
+        principal = await identity.resolve_session(conn, token, state.session_policy)
+    if isinstance(principal, str):
+        return False
+    async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
+        role = await identity.workspace_role(conn, workspace_id)
+    return role is not None and has_permission(role, "run:read")
+
+
+async def _fetch_workspace(
+    request: Request, access: Access, after: tuple[datetime, uuid.UUID | None], types: list[str], limit: int
+) -> list[dict[str, Any]]:
+    """Страница run_event_log workspace после keyset `(created_at, event_id)` (event_id None — с `created_at` включительно)."""
+    state = app_state(request)
+    sql = (
+        "SELECT run_id, seq, event_id, event_type, schema_version, payload, occurred_at, created_at"
+        " FROM run_event_log WHERE workspace_id = :ws AND event_type = ANY(:types)"
+    )
+    params: dict[str, Any] = {"ws": access.workspace_id, "types": types, "n": limit, "t": after[0]}
+    if after[1] is None:
+        sql += " AND created_at >= :t"
+    else:
+        sql += " AND (created_at, event_id) > (:t, :id)"
+        params["id"] = after[1]
+    async with transaction(state.engine, access.db()) as conn:
+        rows = (await conn.execute(text(sql + " ORDER BY created_at, event_id LIMIT :n"), params)).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def _stream_workspace(
+    request: Request, access: Access, since: datetime, types: list[str], token: str, slot: str
+) -> AsyncIterator[str]:
+    """Повтор с перекрытием и live-опрос `run_event_log` workspace; дубли в пределах соединения отсекаются по
+    event_id, между соединениями — клиентом (контракт streamWorkspaceEvents)."""
+    state = app_state(request)
+    cfg = CONFIG
+    subscription = state.redis.pubsub()
+    pubsub: PubSub | None = subscription
+    try:
+        await subscription.subscribe(
+            sse.workspace_channel(access.workspace_id), access_channel(access.principal.user_id)
+        )
+    except Exception:  # noqa: BLE001 — без Redis поток работает опросом
+        log.warning("sse pubsub unavailable")
+        pubsub = None
+    sent: dict[str, datetime] = {}
+    watermark = since
+    try:
+        yield f"retry: {cfg.retry_ms}\n\n"
+        opened = time.monotonic()
+        last_sent = opened
+        last_check = opened
+        while True:
+            # Цикл: от watermark минус перекрытие до «хвоста» пачками (keyset внутри цикла).
+            after: tuple[datetime, uuid.UUID | None] = (watermark - WORKSPACE_OVERLAP, None)
+            while True:
+                rows = await _shielded(_fetch_workspace(request, access, after, types, cfg.replay_batch))
+                for row in rows:
+                    event_id = str(row["event_id"])
+                    created = row["created_at"]
+                    after = (created, row["event_id"])
+                    watermark = max(watermark, created)
+                    if event_id in sent:
+                        continue
+                    sent[event_id] = created
+                    last_sent = time.monotonic()
+                    yield sse.workspace_frame(sse.envelope(row), sse.cursor_of(created))
+                if len(rows) < cfg.replay_batch:
+                    break
+            # Забываем event_id старше окна перекрытия — они больше не попадут в выборку.
+            horizon = watermark - WORKSPACE_OVERLAP
+            if len(sent) > _SENT_IDS_MAX or any(t < horizon for t in sent.values()):
+                sent = {k: t for k, t in sent.items() if t >= horizon}
+            now = time.monotonic()
+            if now - opened >= cfg.max_lifetime_seconds:
+                return  # клиент переподключится с Last-Event-ID
+            deadline = min(
+                last_sent + cfg.heartbeat_seconds,
+                last_check + cfg.access_recheck_seconds,
+                now + cfg.poll_seconds,
+                opened + cfg.max_lifetime_seconds,
+            )
+            signal = await _wait_signal(pubsub, deadline - now)
+            now = time.monotonic()
+            if signal == access_channel(access.principal.user_id) or now - last_check >= cfg.access_recheck_seconds:
+                last_check = now
+                if not await _shielded(_still_member(request, token, access.workspace_id)):
+                    return
+            if now - last_sent >= cfg.heartbeat_seconds:
+                last_sent = now
+                yield sse.workspace_heartbeat_frame(access.workspace_id, utcnow())
+    finally:
+        with anyio.CancelScope(shield=True):
+            with contextlib.suppress(Exception):
+                await subscription.aclose()  # type: ignore[no-untyped-call]
+            await _release_slot(state.redis, slot)
+
+
+async def _audit_workspace_connect(request: Request, access: Access) -> None:
+    """`sse.connect` агрегируется: одно событие на сессию+workspace в час."""
+    state = app_state(request)
+    try:
+        first = await state.redis.set(
+            f"aicd:sse:audit:{access.principal.session_id}:ws:{access.workspace_id}", "1", nx=True, ex=3600
+        )
+    except Exception:  # noqa: BLE001 — недоступность Redis не блокирует аудит
+        first = True
+    if not first:
+        return
+    async with transaction(state.engine, access.db()) as conn:
+        await audit.record(
+            conn, action="sse.connect", resource_type="workspace", resource_id=access.workspace_id,
+            actor_type="user", actor_id=access.principal.user_id, workspace_id=access.workspace_id,
+        )  # fmt: skip
+
+
+@router.get("/workspaces/{workspace_id}/events", tags=["workspaces"], **op("streamWorkspaceEvents", "run:read"))
+async def stream_workspace_events(
+    request: Request,
+    workspace_id: Annotated[uuid.UUID, Path()],
+    principal: identity.Principal = Depends(current_principal),
+    types: Annotated[list[WorkspaceSseEventType] | None, Query()] = None,
+) -> Response:
+    access = await workspace_access(request, principal, workspace_id)
+    await authorize(request, access, "run:read")
+    cursor = _workspace_cursor(request.headers.get("last-event-id"))
+    now = utcnow()
+    if cursor is None:
+        since = now
+    else:
+        try:
+            since = sse.from_cursor(cursor)
+        except OverflowError as exc:
+            raise ProblemError(
+                "validation_error", errors=[FieldError("/headers/Last-Event-ID", "range", "курсор вне диапазона")]
+            ) from exc
+        if since < now - WORKSPACE_REPLAY_WINDOW:
+            raise ProblemError("replay_window_exceeded", extensions={"replay_window_seconds": 86400})
+        since = min(since, now)
+    state = app_state(request)
+    token = request.cookies.get(state.settings.session_cookie_name) or ""
+    slot = await _acquire_slot(state.redis, principal.user_id)
+    try:
+        await _audit_workspace_connect(request, access)
+    except BaseException:
+        await _release_slot(state.redis, slot)
+        raise
+    selected = [str(t) for t in types] if types else list(sse.WORKSPACE_TYPES)
+    return StreamingResponse(
+        _stream_workspace(request, access, since, selected, token, slot),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )

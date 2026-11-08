@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -208,6 +208,7 @@ class OutboxRecord:
     correlation_id: uuid.UUID | None
     causation_id: uuid.UUID | None
     publish_attempts: int = 0
+    traceparent: str | None = None  # W3C-контекст спана, записавшего событие (P8-06)
 
     def message(self) -> dict[str, Any]:
         """Тело Dramatiq-сообщения (JSON-совместимое; потребитель перечитывает состояние из PG)."""
@@ -223,6 +224,7 @@ class OutboxRecord:
             "correlation_id": str(self.correlation_id) if self.correlation_id else None,
             "causation_id": str(self.causation_id) if self.causation_id else None,
             "payload": self.payload,
+            "traceparent": self.traceparent,
         }
 
 
@@ -236,6 +238,37 @@ class Projection:
 def run_channel(run_id: uuid.UUID | str) -> str:
     """Redis pub/sub канал пробуждения SSE (только сигнал, не данные)."""
     return f"aicd:run:{run_id}"
+
+
+def workspace_channel(workspace_id: uuid.UUID | str) -> str:
+    """Redis pub/sub канал пробуждения потока уведомлений workspace (только сигнал, не данные)."""
+    return f"aicd:ws:{workspace_id}"
+
+
+# Поток уведомлений workspace (`GET /workspaces/{id}/events`, API_DESIGN §13.1): подмножество типов run_event_log.
+WORKSPACE_TYPES: tuple[str, ...] = ("run.state_changed", "approval.requested", "approval.decided", "run.completed")
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def cursor_of(created_at: datetime) -> int:
+    """Курсор потока workspace: время записи события в run_event_log, микросекунды epoch (UTC)."""
+    delta = created_at - _EPOCH
+    return delta.days * 86_400_000_000 + delta.seconds * 1_000_000 + delta.microseconds
+
+
+def from_cursor(cursor: int) -> datetime:
+    return _EPOCH + timedelta(microseconds=cursor)
+
+
+def workspace_frame(env: dict[str, Any], cursor: int) -> str:
+    data = json.dumps(env, ensure_ascii=False, separators=(",", ":"))
+    return f"id: {cursor}\nevent: {env['type']}\ndata: {data}\n\n"
+
+
+def workspace_heartbeat_frame(workspace_id: uuid.UUID, now: datetime) -> str:
+    """Heartbeat потока workspace без `id:` (схема WorkspaceSseHeartbeat)."""
+    body = {"type": "heartbeat", "workspace_id": str(workspace_id), "timestamp": isoformat_z(now)}
+    return f"event: heartbeat\ndata: {json.dumps(body, separators=(',', ':'))}\n\n"
 
 
 def _str(value: Any, limit: int) -> str:

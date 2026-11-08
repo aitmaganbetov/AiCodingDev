@@ -82,7 +82,7 @@ function FiltersForm({ filters, search, onApply }: { filters: AuditFilters; sear
 }
 
 function outcomeOf(e: AuditEvent): string | null {
-  const v = (e.metadata as Record<string, unknown>).outcome;
+  const v = e.metadata.outcome;
   return typeof v === 'string' ? v : null;
 }
 

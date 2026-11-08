@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_cli_adapters.fake.adapter import FakeCLIExecutor
 from aicd_cli_adapters.gateway import ExecutionGateway, worktree_resolver
+from aicd_cli_adapters.models import ProbeResult
 from aicd_cli_adapters.subprocess_adapter import SubprocessCLIAdapter
 from aicd_orchestration.approvals import Approvals
 from aicd_orchestration.cli_executor import AdapterFactory, CliTaskExecutor
@@ -17,6 +19,7 @@ from aicd_orchestration.engine import ApprovalsPort, Orchestrator, VerifierPort
 from aicd_orchestration.recovery import Reconciler
 from aicd_orchestration.worktrees import WorktreeManager
 from aicd_platform.artifacts import ArtifactStore, build_artifact_store
+from aicd_platform.ids import uuid7
 from aicd_security.docker_runner import DockerSandboxRunner
 from aicd_security.local_runner import LocalProcessRunner
 from aicd_security.sandbox import SandboxRunner
@@ -54,6 +57,25 @@ def fake_adapter_factory(settings: WorkerSettings) -> AdapterFactory:
         )
 
     return factory
+
+
+def build_provider_prober(
+    settings: WorkerSettings, engine: AsyncEngine, store: ArtifactStore
+) -> Callable[[str], Awaitable[ProbeResult]]:
+    """Probe установки CLI на хосте exec тем же адаптером, что исполняет задачи (`AICD_EXEC_ADAPTER`)."""
+    factory = fake_adapter_factory(settings)
+
+    async def probe(provider: str) -> ProbeResult:
+        installation_id = uuid7()  # новая установка; существующая находится по (provider, host, binary) в record_probe
+        adapter = factory(
+            provider=provider,
+            installation_id=installation_id,
+            gateway=ExecutionGateway(engine=engine, store=store),
+            worktree_root=settings.worktree_root,
+        )
+        return await adapter.probe(installation_id=installation_id)
+
+    return probe
 
 
 def check_verification_runner(settings: WorkerSettings) -> None:

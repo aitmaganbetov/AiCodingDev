@@ -31,11 +31,15 @@ src/
   components/states.tsx   LoadingState/Skeleton, EmptyState, ErrorState, ForbiddenState, UnderConstructionState
   components/             LoadMore (cursor-пагинация), StatusBadge/statusTone, PageHeading, form
   styles/tokens.css       дизайн-токены (CSS-переменные; светлая/тёмная тема)
-  api/client.ts           ядро транспорта: fetch, CSRF, Idempotency-Key, If-Match, problem+json, openEventStream
+  api/client.ts           ядро транспорта: fetch, CSRF, Idempotency-Key, If-Match, problem+json, openEventStream;
+                          requestWithMeta (тело + ETag ответа → If-Match: `ifMatch` приоритетнее `ifMatchVersion`),
+                          requestText (не-JSON представление по Accept, например отчёт run text/markdown)
   api/<area>.ts           операции области: auth, workspaces, projects, runs (+ ключи TanStack Query *Keys)
   api/sse.ts              парсер text/event-stream, дедуп, EventStream (одно соединение с возобновлением)
   api/streamManager.ts    StreamManager: общие потоки, ref-counting, лимит 5, offline/online, скрытая вкладка
-  api/useEventStream.tsx  хук + провайдер менеджера; api/useRunEvents.ts / runEvents.ts — поток run
+  api/useEventStream.tsx  хук + провайдер менеджера; api/useRunEvents.ts / runEvents.ts — поток run;
+                          api/workspaceEvents.ts — поток уведомлений workspace (resume 'cursor': Last-Event-ID = id:,
+                          дедуп по event_id; инвалидация экранов — useWorkspaceInvalidation в features/quality/live.tsx)
   i18n/<area>.json        строки UI (namespace = имя файла), i18n/index.ts подхватывает файлы сам
   lib/                    permissions (полный каталог прав §5.1), theme, shortcuts, format, problem, storage
 ```

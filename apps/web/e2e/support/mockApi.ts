@@ -97,6 +97,8 @@ const ROUTES: { method: string; path: string; operationId: string }[] = [
   { method: 'GET', path: '/api/v1/runs/{id}', operationId: 'getRun' },
   { method: 'GET', path: '/api/v1/runs/{id}/tasks', operationId: 'getRunTasks' },
   { method: 'GET', path: '/api/v1/runs/{id}/events', operationId: 'streamRunEvents' },
+  { method: 'GET', path: '/api/v1/workspaces/{id}/events', operationId: 'streamWorkspaceEvents' },
+  { method: 'GET', path: '/api/v1/workspaces/{id}', operationId: 'getWorkspace' },
   { method: 'POST', path: '/api/v1/runs/{id}/pause', operationId: 'pauseRun' },
   { method: 'POST', path: '/api/v1/runs/{id}/resume', operationId: 'resumeRun' },
   { method: 'POST', path: '/api/v1/runs/{id}/cancel', operationId: 'cancelRun' },
@@ -159,6 +161,11 @@ export class MockApi {
    * SSE-ответ не досылается — как при реальном обрыве (без «призрачных» подключений в журнале).
    */
   offline = false;
+  /** Журнал потока уведомлений workspace: курсор (`id:`) → событие (OQ-45 (c)). */
+  readonly workspaceEvents: { workspaceId: string; cursor: number; event: MockRunEvent }[] = [];
+  /** Подключения к потоку workspace с их Last-Event-ID. */
+  readonly workspaceStreamConnections: { workspaceId: string; lastEventId: string | undefined }[] = [];
+  private workspaceCursor = 1_762_590_000_000_000;
   private readonly extraRoutes: { method: string; path: string; operationId: string; handler: (req: MockRequest) => Reply }[] = [];
 
   /**
@@ -297,6 +304,24 @@ export class MockApi {
     return { status: 200, raw, headers: { 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } };
   }
 
+  /** Событие потока уведомлений workspace (approval.*, run.state_changed, run.completed) с новым курсором. */
+  addWorkspaceEvent(workspaceId: string, type: string, payload: Record<string, unknown>, runId?: string): MockRunEvent {
+    this.workspaceCursor += 1000;
+    const event: MockRunEvent = {
+      event_id: uuid(),
+      run_id: runId ?? this.runs.find((r) => r.workspace_id === workspaceId)?.id ?? uuid(),
+      seq: this.workspaceEvents.length + 1,
+      type,
+      timestamp: '2026-11-08T09:00:00Z',
+      schema_version: '1.0',
+      payload,
+    };
+    const error = validateSseEvent(event);
+    if (error) this.violations.push(`mock ${error}`);
+    this.workspaceEvents.push({ workspaceId, cursor: this.workspaceCursor, event });
+    return event;
+  }
+
   addWorkspace(name: string, slug: string, role: S['WorkspaceRole'] = 'owner'): S['Workspace'] {
     const ws: S['Workspace'] = { id: uuid(), name, slug, role, created_at: '2026-11-01T09:00:00Z' };
     this.workspaces.push(ws);
@@ -381,11 +406,24 @@ export class MockApi {
         return;
       }
     }
+    if (operationId === 'streamWorkspaceEvents' && match.id) {
+      // Как сервер: держим соединение, пока нет событий после курсора (до 1,5 с), затем закрываем.
+      const after = Number(headers['last-event-id'] ?? 0);
+      const wsId = match.id;
+      const hasNew = () => this.workspaceEvents.some((e) => e.workspaceId === wsId && e.cursor > after);
+      for (let waited = 0; waited < 1500 && !hasNew() && !this.offline; waited += 50) await new Promise((r) => setTimeout(r, 50));
+      if (this.offline) {
+        await route.abort('internetdisconnected').catch(() => undefined);
+        return;
+      }
+    }
     const reply = this.dispatch(operationId, url, headers, body, match.id);
 
-    const responseError = validateResponse(operationId, reply.status, reply.raw ?? reply.body);
+    // Явный Content-Type ответа мока (content negotiation) проверяется по своей схеме представления.
+    const explicitType = reply.headers?.['content-type']?.split(';')[0]?.trim();
+    const responseError = validateResponse(operationId, reply.status, reply.raw ?? reply.body, explicitType);
     if (responseError) this.violations.push(`mock ${responseError}`);
-    const contentType = responseMediaType(operationId, reply.status) ?? 'application/json';
+    const contentType = explicitType ? (reply.headers?.['content-type'] ?? explicitType) : (responseMediaType(operationId, reply.status) ?? 'application/json');
     if (reply.raw !== undefined) {
       // Страница могла закрыться, пока поток «висел» в ожидании событий.
       await route
@@ -544,6 +582,26 @@ export class MockApi {
       case 'streamRunEvents': {
         const run = this.runs.find((r) => r.id === id);
         return run ? this.streamEvents(run, headers, url) : problem(404, 'not_found');
+      }
+      case 'streamWorkspaceEvents': {
+        const target = this.workspaces.find((w) => w.id === id);
+        if (!target) return problem(404, 'not_found');
+        const lastEventId = headers['last-event-id'];
+        this.workspaceStreamConnections.push({ workspaceId: target.id, lastEventId });
+        const after = Number(lastEventId ?? 0);
+        const types = url.searchParams.getAll('types');
+        let raw = `retry: ${this.sseRetryMs}\n\n`;
+        for (const e of this.workspaceEvents) {
+          if (e.workspaceId !== target.id || e.cursor <= after || (types.length > 0 && !types.includes(e.event.type))) continue;
+          raw += `id: ${e.cursor}\nevent: ${e.event.type}\ndata: ${JSON.stringify(e.event)}\n\n`;
+        }
+        return { status: 200, raw, headers: { 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } };
+      }
+      case 'getWorkspace': {
+        const target = this.workspaces.find((w) => w.id === id);
+        if (!target) return problem(404, 'not_found');
+        const version = target.version ?? 0;
+        return { status: 200, body: { ...target, settings: target.settings ?? {}, version }, headers: { ETag: `"v${version}"` } };
       }
       case 'pauseRun':
       case 'resumeRun':

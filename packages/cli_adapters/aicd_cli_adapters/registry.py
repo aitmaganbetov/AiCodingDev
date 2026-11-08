@@ -9,12 +9,14 @@ from __future__ import annotations
 import json
 import socket
 import uuid
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from aicd_cli_adapters.models import ProbeResult
+from aicd_platform import audit, metrics, outbox
 from aicd_platform.ids import uuid7
 from aicd_platform.redaction import redact_text
 
@@ -97,6 +99,7 @@ async def record_probe(
         )
     ).scalar_one()
     availability, error = availability_of(probe)
+    metrics.PROVIDER_PROBES.labels(metrics.label(probe.provider, metrics.PROVIDERS), availability).inc()
     detail = "; ".join(e.message for e in probe.errors or [])
     await conn.execute(
         text(
@@ -116,6 +119,25 @@ async def record_probe(
     return uuid.UUID(str(installation_id))
 
 
+async def sample_availability(conn: AsyncConnection) -> dict[str, bool]:
+    """Есть ли у провайдера доступная установка (последнее наблюдение AVAILABLE/DEGRADED) → gauge P8-06."""
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT p.code, COALESCE(bool_or(ph.availability IN ('AVAILABLE','DEGRADED')), false)"
+                " FROM cli_providers p"
+                " LEFT JOIN cli_installations i ON i.provider_id = p.id AND i.enabled"
+                " LEFT JOIN LATERAL (SELECT availability FROM provider_health WHERE installation_id = i.id"
+                "   ORDER BY observed_at DESC LIMIT 1) ph ON true GROUP BY p.code"
+            )
+        )
+    ).all()
+    result = {str(code): bool(ok) for code, ok in rows}
+    for code, ok in result.items():
+        metrics.PROVIDER_AVAILABLE.labels(metrics.label(code, metrics.PROVIDERS)).set(1 if ok else 0)
+    return result
+
+
 async def list_providers(conn: AsyncConnection) -> list[dict[str, Any]]:
     providers = (
         (await conn.execute(text("SELECT id, code, display_name, enabled FROM cli_providers ORDER BY code")))
@@ -123,20 +145,7 @@ async def list_providers(conn: AsyncConnection) -> list[dict[str, Any]]:
         .all()
     )
     installs = (
-        (
-            await conn.execute(
-                text(
-                    "SELECT i.id, i.provider_id, h.hostname, i.detected_version, i.compatibility, i.auth_status,"
-                    " i.capabilities, i.checked_at, ph.availability, ph.error_category"
-                    " FROM cli_installations i JOIN worker_hosts h ON h.id = i.host_id"
-                    " LEFT JOIN LATERAL (SELECT availability, error_category FROM provider_health"
-                    "   WHERE installation_id = i.id ORDER BY observed_at DESC LIMIT 1) ph ON true"
-                    " WHERE i.enabled ORDER BY h.hostname, i.id"
-                )
-            )
-        )
-        .mappings()
-        .all()
+        (await conn.execute(text(_INSTALLATION_SELECT + " WHERE i.enabled ORDER BY h.hostname, i.id"))).mappings().all()
     )
     result = []
     for p in providers:
@@ -146,21 +155,7 @@ async def list_providers(conn: AsyncConnection) -> list[dict[str, Any]]:
                 "code": p["code"],
                 "display_name": p["display_name"],
                 "enabled_globally": p["enabled"],
-                "installations": [
-                    {
-                        "installation_id": i["id"],
-                        "host": i["hostname"],
-                        "detected_version": i["detected_version"],
-                        "compatibility": str(i["compatibility"]).upper(),
-                        "auth_status": i["auth_status"],
-                        "availability": i["availability"] or "UNAVAILABLE",
-                        "capabilities": _as_dict(i["capabilities"]),
-                        "last_error_category": i["error_category"],
-                        "checked_at": i["checked_at"],
-                    }
-                    for i in installs
-                    if i["provider_id"] == p["id"]
-                ],
+                "installations": [_installation_view(i) for i in installs if i["provider_id"] == p["id"]],
                 "workspace_settings": dict(DEFAULT_WORKSPACE_SETTINGS),
             }
         )
@@ -172,3 +167,169 @@ def _as_dict(value: Any) -> dict[str, Any]:
         return value
     loaded: dict[str, Any] = json.loads(value)
     return loaded
+
+
+# --- Запросы проверки провайдера (POST /providers/{id}/probe, OQ-45 (c)) ------------------------------
+#
+# Без отдельной таблицы: запрос — outbox-событие `provider.probe_requested` (очередь exec) плюс audit
+# `provider.probe_requested` с `metadata.probe_request_id`; результат worker-exec пишет audit
+# `provider.probe_completed` (тот же probe_request_id, installation_id, error_category). Статус запроса
+# выводится из этих записей workspace (RLS), установка — из cli_installations/provider_health.
+
+PROBE_REQUESTED = "provider.probe_requested"
+PROBE_COMPLETED = "provider.probe_completed"
+PROBE_TIMEOUT = timedelta(minutes=15)
+
+
+async def provider_code(conn: AsyncConnection, provider_id: uuid.UUID) -> str | None:
+    value = (
+        await conn.execute(text("SELECT code FROM cli_providers WHERE id = :id"), {"id": provider_id})
+    ).scalar_one_or_none()
+    return str(value) if value is not None else None
+
+
+async def request_probe(
+    conn: AsyncConnection, *, workspace_id: uuid.UUID, provider_id: uuid.UUID, provider: str, actor_id: uuid.UUID
+) -> tuple[uuid.UUID, datetime]:
+    """Запрос проверки (API, RLS workspace): outbox для worker-exec и audit в одной транзакции."""
+    probe_request_id = uuid7()
+    await outbox.emit(
+        conn,
+        event_type=PROBE_REQUESTED,
+        aggregate_type="cli_provider",
+        aggregate_id=provider_id,
+        workspace_id=workspace_id,
+        payload={"probe_request_id": str(probe_request_id), "provider_id": str(provider_id), "provider": provider},
+    )
+    await audit.record(
+        conn,
+        action=PROBE_REQUESTED,
+        resource_type="cli_provider",
+        resource_id=provider_id,
+        actor_type="user",
+        actor_id=actor_id,
+        workspace_id=workspace_id,
+        metadata={"probe_request_id": str(probe_request_id), "provider": provider},
+    )
+    accepted_at = (await conn.execute(text("SELECT now()"))).scalar_one()
+    return probe_request_id, accepted_at
+
+
+async def record_probe_outcome(
+    conn: AsyncConnection,
+    *,
+    workspace_id: uuid.UUID,
+    provider_id: uuid.UUID,
+    probe_request_id: uuid.UUID,
+    installation_id: uuid.UUID | None,
+    error_category: str | None,
+) -> None:
+    """Итог проверки (worker-exec, RLS workspace запроса): installation_id — записанная установка или None."""
+    await audit.record(
+        conn,
+        action=PROBE_COMPLETED,
+        resource_type="cli_provider",
+        resource_id=provider_id,
+        actor_type="system",
+        actor_id=None,
+        workspace_id=workspace_id,
+        outcome="success" if installation_id is not None else "failure",
+        metadata={
+            "probe_request_id": str(probe_request_id),
+            "installation_id": str(installation_id) if installation_id else None,
+            "error_category": error_category,
+        },
+    )
+
+
+_INSTALLATION_SELECT = (
+    "SELECT i.id, i.provider_id, h.hostname, i.detected_version, i.compatibility, i.auth_status,"
+    " i.capabilities, i.checked_at, ph.availability, ph.error_category"
+    " FROM cli_installations i JOIN worker_hosts h ON h.id = i.host_id"
+    " LEFT JOIN LATERAL (SELECT availability, error_category FROM provider_health"
+    "   WHERE installation_id = i.id ORDER BY observed_at DESC LIMIT 1) ph ON true"
+)
+
+
+def _installation_view(i: Any) -> dict[str, Any]:
+    return {
+        "installation_id": i["id"],
+        "host": i["hostname"],
+        "detected_version": i["detected_version"],
+        "compatibility": str(i["compatibility"]).upper(),
+        "auth_status": i["auth_status"],
+        "availability": i["availability"] or "UNAVAILABLE",
+        "capabilities": _as_dict(i["capabilities"]),
+        "last_error_category": i["error_category"],
+        "checked_at": i["checked_at"],
+    }
+
+
+_CLI_ERRORS = frozenset(
+    {
+        "CLI_NOT_INSTALLED",
+        "AUTH_REQUIRED",
+        "RATE_LIMITED",
+        "TIMEOUT",
+        "SANDBOX_DENIED",
+        "PROCESS_FAILED",
+        "OUTPUT_PARSE_ERROR",
+        "UNSUPPORTED_VERSION",
+        "CANCELLED",
+    }
+)
+
+
+async def probe_status(
+    conn: AsyncConnection, *, provider_id: uuid.UUID, probe_request_id: uuid.UUID, now: datetime
+) -> dict[str, Any] | None:
+    """`ProviderProbeStatus` запроса workspace текущего RLS-контекста; чужой/несуществующий — None."""
+    rows = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT action, created_at, outcome, metadata FROM audit_events"
+                    " WHERE resource_type = 'cli_provider' AND resource_id = :p AND action = ANY(:actions)"
+                    " AND metadata ->> 'probe_request_id' = :rid ORDER BY created_at, id"
+                ),
+                {"p": provider_id, "actions": [PROBE_REQUESTED, PROBE_COMPLETED], "rid": str(probe_request_id)},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    requested = next((r for r in rows if r["action"] == PROBE_REQUESTED), None)
+    if requested is None:
+        return None
+    done = next((r for r in reversed(rows) if r["action"] == PROBE_COMPLETED), None)
+    status = "PENDING"
+    completed_at = None
+    installation = None
+    error_category = None
+    if done is not None:
+        meta = _as_dict(done["metadata"] or {})
+        completed_at = done["created_at"]
+        raw_error = meta.get("error_category")
+        error_category = raw_error if raw_error in _CLI_ERRORS else None
+        inst_id = meta.get("installation_id")
+        if inst_id:
+            row = (
+                (await conn.execute(text(_INSTALLATION_SELECT + " WHERE i.id = :id"), {"id": uuid.UUID(str(inst_id))}))
+                .mappings()
+                .first()
+            )
+            installation = _installation_view(row) if row is not None else None
+        status = "COMPLETED" if installation is not None else "FAILED"
+        if status == "FAILED" and error_category is None:
+            error_category = "PROCESS_FAILED"
+    elif now - requested["created_at"] > PROBE_TIMEOUT:
+        status = "EXPIRED"
+    return {
+        "probe_request_id": probe_request_id,
+        "provider_id": provider_id,
+        "status": status,
+        "requested_at": requested["created_at"],
+        "completed_at": completed_at,
+        "installation": installation,
+        "error_category": error_category,
+    }

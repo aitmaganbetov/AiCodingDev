@@ -109,7 +109,7 @@ describe('evidence completeness (AC-14)', () => {
     exit_code: 0,
     started_at: '2026-11-08T08:59:00Z',
     finished_at: '2026-11-08T09:00:00Z',
-    environment: { node: '22' } as unknown as Evidence['environment'],
+    environment: { node: '22' },
     artifact: { id: 'a1', kind: 'test_report', sha256: 'b'.repeat(64), size_bytes: 10, mime_type: 'application/json', download_url: '/x' },
   };
 

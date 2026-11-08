@@ -11,7 +11,11 @@
    повторная доставка не создаёт дубль (проверка `event_id`);
 4. `publish(event)` (Dramatiq); ошибка ⇒ `publish_attempts + 1`, экспоненциальный `available_at`,
    `last_error` (редактированный); успех ⇒ `published_at = now()`;
-5. после commit — `notify(run_id)` (Redis pub/sub: только сигнал пробуждения SSE).
+5. после commit — `notify(run_id)` (Redis pub/sub: только сигнал пробуждения SSE) и доменные метрики
+   опубликованных событий (`metrics.observe_outbox_event`, P8-06).
+
+Трассировка (P8-06): публикация каждого события — спан `outbox.publish`, дочерний к `traceparent` события
+(спан, записавший событие); в Dramatiq-сообщение уходит `traceparent` спана публикации.
 
 Гарантия — at-least-once: падение между publish и commit приводит к повторной публикации.
 """
@@ -20,17 +24,21 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from aicd_platform import sse
+from aicd_platform import metrics, sse
 from aicd_platform.db import DbContext, apply_context
 from aicd_platform.redaction import redact_text
+from aicd_platform.telemetry import current_traceparent, span
 
 log = logging.getLogger("aicd.outbox")
 
@@ -43,7 +51,7 @@ MAX_ERROR_LENGTH = 2000
 
 _COLUMNS = (
     "id, created_at, workspace_id, run_id, aggregate_type, aggregate_id, event_type, schema_version, payload,"
-    " correlation_id, causation_id, publish_attempts"
+    " correlation_id, causation_id, publish_attempts, traceparent"
 )
 
 
@@ -67,6 +75,7 @@ def _record(row: Any) -> sse.OutboxRecord:
         correlation_id=m["correlation_id"],
         causation_id=m["causation_id"],
         publish_attempts=int(m["publish_attempts"]),
+        traceparent=m["traceparent"],
     )
 
 
@@ -151,10 +160,17 @@ async def _fail(conn: AsyncConnection, event: sse.OutboxRecord, exc: BaseExcepti
     )
 
 
-async def dispatch_batch(engine: AsyncEngine, publish: Publish, notify: Notify, batch: int = 100) -> int:
-    """Обрабатывает до `batch` событий; возвращает число успешно опубликованных."""
-    published = 0
+async def dispatch_batch(
+    engine: AsyncEngine, publish: Publish, notify: Notify, batch: int = 100, *, notify_workspace: Notify | None = None
+) -> int:
+    """Обрабатывает до `batch` событий; возвращает число успешно опубликованных.
+
+    `notify_workspace` — сигнал потоку уведомлений workspace (`GET /workspaces/{id}/events`) для каждого workspace,
+    в журнал которого попали события (OQ-45 (c))."""
+    published = failures = 0
+    delivered: list[sse.OutboxRecord] = []
     touched_runs: set[uuid.UUID] = set()
+    touched_workspaces: set[uuid.UUID] = set()
     async with engine.begin() as conn:
         await apply_context(conn, DbContext(actor_type="system"))
         locked = await _lock_runs(conn, batch)
@@ -170,29 +186,111 @@ async def dispatch_batch(engine: AsyncEngine, publish: Publish, notify: Notify, 
         ).all()
         for row in rows:
             event = _record(row)
-            try:
-                async with conn.begin_nested():
-                    seq = await append_run_event(conn, event)
-            except (SQLAlchemyError, LookupError, ValueError, TypeError) as exc:
-                log.exception("run_event_log projection failed", extra={"event_id": str(event.id)})
-                await _fail(conn, event, exc)
-                continue
-            if seq is not None and event.run_id is not None:
-                touched_runs.add(event.run_id)
-            try:
-                await publish(event.message())
-            except Exception as exc:  # noqa: BLE001 — любая ошибка транспорта ⇒ повтор с backoff
-                log.warning("outbox publish failed", extra={"event_id": str(event.id), "error": type(exc).__name__})
-                await _fail(conn, event, exc)
-                continue
-            await conn.execute(
-                text("UPDATE outbox_events SET published_at = now() WHERE id = :id AND created_at = :c"),
-                {"id": event.id, "c": event.created_at},
-            )
-            published += 1
+            attributes = {
+                "aicd.event_id": event.id,
+                "aicd.event_type": event.event_type,
+                "aicd.workspace_id": event.workspace_id,
+                "aicd.run_id": event.run_id,
+                "messaging.system": "dramatiq",
+            }
+            with span("outbox.publish", traceparent=event.traceparent, attributes=attributes) as current:
+                try:
+                    async with conn.begin_nested():
+                        seq = await append_run_event(conn, event)
+                except (SQLAlchemyError, LookupError, ValueError, TypeError) as exc:
+                    log.exception("run_event_log projection failed", extra={"event_id": str(event.id)})
+                    current.set_attribute("aicd.outcome", "projection_failed")
+                    failures += 1
+                    await _fail(conn, event, exc)
+                    continue
+                if seq is not None and event.run_id is not None:
+                    touched_runs.add(event.run_id)
+                    if event.workspace_id is not None:
+                        touched_workspaces.add(event.workspace_id)
+                try:
+                    await publish(replace(event, traceparent=current_traceparent() or event.traceparent).message())
+                except Exception as exc:  # noqa: BLE001 — любая ошибка транспорта ⇒ повтор с backoff
+                    log.warning("outbox publish failed", extra={"event_id": str(event.id), "error": type(exc).__name__})
+                    current.set_attribute("aicd.outcome", "publish_failed")
+                    failures += 1
+                    await _fail(conn, event, exc)
+                    continue
+                await conn.execute(
+                    text("UPDATE outbox_events SET published_at = now() WHERE id = :id AND created_at = :c"),
+                    {"id": event.id, "c": event.created_at},
+                )
+                current.set_attribute("aicd.outcome", "published")
+                delivered.append(event)
+                published += 1
+    _observe(delivered, failures)
     for run_id in sorted(touched_runs):
         try:
             await notify(run_id)
         except Exception:  # noqa: BLE001 — потеря сигнала компенсируется опросом SSE
             log.warning("sse notify failed", extra={"run_id": str(run_id)})
+    if notify_workspace is not None:
+        for workspace_id in sorted(touched_workspaces):
+            try:
+                await notify_workspace(workspace_id)
+            except Exception:  # noqa: BLE001 — потеря сигнала компенсируется опросом SSE
+                log.warning("sse workspace notify failed", extra={"workspace_id": str(workspace_id)})
     return published
+
+
+def _observe(delivered: list[sse.OutboxRecord], failures: int) -> None:
+    """Метрики после commit: опубликованные события, queue lag, ошибки публикации."""
+    if failures:
+        metrics.OUTBOX_FAILURES.inc(failures)
+    now = datetime.now(UTC)
+    for event in delivered:
+        metrics.OUTBOX_LAG.observe(max((now - event.created_at).total_seconds(), 0.0))
+        try:
+            metrics.observe_outbox_event(event.event_type, event.payload)
+        except Exception:  # noqa: BLE001 — сбой метрики не должен ломать доставку
+            log.warning("outbox metric failed", extra={"event_type": event.event_type})
+
+
+async def sample_gauges(engine: AsyncEngine) -> None:
+    """Периодические gauge-метрики worker-outbox (системный контекст, глобальные/служебные таблицы):
+    backlog outbox, истёкшие аренды (stuck leases), размер БД. Доступность провайдеров — модуль cli_adapters."""
+    started = time.monotonic()
+    async with engine.begin() as conn:
+        await apply_context(conn, DbContext(actor_type="system"))
+        pending, oldest = (
+            await conn.execute(
+                text(
+                    "SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0)"
+                    " FROM outbox_events WHERE published_at IS NULL"
+                )
+            )
+        ).one()
+        metrics.OUTBOX_PENDING.set(int(pending))
+        metrics.OUTBOX_OLDEST_AGE.set(float(oldest))
+        expired: dict[str, int] = dict(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT resource_type, count(*) FROM worker_leases"
+                        " WHERE released_at IS NULL AND lease_until < now() GROUP BY resource_type"
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+        for resource_type in LEASE_RESOURCE_TYPES:
+            metrics.LEASES_EXPIRED.labels(resource_type).set(int(expired.get(resource_type, 0)))
+        size = (await conn.execute(text("SELECT pg_database_size(current_database())"))).scalar_one()
+        metrics.DATABASE_SIZE.set(int(size))
+    log.debug("gauges sampled", extra={"duration_ms": round((time.monotonic() - started) * 1000, 1)})
+
+
+LEASE_RESOURCE_TYPES = (
+    "task",
+    "run",
+    "cli_execution",
+    "indexing_job",
+    "external_action",
+    "outbox_partition",
+    "recovery",
+)

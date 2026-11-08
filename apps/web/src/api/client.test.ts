@@ -7,7 +7,9 @@ import {
   readCsrfCookie,
   setCsrfToken,
   setUnauthorizedHandler,
+  versionFromEtag,
 } from './client';
+import { qualityApi } from './quality';
 import { authApi } from './auth';
 import { projectsApi } from './projects';
 import { workspacesApi } from './workspaces';
@@ -161,5 +163,38 @@ describe('api client: 401 handling', () => {
     await expect(authApi.getSession()).rejects.toMatchObject({ status: 401 });
     expect(handler).toHaveBeenCalledTimes(1);
     restore();
+  });
+});
+
+describe('api client: ETag and non-JSON representations (OQ-45 (d), (f))', () => {
+  it('exposes the ETag of a response and builds If-Match from it in preference to the version', async () => {
+    const { calls } = mockFetch({
+      [`GET /api/v1/workspaces/${WS_ID}`]: () =>
+        new Response(JSON.stringify({ ...workspace, version: 3 }), { status: 200, headers: { 'Content-Type': 'application/json', ETag: '"v3"' } }),
+      [`PATCH /api/v1/workspaces/${WS_ID}`]: () =>
+        new Response(JSON.stringify({ ...workspace, name: 'X', version: 4 }), { status: 200, headers: { 'Content-Type': 'application/json', ETag: '"v4"' } }),
+    });
+    const got = await workspacesApi.get(WS_ID);
+    expect(got.etag).toBe('"v3"');
+    expect(versionFromEtag(got.etag)).toBe(3);
+    const updated = await workspacesApi.update(WS_ID, { name: 'X' }, { etag: got.etag, version: 1 });
+    expect(calls[1]!.headers.get('If-Match')).toBe('"v3"');
+    expect(updated.etag).toBe('"v4"');
+    await workspacesApi.update(WS_ID, { name: 'Y' }, { etag: null, version: 4 });
+    expect(calls[2]!.headers.get('If-Match')).toBe('"v4"');
+    expect(versionFromEtag('W/"v1"')).toBeNull();
+  });
+
+  it('requests the run report as text/markdown and returns the text as is', async () => {
+    const runId = '01900000-0000-7000-8000-00000000a001';
+    const { calls } = mockFetch({
+      [`GET /api/v1/runs/${runId}/report`]: () =>
+        new Response('# Отчёт\n', { status: 200, headers: { 'Content-Type': 'text/markdown; charset=utf-8' } }),
+    });
+    const report = await qualityApi.runReportMarkdown(runId);
+    expect(calls[0]!.headers.get('Accept')).toBe('text/markdown, application/problem+json');
+    expect(report.text).toBe('# Отчёт\n');
+    expect(report.contentType).toMatch(/^text\/markdown/);
+    expect(report.filename).toBeNull();
   });
 });

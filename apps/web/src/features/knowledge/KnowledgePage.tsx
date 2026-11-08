@@ -1,5 +1,5 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IdempotentIntent } from '../../api/client';
 import { knowledgeApi, knowledgeKeys, type DocumentationSource } from '../../api/knowledge';
@@ -104,6 +104,15 @@ function SourcesPanel({ workspaceId, canRegister, canRefresh }: { workspaceId: s
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
   const items = query.data?.pages.flatMap((p) => p.items) ?? [];
+  // OQ-45 (c): имена технологий источников — из списка технологий workspace (без выбора проекта).
+  const technologies = useQuery({
+    queryKey: [...knowledgeKeys.technologies(workspaceId), 'names'] as const,
+    queryFn: ({ signal }) => knowledgeApi.technologies(workspaceId, { limit: 200 }, signal),
+  });
+  const techNames = useMemo(
+    () => new Map((technologies.data?.items ?? []).map((x) => [x.technology_version_id, `${x.name} ${x.version_label}`])),
+    [technologies.data],
+  );
 
   const columns: Column<DocumentationSource>[] = [
     {
@@ -113,6 +122,13 @@ function SourcesPanel({ workspaceId, canRegister, canRefresh }: { workspaceId: s
       cell: (s) => <span className="break-all font-mono text-xs">{s.uri_or_file_ref}</span>,
       sortValue: (s) => s.uri_or_file_ref,
       className: 'max-w-[20rem]',
+    },
+    {
+      id: 'technology',
+      header: t('knowledge.col.technology'),
+      cell: (s) =>
+        s.technology_version_id ? (techNames.get(s.technology_version_id) ?? (technologies.isPending ? '…' : t('knowledge.techUnknown'))) : '—',
+      sortValue: (s) => (s.technology_version_id ? (techNames.get(s.technology_version_id) ?? '') : ''),
     },
     { id: 'type', header: t('knowledge.col.type'), cell: (s) => t(`knowledge.enums.source_type.${s.source_type}`, { defaultValue: s.source_type }) },
     {

@@ -36,7 +36,7 @@ from tests.support.orchestration import Tenant, connect_admin, drive_run, lease_
 
 pytestmark = pytest.mark.db
 
-OPERATIONS = ("getRunQuality", "getRunCompliance", "getRunReport", "listTaskEvidence", "getEvidence")
+OPERATIONS = ("getRunQuality", "getRunCompliance", "getRunReport", "listTaskEvidence", "getEvidence", "listRunEvidence")
 SCOPE, SECRETS = "SEC-27001-01", "SEC-27002-01"
 SECRET = "hunter2-very-secret"
 EVIL_TITLE = "Шаг | <script>alert(1)</script> [x](javascript:alert(1)) **bold**"
@@ -229,6 +229,7 @@ def _paths(s: Seed) -> dict[str, str]:
         "getRunReport": f"/api/v1/runs/{s.run}/report",
         "listTaskEvidence": f"/api/v1/tasks/{s.task}/evidence",
         "getEvidence": f"/api/v1/evidence/{s.evidence['scope']}",
+        "listRunEvidence": f"/api/v1/runs/{s.run}/evidence",
     }
 
 
@@ -384,6 +385,49 @@ async def test_task_evidence_list_filter_and_pagination(seed: Seed) -> None:
     assert none.json() == {"items": [], "next_cursor": None}
     other = await client.get(f"/api/v1/tasks/{seed.other_task}/evidence", params={"verification_status": "VERIFIED"})
     assert [e["id"] for e in other.json()["items"]] == [str(seed.evidence["linked"])]
+
+
+async def test_run_evidence_list_filters_and_pagination(seed: Seed) -> None:
+    """OQ-45 (c): все evidence run — keyset по (created_at, id), фильтры статуса/задачи/вида."""
+    client = seed.owner.client
+    url = f"/api/v1/runs/{seed.run}/evidence"
+    r = await client.get(url)
+    validate_response("listRunEvidence", r)
+    assert r.status_code == 200
+    ids = [e["id"] for e in r.json()["items"]]
+    expected = [seed.evidence[k] for k in ("scope", "secrets", "linked", "pending")]
+    assert set(ids) == {str(e) for e in expected} and len(ids) == len(set(ids))
+    assert SECRET not in r.text
+    pages: list[str] = []
+    cursor = None
+    while True:
+        params: dict[str, Any] = {"limit": 1}
+        if cursor:
+            params["cursor"] = cursor
+        page = await client.get(url, params=params)
+        validate_response("listRunEvidence", page)
+        pages += [e["id"] for e in page.json()["items"]]
+        cursor = page.json()["next_cursor"]
+        if not cursor:
+            break
+    assert pages == ids
+    verified = await client.get(url, params={"verification_status": "VERIFIED"})
+    assert str(seed.evidence["pending"]) not in [e["id"] for e in verified.json()["items"]]
+    by_task = await client.get(url, params={"task_id": str(seed.other_task)})
+    assert [e["id"] for e in by_task.json()["items"]] == [str(seed.evidence["linked"])]
+    by_kind = await client.get(url, params={"kind": "scan_report"})
+    assert [e["id"] for e in by_kind.json()["items"]] == [str(seed.evidence["secrets"])]
+    empty = await client.get(f"/api/v1/runs/{seed.empty_run}/evidence")
+    validate_response("listRunEvidence", empty)
+    assert empty.json() == {"items": [], "next_cursor": None}
+    # Курсор привязан к фильтрам; испорченный курсор — 422; несуществующий run — 404.
+    first = await client.get(url, params={"limit": 1})
+    mixed = await client.get(url, params={"limit": 1, "cursor": first.json()["next_cursor"], "kind": "diff"})
+    validate_response("listRunEvidence", mixed)
+    assert mixed.status_code == 422
+    missing = await client.get(f"/api/v1/runs/{uuid7()}/evidence")
+    validate_response("listRunEvidence", missing)
+    assert missing.status_code == 404
 
 
 # --- report -----------------------------------------------------------------------------------------

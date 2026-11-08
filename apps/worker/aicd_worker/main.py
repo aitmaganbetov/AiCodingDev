@@ -35,10 +35,24 @@ from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.db import DbContext, create_engine, transaction
 from aicd_platform.logging import configure_logging
 from aicd_platform.outbox_dispatcher import dispatch_batch
-from aicd_worker import docs, indexing, maintenance, runtime
-from aicd_worker.broker import DOCS_QUEUE, EXEC_QUEUE, ORCHESTRATOR_QUEUE, Actors, build_broker, register_actors
+from aicd_worker import docs, github, indexing, maintenance, observability, runtime
+from aicd_worker.broker import (
+    DOCS_QUEUE,
+    EXEC_QUEUE,
+    GITHUB_QUEUE,
+    ORCHESTRATOR_QUEUE,
+    Actors,
+    build_broker,
+    register_actors,
+)
 from aicd_worker.settings import WorkerSettings
-from aicd_worker.wiring import ConfigurationError, build_orchestrator, build_reconciler, check_exec_adapter
+from aicd_worker.wiring import (
+    ConfigurationError,
+    build_orchestrator,
+    build_provider_prober,
+    build_reconciler,
+    check_exec_adapter,
+)
 
 log = logging.getLogger("aicd.worker")
 
@@ -66,10 +80,17 @@ async def run_outbox(
     async def notify(run_id: uuid.UUID) -> None:
         await redis.publish(sse.run_channel(run_id), str(run_id))
 
+    async def notify_workspace(workspace_id: uuid.UUID) -> None:
+        await redis.publish(sse.workspace_channel(workspace_id), str(workspace_id))
+
+    sampler = observability.Sampler(engine, redis)
     try:
         while not stop.is_set():
+            await sampler.maybe_sample()  # gauge-метрики P8-06 (ошибки сбора не прерывают доставку)
             try:
-                published = await dispatch_batch(engine, actors.publish, notify, settings.outbox_batch_size)
+                published = await dispatch_batch(
+                    engine, actors.publish, notify, settings.outbox_batch_size, notify_workspace=notify_workspace
+                )
             except Exception:
                 log.exception("outbox dispatch failed")
                 await _wait(stop, ERROR_BACKOFF_SECONDS)
@@ -120,6 +141,8 @@ async def run_consumers(
         stale_ready_seconds=settings.stale_ready_seconds,
         reconciler=build_reconciler(settings, engine, host_id, store) if host_id is not None else None,
         docs_importer=docs.build_importer(settings, engine, store) if kind == "orchestrator" else None,
+        provider_prober=build_provider_prober(settings, engine, store) if kind == "exec" else None,
+        worker_host_id=host_id,
     )
     if kind == "orchestrator":
 
@@ -127,9 +150,10 @@ async def run_consumers(
             await directives.process(engine, ws, directive_id, artifacts=store)
 
         rt.process_directive = process_directive
+        rt.github = github.build_workflow(settings, engine)  # None — GitHub App не настроен
     runtime.install(rt)
     scheduler = maintenance.Scheduler()  # exec: reconcile при старте, далее reap 15 с / reconcile 60 с
-    queues = {ORCHESTRATOR_QUEUE, DOCS_QUEUE} if kind == "orchestrator" else {EXEC_QUEUE}
+    queues = {ORCHESTRATOR_QUEUE, DOCS_QUEUE, GITHUB_QUEUE} if kind == "orchestrator" else {EXEC_QUEUE}
     worker = dramatiq.Worker(actors.broker, queues=queues, worker_threads=settings.worker_threads)
     worker.start()
     try:
@@ -145,6 +169,8 @@ async def run_consumers(
     finally:
         await asyncio.to_thread(worker.stop)
         runtime.install(None)
+        if rt.github is not None:
+            await rt.github.client.aclose()
 
 
 async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None = None) -> None:
@@ -154,6 +180,7 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
         with contextlib.suppress(NotImplementedError, RuntimeError):
             loop.add_signal_handler(sig, stop.set)
     engine = create_engine(settings.require_database_url(), pool_size=settings.worker_threads + 2)
+    metrics_server = observability.start(settings, kind)
     try:
         if kind == "outbox":
             await run_outbox(settings, engine, stop)
@@ -162,6 +189,9 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
         else:
             await run_consumers(kind, settings, engine, stop)
     finally:
+        if metrics_server is not None:
+            await asyncio.to_thread(metrics_server.shutdown)
+            metrics_server.server_close()
         await engine.dispose()
 
 

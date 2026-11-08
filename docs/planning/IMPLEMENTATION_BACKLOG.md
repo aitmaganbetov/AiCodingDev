@@ -174,9 +174,9 @@
 | P8-03 | Webhooks: HMAC SHA-256, constant-time, дедуп, защита от replay | FR-GH-02 | P8-01 | P0 | Security-тесты spoofing/replay | TODO |
 | P8-04 | PR workflow через `external_actions`: push, PR, комментарии ревью, статусы | FR-GH-03 | P8-02, P3-11 | P0 | Crash-тест: PR не создаётся дважды | TODO |
 | P8-05 | Merge только с approval, с уважением branch protection | FR-GH-03, FR-APR-01 | P8-04 | P0 | AC-13 | TODO |
-| P8-06 | Метрики ТЗ §16 (Prometheus), OTel трассы end-to-end | FR-OBS-02, FR-OBS-03 | P1-06 | P0 | Метрики видны в Prometheus | TODO |
-| P8-07 | Analytics API + экран | FR-OBS-05, FR-CI-08 | P8-06, P7-01 | P0 | E2E | TODO |
-| P8-08 | Grafana dashboards + алерты | FR-OBS-04 | P8-06 | P1 | Тестовый алерт срабатывает | TODO |
+| P8-06 | Метрики ТЗ §16 (Prometheus), OTel трассы end-to-end | FR-OBS-02, FR-OBS-03 | P1-06 | P0 | Метрики видны в Prometheus | IN_REVIEW |
+| P8-07 | Analytics API + экран | FR-OBS-05, FR-CI-08 | P8-06, P7-01 | P0 | E2E | IN_REVIEW |
+| P8-08 | Grafana dashboards + алерты | FR-OBS-04 | P8-06 | P1 | Тестовый алерт срабатывает | IN_REVIEW |
 | P8-09 | Permission-тесты GitHub-действий | FR-GH-03 | P8-05 | P0 | Зелёные | TODO |
 
 ## Phase 9 — Verification & Release

@@ -17,6 +17,7 @@ const EXPECTED = [
   'settings',
   'audit',
   'dashboard',
+  'analytics',
 ];
 
 function leafKeys(value: unknown, prefix = ''): string[] {

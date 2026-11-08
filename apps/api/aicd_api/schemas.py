@@ -35,6 +35,21 @@ class WorkspaceCreateRequest(_Strict):
     slug: Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$")]
 
 
+class WorkspaceSettingsUpdate(_Strict):
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
+
+    allow_single_member_self_approval: bool | None = None
+
+
+class WorkspaceUpdateRequest(_Strict):
+    """Merge-patch workspace (OQ-45 (f)); пустое тело и `null` для необнуляемых полей ⇒ 422 в обработчике."""
+
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
+
+    name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    settings: WorkspaceSettingsUpdate | None = None
+
+
 class MemberCreateRequest(_Strict):
     email: Email
     role: Role

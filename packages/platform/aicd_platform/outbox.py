@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from aicd_platform import context
 from aicd_platform.ids import uuid7
 from aicd_platform.redaction import redact_value
+from aicd_platform.telemetry import current_traceparent
 
 MAX_PAYLOAD_BYTES = 65536
 
@@ -42,8 +43,8 @@ async def emit(
     await conn.execute(
         text(
             "INSERT INTO outbox_events (id, workspace_id, run_id, aggregate_type, aggregate_id, event_type,"
-            " schema_version, payload, correlation_id, causation_id)"
-            " VALUES (:id, :ws, :run, :atype, :aid, :etype, :sv, CAST(:payload AS jsonb), :corr, :cause)"
+            " schema_version, payload, correlation_id, causation_id, traceparent)"
+            " VALUES (:id, :ws, :run, :atype, :aid, :etype, :sv, CAST(:payload AS jsonb), :corr, :cause, :tp)"
         ),
         {
             "id": event_id,
@@ -56,6 +57,8 @@ async def emit(
             "payload": body,
             "corr": correlation_id,
             "cause": causation_id,
+            # W3C-контекст текущего спана: worker-outbox продолжает трассу при публикации (P8-06).
+            "tp": current_traceparent(),
         },
     )
     return event_id

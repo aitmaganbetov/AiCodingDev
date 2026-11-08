@@ -27,7 +27,7 @@ function provider(auth: Provider['installations'][number]['auth_status'] = 'AUTH
         compatibility: 'SUPPORTED',
         auth_status: auth,
         availability: 'AVAILABLE',
-        capabilities: { json_output: true } as unknown as Provider['installations'][number]['capabilities'],
+        capabilities: { json_output: true },
         last_error_category: null,
         checked_at: '2026-11-08T08:00:00Z',
       },
@@ -69,8 +69,9 @@ describe('ProvidersPage', () => {
     expect(screen.queryByLabelText(/токен|ключ|пароль/i)).toBeNull();
   });
 
-  it('probe posts with Idempotency-Key and X-Workspace-Id; settings PATCH sends If-Match and changed fields only', async () => {
+  it('probe posts with Idempotency-Key and X-Workspace-Id, polls the status URL; settings PATCH sends If-Match and changed fields only', async () => {
     const user = userEvent.setup();
+    let statusCalls = 0;
     const { calls } = mockFetch({
       'GET /api/v1/auth/session': () => json(200, session('admin')),
       'GET /api/v1/providers': () => json(200, { items: [provider()] }),
@@ -79,14 +80,29 @@ describe('ProvidersPage', () => {
           provider_id: '01900000-0000-7000-b000-000000000001',
           probe_request_id: '01900000-0000-7000-b000-0000000000ff',
           accepted_at: '2026-11-08T09:00:00Z',
-          status_url: '/api/v1/providers',
+          status_url: '/api/v1/providers/01900000-0000-7000-b000-000000000001/probes/01900000-0000-7000-b000-0000000000ff',
         }),
+      'GET /api/v1/providers/01900000-0000-7000-b000-000000000001/probes/01900000-0000-7000-b000-0000000000ff': () => {
+        statusCalls += 1;
+        return json(200, {
+          probe_request_id: '01900000-0000-7000-b000-0000000000ff',
+          provider_id: '01900000-0000-7000-b000-000000000001',
+          status: statusCalls > 1 ? 'COMPLETED' : 'PENDING',
+          requested_at: '2026-11-08T09:00:00Z',
+          completed_at: statusCalls > 1 ? '2026-11-08T09:00:05Z' : null,
+          installation: statusCalls > 1 ? { ...provider().installations[0], auth_status: 'AUTHENTICATED' } : null,
+          error_category: null,
+        });
+      },
       'PATCH /api/v1/providers/01900000-0000-7000-b000-000000000001/settings': (req) =>
         json(200, { ...SETTINGS, ...(req.body as object), settings_version: 4 }),
     });
     renderApp(`/w/${WS_ID}/providers`);
     await user.click(await screen.findByRole('button', { name: 'Перепроверить' }));
-    expect(await screen.findByText(/Перепроверка «Codex CLI» запрошена/, { selector: 'p' })).toBeInTheDocument();
+    expect(await screen.findByText(/Перепроверка «Codex CLI» выполняется/, { selector: 'p' })).toBeInTheDocument();
+    // OQ-45 (c): статус опрашивается по status_url до финального состояния.
+    expect(await screen.findByText(/Проверка завершена: хост worker-exec-1, авторизация — Выполнен вход/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(calls.filter((c) => c.url.pathname.includes('/probes/')).every((c) => c.headers.get('X-Workspace-Id') === WS_ID)).toBe(true);
     const probe = calls.find((c) => c.method === 'POST');
     expect(probe?.headers.get('Idempotency-Key')).toBeTruthy();
     expect(probe?.headers.get('X-Workspace-Id')).toBe(WS_ID);

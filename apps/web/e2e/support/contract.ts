@@ -68,7 +68,8 @@ function format(fn: ValidateFunction): string {
 }
 
 /** Ошибка валидации тела ответа или null. */
-export function validateResponse(operationId: string, status: number, body: unknown): string | null {
+/** `mediaType` — представление ответа (content negotiation, например text/markdown отчёта run); по умолчанию первое. */
+export function validateResponse(operationId: string, status: number, body: unknown, mediaType?: string): string | null {
   const { path, method, op } = findOperation(operationId);
   const responses = op.responses as Json;
   let base = `/paths/${escape(path)}/${method}/responses/${status}`;
@@ -81,9 +82,10 @@ export function validateResponse(operationId: string, status: number, body: unkn
   }
   const content = response.content as Json | undefined;
   if (!content) return body === undefined ? null : `${operationId} ${status}: contract declares no body`;
-  const mediaType = Object.keys(content)[0];
-  if (!mediaType) return null;
-  const fn = compilePointer(`${base}/content/${escape(mediaType)}/schema`);
+  if (mediaType !== undefined && !(mediaType in content)) return `${operationId} ${status}: media type ${mediaType} is not declared`;
+  const chosen = mediaType ?? Object.keys(content)[0];
+  if (!chosen) return null;
+  const fn = compilePointer(`${base}/content/${escape(chosen)}/schema`);
   return fn(body) ? null : `${operationId} ${status} response: ${format(fn)}`;
 }
 

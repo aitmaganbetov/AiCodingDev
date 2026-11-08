@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,3 +170,67 @@ def validate_branch_name(name: str) -> str:
     if not _BRANCH_RE.fullmatch(name) or name.endswith((".lock", "/", ".")) or "//" in name or "@{" in name:
         raise GitRepositoryError("недопустимое имя ветки")
     return name
+
+
+_SHA_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+_ASKPASS_SCRIPT = """#!/bin/sh
+case "$1" in
+  Username*) printf '%s\\n' 'x-access-token' ;;
+  *) printf '%s\\n' "$AICD_GIT_ASKPASS_TOKEN" ;;
+esac
+"""
+
+
+def push_ref(
+    repo: Path,
+    *,
+    remote_url: str,
+    sha: str,
+    branch: str,
+    token: str,
+    proxy_url: str | None = None,
+    timeout: float = 300.0,
+) -> None:
+    """Push коммита `sha` в ветку `branch` удалённого репозитория (SC-GH-04/05, SECURITY_ARCHITECTURE §10).
+
+    * только ветки `aicd/*`, без force (`<sha>:refs/heads/<branch>` без `+`): перезапись чужой истории
+      отклоняется сервером как non-fast-forward;
+    * токен не попадает ни в argv, ни в URL, ни в `.git/config`: git получает его через одноразовый
+      GIT_ASKPASS-хелпер из временного каталога 0700, значение — в переменной окружения только дочернего
+      процесса; хелперы учётных данных отключены; протоколы — только https (http — лишь если так задан
+      `remote_url`, тестовый стенд);
+    * сообщение об ошибке не содержит токена (stderr git усекается и редактируется вызывающим).
+    """
+    validate_branch_name(branch)
+    if not branch.startswith("aicd/"):
+        raise GitRepositoryError("push разрешён только в ветки aicd/*")
+    if not _SHA_RE.fullmatch(sha):
+        raise GitRepositoryError("ожидался полный SHA коммита")
+    scheme = remote_url.split("://", 1)[0] if "://" in remote_url else ""
+    if scheme not in ("https", "http") or "@" in remote_url or any(c.isspace() for c in remote_url):
+        raise GitRepositoryError("remote_url должен быть https-URL без учётных данных")
+    workdir = tempfile.mkdtemp(prefix="aicd-askpass-")
+    try:
+        os.chmod(workdir, 0o700)
+        helper = Path(workdir) / "askpass.sh"
+        fd = os.open(helper, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(_ASKPASS_SCRIPT)
+        argv, env = _argv_env(repo, ())
+        options = [
+            "-c", "credential.helper=",
+            "-c", "protocol.allow=never",
+            "-c", f"protocol.{scheme}.allow=always",
+            "-c", "http.followRedirects=false",
+            "-c", f"http.proxy={proxy_url or ''}",
+        ]  # fmt: skip
+        argv = [argv[0], *options, *argv[1:], "push", "--porcelain", remote_url, f"{sha}:refs/heads/{branch}"]
+        env.update({"GIT_ASKPASS": str(helper), "AICD_GIT_ASKPASS_TOKEN": token, "GIT_TERMINAL_PROMPT": "0"})
+        proc = subprocess.run(  # noqa: S603 — argv-массив, без shell
+            argv, capture_output=True, text=True, timeout=timeout, env=env, check=False
+        )
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").replace(token, "***").strip()[-500:]
+        raise GitRepositoryError("git push завершился с ошибкой", detail=detail)

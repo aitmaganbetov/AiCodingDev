@@ -330,6 +330,7 @@ class Approvals:
                     "UPDATE approvals SET status = :d, decided_by = :uid, decided_at = now(), decision_reason = :reason,"
                     " allow_self_approval = allow_self_approval OR :self, version = version + 1"
                     " WHERE id = :id AND status = 'PENDING' AND version = :v"
+                    " RETURNING EXTRACT(EPOCH FROM decided_at - requested_at)"
                 ),
                 {
                     "d": decision,
@@ -340,11 +341,12 @@ class Approvals:
                     "v": row["version"],
                 },
             )
+            waited = result.scalar_one_or_none()
         except DBAPIError as exc:  # trg_approvals_decider_role: роль ниже required (с учётом overrides проекта)
             if getattr(exc.orig, "sqlstate", None) == "42501":
                 raise ProblemError("forbidden") from exc
             raise
-        if result.rowcount != 1:
+        if waited is None:
             raise ProblemError("precondition_failed")
         await outbox.emit(
             conn,
@@ -359,6 +361,8 @@ class Approvals:
                 "status": decision,
                 "task_id": str(row["task_id"]) if row["task_id"] else None,
                 "subject": row["subject"],
+                # approval wait time (ТЗ §16): от запроса до решения человека, метрика P8-06.
+                "wait_seconds": round(max(float(waited), 0.0), 3),
             },
         )
         await audit.record(

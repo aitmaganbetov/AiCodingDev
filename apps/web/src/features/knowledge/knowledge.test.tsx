@@ -90,3 +90,41 @@ describe('KnowledgePage', () => {
     await waitFor(() => expect(screen.queryByRole('radio')).toBeNull());
   });
 });
+
+describe('KnowledgePage: workspace technologies (OQ-45 (c))', () => {
+  const TECH = {
+    technology_id: '01900000-0000-7000-e000-000000000010',
+    name: 'fastapi',
+    ecosystem: 'python',
+    technology_version_id: '01900000-0000-7000-e000-000000000001',
+    version_label: '0.115.0',
+    support_status: 'unknown',
+    project_count: 2,
+    source_count: 1,
+  };
+
+  it('shows technology names in the sources table and registers a source without choosing a project', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch({
+      'GET /api/v1/auth/session': () => json(200, session('admin')),
+      'GET /api/v1/documentation/sources': () => json(200, { items: [source(1)], next_cursor: null }),
+      'GET /api/v1/projects': () => json(200, { items: [P1], next_cursor: null }),
+      'GET /api/v1/technologies': () => json(200, { items: [TECH], next_cursor: null }),
+      'POST /api/v1/documentation/sources': (req) => json(201, { ...source(5), ...(req.body as object) }),
+    });
+    renderApp(`/w/${WS_ID}/knowledge`);
+    const table = await screen.findByRole('table', { name: 'Источники документации' });
+    expect(await within(table).findByText('fastapi 0.115.0')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Зарегистрировать источник' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Новый источник документации' });
+    expect(within(dialog).queryByLabelText('Проект')).toBeNull();
+    await user.selectOptions(await within(dialog).findByLabelText('Технология и версия'), TECH.technology_version_id);
+    await user.type(within(dialog).getByLabelText('Адрес или ссылка'), 'https://fastapi.example/docs');
+    await user.click(within(dialog).getByRole('button', { name: 'Зарегистрировать' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.body).toMatchObject({ technology_version_id: TECH.technology_version_id, uri_or_file_ref: 'https://fastapi.example/docs' });
+    expect(calls.filter((c) => c.url.pathname === '/api/v1/technologies').every((c) => c.headers.get('X-Workspace-Id') === WS_ID)).toBe(true);
+    expect(calls.some((c) => /\/projects\/[^/]+\/technologies$/.test(c.url.pathname))).toBe(false);
+  });
+});

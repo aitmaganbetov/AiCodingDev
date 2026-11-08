@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -14,6 +14,9 @@ from aicd_platform.db import ActorType
 from aicd_platform.ids import uuid7
 from aicd_platform.redaction import redact_value
 
+# audit_events.actor_type (DATABASE_DESIGN §17.1): помимо субъектов транзакции — `github` (подписанный вебхук).
+AuditActorType = ActorType | Literal["github"]
+
 
 async def record(
     conn: AsyncConnection,
@@ -21,7 +24,7 @@ async def record(
     action: str,
     resource_type: str,
     resource_id: uuid.UUID | None,
-    actor_type: ActorType,
+    actor_type: AuditActorType,
     actor_id: uuid.UUID | None,
     workspace_id: uuid.UUID | None,
     outcome: str = "success",

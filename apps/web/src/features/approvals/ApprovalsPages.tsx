@@ -31,12 +31,12 @@ import { useToast } from '../../components/ui/Toast';
 import { can } from '../../lib/permissions';
 import { problemMessage } from '../../lib/problem';
 import { useCurrentWorkspace } from '../../workspace';
-import { LiveStatus, useRunInvalidation } from '../quality/live';
+import { LiveStatus, useRunInvalidation, useWorkspaceInvalidation } from '../quality/live';
 import { Field, FieldList, runViewPath, SeverityBadge, TextLink, useWorkspaceRole, workspacePath } from '../quality/shared';
 
 export const APPROVALS_PAGE_SIZE = 25;
-/** Нет общего потока событий workspace (SSE только по run): список без фильтра run перечитывается периодически. */
-export const APPROVALS_POLL_MS = 30_000;
+/** События потока workspace, меняющие список approvals (OQ-45 (c): вместо опроса раз в 30 с). */
+export const APPROVAL_WORKSPACE_EVENTS = ['approval.requested', 'approval.decided'] as const;
 export const DECISION_REASON_MAX = 4000;
 const TABS = ['pending', 'decided'] as const;
 type Tab = (typeof TABS)[number];
@@ -118,8 +118,7 @@ function ApprovalList({ workspaceId, tab, mine, runId }: { workspaceId: string; 
       approvalsApi.list(workspaceId, { ...query, limit: APPROVALS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
-    // С фильтром run обновления приходят по SSE; без него — периодический опрос (нет потока workspace).
-    refetchInterval: runId || tab !== 'pending' ? false : APPROVALS_POLL_MS,
+    // Обновления: с фильтром run — поток run, без него — поток уведомлений workspace (ApprovalsPage).
   });
   const items = list.data?.pages.flatMap((p) => p.items) ?? [];
   if (list.isPending) return <LoadingState label={t('approvals.loading')} />;
@@ -161,7 +160,9 @@ export function ApprovalsPage() {
   const mine = params.get('mine') === '1';
   const runId = params.get('run_id');
   const keys = useMemo(() => [approvalKeys.all(workspaceId ?? '')], [workspaceId]);
-  const live = useRunInvalidation(runId, APPROVAL_EVENT_TYPES, keys);
+  const runLive = useRunInvalidation(runId, APPROVAL_EVENT_TYPES, keys);
+  const workspaceLive = useWorkspaceInvalidation(runId ? null : workspaceId, APPROVAL_WORKSPACE_EVENTS, keys);
+  const live = runId ? runLive : workspaceLive;
   const update = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
     if (value === null) next.delete(key);
@@ -172,7 +173,9 @@ export function ApprovalsPage() {
   if (!workspaceId) return null;
   return (
     <section aria-labelledby="page-title">
-      <PageHeading title={t('approvals.title')}>{runId ? <LiveStatus state={live.state} onReconnect={live.reconnect} /> : null}</PageHeading>
+      <PageHeading title={t('approvals.title')}>
+        <LiveStatus state={live.state} onReconnect={live.reconnect} />
+      </PageHeading>
       <p className="mb-4 text-fg-muted">{runId ? t('approvals.descriptionRun') : t('approvals.description')}</p>
       <div className="mb-4 flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">

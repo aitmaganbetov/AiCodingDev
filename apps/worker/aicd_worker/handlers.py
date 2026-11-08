@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -17,16 +18,21 @@ from typing import Any, Literal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_cli_adapters import registry
 from aicd_collaboration import acp
 from aicd_platform import consumer, context
 from aicd_platform.db import DbContext, apply_context, transaction
 from aicd_platform.ids import uuid7
+from aicd_platform.telemetry import current_traceparent
 from aicd_worker.runtime import Runtime
 
 log = logging.getLogger("aicd.worker")
 
 ORCHESTRATOR_CONSUMER = "orchestrator.handle_event"
 EXEC_CONSUMER = "exec.execute_task"
+PROBE_CONSUMER = "exec.probe_provider"
+# Запрос перепроверки установки CLI (POST /providers/{id}/probe): очередь exec, обработчик `probe_provider`.
+PROBE_EVENT_TYPES = frozenset({registry.PROBE_REQUESTED})
 
 # Типы, которые диспетчер outbox направляет в очередь оркестратора (остальные — только SSE/прочие потребители).
 ORCHESTRATOR_EVENT_TYPES = frozenset(
@@ -57,6 +63,7 @@ Outcome = Literal[
     "on_run_resumed",
     "execute_task",
     "directive_processed",
+    "provider_probed",
     "tick",
 ]
 
@@ -76,6 +83,62 @@ def _uuid(value: Any) -> uuid.UUID | None:
         return uuid.UUID(str(value))
     except ValueError:
         return None
+
+
+async def probe_provider(rt: Runtime, event: dict[str, Any]) -> Outcome:
+    """Перепроверка установки CLI на этом хосте (worker-exec) по запросу пользователя (OQ-45 (c)).
+
+    Результат: upsert установки и наблюдение provider_health (`registry.record_probe`) плюс audit
+    `provider.probe_completed` в workspace запроса — по нему API отдаёт статус. Повторная доставка — no-op.
+    API не передаёт и не получает credentials: probe только читает состояние CLI (ADR-0003).
+    """
+    event_id = _uuid(event.get("event_id"))
+    ws = _uuid(event.get("workspace_id"))
+    payload = event.get("payload") or {}
+    provider_id = _uuid(payload.get("provider_id")) or _uuid(event.get("aggregate_id"))
+    request_id = _uuid(payload.get("probe_request_id"))
+    provider = payload.get("provider")
+    if (
+        event_id is None
+        or ws is None
+        or provider_id is None
+        or request_id is None
+        or provider not in ("codex", "claude")
+    ):
+        return "ignored"
+    if rt.provider_prober is None or rt.worker_host_id is None:
+        raise RuntimeError("probe провайдера выполняет только воркер exec")
+    async with claimed(rt.engine, PROBE_CONSUMER, event_id) as first:
+        pass
+    if not first:
+        return "duplicate"
+    context.bind(workspace_id=ws)
+    started = time.monotonic()
+    probe = None
+    error: str | None = None
+    try:
+        probe = await rt.provider_prober(str(provider))
+    except Exception:
+        log.exception("provider probe failed", extra={"provider": provider})
+        error = "PROCESS_FAILED"
+    duration_ms = int((time.monotonic() - started) * 1000)
+    installation_id: uuid.UUID | None = None
+    async with transaction(rt.engine, DbContext(workspace_id=ws, actor_type="system")) as conn:
+        if probe is not None:
+            if probe.installed and probe.binary_path is not None:
+                installation_id = await registry.record_probe(
+                    conn, host_id=rt.worker_host_id, probe=probe, duration_ms=duration_ms
+                )
+            error = registry.availability_of(probe)[1]
+        await registry.record_probe_outcome(
+            conn,
+            workspace_id=ws,
+            provider_id=provider_id,
+            probe_request_id=request_id,
+            installation_id=installation_id,
+            error_category=error,
+        )
+    return "provider_probed"
 
 
 async def handle_event(rt: Runtime, event: dict[str, Any]) -> Outcome:
@@ -175,12 +238,14 @@ async def _plan_decision(
 
 
 def execution_message(task_id: uuid.UUID, ws: uuid.UUID, cause: uuid.UUID | None = None) -> dict[str, Any]:
-    """Сообщение очереди exec. `event_id` уникален на постановку (дедупликация повторной доставки)."""
+    """Сообщение очереди exec. `event_id` уникален на постановку (дедупликация повторной доставки);
+    `traceparent` продолжает трассу обработчика события в воркере exec (P8-06)."""
     return {
         "event_id": str(uuid7()),
         "task_id": str(task_id),
         "workspace_id": str(ws),
         "causation_id": str(cause) if cause else None,
+        "traceparent": current_traceparent(),
     }
 
 

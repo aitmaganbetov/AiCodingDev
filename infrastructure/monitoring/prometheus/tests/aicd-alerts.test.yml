@@ -1,0 +1,114 @@
+# Unit-тесты правил алертов (P8-08: «тестовый алерт срабатывает»):
+#   promtool test rules infrastructure/monitoring/prometheus/tests/aicd-alerts.test.yml
+# (tests/infra/test_promtool.py запускает его в образе prom/prometheus, закреплённом по digest).
+rule_files:
+  - ../rules/aicd-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Перебор паролей: 20 неудачных входов в минуту → алерт через 5 минут; до этого — pending (не firing).
+  - interval: 1m
+    input_series:
+      - series: 'aicd_auth_failures_total{reason="login_failed", job="aicd-api", instance="api:8000"}'
+        values: '0+20x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AicdLoginFailuresSpike
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: AicdLoginFailuresSpike
+        exp_alerts:
+          - exp_labels: {severity: warning, area: security}
+            exp_annotations:
+              summary: "Всплеск неудачных входов: 20.0/мин"
+              description: "Более 10 неудачных входов в минуту 5 минут подряд (перебор паролей?). Проверьте audit auth.login_failed и блокировки."
+
+  # Нормальный фон (2 неудачи в минуту) — алерта нет.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_auth_failures_total{reason="login_failed", job="aicd-api", instance="api:8000"}'
+        values: '0+2x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AicdLoginFailuresSpike
+        exp_alerts: []
+
+  # Stuck lease: истёкшая аренда задачи держится 10 минут → алерт с resource_type.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_worker_leases_expired{resource_type="task", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0 0 1 1 1 1 1 1 1 1 1 1 1 1 1'
+      - series: 'aicd_worker_leases_expired{resource_type="run", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0x14'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: AicdStuckLeases
+        exp_alerts:
+          - exp_labels: {severity: warning, area: orchestration, resource_type: task}
+            exp_annotations:
+              summary: "Истёкшие неосвобождённые аренды (task): 1"
+              description: "Аренды с lease_until в прошлом не освобождены 10 минут: reaper/recovery не работает или воркер упал."
+
+  # Высокая доля 5xx при заметной нагрузке.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_http_requests_total{method="GET", route="/api/v1/runs", status="200", job="aicd-api", instance="api:8000"}'
+        values: '0+60x30'
+      - series: 'aicd_http_requests_total{method="GET", route="/api/v1/runs", status="500", job="aicd-api", instance="api:8000"}'
+        values: '0+20x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AicdApiHighErrorRate
+        exp_alerts:
+          - exp_labels: {severity: critical, area: api}
+            exp_annotations:
+              summary: "Доля 5xx API 25%"
+              description: "Более 5% ответов 5xx при нагрузке > 0.1 rps в течение 10 минут."
+
+  # Хранилище артефактов: 4% свободно → и warning, и critical.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_artifact_storage_free_bytes{job="aicd-api", instance="api:8000"}'
+        values: '40x30'
+      - series: 'aicd_artifact_storage_size_bytes{job="aicd-api", instance="api:8000"}'
+        values: '1000x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AicdArtifactStorageLow
+        exp_alerts:
+          - exp_labels: {severity: warning, area: storage}
+            exp_annotations:
+              summary: "Свободно 4% хранилища артефактов"
+      - eval_time: 20m
+        alertname: AicdArtifactStorageCritical
+        exp_alerts:
+          - exp_labels: {severity: critical, area: storage}
+            exp_annotations:
+              summary: "Свободно 4% хранилища артефактов — запись артефактов скоро остановится"
+
+  # Outbox не доставляется 10 минут.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_outbox_oldest_pending_age_seconds{job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0+60x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AicdOutboxLag
+        exp_alerts:
+          - exp_labels: {severity: critical, area: delivery}
+            exp_annotations:
+              summary: "Outbox не доставляется: старейшее событие ждёт 12m 0s"
+
+  # Цель недоступна.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="aicd-api", instance="api:8000"}'
+        values: '1 1 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: AicdTargetDown
+        exp_alerts:
+          - exp_labels: {severity: critical, area: availability, job: aicd-api, instance: "api:8000"}
+            exp_annotations:
+              summary: "aicd-api api:8000 недоступен для скрейпа"

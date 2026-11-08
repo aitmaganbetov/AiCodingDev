@@ -10,6 +10,7 @@ from aicd_api.responses import json_response
 from aicd_api.routers import op
 from aicd_api.schemas import LoginRequest
 from aicd_identity import api as identity
+from aicd_platform import metrics
 from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import ProblemError
@@ -76,6 +77,7 @@ async def login(request: Request, body: LoginRequest) -> Response:
             policy=state.session_policy,
         )
     if issued is None:
+        metrics.AUTH_FAILURES.labels("login_failed").inc()  # неверные данные или блокировка (не различаются)
         raise ProblemError("unauthenticated")
     principal = identity.Principal(
         user_id=issued.user_id,

@@ -12,9 +12,13 @@ export type ProviderSettingsUpdateRequest = JsonBody<'updateProviderSettings'>;
 export type AgentRole = Schemas['AgentRole'];
 export type AuthStatus = Schemas['AuthStatus'];
 export type ProviderAvailability = Schemas['ProviderAvailability'];
+export type ProbeAccepted = Schemas['ProbeAccepted'];
+export type ProviderProbeStatus = Schemas['ProviderProbeStatus'];
 
 export const providerKeys = {
   list: (workspaceId: string) => ['providers', workspaceId] as const,
+  probe: (workspaceId: string, providerId: string, probeRequestId: string) =>
+    ['providers', workspaceId, providerId, 'probe', probeRequestId] as const,
 };
 
 export const providersApi = {
@@ -25,6 +29,16 @@ export const providersApi = {
   /** 202: перепроверка поставлена на worker-exec (лимит 6/час на workspace). */
   probe(workspaceId: string, providerId: string, idempotencyKey: string): Promise<JsonResponse<'probeProvider', 202>> {
     return request({ method: 'POST', path: `/providers/${seg(providerId)}/probe`, workspaceId, idempotencyKey });
+  },
+
+  /** Статус запроса проверки (ProbeAccepted.status_url): PENDING → COMPLETED | FAILED | EXPIRED. */
+  probeStatus(
+    workspaceId: string,
+    providerId: string,
+    probeRequestId: string,
+    signal?: AbortSignal,
+  ): Promise<JsonResponse<'getProviderProbe', 200>> {
+    return request({ method: 'GET', path: `/providers/${seg(providerId)}/probes/${seg(probeRequestId)}`, workspaceId, signal });
   },
 
   updateSettings(

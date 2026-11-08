@@ -52,13 +52,40 @@ function providers(): S['Provider'][] {
   ];
 }
 
+const PROBE_ID = '01900000-0000-7000-b000-0000000000ff';
+
 function mockProviders(api: MockApi, items: S['Provider'][], { probeLimited = false } = {}) {
   api.route('GET', '/api/v1/providers', 'listProviders', () => ({ status: 200, body: { items } }));
   api.route('POST', '/api/v1/providers/{id}/probe', 'probeProvider', ({ id }) => {
     if (probeLimited) return { ...problem(429, 'rate_limited'), headers: { 'Retry-After': '600' } };
     return {
       status: 202,
-      body: { provider_id: id, probe_request_id: '01900000-0000-7000-b000-0000000000ff', accepted_at: '2026-11-08T09:00:00Z', status_url: '/api/v1/providers' },
+      body: {
+        provider_id: id,
+        probe_request_id: PROBE_ID,
+        accepted_at: '2026-11-08T09:00:00Z',
+        status_url: `/api/v1/providers/${id}/probes/${PROBE_ID}`,
+      },
+    };
+  });
+  // OQ-45 (c): статус запроса проверки — первый опрос PENDING, затем COMPLETED с проверенной установкой.
+  let polls = 0;
+  api.route('GET', `/api/v1/providers/{id}/probes/${PROBE_ID}`, 'getProviderProbe', ({ id }) => {
+    const p = items.find((x) => x.provider_id === id);
+    if (!p) return problem(404, 'not_found');
+    polls += 1;
+    const done = polls > 1;
+    return {
+      status: 200,
+      body: {
+        probe_request_id: PROBE_ID,
+        provider_id: p.provider_id,
+        status: done ? 'COMPLETED' : 'PENDING',
+        requested_at: '2026-11-08T09:00:00Z',
+        completed_at: done ? '2026-11-08T09:00:04Z' : null,
+        installation: done && p.installations[0] ? { ...p.installations[0], auth_status: 'AUTHENTICATED' } : null,
+        error_category: null,
+      },
     };
   });
   api.route('PATCH', '/api/v1/providers/{id}/settings', 'updateProviderSettings', ({ id, body, headers }) => {
@@ -98,7 +125,14 @@ test('providers: status, login guidance without secrets, probe and safe settings
   }
 
   await claude.getByRole('button', { name: 'Перепроверить' }).click();
-  await expect(claude.getByRole('status').filter({ hasText: 'Перепроверка «Claude Code» запрошена' })).toBeVisible();
+  await expect(claude.getByRole('status').filter({ hasText: 'Перепроверка «Claude Code» выполняется' })).toBeVisible();
+  await expect(claude.getByRole('status').filter({ hasText: 'Проверка завершена: хост worker-exec-2, авторизация — Выполнен вход.' })).toBeVisible({
+    timeout: 10_000,
+  });
+  const polls = api.requests.filter((r) => r.operationId === 'getProviderProbe');
+  expect(polls.length).toBeGreaterThanOrEqual(2);
+  expect(polls.every((r) => r.headers['x-workspace-id'] === ws.id)).toBe(true);
+  await expectNoSeriousA11yViolations(page, 'providers probe status');
   const probe = api.requests.find((r) => r.operationId === 'probeProvider');
   expect(probe?.headers['idempotency-key']).toBeTruthy();
   expect(probe?.headers['x-workspace-id']).toBe(ws.id);

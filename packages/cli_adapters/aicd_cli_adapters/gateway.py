@@ -23,9 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from aicd_cli_adapters.models import ExecutionRequest, ExecutionResult, NormalizedCliEvent, result_json
 from aicd_cli_adapters.subprocess_adapter import StoredArtifact, SubprocessCLIAdapter
+from aicd_platform import metrics
 from aicd_platform.artifacts import ArtifactStore
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
+from aicd_platform.telemetry import span
 
 EventSink = Callable[[NormalizedCliEvent], Awaitable[None]]
 
@@ -102,22 +104,43 @@ class ExecutionGateway:
         installation_id: uuid.UUID,
         on_event: EventSink | None = None,
     ) -> GatewayOutcome:
-        existing = await self._existing(request)
-        if existing is not None:
-            return existing
-        token = await self._admit(request, installation_id)
-        handle = await adapter.execute(request)
-        ref = await adapter.wait_started(request.execution_id)
-        if ref is not None:
-            await self._transition(request, token, "STARTING", extra="pid_ref = :ref", params={"ref": ref})
-            await self._transition(request, token, "RUNNING", extra="started_at = now()")
-        async for event in adapter.stream_events(handle.execution_id):
-            if on_event is not None:
-                await on_event(event)
-        result = await adapter.collect_result(request.execution_id)
-        result = await self._attach_diff(request, result)
-        await self._complete(request, token, result, started=ref is not None)
-        return GatewayOutcome(result=result, reused=False)
+        provider = metrics.label(request.provider, metrics.PROVIDERS)
+        attributes = {
+            "aicd.workspace_id": request.workspace_id,
+            "aicd.execution_id": request.execution_id,
+            "aicd.provider": provider,
+        }
+        with span("cli.execution", attributes=attributes) as current:
+            existing = await self._existing(request)
+            if existing is not None:
+                current.set_attribute("aicd.outcome", "reused")
+                return existing
+            try:
+                token = await self._admit(request, installation_id)
+            except ConcurrencyLimitReachedError:
+                metrics.CLI_LIMIT_REJECTIONS.labels(provider).inc()
+                current.set_attribute("aicd.outcome", "concurrency_limit")
+                raise
+            metrics.CLI_EXECUTIONS_ACTIVE.labels(provider).inc()
+            try:
+                handle = await adapter.execute(request)
+                ref = await adapter.wait_started(request.execution_id)
+                if ref is not None:
+                    await self._transition(request, token, "STARTING", extra="pid_ref = :ref", params={"ref": ref})
+                    await self._transition(request, token, "RUNNING", extra="started_at = now()")
+                async for event in adapter.stream_events(handle.execution_id):
+                    if on_event is not None:
+                        await on_event(event)
+                result = await adapter.collect_result(request.execution_id)
+                result = await self._attach_diff(request, result)
+                await self._complete(request, token, result, started=ref is not None)
+            finally:
+                metrics.CLI_EXECUTIONS_ACTIVE.labels(provider).dec()
+            _observe(provider, result)
+            current.set_attribute("aicd.status", result.execution_status)
+            if result.error is not None:
+                current.set_attribute("aicd.failure_category", result.error.code)
+            return GatewayOutcome(result=result, reused=False)
 
     async def _existing(self, request: ExecutionRequest) -> GatewayOutcome | None:
         async with transaction(self._engine, self._ctx(request)) as conn:
@@ -293,6 +316,18 @@ class ExecutionGateway:
                     "src": source,
                 },
             )
+
+
+def _observe(provider: str, result: ExecutionResult) -> None:
+    """Метрики исполнения (P8-06): статус/категория ошибки, длительность; токены — только сообщённые CLI."""
+    failure = result.error.code if result.error else None
+    metrics.CLI_EXECUTIONS.labels(
+        provider, metrics.label(result.execution_status, metrics.EXECUTION_STATUSES), metrics.label(failure)
+    ).inc()
+    if result.started_at is not None:
+        metrics.CLI_DURATION.labels(provider).observe(max((result.finished_at - result.started_at).total_seconds(), 0))
+    if result.usage.source == "cli_reported" and result.usage.tokens is not None and result.usage.tokens >= 0:
+        metrics.CLI_TOKENS.labels(provider).inc(result.usage.tokens)
 
 
 def _profile_slug(profile: str) -> str:

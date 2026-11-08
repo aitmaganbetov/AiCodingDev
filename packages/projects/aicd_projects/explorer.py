@@ -12,6 +12,9 @@ git вызывается через `aicd_security.git` (argv без shell, ху
 * файл — не больше `MAX_FILE_BYTES` (иначе `truncated`), бинарность — NUL-байт или не UTF-8;
   содержимое отдаётся только как текст (без HTML), бинарный файл — без содержимого.
 
+* ветки — `for-each-ref refs/heads/` (не более `MAX_BRANCHES`); история — `git log` от разрешённого commit
+  (глубина не более `MAX_HISTORY_DEPTH`), без email автора, тема commit — однострочный текст с редактированием секретов.
+
 Блокирующие вызовы git выполняются вызывающим слоем вне транзакции БД (в пуле потоков).
 """
 
@@ -27,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from aicd_platform.errors import FieldError, ProblemError
+from aicd_platform.redaction import redact_text
 from aicd_security import git as git_guard
 from aicd_security.paths import UnsafePathError, resolve_ref
 
@@ -285,3 +289,117 @@ def read_file(repo_path: Path, commit_sha: str, path: str) -> dict[str, Any]:
         "encoding": None if binary else "utf-8",
         "content": content,
     }
+
+
+# --- Ветки и история commit (OQ-45 (c)) ----------------------------------------------------------
+
+MAX_BRANCHES = 1000
+MAX_HISTORY_DEPTH = 1000
+_SUBJECT_MAX = 500
+_AUTHOR_MAX = 200
+_REC_SEP = "\x1e"
+_FIELD_SEP = "\x1f"
+
+
+@dataclass(frozen=True)
+class BranchItem:
+    name: str
+    commit_sha: str
+    committed_at: str | None
+    is_default: bool
+
+
+def _clean_text(value: str, limit: int) -> str:
+    """Однострочный текст без управляющих символов (метаданные git — недоверенные данные)."""
+    cleaned = "".join(" " if ord(ch) < 0x20 or ch == "\x7f" else ch for ch in value).strip()
+    return redact_text(cleaned)[:limit]
+
+
+def _iso_or_none(value: str) -> str | None:
+    value = value.strip()
+    return value or None
+
+
+def list_branches(repo_path: Path, default_branch: str) -> tuple[list[BranchItem], bool]:
+    """Локальные ветки: ветка по умолчанию первой, остальные — новые commit первыми, затем по имени.
+
+    Возвращает (ветки, truncated). Имена, не проходящие `validate_branch_name`, пропускаются.
+    """
+    try:
+        raw = git_guard.run_git_bytes(
+            repo_path,
+            "for-each-ref",
+            "--sort=-committerdate",
+            f"--count={MAX_BRANCHES + 1}",
+            "--format=%(refname)%00%(objectname)%00%(committerdate:iso-strict)",
+            "refs/heads/",
+            timeout=30,
+            max_output_bytes=_MAX_TREE_OUTPUT,
+        )
+    except git_guard.GitRepositoryError as exc:
+        raise ProblemError("service_unavailable", detail="Не удалось прочитать ветки git") from exc
+    items: list[BranchItem] = []
+    for line in raw.decode("utf-8", "replace").splitlines():
+        parts = line.split("\x00")
+        if len(parts) != 3 or not parts[0].startswith("refs/heads/"):
+            continue
+        name = parts[0].removeprefix("refs/heads/")
+        try:
+            git_guard.validate_branch_name(name)
+        except git_guard.GitRepositoryError:
+            continue
+        if not _FULL_SHA_RE.fullmatch(parts[1]):
+            continue
+        items.append(BranchItem(name, parts[1], _iso_or_none(parts[2]), name == default_branch))
+    truncated = len(items) > MAX_BRANCHES
+    items = items[:MAX_BRANCHES]
+    items.sort(key=lambda b: (not b.is_default,))  # стабильная сортировка: default первой, порядок git сохранён
+    return items, truncated
+
+
+def list_commits(repo_path: Path, commit_sha: str, offset: int, limit: int) -> tuple[list[dict[str, Any]], bool]:
+    """История от `commit_sha` (порядок git log): страница `limit` commit после `offset`; второй элемент — есть ли ещё
+    в пределах `MAX_HISTORY_DEPTH`. Email автора не отдаётся; тема — однострочный текст с редактированием секретов."""
+    if offset >= MAX_HISTORY_DEPTH:
+        return [], False
+    count = min(limit + 1, MAX_HISTORY_DEPTH - offset)
+    fmt = _FIELD_SEP.join(("%H", "%P", "%an", "%aI", "%cI", "%s")) + _REC_SEP
+    try:
+        raw = git_guard.run_git_bytes(
+            repo_path,
+            "log",
+            "--no-show-signature",
+            "--no-decorate",
+            "--no-color",
+            "--encoding=UTF-8",
+            f"--format={fmt}",
+            f"--max-count={count}",
+            f"--skip={offset}",
+            "--end-of-options",
+            commit_sha,
+            timeout=60,
+            max_output_bytes=_MAX_TREE_OUTPUT,
+        )
+    except git_guard.GitRepositoryError as exc:
+        raise ProblemError("service_unavailable", detail="Не удалось прочитать историю git") from exc
+    items: list[dict[str, Any]] = []
+    for record in raw.decode("utf-8", "replace").split(_REC_SEP):
+        record = record.strip("\n")
+        if not record:
+            continue
+        fields = record.split(_FIELD_SEP)
+        if len(fields) != 6 or not _FULL_SHA_RE.fullmatch(fields[0]):
+            continue
+        parents = [p for p in fields[1].split() if _FULL_SHA_RE.fullmatch(p)]
+        items.append(
+            {
+                "sha": fields[0],
+                "parents": parents,
+                "author_name": _clean_text(fields[2], _AUTHOR_MAX),
+                "authored_at": _iso_or_none(fields[3]),
+                "committed_at": _iso_or_none(fields[4]),
+                "subject": _clean_text(fields[5], _SUBJECT_MAX),
+            }
+        )
+    more = len(items) > limit and offset + limit < MAX_HISTORY_DEPTH
+    return items[:limit], more

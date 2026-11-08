@@ -95,6 +95,30 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     otel_exporter: Literal["none", "console"] = "none"
 
+    # GitHub App (P8-02/P8-03, SECURITY_ARCHITECTURE §6.1, §10): ключ App и webhook secret(ы) — только файлы
+    # секретов (Docker secrets); при ротации активны два webhook secret (текущий и предыдущий, SC-SEC-06).
+    # Базовые URL — конфигурация оператора (в production — только https); исходящие запросы к GitHub идут
+    # через egress-proxy (`egress_proxy_url`), если он задан.
+    github_app_id: int | None = Field(default=None, ge=1)
+    github_app_slug: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,99}$")
+    github_app_private_key_file: str | None = None
+    github_webhook_secret_file: str | None = None
+    github_webhook_secret_previous_file: str | None = None
+    github_api_url: str = "https://api.github.com"
+    github_web_url: str = "https://github.com"
+    github_git_url: str | None = None  # транспорт git push (по умолчанию github_web_url)
+    github_webhook_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
+    github_install_state_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    egress_proxy_url: str | None = None
+
+    # Метрики Prometheus (P8-06, SC-OBS-03): `/metrics` только во внутренней сети и по bearer-токену из файла
+    # секрета; в production без токена endpoint выключен. Воркеры поднимают свой HTTP-сервер на
+    # `metrics_port` (0 — не поднимать), API отдаёт `/metrics` вне `/api/v1` (reverse-proxy его не публикует).
+    metrics_token: SecretStr | None = None
+    metrics_token_file: str | None = None
+    metrics_host: str = "0.0.0.0"  # noqa: S104 — порт доступен только в сети backend (compose), не публикуется
+    metrics_port: int = Field(default=0, ge=0, le=65535)
+
     @field_validator("repository_roots", mode="before")
     @classmethod
     def _parse_roots(cls, value: object) -> object:
@@ -121,6 +145,8 @@ class Settings(BaseSettings):
             self.secret_key = _read_secret_file(self.secret_key_file)
         if self.maintenance_database_url is None:
             self.maintenance_database_url = _read_secret_file(self.maintenance_database_url_file)
+        if self.metrics_token is None:
+            self.metrics_token = _read_secret_file(self.metrics_token_file)
         redis_from_file = _read_secret_file(self.redis_url_file)
         if redis_from_file is not None:
             self.redis_url = redis_from_file.get_secret_value()
@@ -129,6 +155,11 @@ class Settings(BaseSettings):
                 raise ValueError(f"недопустимое имя корня репозиториев: {name!r}")
             if not root.is_absolute():
                 raise ValueError(f"корень репозиториев {name!r} должен быть абсолютным путём")
+        if self.environment == "production":
+            for name in ("github_api_url", "github_web_url", "github_git_url"):
+                value = getattr(self, name)
+                if value is not None and not str(value).startswith("https://"):
+                    raise ValueError(f"{name} в production должен использовать https://")
         return self
 
     def require_database_url(self) -> str:
@@ -140,6 +171,21 @@ class Settings(BaseSettings):
         if self.maintenance_database_url is None:
             raise RuntimeError("AICD_MAINTENANCE_DATABASE_URL или AICD_MAINTENANCE_DATABASE_URL_FILE не заданы")
         return self.maintenance_database_url.get_secret_value()
+
+    def metrics_token_value(self) -> str | None:
+        return self.metrics_token.get_secret_value() if self.metrics_token else None
+
+    def github_private_key_pem(self) -> SecretStr | None:
+        """PEM-ключ GitHub App из файла секрета (читается при обращении, в атрибутах Settings не хранится)."""
+        return _read_secret_file(self.github_app_private_key_file)
+
+    def github_webhook_secrets(self) -> list[SecretStr]:
+        """Активные webhook secret: текущий и (на время ротации) предыдущий."""
+        found = (
+            _read_secret_file(self.github_webhook_secret_file),
+            _read_secret_file(self.github_webhook_secret_previous_file),
+        )
+        return [s for s in found if s is not None and s.get_secret_value()]
 
     def archive_root(self) -> Path:
         return self.retention_archive_root or self.artifact_fs_root / "archive"

@@ -12,13 +12,14 @@ from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from aicd_api.responses import problem_response
-from aicd_platform import context
+from aicd_platform import context, metrics
 from aicd_platform.errors import ProblemError
 from aicd_platform.telemetry import current_trace_id, tracer
 
 log = logging.getLogger("aicd.access")
 
 MAX_BODY_BYTES = 256 * 1024
+HTTP_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -37,17 +38,19 @@ class _BodyTooLargeError(Exception):
 class BodyLimitMiddleware:
     """413 для тел > 256 KiB (API_DESIGN §6) — по Content-Length и по фактическому потоку."""
 
-    def __init__(self, app: ASGIApp, max_bytes: int = MAX_BODY_BYTES) -> None:
+    def __init__(self, app: ASGIApp, max_bytes: int = MAX_BODY_BYTES, overrides: dict[str, int] | None = None) -> None:
         self.app = app
         self.max_bytes = max_bytes
+        self.overrides = dict(overrides or {})  # точный путь → лимит (вебхук GitHub, SC-GH-01)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         headers = dict(scope.get("headers") or [])
+        max_bytes = self.overrides.get(scope.get("path", ""), self.max_bytes)
         declared = headers.get(b"content-length")
-        if declared is not None and declared.isdigit() and int(declared) > self.max_bytes:
+        if declared is not None and declared.isdigit() and int(declared) > max_bytes:
             await self._reject(scope, receive, send)
             return
         received = 0
@@ -57,7 +60,7 @@ class BodyLimitMiddleware:
             message = await receive()
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
-                if received > self.max_bytes:
+                if received > max_bytes:
                     raise _BodyTooLargeError
             return message
 
@@ -102,13 +105,18 @@ def _finish(request: Request, response: Response, started: float) -> Response:
         response.headers["RateLimit-Remaining"] = str(rate.remaining)
         response.headers["RateLimit-Reset"] = str(rate.reset_seconds)
     route = request.scope.get("route")
+    template = getattr(route, "path", "unmatched")  # шаблон пути, без query string и ID
+    elapsed = time.perf_counter() - started
+    method = metrics.label(request.method, HTTP_METHODS)
+    metrics.HTTP_REQUESTS.labels(method, template, str(response.status_code)).inc()
+    metrics.HTTP_DURATION.labels(method, template).observe(elapsed)
     log.info(
         "request",
         extra={
             "method": request.method,
-            "route": getattr(route, "path", "unmatched"),  # шаблон пути, без query string и ID
+            "route": template,
             "status": response.status_code,
-            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "duration_ms": round(elapsed * 1000, 1),
         },
     )
     return response

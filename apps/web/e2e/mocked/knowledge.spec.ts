@@ -56,7 +56,8 @@ function mockKnowledge(api: MockApi, sources: S['DocumentationSource'][], polici
     policies.set(p.project_id, next);
     return { status: 200, body: next, headers: { ETag: `"v${next.settings_version}"` } };
   });
-  api.route('GET', '/api/v1/projects/{id}/technologies', 'listTechnologies', () => ({
+  // OQ-45 (c): технологии workspace — без выбора проекта (стек проектов + источники).
+  api.route('GET', '/api/v1/technologies', 'listWorkspaceTechnologies', ({ workspaceId }) => ({
     status: 200,
     body: {
       items: [
@@ -67,8 +68,8 @@ function mockKnowledge(api: MockApi, sources: S['DocumentationSource'][], polici
           technology_version_id: TECH_VERSION,
           version_label: '3.12',
           support_status: 'supported',
-          detected_from: 'pyproject.toml',
-          confirmed_by: null,
+          project_count: 1,
+          source_count: sources.filter((x) => x.workspace_id === workspaceId && x.technology_version_id === TECH_VERSION).length,
         },
       ],
       next_cursor: null,
@@ -94,6 +95,8 @@ test('knowledge: sources table, refresh needs explicit consent, register source,
 
   const table = page.getByRole('table', { name: 'Источники документации' });
   await expect(table.getByRole('row')).toHaveCount(3);
+  // Название технологии источника — из списка технологий workspace.
+  await expect(table.locator(`[data-source-id="${sources[0]?.id}"]`)).toContainText('Python 3.12');
   await expect(table.locator(`[data-source-id="${sources[1]?.id}"]`)).toContainText('Источник выключен — обновление недоступно');
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
@@ -125,9 +128,9 @@ test('knowledge: sources table, refresh needs explicit consent, register source,
   // Регистрация источника: валидация, затем успех.
   await page.getByRole('button', { name: 'Зарегистрировать источник' }).click();
   const reg = page.getByRole('dialog', { name: 'Новый источник документации' });
+  await expect(reg.getByLabel('Проект', { exact: true })).toHaveCount(0);
   await reg.getByRole('button', { name: 'Зарегистрировать' }).click();
-  await expect(reg.getByLabel('Проект', { exact: true })).toHaveAttribute('aria-invalid', 'true');
-  await reg.getByLabel('Проект', { exact: true }).selectOption(project.id);
+  await expect(reg.getByLabel('Технология и версия')).toHaveAttribute('aria-invalid', 'true');
   await reg.getByLabel('Технология и версия').selectOption(TECH_VERSION);
   await reg.getByLabel('Адрес или ссылка').fill('http://insecure.example.com');
   await reg.getByRole('button', { name: 'Зарегистрировать' }).click();

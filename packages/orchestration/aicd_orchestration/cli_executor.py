@@ -36,6 +36,7 @@ from aicd_orchestration import worktrees as wt
 from aicd_orchestration.agent_io import AgentContext, AgentIoSummary, InboxMessage
 from aicd_orchestration.agents.prompt import AssembledPrompt
 from aicd_orchestration.engine import TaskExecution
+from aicd_platform import metrics as prom
 from aicd_platform.artifacts import ArtifactStore
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
@@ -329,6 +330,13 @@ class CliTaskExecutor:
             reason = "no_base_commit" if not run.get("base_commit_sha") else "context_pack_unavailable"
             return None, {"context_pack_id": None, "warnings": [reason if self.context_enabled else "disabled"]}
         metrics: dict[str, Any] = {**pack.stats(), "warnings": pack.warnings, "content_hash": pack.content_hash}
+        stats = pack.stats()
+        prom.observe_context_pack(
+            size_bytes=int(stats["size_bytes"]),
+            fragments=int(stats["fragment_count"]),
+            stale=int(stats["stale_count"]),
+            snapshot_id=pack.snapshot_id,
+        )
         try:
             async with conn.begin_nested():
                 await record_retrieval(conn, pack, run_id=run["id"], task_id=task["id"], task_attempt_id=attempt_id)

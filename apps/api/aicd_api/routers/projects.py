@@ -180,10 +180,17 @@ async def attach_repository(
     access = await project_access(request, principal, project_id)
     await authorize(request, access, "repository:attach")
     if body.provider == "github":
-        # GitHub App и привязка GitHub-репозиториев — Phase 8 (P8-02).
-        raise ProblemError(
-            "validation_error",
-            errors=[FieldError("/provider", "not_supported", "Привязка GitHub-репозиториев появится в Phase 8")],
+        # FR-PRJ-03 (P8-02): репозиторий подтверждается через установку GitHub App workspace.
+        from aicd_api.routers import github as github_routes
+
+        return await github_routes.attach_github_repository(
+            request,
+            access,
+            project_id,
+            remote_url=body.remote_url,
+            local_path=body.local_path,
+            default_branch=body.default_branch,
+            payload=body.model_dump(),
         )
     if not body.local_path:
         raise ProblemError("validation_error", errors=[FieldError("/local_path", "required", "обязательно для local")])
@@ -287,3 +294,64 @@ async def get_repository_file(
     commit_sha = await asyncio.to_thread(explorer.resolve_commit, repo_path, repo, commit)
     body = await asyncio.to_thread(explorer.read_file, repo_path, commit_sha, rel)
     return json_response({"repository_id": repo.id, **body})
+
+
+@router.get("/{project_id}/repositories/{repository_id}/branches", **op("listRepositoryBranches", "project:read"))
+async def list_repository_branches(
+    request: Request,
+    project_id: Annotated[uuid.UUID, PathParam()],
+    repository_id: Annotated[uuid.UUID, PathParam()],
+    principal: identity.Principal = Depends(current_principal),
+    limit: Limit = DEFAULT_LIMIT,
+    cursor: Cursor = None,
+) -> Response:
+    """Ветки локальной копии (OQ-45 (c)): ветка по умолчанию первой; курсор — смещение в снимке списка."""
+    repo, repo_path = await _explorer_repo(request, principal, project_id, repository_id)
+    state = app_state(request)
+    filters = {"r": "repo_branches", "repo": str(repository_id)}
+    offset = 0
+    if cursor:
+        (raw_offset,) = decode_cursor(state.secret_key, cursor, filters)
+        offset = int(raw_offset)
+    items, truncated = await asyncio.to_thread(explorer.list_branches, repo_path, repo.default_branch)
+    page = items[offset : offset + limit]
+    next_cursor = encode_cursor(state.secret_key, [offset + limit], filters) if offset + limit < len(items) else None
+    return json_response(
+        {
+            "repository_id": repo.id,
+            "default_branch": repo.default_branch,
+            "truncated": truncated,
+            "items": [
+                {"name": b.name, "commit_sha": b.commit_sha, "committed_at": b.committed_at, "is_default": b.is_default}
+                for b in page
+            ],
+            "next_cursor": next_cursor,
+        }
+    )
+
+
+@router.get("/{project_id}/repositories/{repository_id}/commits", **op("listRepositoryCommits", "project:read"))
+async def list_repository_commits(
+    request: Request,
+    project_id: Annotated[uuid.UUID, PathParam()],
+    repository_id: Annotated[uuid.UUID, PathParam()],
+    principal: identity.Principal = Depends(current_principal),
+    commit: Commit = None,
+    limit: Limit = DEFAULT_LIMIT,
+    cursor: Cursor = None,
+) -> Response:
+    """История commit (OQ-45 (c)); курсор фиксирует разрешённый SHA и смещение (глубина ≤ MAX_HISTORY_DEPTH)."""
+    repo, repo_path = await _explorer_repo(request, principal, project_id, repository_id)
+    state = app_state(request)
+    filters = {"r": "repo_commits", "repo": str(repository_id), "commit": commit or ""}
+    offset = 0
+    if cursor:
+        sha, raw_offset = decode_cursor(state.secret_key, cursor, filters)
+        commit_sha, offset = str(sha), int(raw_offset)
+    else:
+        commit_sha = await asyncio.to_thread(explorer.resolve_commit, repo_path, repo, commit)
+    items, more = await asyncio.to_thread(explorer.list_commits, repo_path, commit_sha, offset, limit)
+    next_cursor = encode_cursor(state.secret_key, [commit_sha, offset + limit], filters) if more else None
+    return json_response(
+        {"repository_id": repo.id, "commit_sha": commit_sha, "items": items, "next_cursor": next_cursor}
+    )

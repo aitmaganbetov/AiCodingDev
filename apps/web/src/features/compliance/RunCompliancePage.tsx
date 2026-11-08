@@ -33,6 +33,7 @@ import { Hash, runViewPath, TextLink, useWorkspaceRole, workspacePath } from '..
 export const COMPLIANCE_PAGE_SIZE = 100;
 export const NOTES_MAX = 4000;
 export const EVIDENCE_MAX = 20;
+export const EVIDENCE_PAGE = 100;
 const COMPLIANCE_EVENT_TYPES = ['gate.completed', 'run.completed', 'run.state_changed'] as const;
 
 type ReviewField = 'status' | 'notes' | 'evidence_ids';
@@ -48,9 +49,14 @@ function ReviewDialog({ runId, row, onClose }: { runId: string; row: ComplianceR
   const [selected, setSelected] = useState<string[]>(row.evidence_id ? [row.evidence_id] : []);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<ReviewField, string>>>({});
   const [formErrors, setFormErrors] = useState<string[]>([]);
-  // Кандидаты — evidence этого run из отчёта (отдельной операции «evidence run» в контракте нет).
-  const report = useQuery({ queryKey: qualityKeys.report(runId), queryFn: ({ signal }) => qualityApi.runReport(runId, signal) });
-  const candidates: Evidence[] = useMemo(() => report.data?.evidence ?? [], [report.data]);
+  // Кандидаты — все evidence этого run (listRunEvidence, OQ-45 (c)), постранично.
+  const report = useInfiniteQuery({
+    queryKey: qualityKeys.runEvidence(runId, { limit: EVIDENCE_PAGE }),
+    queryFn: ({ pageParam, signal }) => qualityApi.runEvidence(runId, { limit: EVIDENCE_PAGE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+  });
+  const candidates: Evidence[] = useMemo(() => report.data?.pages.flatMap((p) => p.items) ?? [], [report.data]);
   const byId = useMemo(() => new Map(candidates.map((e) => [e.id, e])), [candidates]);
 
   const review = useMutation({
@@ -115,7 +121,7 @@ function ReviewDialog({ runId, row, onClose }: { runId: string; row: ComplianceR
             </p>
             {report.isPending ? (
               <LoadingState inline label={t('compliance.review.evidenceLoading')} />
-            ) : report.isError ? (
+            ) : report.isError && candidates.length === 0 ? (
               <ErrorState error={report.error} onRetry={() => void report.refetch()} />
             ) : candidates.length === 0 ? (
               <p className="text-sm text-fg-muted">{t('compliance.review.noEvidence')}</p>
@@ -144,6 +150,15 @@ function ReviewDialog({ runId, row, onClose }: { runId: string; row: ComplianceR
                 })}
               </ul>
             )}
+            {report.hasNextPage || report.isFetchNextPageError ? (
+              <LoadMore
+                shown={candidates.length}
+                hasNextPage={report.hasNextPage}
+                isFetchingNextPage={report.isFetchingNextPage}
+                nextPageError={report.isFetchNextPageError ? report.error : null}
+                onLoadMore={() => void report.fetchNextPage()}
+              />
+            ) : null}
             {fieldErrors.evidence_ids ? (
               <p id="review-evidence-error" className="text-sm font-medium text-danger-text">
                 {fieldErrors.evidence_ids}

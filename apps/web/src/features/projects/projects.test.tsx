@@ -141,6 +141,61 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
     expect(fileCall?.url.searchParams.get('path')).toBe('a.html');
   });
 
+  it('selects a branch and a recent commit from the repository history (OQ-45 (c))', async () => {
+    const user = userEvent.setup();
+    const local: Repository = { ...REPO, provider: 'local', remote_url: null, local_root_ref: 'repos/payments' };
+    const head = 'c'.repeat(40);
+    const older = 'd'.repeat(40);
+    const base64 = `/api/v1/projects/${P1.id}/repositories/${REPO.id}`;
+    const { calls } = mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [local], next_cursor: null }),
+      [`GET ${base64}/branches`]: () =>
+        json(200, {
+          repository_id: REPO.id,
+          default_branch: 'main',
+          truncated: false,
+          items: [
+            { name: 'main', commit_sha: 'b'.repeat(40), committed_at: '2026-11-07T10:00:00Z', is_default: true },
+            { name: 'feature/x', commit_sha: head, committed_at: '2026-11-07T09:00:00Z', is_default: false },
+          ],
+          next_cursor: null,
+        }),
+      [`GET ${base64}/commits`]: (req) =>
+        json(200, {
+          repository_id: REPO.id,
+          commit_sha: req.url.searchParams.get('commit') === 'feature/x' ? head : 'b'.repeat(40),
+          items: [
+            { sha: head, parents: [older], author_name: 't', authored_at: null, committed_at: null, subject: '<b>fix</b> login' },
+            { sha: older, parents: [], author_name: 't', authored_at: null, committed_at: null, subject: 'init' },
+          ],
+          next_cursor: null,
+        }),
+      [`GET ${base64}/tree`]: (req) =>
+        json(200, {
+          repository_id: REPO.id,
+          commit_sha: req.url.searchParams.get('commit') === older ? older : head,
+          path: '',
+          items: [{ name: 'README.md', path: 'README.md', type: 'file', mode: '100644', size: 3 }],
+          next_cursor: null,
+        }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}`);
+    await user.click(await screen.findByRole('button', { name: 'Открыть дерево файлов' }));
+    const branch = await screen.findByLabelText('Ветка');
+    await waitFor(() => expect(within(branch).getAllByRole('option')).toHaveLength(2));
+    await user.selectOptions(branch, 'feature/x');
+    await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith('/tree') && c.url.searchParams.get('commit') === 'feature/x')).toBe(true));
+    const commit = screen.getByLabelText('Commit');
+    await waitFor(() => expect(within(commit).getByRole('option', { name: `${older.slice(0, 12)} — init` })).toBeInTheDocument());
+    // Тема commit — недоверенный текст: только как текст опции.
+    expect(within(commit).getByRole('option', { name: `${head.slice(0, 12)} — <b>fix</b> login` })).toBeInTheDocument();
+    await user.selectOptions(commit, older);
+    await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith('/tree') && c.url.searchParams.get('commit') === older)).toBe(true));
+    expect(await screen.findByTestId('explorer-resolved-commit')).toHaveTextContent(older.slice(0, 12));
+    expect(calls.find((c) => c.url.pathname.endsWith('/commits') && c.url.searchParams.get('commit') === 'feature/x')).toBeTruthy();
+  });
+
   it('shows not found for an inaccessible project and hides attach for viewers', async () => {
     mockFetch({
       'GET /api/v1/auth/session': () => json(200, session('viewer')),

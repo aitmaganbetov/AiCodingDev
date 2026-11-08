@@ -15,11 +15,16 @@ from aicd_api.deps import Access, app_state, authorize, current_principal, works
 from aicd_api.idempotency import CommandResult, run_idempotent
 from aicd_api.responses import etag, json_response, require_if_match
 from aicd_api.routers import op
-from aicd_api.schemas import MemberCreateRequest, MemberUpdateRequest, WorkspaceCreateRequest
+from aicd_api.schemas import (
+    MemberCreateRequest,
+    MemberUpdateRequest,
+    WorkspaceCreateRequest,
+    WorkspaceUpdateRequest,
+)
 from aicd_identity import api as identity
 from aicd_identity.rbac import Role
 from aicd_platform.db import DbContext, apply_context, transaction
-from aicd_platform.errors import ProblemError
+from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.ids import uuid7
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
 from aicd_projects import api as projects
@@ -74,11 +79,72 @@ async def create_workspace(
         )
         return CommandResult(
             201,
-            views.workspace(row, Role.OWNER.value),
+            views.workspace({**row, "version": 0}, Role.OWNER.value),
             {"Location": f"/api/v1/workspaces/{workspace_id}", "ETag": etag(0)},
         )
 
     return await run_idempotent(request, DbContext(user_id=principal.user_id), body.model_dump(), command)
+
+
+# --- Workspace (OQ-45 (f)) ------------------------------------------------------------------
+
+
+@router.get("/{workspace_id}", **op("getWorkspace", "member:read"))
+async def get_workspace(
+    request: Request,
+    workspace_id: Annotated[uuid.UUID, Path()],
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    access = await workspace_access(request, principal, workspace_id)
+    await authorize(request, access, "member:read")
+    async with transaction(app_state(request).engine, access.db()) as conn:
+        row = await projects.get_workspace(conn, workspace_id)
+    if row is None:
+        raise ProblemError("not_found")
+    return json_response(views.workspace(row, access.role.value), headers={"ETag": etag(row["version"])})
+
+
+@router.patch("/{workspace_id}", **op("updateWorkspace", "workspace:update"))
+async def update_workspace(
+    request: Request,
+    workspace_id: Annotated[uuid.UUID, Path()],
+    body: WorkspaceUpdateRequest,
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    """Название — owner/admin; политики (`settings`) — только owner (x-permission-depends-on: settings)."""
+    access = await workspace_access(request, principal, workspace_id)
+    await authorize(request, access, "workspace:update")
+    changes = body.model_dump(exclude_unset=True)
+    if "settings" in changes:
+        await authorize(request, access, "workspace:policy")
+    expected = require_if_match(request.headers.get("if-match"))
+    if not changes:
+        raise ProblemError("validation_error", errors=[FieldError("/", "min_properties", "нет изменяемых полей")])
+    if "name" in changes and changes["name"] is None:
+        raise ProblemError("validation_error", errors=[FieldError("/name", "null", "значение обязательно")])
+    settings: dict[str, object] | None = None
+    if "settings" in changes:
+        raw = changes["settings"]
+        if not raw:
+            raise ProblemError(
+                "validation_error", errors=[FieldError("/settings", "min_properties", "нет изменяемых настроек")]
+            )
+        for key, value in raw.items():
+            if value is None:
+                raise ProblemError(
+                    "validation_error", errors=[FieldError(f"/settings/{key}", "null", "значение обязательно")]
+                )
+        settings = dict(raw)
+    async with transaction(app_state(request).engine, access.db()) as conn:
+        row = await projects.update_workspace(
+            conn,
+            workspace_id=workspace_id,
+            actor_id=principal.user_id,
+            expected_version=expected,
+            name=changes.get("name"),
+            settings=settings,
+        )
+    return json_response(views.workspace(row, access.role.value), headers={"ETag": etag(row["version"])})
 
 
 # --- Members ------------------------------------------------------------------------------

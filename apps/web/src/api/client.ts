@@ -231,6 +231,10 @@ export interface RequestOptions {
   workspaceId?: string | undefined;
   /** Optimistic locking (API_DESIGN §9): If-Match: "v<version>". */
   ifMatchVersion?: number | undefined;
+  /** Готовый ETag из ответа сервера (приоритетнее ifMatchVersion): If-Match: <etag>. */
+  ifMatch?: string | undefined;
+  /** Представление ответа (Accept), например text/markdown для отчёта run; по умолчанию JSON. */
+  accept?: string | undefined;
   /** false — не отправлять X-CSRF-Token (только POST /auth/login). */
   csrf?: boolean;
   /** false — 401 не вызывает переход на вход (login, session, logout). */
@@ -270,9 +274,53 @@ async function readBody(res: Response): Promise<unknown> {
   }
 }
 
+/** Ответ с метаданными: тело и сильный ETag (API_DESIGN §9) — для If-Match следующего изменения. */
+export interface ApiResponse<T> {
+  data: T;
+  /** Значение заголовка ETag (`"v<n>"`) или null, если сервер его не прислал / прокси его скрыл. */
+  etag: string | null;
+  headers: Headers;
+}
+
+/** Версия из сильного ETag `"v<n>"` (null — нет/иной формат). */
+export function versionFromEtag(etag: string | null | undefined): number | null {
+  const m = etag ? /^"v(\d+)"$/.exec(etag.trim()) : null;
+  return m ? Number(m[1]) : null;
+}
+
 export async function request<T>(opts: RequestOptions): Promise<T> {
+  return (await requestWithMeta<T>(opts)).data;
+}
+
+/** Не-JSON представление (например, text/markdown отчёта run): текст, Content-Type и имя файла из Content-Disposition. */
+export interface TextResponse {
+  text: string;
+  contentType: string;
+  filename: string | null;
+}
+
+export async function requestText(opts: RequestOptions & { accept: string }): Promise<TextResponse> {
+  const res = await send(opts);
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  return {
+    text: await res.text(),
+    contentType: res.headers.get('Content-Type') ?? opts.accept,
+    filename: match?.[1] ? decodeURIComponent(match[1]) : null,
+  };
+}
+
+export async function requestWithMeta<T>(opts: RequestOptions): Promise<ApiResponse<T>> {
+  const res = await send(opts);
+  const etag = res.headers.get('ETag');
+  if (res.status === 204) return { data: undefined as T, etag, headers: res.headers };
+  return { data: (await readBody(res)) as T, etag, headers: res.headers };
+}
+
+/** Транспорт: заголовки, повторы, разбор ошибок. Возвращает успешный Response с непрочитанным телом. */
+async function send(opts: RequestOptions): Promise<Response> {
   const unsafe = opts.method !== 'GET';
-  const headers: Record<string, string> = { Accept: 'application/json, application/problem+json' };
+  const headers: Record<string, string> = { Accept: opts.accept ? `${opts.accept}, application/problem+json` : 'application/json, application/problem+json' };
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (unsafe && opts.csrf !== false) {
     const token = currentCsrfToken();
@@ -280,7 +328,8 @@ export async function request<T>(opts: RequestOptions): Promise<T> {
   }
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
   if (opts.workspaceId) headers['X-Workspace-Id'] = opts.workspaceId;
-  if (opts.ifMatchVersion !== undefined) headers['If-Match'] = `"v${opts.ifMatchVersion}"`;
+  if (opts.ifMatch) headers['If-Match'] = opts.ifMatch;
+  else if (opts.ifMatchVersion !== undefined) headers['If-Match'] = `"v${opts.ifMatchVersion}"`;
 
   // Повторять можно только то, что безопасно: GET или POST с Idempotency-Key.
   const retryable = !unsafe || Boolean(opts.idempotencyKey);
@@ -306,10 +355,7 @@ export async function request<T>(opts: RequestOptions): Promise<T> {
       throw new ApiError({ status: 0, code: 'network_error', cause });
     }
 
-    if (res.ok) {
-      if (res.status === 204) return undefined as T;
-      return (await readBody(res)) as T;
-    }
+    if (res.ok) return res;
 
     const error = parseProblem(res.status, await readBody(res), res.headers.get('Retry-After'));
     if (

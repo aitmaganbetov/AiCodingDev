@@ -2570,6 +2570,7 @@ CREATE TABLE github_webhook_deliveries (
 CREATE INDEX ix_gwd_pending ON github_webhook_deliveries (received_at) WHERE status = 'RECEIVED';
 ```
 Невалидная подпись → строка `REJECTED` без сохранения payload (защита от заполнения хранилища); глобальной FK на `github_installations` нет (запрет global → tenant ссылок).
+Реализация (миграция 0012): payload не сохраняется и для подлинных доставок (`payload_storage_key` остаётся `NULL`) — payload лишь подсказка (SC-GH-03), в outbox уходит ограниченная выжимка (`hint`: id репозитория, номер PR, head), состояние перечитывается через GitHub API; хранится `payload_sha256`. Запись приёма — `sys_github_webhook_receive` (§19.5), статус обработки — `aicd_worker`.
 
 ### 16.3 `pull_requests` (T, integrations_github) — **дополнение к ТЗ**
 
@@ -2606,6 +2607,7 @@ CREATE INDEX ix_pull_requests_run ON pull_requests (workspace_id, run_id) WHERE 
 CREATE INDEX ix_pull_requests_open ON pull_requests (workspace_id, repository_id) WHERE state = 'OPEN';
 ```
 `state = 'MERGED'` может появиться и из вебхука (merge человеком в GitHub) — тогда `merge_action_id IS NULL`; merge **платформой** возможен только через `external_actions(pr_merge)` с approval (AC-13).
+Реализация (миграция 0012): `trg_pull_requests_state` — `MERGED` терминально, `merge_action_id` ссылается только на `pr_merge`, `create_action_id` — только на `pr_create`. `trg_fn_lock_run_share` допускает в `COMPLETED` run approvals `MERGE`/`MANUAL_REVIEW` с `subject.scope = 'github'` (merge PR и пуш CI-конфигурации — шаги после завершения run; `ck_approvals_run_bound` требует `run_id` для `MERGE`).
 
 ---
 
@@ -3021,6 +3023,7 @@ CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USI
 | `sys_list_user_workspaces()` | `aicd_app` | `(workspace_id, role)` для `app_current_user()` — список «мои workspace» (бриф) |
 | `sys_resolve_project_workspace(project_id uuid)` | `aicd_app` | `workspace_id`, если `app_current_user()` — член; иначе `NULL` |
 | `sys_resolve_installation_workspace(installation_id bigint)` | `aicd_worker` | `workspace_id` установки GitHub App (после проверки подписи вебхука) |
+| `sys_github_webhook_receive(id, event_id, delivery_guid, event, action, installation_id, signature_valid, payload_sha256, status, error, hint jsonb)` | `aicd_app` | `'accepted'`/`'ignored'`/`'rejected'`/`'duplicate'`: строка `github_webhook_deliveries` (дедупликация по GUID; `REJECTED` подделка с тем же GUID заменяется подлинной доставкой) + для `RECEIVED` событие outbox `github.webhook.received` без workspace — у `aicd_app` нет прямых прав на G-таблицу и INSERT в outbox вне своего workspace (миграция 0012) |
 | `sys_schedulable_workspaces(limit int)` | `aicd_worker` | workspace с `READY`-задачами, наступившими `RETRY_WAIT`, истекающими `PENDING` approvals, активными directives |
 | `sys_login_lookup(email text)` | `aicd_app` | `user_id` и признак активности для аутентификации (глобальная таблица, но функция централизует rate-limited lookup) |
 | `sys_resolve_run_workspace(run_id uuid)` / `sys_resolve_task_workspace(task_id uuid)` | `aicd_app` | `workspace_id` run/задачи, если `app_current_user()` — член; иначе `NULL` (миграция 0003) |

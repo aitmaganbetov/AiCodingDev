@@ -13,6 +13,8 @@ x-backend-env: &backend-env
   AICD_REPOSITORY_ROOTS: main=/srv/repos
   AICD_COOKIE_SECURE: "${AICD_COOKIE_SECURE:-true}"
   AICD_ALLOWED_ORIGINS: "${AICD_PUBLIC_ORIGIN:-http://localhost:8080}"
+  # /metrics (P8-06): bearer-токен скрейпа; без него в production endpoint выключен. Воркеры — AICD_METRICS_PORT=9464.
+  AICD_METRICS_TOKEN_FILE: /run/secrets/metrics_token
 
 services:
   postgres:
@@ -58,7 +60,7 @@ services:
   api:
     image: aicodingdev/backend:local
     environment: *backend-env
-    secrets: [app_database_url, app_secret_key, app_redis_url]
+    secrets: [app_database_url, app_secret_key, app_redis_url, metrics_token]
     volumes:
       - artifacts:/var/lib/aicd/artifacts
       - ${AICD_REPOS_DIR:-./repos}:/srv/repos:ro
@@ -80,13 +82,74 @@ services:
     tmpfs: [/var/cache/nginx, /var/run, /tmp]
     depends_on: [api]
 
+  # --- Профиль observability (P8-08): docker compose ... --profile observability up -d ----------------------
+  # Prometheus (скрейп /metrics api и воркеров по bearer-токену) и Alertmanager портов не публикуют;
+  # Grafana — только на 127.0.0.1:3000 со своей аутентификацией (admin, пароль — secret grafana_admin_password),
+  # анонимный доступ выключен (SC-OBS-03). Образы закреплены по digest.
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    secrets: [metrics_token]
+    networks: [backend, monitoring]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [api, alertmanager]
+
+  alertmanager:
+    profiles: [observability]
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks: [monitoring]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_SECURITY_COOKIE_SECURE: "${AICD_COOKIE_SECURE:-true}"
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    secrets: [grafana_admin_password]
+    ports: ["127.0.0.1:3000:3000"]
+    networks: [monitoring, edge]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [prometheus]
+
 networks:
   backend: { internal: true }
   edge: {}
+  monitoring: { internal: true }
 
 volumes:
   pgdata: {}
   artifacts: {}
+  prometheus-data: {}
+  alertmanager-data: {}
+  grafana-data: {}
 
 secrets:
   pg_admin_password: { file: ./secrets/pg_admin_password }
@@ -99,3 +162,5 @@ secrets:
   app_secret_key: { file: ./secrets/app_secret_key }
   redis_password: { file: ./secrets/redis_password }
   app_redis_url: { file: ./secrets/app_redis_url }
+  metrics_token: { file: ./secrets/metrics_token }
+  grafana_admin_password: { file: ./secrets/grafana_admin_password }

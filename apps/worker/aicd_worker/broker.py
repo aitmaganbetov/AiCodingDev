@@ -10,11 +10,12 @@ import dramatiq
 from dramatiq.brokers.redis import RedisBroker
 from dramatiq.brokers.stub import StubBroker
 
-from aicd_worker import docs, handlers, runtime
+from aicd_worker import docs, github, handlers, runtime
 
 ORCHESTRATOR_QUEUE = "orchestrator"
 EXEC_QUEUE = "exec"
 DOCS_QUEUE = "docs"  # загрузка документации (обслуживает воркер orchestrator вместе со своей очередью)
+GITHUB_QUEUE = "github"  # PR workflow, merge после approval, вебхуки (воркер orchestrator, P8-03…P8-05)
 
 
 def build_broker(redis_url: str | None, *, stub: bool = False) -> dramatiq.Broker:
@@ -32,12 +33,18 @@ class Actors:
     handle_event: dramatiq.Actor[[dict[str, Any]], None]
     execute_task: dramatiq.Actor[[dict[str, Any]], None]
     import_documentation: dramatiq.Actor[[dict[str, Any]], None]
+    probe_provider: dramatiq.Actor[[dict[str, Any]], None]
+    github_event: dramatiq.Actor[[dict[str, Any]], None] | None = None
 
     async def publish(self, event: dict[str, Any]) -> None:
         """Публикация outbox-события (для `dispatch_batch`): события run нужных типов — в очередь оркестратора,
-        запросы загрузки документации (без run) — в очередь docs."""
+        запросы загрузки документации (без run) — в очередь docs, перепроверка провайдера — в очередь exec."""
+        if self.github_event is not None and github.is_github_event(event):
+            await asyncio.to_thread(self.github_event.send, event)  # approval.decided(MERGE) — и в оркестратор
         if event.get("event_type") in handlers.DOCS_EVENT_TYPES:
             await asyncio.to_thread(self.import_documentation.send, event)
+        elif event.get("event_type") in handlers.PROBE_EVENT_TYPES:
+            await asyncio.to_thread(self.probe_provider.send, event)
         elif event.get("run_id") and event.get("event_type") in handlers.ORCHESTRATOR_EVENT_TYPES:
             await asyncio.to_thread(self.handle_event.send, event)
 
@@ -46,15 +53,23 @@ class Actors:
 
 
 def _handle_event(event: dict[str, Any]) -> None:
-    runtime.submit(lambda rt: handlers.handle_event(rt, event))
+    runtime.submit(lambda rt: runtime.traced(handlers.ORCHESTRATOR_CONSUMER, event, handlers.handle_event(rt, event)))
 
 
 def _execute_task(message: dict[str, Any]) -> None:
-    runtime.submit(lambda rt: handlers.execute_task(rt, message))
+    runtime.submit(lambda rt: runtime.traced(handlers.EXEC_CONSUMER, message, handlers.execute_task(rt, message)))
 
 
 def _import_documentation(event: dict[str, Any]) -> None:
-    runtime.submit(lambda rt: docs.import_documentation(rt, event))
+    runtime.submit(lambda rt: runtime.traced(docs.DOCS_CONSUMER, event, docs.import_documentation(rt, event)))
+
+
+def _probe_provider(event: dict[str, Any]) -> None:
+    runtime.submit(lambda rt: runtime.traced(handlers.PROBE_CONSUMER, event, handlers.probe_provider(rt, event)))
+
+
+def _github_event(event: dict[str, Any]) -> None:
+    runtime.submit(lambda rt: runtime.traced(github.GITHUB_CONSUMER, event, github.handle_event(rt, event)))
 
 
 def register_actors(broker: dramatiq.Broker, *, exec_time_limit_seconds: int = 5 * 3600) -> Actors:
@@ -85,4 +100,22 @@ def register_actors(broker: dramatiq.Broker, *, exec_time_limit_seconds: int = 5
         max_backoff=300_000,
         time_limit=15 * 60_000,
     )(_import_documentation)
-    return Actors(broker, handle_event, execute_task, import_documentation)
+    probe_provider: dramatiq.Actor[[dict[str, Any]], None] = dramatiq.actor(
+        actor_name=handlers.PROBE_CONSUMER,
+        queue_name=EXEC_QUEUE,
+        broker=broker,
+        max_retries=3,
+        min_backoff=5_000,
+        max_backoff=60_000,
+        time_limit=5 * 60_000,
+    )(_probe_provider)
+    github_event: dramatiq.Actor[[dict[str, Any]], None] = dramatiq.actor(
+        actor_name=github.GITHUB_CONSUMER,
+        queue_name=GITHUB_QUEUE,
+        broker=broker,
+        max_retries=8,
+        min_backoff=5_000,
+        max_backoff=600_000,
+        time_limit=15 * 60_000,
+    )(_github_event)
+    return Actors(broker, handle_event, execute_task, import_documentation, probe_provider, github_event)

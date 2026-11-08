@@ -157,25 +157,10 @@ function seed(api: MockApi, role: S['WorkspaceRole'] = 'owner') {
     for (const r of rows) summary[r.status] = (summary[r.status] ?? 0) + 1;
     return { status: 200, body: { items, next_cursor: null, summary, disclaimer: DISCLAIMER } };
   });
-  api.route('GET', '/api/v1/runs/{id}/report', 'getRunReport', () => ({
-    status: 200,
-    body: {
-      run,
-      quality: {
-        run_id: run.id,
-        quality_profile: 'strict',
-        verdict: 'RUNNING',
-        gate_executions: [],
-        findings_summary: {},
-        findings: [],
-        findings_total: 0,
-      },
-      tasks: [],
-      approvals: [],
-      evidence: evidenceList,
-      generated_at: '2026-11-08T09:00:00Z',
-    } satisfies S['RunReport'],
-  }));
+  // OQ-45 (c): кандидаты evidence вердикта — listRunEvidence (а не evidence из отчёта run).
+  api.route('GET', '/api/v1/runs/{id}/evidence', 'listRunEvidence', ({ id }) =>
+    id === run.id ? { status: 200, body: { items: evidenceList, next_cursor: null } } : problem(404, 'not_found'),
+  );
   // Два id в пути: второй сегмент — регулярное выражение (control_id берём из URL).
   api.route('POST', '/api/v1/runs/{id}/compliance/[^/]+/review', 'reviewComplianceControl', ({ url, headers, body }): Reply => {
     const controlId = url.pathname.split('/')[6];

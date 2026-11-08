@@ -10,12 +10,10 @@ import {
   type DocumentationSourceType,
   type DocumentationTrustLevel,
 } from '../../api/knowledge';
-import { projectKeys, projectsApi } from '../../api/projects';
 import { FormAlert, RadioGroup, TextAreaField, TextField, focusFirstInvalid } from '../../components/form';
 import { ErrorState, LoadingState } from '../../components/states';
 import { Button } from '../../components/ui';
 import { mapProblemToFields } from '../../lib/problem';
-import { ProjectSelect } from './ProjectSelect';
 
 export const SOURCE_TYPES = ['url', 'git', 'file'] as const satisfies readonly DocumentationSourceType[];
 export const TRUST_LEVELS = ['official', 'internal', 'community'] as const satisfies readonly DocumentationTrustLevel[];
@@ -23,7 +21,7 @@ export const REFRESH_POLICIES = ['manual', 'scheduled'] as const satisfies reado
 export const URI_MAX = 2048;
 export const LICENSE_MAX = 2000;
 
-type Field = 'project' | 'technology_version_id' | 'source_type' | 'uri_or_file_ref' | 'trust_level' | 'license_info' | 'refresh_policy';
+type Field = 'technology_version_id' | 'source_type' | 'uri_or_file_ref' | 'trust_level' | 'license_info' | 'refresh_policy';
 const SERVER_FIELDS = ['technology_version_id', 'source_type', 'uri_or_file_ref', 'trust_level', 'license_info', 'refresh_policy'] as const;
 
 /** https-URL для url; для git — https:// или git@; file — ссылка на загруженный artifact (непустая строка). */
@@ -35,11 +33,12 @@ export function validateSourceUri(type: DocumentationSourceType, uri: string): '
   return null;
 }
 
-function TechnologySelect({ projectId, value, onChange, error }: { projectId: string; value: string; onChange: (v: string) => void; error?: string | undefined }) {
+/** Технологии workspace (OQ-45 (c)): стек всех проектов и уже зарегистрированных источников — без выбора проекта. */
+function TechnologySelect({ workspaceId, value, onChange, error }: { workspaceId: string; value: string; onChange: (v: string) => void; error?: string | undefined }) {
   const { t } = useTranslation();
   const query = useQuery({
-    queryKey: [...projectKeys.technologies(projectId), 'select'] as const,
-    queryFn: ({ signal }) => projectsApi.technologies(projectId, { limit: 200 }, signal),
+    queryKey: [...knowledgeKeys.technologies(workspaceId), 'select'] as const,
+    queryFn: ({ signal }) => knowledgeApi.technologies(workspaceId, { limit: 200 }, signal),
   });
   if (query.isPending) return <LoadingState inline label={t('knowledge.register.techLoading')} />;
   if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
@@ -61,7 +60,12 @@ function TechnologySelect({ projectId, value, onChange, error }: { projectId: st
         <option value="">{t('knowledge.register.selectTechnology')}</option>
         {query.data.items.map((x) => (
           <option key={x.technology_version_id} value={x.technology_version_id}>
-            {x.name} {x.version_label} ({x.ecosystem})
+            {t('knowledge.register.technologyOption', {
+              name: x.name,
+              version: x.version_label,
+              ecosystem: x.ecosystem,
+              projects: x.project_count,
+            })}
           </option>
         ))}
       </select>
@@ -79,7 +83,6 @@ export function RegisterSourceForm({ workspaceId, onDone }: { workspaceId: strin
   const queryClient = useQueryClient();
   const formRef = useRef<HTMLFormElement>(null);
   const intent = useRef(new IdempotentIntent());
-  const [projectId, setProjectId] = useState('');
   const [technology, setTechnology] = useState('');
   const [sourceType, setSourceType] = useState<DocumentationSourceType>('url');
   const [uri, setUri] = useState('');
@@ -95,6 +98,7 @@ export function RegisterSourceForm({ workspaceId, onDone }: { workspaceId: strin
     onSuccess: async () => {
       intent.current.complete();
       await queryClient.invalidateQueries({ queryKey: knowledgeKeys.allSources(workspaceId) });
+      await queryClient.invalidateQueries({ queryKey: knowledgeKeys.technologies(workspaceId) });
       onDone(t('knowledge.register.done'));
     },
     onError: (error) => {
@@ -110,8 +114,7 @@ export function RegisterSourceForm({ workspaceId, onDone }: { workspaceId: strin
     const errors: Partial<Record<Field, string>> = {};
     const trimmedUri = uri.trim();
     const trimmedLicense = license.trim();
-    if (!projectId) errors.project = t('validation.required');
-    else if (!technology) errors.technology_version_id = t('validation.required');
+    if (!technology) errors.technology_version_id = t('validation.required');
     const uriError = validateSourceUri(sourceType, trimmedUri);
     if (uriError === 'required') errors.uri_or_file_ref = t('validation.required');
     else if (uriError === 'max') errors.uri_or_file_ref = t('validation.maxLength', { max: URI_MAX });
@@ -137,18 +140,7 @@ export function RegisterSourceForm({ workspaceId, onDone }: { workspaceId: strin
   return (
     <form ref={formRef} noValidate onSubmit={onSubmit} className="flex flex-col gap-4" aria-label={t('knowledge.register.title')}>
       <FormAlert messages={formErrors} />
-      <ProjectSelect
-        id="source-project"
-        workspaceId={workspaceId}
-        value={projectId}
-        onChange={(v) => {
-          setProjectId(v);
-          setTechnology('');
-        }}
-        label={t('knowledge.register.project')}
-        error={fieldErrors.project}
-      />
-      {projectId ? <TechnologySelect projectId={projectId} value={technology} onChange={setTechnology} error={fieldErrors.technology_version_id} /> : null}
+      <TechnologySelect workspaceId={workspaceId} value={technology} onChange={setTechnology} error={fieldErrors.technology_version_id} />
       <RadioGroup
         name="source-type"
         legend={t('knowledge.register.sourceType')}

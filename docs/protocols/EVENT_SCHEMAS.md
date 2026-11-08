@@ -107,6 +107,7 @@ flowchart LR
 | `finding.status_changed` | finding | смена `finding_status` | `from`, `to`, `actor` | — |
 | `compliance.result_recorded` | compliance_result | `INSERT compliance_results` | `control_id`, `status`, `evidence_id?` | — |
 | `provider.health_changed` | cli_installation | новое наблюдение `provider_health`, если изменилось `availability`/`auth_status` | `provider`, `availability`, `auth_status`, `error_category?`, `cooldown_until?` | — (глобальный; UI CLI Providers опрашивает API; затронутые run получают `task.state_changed`) |
+| `provider.probe_requested` (Phase 8, OQ-45 (c)) | cli_provider | `POST /providers/{id}/probe` (вместе с audit `provider.probe_requested`) | `probe_request_id`, `provider_id`, `provider` | — (очередь `exec`, актор `exec.probe_provider`; итог — audit `provider.probe_completed`, статус — `GET /providers/{id}/probes/{probe_request_id}`) |
 | `provider.auth_restored` | cli_installation | `check_auth` → `AUTHENTICATED` после `AUTH_REQUIRED` | `provider`, `installation_id` | — |
 | `checkpoint.created` | checkpoint | `INSERT checkpoints` | `state_version`, `reason` (`directive`,`pause`,`periodic`) | — |
 | `external_action.state_changed` | external_action | `PLANNED→EXECUTING→CONFIRMED/FAILED/COMPENSATED` | `action_type`, `status`, `idempotency_key`, `external_ref?` | — (видно через approvals/run) |
@@ -399,12 +400,22 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 }
 ```
 
+### 3.2a Поток уведомлений workspace (Phase 8, OQ-45 (c))
+
+`GET /api/v1/workspaces/{workspace_id}/events` — тот же формат кадров и конверт `SseEnvelope` (схема `sse-event.schema.json`), но только типы `approval.requested`, `approval.decided`, `run.state_changed`, `run.completed` **всех run workspace** (источник — `run_event_log`, RLS). Отличия от потока run (API_DESIGN §13.1):
+
+- `id:` — курсор потока: `run_event_log.created_at` в микросекундах Unix epoch (не `seq`; `seq` в данных — номер события в его run);
+- возобновление по `Last-Event-ID` с перекрытием 60 с — **клиент дедуплицирует по `event_id`** (§5); курсор старше 24 ч ⇒ `410 replay_window_exceeded`, без `Last-Event-ID` — с текущего момента;
+- heartbeat: `event: heartbeat`, `data: {"type":"heartbeat","workspace_id":"…","timestamp":"…"}` без `id:` (контракт `WorkspaceSseHeartbeat`);
+- пробуждение — Redis `aicd:ws:{workspace_id}` (worker-outbox после commit, только сигнал), опрос раз в 5 с как страховка;
+- поток не терминальный (сервер закрывает его по max lifetime 30 мин, при отзыве доступа и удалении участника).
+
 ### 3.3 Правила проекции outbox → SSE
 
 1. Проекцию выполняет `worker-outbox` в той же транзакции, где выставляется `outbox_events.published_at` для событий из каталога с непустой колонкой «SSE»: `INSERT run_event_log(workspace_id, run_id, seq, event_id, event_type, schema_version, payload)`.
 2. `seq` назначается под per-run advisory lock (`pg_advisory_xact_lock(hashtext(run_id))`) как `max(seq)+1` (или счётчик `runs.last_event_seq`); откат транзакции откатывает и `seq` → разрывов нет, но клиенты не обязаны на это полагаться.
 3. `run_event_log.event_id` = новый UUIDv7, `source_event_id` = outbox `event_id`; `UNIQUE(source_event_id, event_type)` обеспечивает идемпотентность повторной публикации (одно outbox-событие `cli_execution.output_batch` даёт несколько `cli.output` — уникальность по `(source_event_id, payload.cli_seq)` через частичный индекс).
-4. После коммита — `PUBLISH run:{run_id} <seq>` в Redis (только сигнал; потеря сигнала компенсируется опросом раз в 5 с).
+4. После коммита — `PUBLISH run:{run_id} <seq>` в Redis (только сигнал; потеря сигнала компенсируется опросом раз в 5 с); для потока уведомлений workspace — также `PUBLISH aicd:ws:{workspace_id}` (Phase 8).
 5. Payload SSE не содержит секретов, полных промптов, raw log, скрытых рассуждений; тексты прошли санитизацию CLI Gateway (CLI_ADAPTER_CONTRACT §11) и ограничены по длине.
 
 ## 4. Live Agent Chat
@@ -511,6 +522,7 @@ UI обязан показывать «доставлено», «принято 
 | ACP | `message_deliveries UNIQUE(message_id, consumer_id)` + `acked_at` |
 | SSE сервер | `run_event_log PK(run_id, seq)`, `event_id UNIQUE`; идемпотентная проекция (3.3) |
 | SSE клиент | хранит последний `seq`; событие с `seq ≤ last_seq` отбрасывается; `event_id` — для журналов |
+| SSE клиент, поток workspace (§3.2a) | хранит последний `id:` (курсор) для `Last-Event-ID`; дубли перекрытия отбрасываются по `event_id` (последние 2000), `seq` не сравнивается (события разных run) |
 | Chat | `UNIQUE(thread_id, source_event_id, projection_index)` |
 | Directives API | `Idempotency-Key` (`idempotency_keys`) + `expected_run_version` |
 | GitHub webhooks | `github_webhook_deliveries.delivery_guid UNIQUE` |

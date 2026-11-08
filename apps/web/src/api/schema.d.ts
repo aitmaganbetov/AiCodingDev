@@ -110,6 +110,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workspace с настройками и версией [дополнение к ТЗ]
+         * @description Название, slug, роль текущего пользователя, настройки (`WorkspaceSettings`) и `version` (ETag `"v<version>"`). Не член workspace ⇒ 404 (OQ-45 (f)).
+         */
+        get: operations["getWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Изменить название и политики workspace [дополнение к ТЗ]
+         * @description Merge-patch: отсутствующее поле не меняется. `name` — owner/admin (`workspace:update`); `settings.allow_single_member_self_approval` — только owner (SECURITY_ARCHITECTURE §11, иначе 403 и `authz.denied`). `If-Match` обязателен (428/412). Аудит `workspace.update` (metadata `changed` — имена полей, `from`/`to` для политик) и `policy.changed` при изменении политики.
+         */
+        patch: operations["updateWorkspace"];
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * SSE-поток уведомлений workspace (approvals, статусы run) [дополнение к ТЗ]
+         * @description Уведомления workspace (API_DESIGN §13.1, EVENT_SCHEMAS §5.1): события `approval.requested`, `approval.decided`, `run.state_changed`, `run.completed` всех run workspace из `run_event_log`. Кадр: `id: <cursor>` (UTC-время записи события в журнал, микросекунды epoch), `event: <type>`, `data: SseEnvelope` (поле `seq` — номер события в его run). Возобновление — `Last-Event-ID`: сервер повторяет события с перекрытием 60 с, клиент обязан дедуплицировать по `event_id`. Без `Last-Event-ID` — с текущего момента (минус перекрытие); состояние экрана клиент берёт из REST. Курсор старше 24 ч ⇒ 410 (перечитать REST и подключиться без Last-Event-ID). Heartbeat каждые 15 с без `id:`. Доступ проверяется при подключении, каждые 60 с и по сигналу отзыва; лимиты — общие с потоками run (5 на пользователя, 30 мин). Approvals вне run (`DOCS_DOWNLOAD` без run) в поток не попадают.
+         */
+        get: operations["streamWorkspaceEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/members": {
         parameters: {
             query?: never;
@@ -238,6 +282,46 @@ export interface paths {
          * @description Файл `path` в commit как текст UTF-8 (без рендеринга HTML). Содержимое больше `max_bytes` усекается (`truncated: true`, отдаются первые `max_bytes` байт). Бинарный файл (NUL-байт или не UTF-8) — `is_binary: true`, `content: null`. Symlink отдаётся как текст цели ссылки (ссылка не разыменовывается). Каталог/submodule — 422 (`errors[].code=not_a_file`).
          */
         get: operations["getRepositoryFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ветки репозитория (Repository Explorer, FR-PRJ-05) [дополнение к ТЗ]
+         * @description Локальные ветки (`refs/heads/`) локальной копии репозитория: имя, commit, время commit. Ветка по умолчанию — первой, остальные — по времени commit (новые первыми), затем по имени. Имена, не проходящие проверку имени ветки, не отображаются. Не более 1000 веток (`truncated: true`, если больше). Курсор привязан к снимку списка. 409 — у репозитория нет локальной копии.
+         */
+        get: operations["listRepositoryBranches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/commits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Последние commit ветки или от commit (Repository Explorer, FR-PRJ-05) [дополнение к ТЗ]
+         * @description История от `commit` (ветка или SHA; без параметра — HEAD ветки по умолчанию, как у listRepositoryTree) в порядке git log (первым — сам commit). Поля: SHA, родители, имя автора (email не отдаётся), время автора/commit, первая строка сообщения (≤ 500 символов, секреты редактируются). Глубина обхода — не более 1000 commit от начала (`next_cursor: null` дальше). Курсор фиксирует разрешённый SHA: сдвиг ветки не смешивает страницы.
+         */
+        get: operations["listRepositoryCommits"];
         put?: never;
         post?: never;
         delete?: never;
@@ -750,6 +834,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Все evidence run [дополнение к ТЗ]
+         * @description Evidence run (`evidence.run_id`) в порядке создания (keyset по `created_at`, `id`), с фильтрами по статусу проверки, задаче и виду. Используется экранами качества и compliance для выбора доказательств (OQ-45 (c)). Чужой run ⇒ 404.
+         */
+        get: operations["listRunEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/findings": {
         parameters: {
             query?: never;
@@ -864,6 +968,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/providers/{provider_id}/probes/{probe_request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Статус запроса проверки провайдера [дополнение к ТЗ]
+         * @description `ProbeAccepted.status_url`. `PENDING` — запрос принят, worker-exec ещё не записал результат; `COMPLETED` — установка проверена (результат — `installation`, тот же вид, что в `GET /providers`); `FAILED` — проверка не выполнена (`error_category`); `EXPIRED` — результата нет дольше 15 мин (нет живого worker-exec). Запрос другого workspace или другого провайдера ⇒ 404.
+         */
+        get: operations["getProviderProbe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/providers/{provider_id}/settings": {
         parameters: {
             query?: never;
@@ -935,6 +1059,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/technologies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Технологии workspace (стек проектов и источники документации) [дополнение к ТЗ]
+         * @description Версии технологий, определённые в любом проекте workspace или указанные в его источниках документации (без глобального каталога других workspace). `project_count`, `source_count` — число проектов и источников workspace с этой версией. Сортировка (ecosystem, name, technology_version_id), cursor-пагинация (OQ-45 (c)).
+         */
+        get: operations["listWorkspaceTechnologies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documentation/sources": {
         parameters: {
             query?: never;
@@ -990,10 +1134,425 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Сводка Analytics workspace за окно времени [дополнение к ТЗ]
+         * @description Экран Analytics (ТЗ §11, FR-OBS-05) и метрики ТЗ §16: run success rate, verified completion rate, retry count, task latency, gate failures, использование и ограничения провайдеров CLI, review loops, agent message count, approval wait time, размер Context Pack, доля stale-фрагментов и полезность контекста (FR-CI-08). Агрегаты считаются из БД под RLS workspace; межтенантной агрегации нет. Окно — по времени создания run (задачи/gates — по завершению, approvals — по запросу); по умолчанию последние 30 дней, не больше 366. Токены CLI — только достоверно сообщённые CLI (иначе tokens.total = null, UI показывает «unknown»).
+         */
+        get: operations["getAnalyticsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Установки GitHub App workspace (FR-GH-01) [дополнение к ТЗ] */
+        get: operations["listGitHubInstallations"];
+        put?: never;
+        /**
+         * Подключить установку GitHub App к workspace (P8-02) [дополнение к ТЗ]
+         * @description Вызывается UI со страницы Setup URL App с installation_id и state из startGitHubInstallation. Сервер проверяет state (HMAC, workspace и пользователь сессии, срок, однократность), читает установку через GitHub API (JWT App) и отклоняет установки, права которых шире минимального набора App или содержат workflows/administration/secrets/environments/actions (SC-GH-04) ⇒ 422. Установка другого workspace ⇒ 409. Повторное подключение REVOKED-установки этого workspace — реактивация.
+         */
+        post: operations["connectGitHubInstallation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/installations/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Начать установку GitHub App (state + URL установки) [дополнение к ТЗ]
+         * @description state — HMAC-токен, привязанный к workspace и пользователю сессии, однократный, срок 10 мин (защита от CSRF/подмены установки). 503 — GitHub App не настроен.
+         */
+        post: operations["startGitHubInstallation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/installations/{github_installation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Отключить установку GitHub App от workspace [дополнение к ТЗ]
+         * @description Статус REVOKED (строка сохраняется для истории PR); новые PR и merge через неё невозможны. Вебхук не реактивирует отключённую установку.
+         */
+        delete: operations["disconnectGitHubInstallation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Приём вебхуков GitHub (FR-GH-02, SC-GH-01…03) [дополнение к ТЗ]
+         * @description Без сессии и CSRF. X-Hub-Signature-256 = HMAC-SHA256(webhook secret, сырое тело) проверяется до разбора JSON (constant-time, два секрета на время ротации); неверная/отсутствующая подпись ⇒ 401 и запись REJECTED без payload. Дедупликация по X-GitHub-Delivery ⇒ повтор 200 duplicate без обработки. Событие вне allowlist ⇒ 202 ignored. Тело ≤ 25 MiB (413). Payload — подсказка: обработчик перечитывает состояние через GitHub API. Обработка асинхронна (outbox).
+         */
+        post: operations["receiveGitHubWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/pull-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Открыть PR в GitHub из проверенного результата run (FR-GH-03, P8-04) [дополнение к ТЗ]
+         * @description Только COMPLETED run, репозиторий которого привязан к активной установке GitHub App; источник — последний worktree задачи SUCCEEDED с коммитом, на котором есть PASS gate (несколько задач с изменениями ⇒ task_id обязателен, 422). Изменения CI-конфигурации (.github/workflows/** и аналоги) без APPROVED MANUAL_REVIEW ⇒ 403 policy_denied + approval_id (approval создаётся). Внешние действия (push ветки aicd/*, создание PR, ревью-комментарий с итогами gates, commit status aicd/verification) исполняет воркер через ledger external_actions; повтор/сбой не создаёт второй PR.
+         */
+        post: operations["requestPullRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/pull-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** PR проекта в GitHub [дополнение к ТЗ] */
+        get: operations["listPullRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/pull-requests/{pull_request_id}/merge-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Запросить merge PR (approval MERGE, AC-13) [дополнение к ТЗ]
+         * @description Создаёт approval MERGE (admin, four-eyes: инициатор не может утвердить) на конкретный предмет — PR, head SHA, базовая ветка, метод. После APPROVED воркер перечитывает PR и защиту ветки через GitHub API и выполняет merge только при выполненных required checks и mergeable_state без обхода branch protection и без admin merge; head SHA сдвинулся ⇒ нужен новый approval. Повтор для того же предмета возвращает тот же PENDING approval.
+         */
+        post: operations["requestPullRequestMerge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        GitHubInstallation: {
+            /** Format: uuid */
+            id: string;
+            installation_id: number;
+            account_login: string;
+            /** @enum {string} */
+            account_type: "user" | "organization";
+            /** @enum {string} */
+            repository_selection: "all" | "selected";
+            /** @description Права установки (подмножество минимального набора App, SC-GH-04) */
+            permissions: {
+                [key: string]: string;
+            };
+            /** @enum {string} */
+            status: "ACTIVE" | "SUSPENDED" | "REVOKED";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        GitHubInstallationList: {
+            items: components["schemas"]["GitHubInstallation"][];
+        };
+        GitHubInstallationSetup: {
+            /** @description URL установки App на GitHub со state */
+            install_url: string;
+            state: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        GitHubInstallationConnectRequest: {
+            installation_id: number;
+            state: string;
+            /** @enum {string} */
+            setup_action?: "install" | "update";
+        };
+        GitHubWebhookAck: {
+            /** @enum {string} */
+            status: "accepted" | "ignored" | "duplicate";
+        };
+        /** @enum {string} */
+        PullRequestState: "OPEN" | "CLOSED" | "MERGED";
+        PullRequest: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            repository_id: string;
+            repository_full_name: string;
+            /** Format: uuid */
+            run_id: string | null;
+            pr_number: number;
+            url: string;
+            state: components["schemas"]["PullRequestState"];
+            head_branch: string;
+            base_branch: string;
+            head_sha: string;
+            merged_commit_sha: string | null;
+            /** Format: uuid */
+            create_action_id: string | null;
+            /** Format: uuid */
+            merge_action_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            merged_at: string | null;
+            /** Format: date-time */
+            closed_at: string | null;
+        };
+        PullRequestPage: {
+            items: components["schemas"]["PullRequest"][];
+            next_cursor: string | null;
+        };
+        PullRequestCreateRequest: {
+            /**
+             * Format: uuid
+             * @description Обязателен
+             */
+            task_id?: string;
+            /** @description По умолчанию — ветка по умолчанию репозитория */
+            base_branch?: string;
+            /** @description Без управляющих символов */
+            title?: string;
+        };
+        PullRequestJob: {
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            task_id: string;
+            /** Format: uuid */
+            repository_id: string;
+            repository_full_name: string;
+            head_branch: string;
+            head_sha: string;
+            base_branch: string;
+            title: string;
+            /** @enum {string} */
+            status: "QUEUED";
+        };
+        PullRequestMergeRequest: {
+            /**
+             * @default merge
+             * @enum {string}
+             */
+            merge_method: "merge" | "squash" | "rebase";
+        };
+        PullRequestMergeAccepted: {
+            /** Format: uuid */
+            pull_request_id: string;
+            /** Format: uuid */
+            approval_id: string;
+            /** @enum {string} */
+            status: "AWAITING_APPROVAL";
+        };
+        /** @description Доля 0..1; null — знаменатель равен нулю (нет данных). */
+        AnalyticsRate: number | null;
+        /** @description Секунды; null — нет завершённых элементов в окне. */
+        AnalyticsDurationStats: {
+            p50: number | null;
+            p90: number | null;
+            avg: number | null;
+        };
+        AnalyticsSummary: {
+            window: {
+                /** Format: date-time */
+                from: string;
+                /** Format: date-time */
+                to: string;
+            };
+            /** Format: uuid */
+            project_id: string | null;
+            runs: {
+                total: number;
+                finished: number;
+                completed: number;
+                success_rate: components["schemas"]["AnalyticsRate"];
+                /** @description Ключи — RunStatus. */
+                by_status: {
+                    [key: string]: number;
+                };
+                duration_seconds: components["schemas"]["AnalyticsDurationStats"];
+                /** @description Время и исход по режиму run (cost/time per mode; стоимость в деньгах CLI не сообщают). */
+                by_mode: {
+                    mode: components["schemas"]["RunMode"];
+                    total: number;
+                    finished: number;
+                    completed: number;
+                    success_rate: components["schemas"]["AnalyticsRate"];
+                    avg_duration_seconds: number | null;
+                }[];
+            };
+            daily: {
+                /** Format: date */
+                date: string;
+                runs_created: number;
+                runs_completed: number;
+                runs_failed: number;
+                runs_cancelled: number;
+            }[];
+            tasks: {
+                attempts: number;
+                succeeded: number;
+                failed: number;
+                /** @description Попытки с attempt_no > 1 (retry count). */
+                retries: number;
+                verified_completion_rate: components["schemas"]["AnalyticsRate"];
+                tasks_finished: number;
+                latency_seconds: components["schemas"]["AnalyticsDurationStats"];
+                by_role: {
+                    role: string;
+                    attempts: number;
+                    succeeded: number;
+                    failed: number;
+                    retries: number;
+                    verified_completion_rate: components["schemas"]["AnalyticsRate"];
+                }[];
+            };
+            gates: {
+                gate_type: string;
+                total: number;
+                passed: number;
+                failed: number;
+                errored: number;
+                /** @description SKIPPED/NOT_APPLICABLE — не входят в pass_rate (SKIPPED ≠ PASS). */
+                skipped: number;
+                pass_rate: components["schemas"]["AnalyticsRate"];
+                avg_duration_seconds: number | null;
+            }[];
+            providers: {
+                provider: string;
+                executions: number;
+                collected: number;
+                /** @description TIMED_OUT + CRASHED */
+                errors: number;
+                rate_limited: number;
+                auth_required: number;
+                cancelled: number;
+                in_progress: number;
+                success_rate: components["schemas"]["AnalyticsRate"];
+                avg_duration_seconds: number | null;
+                failures_by_category: {
+                    [key: string]: number;
+                };
+                tokens: {
+                    /** @description Сумма токенов */
+                    total: number | null;
+                    /** @enum {string} */
+                    source: "cli_reported" | "not_exposed_by_cli" | "mixed";
+                    executions_reported: number;
+                };
+            }[];
+            review_loops: {
+                review_requests: number;
+                fix_requests: number;
+                /** @description Цепочки correlation_id с REVIEW_REQUEST. */
+                review_chains: number;
+                chains_with_fixes: number;
+                avg_fix_rounds: number | null;
+                max_fix_rounds: number;
+                /** @description Задачи в BLOCKED(REVIEW_LOOP_EXHAUSTED) */
+                loops_exhausted: number;
+            };
+            agent_messages: {
+                total: number;
+                /** @description Ключи — тип ACP-сообщения. */
+                by_type: {
+                    [key: string]: number;
+                };
+            };
+            approvals: {
+                requested: number;
+                pending: number;
+                by_status: {
+                    [key: string]: number;
+                };
+                wait_seconds: components["schemas"]["AnalyticsDurationStats"];
+            };
+            context: {
+                packs: number;
+                avg_size_bytes: number | null;
+                max_size_bytes: number | null;
+                fragments: number;
+                stale_fragment_ratio: components["schemas"]["AnalyticsRate"];
+                /** @description FR-CI-08: доля уникальных путей фрагментов Context Pack, на которые сослались заявления итога попыток, подтверждённых платформой (SUCCEEDED после обязательных gates). */
+                usefulness: {
+                    rate: components["schemas"]["AnalyticsRate"];
+                    packs_evaluated: number;
+                    fragments_referenced: number;
+                    fragments_total: number;
+                    /** @description Оценено не больше 2000 последних пакетов окна. */
+                    truncated: boolean;
+                };
+            };
+        };
         /**
          * @description Каноническое перечисление (docs/README.md §3).
          * @enum {string}
@@ -1317,12 +1876,32 @@ export interface components {
             name: string;
             slug: string;
             role: components["schemas"]["WorkspaceRole"];
-            settings?: Record<string, never>;
+            settings?: components["schemas"]["WorkspaceSettings"];
+            /**
+             * Format: int64
+             * @description Версия для If-Match (ETag `"v<version>"`); присутствует в ответах getWorkspace/updateWorkspace/createWorkspace
+             */
+            version?: number;
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
              */
             created_at: string;
+        };
+        /** @description Настройки и политики workspace; неизвестные ключи клиент игнорирует (API_DESIGN §16). */
+        WorkspaceSettings: {
+            /** @description Исключение four-eyes для workspace с единственным участником (API_DESIGN §5.3); по умолчанию false. Меняет только owner. */
+            allow_single_member_self_approval?: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description Merge-patch workspace (OQ-45 (f)); slug неизменяем. */
+        WorkspaceUpdateRequest: {
+            name?: string;
+            settings?: components["schemas"]["WorkspaceSettingsUpdate"];
+        };
+        WorkspaceSettingsUpdate: {
+            allow_single_member_self_approval?: boolean;
         };
         WorkspaceCreateRequest: {
             name: string;
@@ -1483,13 +2062,51 @@ export interface components {
             /** @description Текст файла (усечённый при truncated); null для бинарного файла. Отображается только как текст. */
             content: string | null;
         };
+        RepositoryBranch: {
+            /** @description Имя ветки без refs/heads/ */
+            name: string;
+            commit_sha: string;
+            /** Format: date-time */
+            committed_at: string | null;
+            is_default: boolean;
+        };
+        RepositoryBranchPage: {
+            /** Format: uuid */
+            repository_id: string;
+            default_branch: string;
+            /** @description В репозитории больше веток */
+            truncated: boolean;
+            items: components["schemas"]["RepositoryBranch"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        RepositoryCommitSummary: {
+            sha: string;
+            parents: string[];
+            author_name: string;
+            /** Format: date-time */
+            authored_at: string | null;
+            /** Format: date-time */
+            committed_at: string | null;
+            /** @description Первая строка сообщения commit (секреты редактируются); только текст */
+            subject: string;
+        };
+        RepositoryCommitPage: {
+            /** Format: uuid */
+            repository_id: string;
+            /** @description Полный SHA */
+            commit_sha: string;
+            items: components["schemas"]["RepositoryCommitSummary"][];
+            /** @description Opaque base64url cursor; null — конец выборки (или лимит глубины 1000). */
+            next_cursor: string | null;
+        };
         /** @description Страница Repository (cursor pagination). */
         RepositoryPage: {
             items: components["schemas"]["Repository"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
         };
-        /** @description provider=local требует local_path; provider=github требует remote_url и установленный GitHub App. */
+        /** @description provider=local требует local_path; provider=github (P8-02, FR-PRJ-03) требует remote_url, local_path (локальная рабочая копия в allowlist-корнях) и активную установку GitHub App workspace с доступом к репозиторию (проверяется через GitHub API). */
         RepositoryAttachRequest: {
             provider: components["schemas"]["RepositoryProvider"];
             /** @description Для github: https://github.com/<owner>/<repo> */
@@ -1513,6 +2130,26 @@ export interface components {
         /** @description Страница Technology (cursor pagination). */
         TechnologyPage: {
             items: components["schemas"]["Technology"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        WorkspaceTechnology: {
+            /** Format: uuid */
+            technology_id: string;
+            name: string;
+            ecosystem: string;
+            /** Format: uuid */
+            technology_version_id: string;
+            version_label: string;
+            support_status: string | null;
+            /** @description Проекты workspace с этой версией в определённом стеке */
+            project_count: number;
+            /** @description Источники документации workspace для этой версии */
+            source_count: number;
+        };
+        /** @description Страница WorkspaceTechnology (cursor pagination). */
+        WorkspaceTechnologyPage: {
+            items: components["schemas"]["WorkspaceTechnology"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
         };
@@ -1763,7 +2400,9 @@ export interface components {
             reply_to_id?: string | null;
             schema_version: string;
             /** @description Типизированный payload ACP (AGENT_COMMUNICATION_PROTOCOL.md); ≤ 32 KiB */
-            payload: Record<string, never>;
+            payload: {
+                [key: string]: unknown;
+            };
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
@@ -2346,7 +2985,9 @@ export interface components {
             auth_status: components["schemas"]["AuthStatus"];
             availability: components["schemas"]["ProviderAvailability"];
             /** @description Результат feature detection (probe) */
-            capabilities: Record<string, never>;
+            capabilities: {
+                [key: string]: unknown;
+            };
             last_error_category?: components["schemas"]["CliErrorCode"] | null;
             /** Format: date-time */
             checked_at?: string | null;
@@ -2393,7 +3034,29 @@ export interface components {
              * @description UTC, ISO 8601 с Z
              */
             accepted_at: string;
+            /** @description URL статуса запроса: /api/v1/providers/{provider_id}/probes/{probe_request_id} (getProviderProbe) */
             status_url: string;
+        };
+        ProviderProbeStatus: {
+            /** Format: uuid */
+            probe_request_id: string;
+            /** Format: uuid */
+            provider_id: string;
+            /**
+             * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+             * @enum {string}
+             */
+            status: "PENDING" | "COMPLETED" | "FAILED" | "EXPIRED";
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            requested_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** @description Проверенная установка (COMPLETED/FAILED); без учётных данных и путей */
+            installation: components["schemas"]["ProviderInstallation"] | null;
+            error_category: components["schemas"]["CliErrorCode"] | null;
         };
         Approval: {
             /** Format: uuid */
@@ -2527,7 +3190,9 @@ export interface components {
             resource_type: string;
             resource_id: string;
             /** @description request_id, ip (усечённый), outcome, idempotency_key hash; без секретов */
-            metadata: Record<string, never>;
+            metadata: {
+                [key: string]: unknown;
+            };
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
@@ -2564,7 +3229,9 @@ export interface components {
             timestamp: string;
             /** @constant */
             schema_version: "1.0";
-            payload: Record<string, never>;
+            payload: {
+                [key: string]: unknown;
+            };
         };
         RunStateChangedPayload: {
             from_status: components["schemas"]["RunStatus"] | null;
@@ -2900,6 +3567,25 @@ export interface components {
         };
         /** @description Значение поля data: SSE-кадра. event: = type. */
         SseEvent: components["schemas"]["SseRunStateChanged"] | components["schemas"]["SseTaskStateChanged"] | components["schemas"]["SseAgentMessage"] | components["schemas"]["SseCliOutput"] | components["schemas"]["SseDirectiveImpactReady"] | components["schemas"]["SseDirectiveStateChanged"] | components["schemas"]["SseApprovalRequested"] | components["schemas"]["SseApprovalDecided"] | components["schemas"]["SseGateCompleted"] | components["schemas"]["SseRunCompleted"] | components["schemas"]["SseChatMessage"] | components["schemas"]["SseHeartbeat"];
+        /**
+         * @description Подмножество SseEventType, доставляемое потоком уведомлений workspace (streamWorkspaceEvents).
+         * @enum {string}
+         */
+        WorkspaceSseEventType: "run.state_changed" | "approval.requested" | "approval.decided" | "run.completed";
+        /** @description Каждые 15 с простоя; без id: (не сдвигает Last-Event-ID). */
+        WorkspaceSseHeartbeat: {
+            /** @constant */
+            type: "heartbeat";
+            /** Format: uuid */
+            workspace_id: string;
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            timestamp: string;
+        };
+        /** @description Значение поля data: кадра потока workspace (streamWorkspaceEvents). event: = type; id: = курсор потока. */
+        WorkspaceSseEvent: components["schemas"]["SseRunStateChanged"] | components["schemas"]["SseApprovalRequested"] | components["schemas"]["SseApprovalDecided"] | components["schemas"]["SseRunCompleted"] | components["schemas"]["WorkspaceSseHeartbeat"];
     };
     responses: {
         /** @description 400 malformed_request | idempotency_key_missing */
@@ -3036,6 +3722,9 @@ export interface components {
         ArtifactId: string;
         FindingId: string;
         ControlId: string;
+        /** @description id строки установки в платформе (не числовой installation_id GitHub) */
+        GitHubInstallationRef: string;
+        PullRequestId: string;
     };
     requestBodies: never;
     headers: {
@@ -3267,6 +3956,127 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateWorkspace: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Сильный ETag текущей версии. Отсутствует ⇒ 428, не совпадает ⇒ 412. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            422: components["responses"]["Unprocessable"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    streamWorkspaceEvents: {
+        parameters: {
+            query?: {
+                /** @description Фильтр типов (heartbeat всегда) */
+                types?: components["schemas"]["WorkspaceSseEventType"][];
+            };
+            header?: {
+                /** @description `id:` последнего полученного кадра (курсор потока workspace) */
+                "Last-Event-ID"?: string;
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream. Кадры: `id: <cursor>`, `event: <type>`, `data: <SseEnvelope JSON>`; heartbeat каждые 15 с; `retry: 3000`. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    "X-Accel-Buffering"?: "no";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 410 replay_window_exceeded — курсор старше окна повтора; перечитать состояние REST и подключиться без Last-Event-ID */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
@@ -3736,6 +4546,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RepositoryFile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listRepositoryBranches: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryBranchPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listRepositoryCommits: {
+        parameters: {
+            query?: {
+                /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
+                commit?: components["parameters"]["RepositoryCommit"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryCommitPage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4937,6 +5825,47 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listRunEvidence: {
+        parameters: {
+            query?: {
+                verification_status?: components["schemas"]["EvidenceVerificationStatus"];
+                /** @description Только evidence этой задачи */
+                task_id?: string;
+                /** @description Вид evidence (`Evidence.kind`), точное совпадение */
+                kind?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                run_id: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidencePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listRunFindings: {
         parameters: {
             query?: {
@@ -5183,6 +6112,42 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    getProviderProbe: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path: {
+                provider_id: components["parameters"]["ProviderId"];
+                probe_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderProbeStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     updateProviderSettings: {
         parameters: {
             query?: never;
@@ -5349,6 +6314,45 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listWorkspaceTechnologies: {
+        parameters: {
+            query?: {
+                /** @description Подстрока имени технологии (без учёта регистра) */
+                q?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceTechnologyPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listDocumentationSources: {
         parameters: {
             query?: {
@@ -5507,6 +6511,377 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAnalyticsSummary: {
+        parameters: {
+            query?: {
+                /** @description Начало окна (включительно), UTC ISO 8601. По умолчанию to − 30 дней. */
+                from?: string;
+                /** @description Конец окна (не включая), UTC ISO 8601. По умолчанию — текущее время. */
+                to?: string;
+                /** @description Только run этого проекта (проект другого workspace ⇒ 404). */
+                project_id?: string;
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listGitHubInstallations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallationList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    connectGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitHubInstallationConnectRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    startGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallationSetup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    disconnectGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path: {
+                /** @description id строки установки в платформе (не числовой installation_id GitHub) */
+                github_installation_id: components["parameters"]["GitHubInstallationRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Отключена */
+            204: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    receiveGitHubWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-GitHub-Event": string;
+                "X-GitHub-Delivery": string;
+                "X-Hub-Signature-256"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Повторная доставка (дедупликация, без обработки) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubWebhookAck"];
+                };
+            };
+            /** @description Принято к обработке или проигнорировано (событие вне allowlist) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubWebhookAck"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 413 payload_too_large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description 415 unsupported_media_type (вебхук должен быть настроен с content type application/json) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    requestPullRequest: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                run_id: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PullRequestCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Запрос принят (исполняется воркером) */
+            202: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PullRequestJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listPullRequests: {
+        parameters: {
+            query?: {
+                run_id?: string;
+                state?: components["schemas"]["PullRequestState"];
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PullRequestPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    requestPullRequestMerge: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                pull_request_id: components["parameters"]["PullRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PullRequestMergeRequest"];
+            };
+        };
+        responses: {
+            /** @description Approval MERGE запрошен */
+            202: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    Location: components["headers"]["Location"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PullRequestMergeAccepted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];

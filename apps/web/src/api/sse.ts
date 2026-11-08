@@ -145,12 +145,16 @@ export class EventDeduper {
 
   constructor(private readonly maxIds = 2000) {}
 
-  accept(event: StreamEvent): boolean {
-    if ((this.lastSeq !== null && event.seq <= this.lastSeq) || this.seen.has(event.event_id)) {
+  /**
+   * `bySeq = false` — поток с курсором (`id:` не равен seq, например поток workspace: события разных run):
+   * дубли отсекаются только по event_id (сервер повторяет окно перекрытия при возобновлении).
+   */
+  accept(event: StreamEvent, bySeq = true): boolean {
+    if ((bySeq && this.lastSeq !== null && event.seq <= this.lastSeq) || this.seen.has(event.event_id)) {
       this.duplicates += 1;
       return false;
     }
-    this.lastSeq = event.seq;
+    if (bySeq) this.lastSeq = event.seq;
     this.seen.add(event.event_id);
     this.order.push(event.event_id);
     if (this.order.length > this.maxIds) this.seen.delete(this.order.shift() as string);
@@ -193,6 +197,11 @@ export interface EventStreamOptions {
   maxRetryMs?: number;
   /** Нет ни байта (включая heartbeat каждые 15 с) дольше этого — соединение считается мёртвым. */
   idleTimeoutMs?: number;
+  /**
+   * Возобновление: 'seq' (по умолчанию) — Last-Event-ID = последний seq потока run, after_seq после 410;
+   * 'cursor' — Last-Event-ID = `id:` последнего кадра как есть (поток workspace), после 410 — без курсора.
+   */
+  resume?: 'seq' | 'cursor';
 }
 
 export const DEFAULT_TERMINAL_EVENTS: readonly string[] = ['run.completed'];
@@ -211,6 +220,8 @@ export class EventStream {
   private serverRetryMs: number | undefined;
   /** after_seq для следующего подключения после 410 (контракт: «after_seq = текущий max»). */
   private afterSeq: number | null = null;
+  /** Курсор потока (`id:` последнего кадра) в режиме resume = 'cursor'. */
+  private lastCursor: string | undefined;
   private suspended: 'paused' | 'offline' | null = null;
   /** Поколение подключения: результаты «старых» подключений после pause/stop игнорируются. */
   private generation = 0;
@@ -284,12 +295,13 @@ export class EventStream {
     this.controller = controller;
     this.connections += 1;
     const last = this.dedup.lastSeq;
-    const useAfterSeq = this.afterSeq !== null;
+    const cursorMode = this.opts.resume === 'cursor';
+    const useAfterSeq = !cursorMode && this.afterSeq !== null;
     try {
       const res = await openEventStream({
         path: this.opts.path,
         query: useAfterSeq ? { ...this.opts.query, after_seq: this.afterSeq } : this.opts.query,
-        lastEventId: !useAfterSeq && last !== null ? String(last) : undefined,
+        lastEventId: cursorMode ? this.lastCursor : !useAfterSeq && last !== null ? String(last) : undefined,
         signal: controller.signal,
       });
       if (gen !== this.generation) return;
@@ -333,9 +345,11 @@ export class EventStream {
         const frames = parser.feed(decoder.decode(value, { stream: true }));
         if (parser.retryMs !== undefined) this.serverRetryMs = parser.retryMs;
         const fresh: StreamEvent[] = [];
+        const cursorMode = this.opts.resume === 'cursor';
         for (const frame of frames) {
           const event = parseStreamEvent(frame);
-          if (event && this.dedup.accept(event)) {
+          if (cursorMode && event && frame.id !== undefined) this.lastCursor = frame.id;
+          if (event && this.dedup.accept(event, !cursorMode)) {
             fresh.push(event);
             if (terminalTypes.includes(event.type)) this.terminal = true;
           }
@@ -354,8 +368,19 @@ export class EventStream {
       this.scheduleReconnect();
       return;
     }
+    if ((error.status === 410 || error.code === 'replay_window_exceeded') && this.opts.resume === 'cursor') {
+      // Курсор вне окна повтора: состояние — из REST, поток — «с текущего момента».
+      if (this.lastCursor === undefined) {
+        this.finish('failed', error);
+        return;
+      }
+      this.lastCursor = undefined;
+      this.opts.onResync?.();
+      this.scheduleReconnect(0);
+      return;
+    }
     if (error.status === 410 || error.code === 'replay_window_exceeded') {
-      const lastSeq = error.problem ? (error.problem as Record<string, unknown>).last_seq : undefined;
+      const lastSeq = error.problem?.last_seq;
       if (typeof lastSeq === 'number' && Number.isSafeInteger(lastSeq) && lastSeq >= 0 && this.afterSeq === null) {
         // История вне окна хранения (OQ-35: 410, а не синтетический resync): состояние берём
         // из REST, ленту продолжаем «с текущего max».

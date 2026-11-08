@@ -45,6 +45,23 @@ function mockMembers(api: MockApi, members: S['Member'][]) {
   });
 }
 
+/** OQ-45 (f): PATCH /workspaces/{id} — merge-patch с If-Match; политики меняет только owner. */
+function mockWorkspaceUpdate(api: MockApi) {
+  api.route('PATCH', '/api/v1/workspaces/{id}', 'updateWorkspace', ({ id, body, headers }) => {
+    const ws = api.workspaces.find((w) => w.id === id);
+    if (!ws) return problem(404, 'not_found');
+    if (ws.role !== 'owner' && ws.role !== 'admin') return problem(403, 'forbidden');
+    const b = body as S['WorkspaceUpdateRequest'];
+    if (b.settings && ws.role !== 'owner') return problem(403, 'forbidden');
+    const version = ws.version ?? 0;
+    if (headers['if-match'] !== `"v${version}"`) return { ...problem(412, 'precondition_failed'), headers: { ETag: `"v${version}"` } };
+    if (b.name !== undefined) ws.name = b.name;
+    if (b.settings) ws.settings = { ...(ws.settings ?? {}), ...b.settings };
+    ws.version = version + 1;
+    return { status: 200, body: { ...ws, settings: ws.settings ?? {} }, headers: { ETag: `"v${ws.version}"` } };
+  });
+}
+
 function seedMembers(): S['Member'][] {
   return [
     { user: { id: ME, display_name: 'Анна Петрова' }, email: 'anna@example.com', role: 'owner', joined_at: '2026-11-01T09:00:00Z', version: 0 },
@@ -56,6 +73,7 @@ test('settings (owner): members, change role (keyboard), last owner protected, a
   const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
   const members = seedMembers();
   mockMembers(api, members);
+  mockWorkspaceUpdate(api);
   await login(page, api);
   await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда Альфа' })).toBeFocused();
   await page.keyboard.press('g');
@@ -63,7 +81,28 @@ test('settings (owner): members, change role (keyboard), last owner protected, a
   await expect(page).toHaveURL(`/w/${ws.id}/settings`);
   await expect(page.getByRole('heading', { level: 1, name: 'Настройки' })).toBeFocused();
   await expect(page.locator('#workspace-info')).toContainText('alpha');
-  await expect(page.locator('#workspace-info')).toContainText('Изменение названия и политик рабочего пространства пока недоступно');
+  await expect(page.locator('#workspace-info')).not.toContainText('пока недоступно');
+
+  // OQ-45 (f): переименование и политика самоутверждения (owner); If-Match — из ETag ответа GET.
+  const wsForm = page.getByRole('form', { name: 'Параметры рабочего пространства' });
+  await wsForm.getByLabel('Название').fill('');
+  await wsForm.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(wsForm.getByLabel('Название')).toHaveAttribute('aria-invalid', 'true');
+  expect(api.requests.some((r) => r.operationId === 'updateWorkspace')).toBe(false);
+  await wsForm.getByLabel('Название').fill('Команда Бета');
+  await wsForm.getByRole('checkbox', { name: /утверждать собственные критические действия/ }).check();
+  await wsForm.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(wsForm.getByRole('status')).toHaveText('Параметры рабочего пространства сохранены.');
+  const wsPatch = api.requests.find((r) => r.operationId === 'updateWorkspace');
+  expect(wsPatch?.headers['if-match']).toBe('"v0"');
+  expect(wsPatch?.body).toEqual({ name: 'Команда Бета', settings: { allow_single_member_self_approval: true } });
+  // Название в переключателе пространств обновляется (сессия перечитана).
+  await expect(page.getByRole('banner')).toContainText('Команда Бета');
+  await wsForm.getByLabel('Название').fill('Команда Гамма');
+  await wsForm.getByRole('button', { name: 'Сохранить' }).click();
+  await expect.poll(() => api.requests.filter((r) => r.operationId === 'updateWorkspace').length).toBe(2);
+  expect(api.requests.filter((r) => r.operationId === 'updateWorkspace')[1]?.headers['if-match']).toBe('"v1"');
+  await expect(wsForm.getByRole('status')).toHaveText('Параметры рабочего пространства сохранены.');
 
   const table = page.getByRole('table', { name: /Участники/ });
   await expect(table.getByRole('row')).toHaveCount(3);
@@ -128,6 +167,9 @@ test('settings (developer): read-only members, no audit link; 360px', async ({ p
   await expect(page.getByRole('button', { name: 'Добавить участника' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Журнал аудита' })).toHaveCount(0);
   await expect(page.getByText('Добавлять участников и менять роли может владелец')).toBeVisible();
+  // Developer видит параметры пространства только для чтения (PATCH недоступен).
+  await expect(page.getByRole('form', { name: 'Параметры рабочего пространства' })).toHaveCount(0);
+  await expect(page.locator('#workspace-info')).toContainText('Изменять параметры могут владелец и администраторы');
   await expectNoHorizontalScroll(page);
   await expectNoSeriousA11yViolations(page, 'settings developer 360px');
 });

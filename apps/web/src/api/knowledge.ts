@@ -8,11 +8,14 @@ export type DocumentationTrustLevel = Schemas['DocumentationTrustLevel'];
 export type DocumentationRefreshPolicy = Schemas['DocumentationRefreshPolicy'];
 export type DocumentationPolicy = Schemas['DocumentationPolicy'];
 export type ListDocumentationSourcesQuery = Query<'listDocumentationSources'>;
+export type WorkspaceTechnology = Schemas['WorkspaceTechnology'];
+export type ListWorkspaceTechnologiesQuery = Query<'listWorkspaceTechnologies'>;
 
 export const knowledgeKeys = {
   sources: (workspaceId: string, filter: string) => ['documentation-sources', workspaceId, filter] as const,
   allSources: (workspaceId: string) => ['documentation-sources', workspaceId] as const,
   policy: (projectId: string) => ['project', projectId, 'documentation-policy'] as const,
+  technologies: (workspaceId: string) => ['workspace-technologies', workspaceId] as const,
 };
 
 export const knowledgeApi = {
@@ -44,6 +47,15 @@ export const knowledgeApi = {
   /** Явный запрос человека = согласие на загрузку вне run; 202 QUEUED, disabled ⇒ 409. */
   refreshSource(sourceId: string, idempotencyKey: string): Promise<JsonResponse<'refreshDocumentationSource', 202>> {
     return request({ method: 'POST', path: `/documentation/sources/${seg(sourceId)}/refresh`, idempotencyKey });
+  },
+
+  /** OQ-45 (c): технологии workspace (стек проектов + источники документации), без выбора проекта. */
+  technologies(
+    workspaceId: string,
+    query: ListWorkspaceTechnologiesQuery = {},
+    signal?: AbortSignal,
+  ): Promise<JsonResponse<'listWorkspaceTechnologies', 200>> {
+    return request({ method: 'GET', path: '/technologies', query, workspaceId, signal });
   },
 
   getPolicy(projectId: string, signal?: AbortSignal): Promise<JsonResponse<'getDocumentationPolicy', 200>> {

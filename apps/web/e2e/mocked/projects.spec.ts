@@ -136,6 +136,7 @@ test('repository explorer: viewer is read-only, empty states, unknown project; 3
 const LOCAL_REPO_ID = '01900000-0000-7000-a100-000000000031';
 const HEAD_SHA = 'b'.repeat(40);
 const INDEX_SHA = 'c'.repeat(40);
+const FEATURE_SHA = 'e'.repeat(40);
 
 function treeEntry(path: string, type: S['RepositoryTreeEntry']['type'], size: number | null): S['RepositoryTreeEntry'] {
   return { name: path.split('/').at(-1)!, path, type, mode: type === 'directory' ? '040000' : type === 'symlink' ? '120000' : '100644', size };
@@ -155,6 +156,7 @@ function mockRepositoryFiles(api: MockApi, projectId: string) {
       src: [treeEntry('src/app.py', 'file', 24)],
     },
     [INDEX_SHA]: { '': [treeEntry('README.md', 'file', 3)] },
+    [FEATURE_SHA]: { '': [treeEntry('README.md', 'file', 3), treeEntry('feature.txt', 'file', 7)] },
   };
   const files: Record<string, Omit<S['RepositoryFile'], 'repository_id' | 'commit_sha' | 'path' | 'mode'>> = {
     'README.md': { type: 'file', size: 52, max_bytes: 524288, truncated: false, is_binary: false, encoding: 'utf-8', content: '# Платежи\n<b>не HTML</b>\n<script>alert(1)</script>\n' },
@@ -163,7 +165,47 @@ function mockRepositoryFiles(api: MockApi, projectId: string) {
     'logo.png': { type: 'file', size: 4096, max_bytes: 524288, truncated: false, is_binary: true, encoding: null, content: null },
   };
   const base = `/api/v1/projects/{id}/repositories/${LOCAL_REPO_ID}`;
-  const resolve = (commit: string | null) => (commit === null || commit === 'main' ? HEAD_SHA : commit.length >= 7 && INDEX_SHA.startsWith(commit) ? INDEX_SHA : commit === HEAD_SHA ? HEAD_SHA : null);
+  const resolve = (commit: string | null) =>
+    commit === null || commit === 'main'
+      ? HEAD_SHA
+      : commit === 'feature/x' || commit === FEATURE_SHA
+        ? FEATURE_SHA
+        : commit.length >= 7 && INDEX_SHA.startsWith(commit)
+          ? INDEX_SHA
+          : commit === HEAD_SHA
+            ? HEAD_SHA
+            : null;
+  // OQ-45 (c): ветки и история для селектора commit.
+  api.route('GET', `${base}/branches`, 'listRepositoryBranches', ({ id }) =>
+    id !== projectId
+      ? problem(404, 'not_found')
+      : {
+          status: 200,
+          body: {
+            repository_id: LOCAL_REPO_ID,
+            default_branch: 'main',
+            truncated: false,
+            items: [
+              { name: 'main', commit_sha: HEAD_SHA, committed_at: '2026-11-07T10:00:00Z', is_default: true },
+              { name: 'feature/x', commit_sha: FEATURE_SHA, committed_at: '2026-11-07T09:00:00Z', is_default: false },
+            ],
+            next_cursor: null,
+          },
+        },
+  );
+  api.route('GET', `${base}/commits`, 'listRepositoryCommits', ({ id, url }) => {
+    if (id !== projectId) return problem(404, 'not_found');
+    const sha = resolve(url.searchParams.get('commit'));
+    if (!sha) return problem(404, 'not_found');
+    const items: S['RepositoryCommitSummary'][] =
+      sha === FEATURE_SHA
+        ? [
+            { sha: FEATURE_SHA, parents: [HEAD_SHA], author_name: 'Анна', authored_at: '2026-11-07T09:00:00Z', committed_at: '2026-11-07T09:00:00Z', subject: 'Фича <i>x</i>' },
+            { sha: HEAD_SHA, parents: [], author_name: 'Анна', authored_at: '2026-11-06T09:00:00Z', committed_at: '2026-11-06T09:00:00Z', subject: 'Начало' },
+          ]
+        : [{ sha: HEAD_SHA, parents: [], author_name: 'Анна', authored_at: '2026-11-06T09:00:00Z', committed_at: '2026-11-06T09:00:00Z', subject: 'Начало' }];
+    return { status: 200, body: { repository_id: LOCAL_REPO_ID, commit_sha: sha, items, next_cursor: null } };
+  });
   api.route('GET', `${base}/tree`, 'listRepositoryTree', ({ id, url }) => {
     if (id !== projectId) return problem(404, 'not_found');
     const sha = resolve(url.searchParams.get('commit'));
@@ -265,4 +307,19 @@ test('repository explorer: file tree by commit, text view with line numbers, tru
   await page.keyboard.press('Enter');
   await expect(explorer.getByTestId('error-state')).toBeVisible();
   await expectNoSeriousA11yViolations(page, 'repository explorer commit selector');
+
+  // OQ-45 (c): ветка из списка веток, затем commit из её истории (без ручного ввода SHA).
+  await explorer.getByLabel('Ветка', { exact: true }).selectOption('feature/x');
+  await expect(explorer.getByTestId('explorer-resolved-commit')).toContainText('eeeeeeeeeeee');
+  await expect(explorer.getByRole('list', { name: 'Содержимое каталога /' }).getByRole('listitem')).toHaveCount(2);
+  const commitSelect = explorer.getByLabel('Commit', { exact: true });
+  await expect(commitSelect.locator('option', { hasText: 'Фича <i>x</i>' })).toHaveCount(1);
+  await commitSelect.selectOption({ label: `${HEAD_SHA.slice(0, 12)} — Начало` });
+  await expect(explorer.getByTestId('explorer-resolved-commit')).toContainText('bbbbbbbbbbbb');
+  await expect(explorer.getByRole('list', { name: 'Содержимое каталога /' }).getByRole('listitem')).toHaveCount(5);
+  expect(api.requests.some((r) => r.operationId === 'listRepositoryCommits')).toBe(true);
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expectNoSeriousA11yViolations(page, `repository explorer branch/commit selector (${scheme})`);
+  }
 });

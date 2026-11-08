@@ -210,6 +210,55 @@ async def list_task_evidence(
     return json_response({"items": items, "next_cursor": next_cursor})
 
 
+@router.get("/runs/{run_id}/evidence", tags=["evidence"], **op("listRunEvidence", "evidence:read"))
+async def list_run_evidence(
+    request: Request,
+    run_id: Annotated[uuid.UUID, Path()],
+    principal: identity.Principal = Depends(current_principal),
+    verification_status: EvidenceStatus | None = None,
+    task_id: Annotated[uuid.UUID | None, Query()] = None,
+    kind: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    limit: Limit = DEFAULT_LIMIT,
+    cursor: Cursor = None,
+) -> Response:
+    """Все evidence run (OQ-45 (c)): keyset по (created_at, id), фильтры статуса, задачи и вида."""
+    access = await resolve_resource(request, principal, "sys_resolve_run_workspace", run_id)
+    await authorize(request, access, "evidence:read")
+    state = app_state(request)
+    filters = {
+        "r": "run_evidence",
+        "run": str(run_id),
+        "vs": verification_status,
+        "t": str(task_id) if task_id else None,
+        "k": kind,
+    }
+    clauses = ["e.run_id = :run"]
+    params: dict[str, Any] = {"run": run_id, "lim": limit + 1}
+    if verification_status:
+        clauses.append("e.verification_status = CAST(:vs AS evidence_verification_status_t)")
+        params["vs"] = verification_status
+    if task_id:
+        clauses.append("e.task_id = :task")
+        params["task"] = task_id
+    if kind:
+        clauses.append("e.kind = :kind")
+        params["kind"] = kind
+    if cursor:
+        t, i = decode_cursor(state.secret_key, cursor, filters)
+        clauses.append("(e.created_at, e.id) > (:ct, :cid)")
+        params.update(ct=datetime.fromisoformat(t), cid=uuid.UUID(i))
+    sql = _EVIDENCE_SELECT + " WHERE " + " AND ".join(clauses) + " ORDER BY e.created_at, e.id LIMIT :lim"
+    async with transaction(state.engine, access.db()) as conn:
+        rows = [dict(r) for r in (await conn.execute(text(sql), params)).mappings().all()]
+        page = rows[:limit]
+        items = await _evidence_views(conn, page)
+    next_cursor = None
+    if len(rows) > limit:
+        last = page[-1]
+        next_cursor = encode_cursor(state.secret_key, [last["created_at"].isoformat(), str(last["id"])], filters)
+    return json_response({"items": items, "next_cursor": next_cursor})
+
+
 @router.get("/evidence/{evidence_id}", tags=["evidence"], **op("getEvidence", "evidence:read"))
 async def get_evidence(
     request: Request,

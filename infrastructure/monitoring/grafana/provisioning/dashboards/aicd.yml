@@ -1,0 +1,10 @@
+# Провижининг дашбордов AiCodingDev (P8-08): JSON из infrastructure/monitoring/grafana/dashboards, только чтение.
+apiVersion: 1
+providers:
+  - name: aicodingdev
+    folder: AiCodingDev
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
