@@ -24,6 +24,7 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from aicd_cli_adapters import registry
 from aicd_cli_adapters.gateway import ExecutionGateway
 from aicd_cli_adapters.models import ExecutionRequest
 from aicd_cli_adapters.subprocess_adapter import SubprocessCLIAdapter
@@ -181,6 +182,13 @@ class CliTaskExecutor:
             stored_pack, pack_metrics = await self._store_pack(
                 conn, pack, task=task, run=run, attempt_id=attempt_id, prompt=prompt, prompt_artifact=stored_prompt
             )
+            # default_timeout_seconds провайдера в workspace — если у задачи нет явного тайм-аута (§15).
+            ws_settings = (await registry.workspace_settings_by_code(conn)).get(
+                provider
+            ) or registry.default_workspace_settings()
+            timeout_seconds = registry.effective_timeout(
+                int(task["timeout_seconds"]), int(ws_settings["default_timeout_seconds"])
+            )
         permissions = agent_io.role_permissions(role)
         request = ExecutionRequest.model_validate(
             {
@@ -210,7 +218,7 @@ class CliTaskExecutor:
                     "instruction_template_version": template_ref,
                 },
                 "limits": {
-                    "timeout_seconds": max(30, min(task["timeout_seconds"], 14400)),
+                    "timeout_seconds": timeout_seconds,
                     "max_attempts": task["max_attempts"],
                 },
                 "permissions": {

@@ -359,6 +359,22 @@ def _settings_view(definition: dict[str, Any] | None, version: int) -> dict[str,
     return view
 
 
+def default_workspace_settings() -> dict[str, Any]:
+    """Настройки провайдера в workspace без строки политики (settings_version 0)."""
+    return _settings_view(None, 0)
+
+
+TASK_TIMEOUT_COLUMN_DEFAULT = 1800  # tasks.timeout_seconds DEFAULT (миграция 0003)
+
+
+def effective_timeout(task_timeout: int, workspace_default: int) -> int:
+    """Тайм-аут исполнения CLI (API_DESIGN §15, ROUTING_POLICY §4.1a): явный тайм-аут задачи важнее
+    `default_timeout_seconds` workspace; значение столбца по умолчанию (1800, план его не задавал) считается
+    «не задано». Результат ограничен 30…14400 с (ExecutionRequest.limits)."""
+    chosen = workspace_default if task_timeout == TASK_TIMEOUT_COLUMN_DEFAULT else task_timeout
+    return max(30, min(int(chosen), 14400))
+
+
 async def workspace_settings_by_code(conn: AsyncConnection) -> dict[str, dict[str, Any]]:
     """Активные настройки провайдеров workspace текущего RLS-контекста (без контекста — пусто)."""
     rows = (

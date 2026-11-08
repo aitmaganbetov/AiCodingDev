@@ -266,9 +266,9 @@ async def providers_section(conn: AsyncConnection, w: Window) -> list[dict[str, 
         " count(*) FILTER (WHERE v.status = 'CANCELLED') AS cancelled,"
         " count(*) FILTER (WHERE v.finished_at IS NULL) AS in_progress,"
         " avg(v.duration_seconds) AS avg_d,"
-        " COALESCE(sum(v.tokens_reported), 0) AS tokens_reported,"
-        " COALESCE(sum(v.tokens_not_exposed), 0) AS tokens_not_exposed,"
-        " sum(v.tokens_total) AS tokens_total"
+        " COALESCE(sum(v.usage_reported), 0) AS tokens_reported,"
+        " COALESCE(sum(v.usage_not_exposed), 0) AS tokens_not_exposed,"
+        " sum(v.usage_total) AS tokens_total"
         f"{scope} GROUP BY v.provider ORDER BY v.provider",
         w.params(),
     )

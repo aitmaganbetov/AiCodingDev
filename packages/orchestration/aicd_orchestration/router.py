@@ -35,6 +35,10 @@ TIE_EPSILON = 0.01
 # Роли, для которых действует правило независимости (ROUTING_POLICY §5, H7).
 REVIEW_ROLES = frozenset({"reviewer", "security"})
 REVIEW_TASK_ROLES = frozenset({"qa", "architect", "database"})  # только для review-задач этих ролей
+# Исключения по политике workspace/run (не по состоянию установки) — для текста причины BLOCKED.
+WORKSPACE_POLICY_REASONS = frozenset(
+    {"policy_disallowed", "workspace_disabled", "role_not_allowed", "workspace_sessions_zero"}
+)
 DEFAULT_FALLBACK: dict[str, Fallback] = {
     "basic": "SELF_REVIEW_FALLBACK",
     "strict": "MANUAL_REVIEW",
@@ -57,6 +61,12 @@ class Candidate:
     cooldown_until: datetime | None = None
     recent_success_within_hour: bool = False  # для auth_status UNKNOWN (H3)
     recent_failure_ages_h: tuple[float, ...] = ()  # PROCESS_FAILED/TIMEOUT/OUTPUT_PARSE_ERROR за 24 ч
+    # Безопасные настройки провайдера в workspace (PATCH /providers/{id}/settings, ROUTING_POLICY §4.1a):
+    # выключен в workspace, разрешённые роли (None — все), сессии провайдера в workspace сейчас и лимит (None — нет).
+    workspace_enabled: bool = True
+    allowed_roles: frozenset[str] | None = None
+    workspace_active: int = 0
+    workspace_max_sessions: int | None = None
 
 
 @dataclass(frozen=True)
@@ -103,7 +113,8 @@ def independence_required(req: RouteRequest) -> bool:
 
 
 def _hard_filter(c: Candidate, req: RouteRequest) -> str | None:
-    """Причина исключения по H1–H6 (H7 — независимость, H8 — concurrency — отдельно)."""
+    """Причина исключения по H1–H6 и настройкам провайдера в workspace (H7 — независимость, H8 — concurrency —
+    отдельно)."""
     if not c.enabled:
         return "disabled"
     if not c.installed:
@@ -127,6 +138,22 @@ def _hard_filter(c: Candidate, req: RouteRequest) -> str | None:
         return "capability_missing:resume_session"
     if c.provider not in req.allowed_providers:
         return "policy_disallowed"
+    if not c.workspace_enabled:
+        return "workspace_disabled"
+    if c.allowed_roles is not None and req.role not in c.allowed_roles:
+        return "role_not_allowed"
+    if c.workspace_max_sessions == 0:
+        return "workspace_sessions_zero"
+    return None
+
+
+def _slot_reason(c: Candidate) -> str | None:
+    """Причина отсутствия свободного слота (H8): лимит установки или лимит сессий провайдера в workspace —
+    действует более строгий; None — слот есть."""
+    if c.active >= c.max_concurrent:
+        return "concurrency_full"
+    if c.workspace_max_sessions is not None and c.workspace_active >= c.workspace_max_sessions:
+        return "workspace_concurrency_full"
     return None
 
 
@@ -244,11 +271,11 @@ def route(req: RouteRequest, candidates: list[Candidate]) -> RouteDecision:
                 )
 
     def decide(pool: list[Candidate], independence: Independence, fallback: Fallback | None) -> RouteDecision:
-        free = [c for c in pool if c.active < c.max_concurrent]
+        free = [c for c in pool if _slot_reason(c) is None]
         if not free:
             for c in pool:
                 excluded.append(
-                    {"installation_id": str(c.installation_id), "provider": c.provider, "reason": "concurrency_full"}
+                    {"installation_id": str(c.installation_id), "provider": c.provider, "reason": _slot_reason(c) or ""}
                 )
             breakdown["review_independence"] = independence
             return RouteDecision(
@@ -318,13 +345,7 @@ def route(req: RouteRequest, candidates: list[Candidate]) -> RouteDecision:
     reasons = {e["reason"] for e in excluded} - {"disabled"}
     blocked = "AUTH_REQUIRED" if reasons == {"auth_required"} else "PROVIDER_UNAVAILABLE"
     breakdown["review_independence"] = "not_required"
-    return RouteDecision(
-        "BLOCKED",
-        None,
-        blocked,
-        "not_required",
-        None,
-        None,
-        f"нет допустимых установок CLI ({blocked}); обход лимитов не выполняется",
-        breakdown,
-    )
+    text = f"нет допустимых установок CLI ({blocked}); обход лимитов не выполняется"
+    if reasons and reasons <= WORKSPACE_POLICY_REASONS:
+        text = f"провайдеры недоступны по настройкам workspace ({', '.join(sorted(reasons))}); {text}"
+    return RouteDecision("BLOCKED", None, blocked, "not_required", None, None, text[:500], breakdown)

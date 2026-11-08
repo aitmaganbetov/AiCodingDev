@@ -78,13 +78,13 @@ SELECT g.id AS gate_execution_id, g.workspace_id, g.run_id, r.project_id, g.task
   JOIN runs r ON r.id = g.run_id AND r.workspace_id = g.workspace_id
  WHERE g.superseded_at IS NULL;
 
--- cli_adapters: cli_executions + usage_metrics (токены — только cli_reported, ТЗ §9, §16)
+-- cli_adapters: cli_executions + usage_metrics tokens.total (usage_* — только cli_reported, ТЗ §9, §16; без слова token в именах колонок, §18.9)
 CREATE VIEW v_cli_usage WITH (security_invoker = true) AS
 SELECT ce.id AS execution_id, ce.workspace_id, t.run_id, r.project_id, p.code AS provider, ce.status,
        ce.failure_category, ce.created_at, ce.started_at, ce.finished_at,
        CASE WHEN ce.finished_at IS NOT NULL AND ce.started_at IS NOT NULL
             THEN EXTRACT(EPOCH FROM ce.finished_at - ce.started_at) END AS duration_seconds,
-       tok.reported AS tokens_reported, tok.not_exposed AS tokens_not_exposed, tok.total AS tokens_total
+       tok.reported AS usage_reported, tok.not_exposed AS usage_not_exposed, tok.total AS usage_total
   FROM cli_executions ce
   JOIN cli_installations i ON i.id = ce.installation_id
   JOIN cli_providers p ON p.id = i.provider_id

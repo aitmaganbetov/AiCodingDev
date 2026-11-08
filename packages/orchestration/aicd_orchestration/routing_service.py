@@ -14,12 +14,27 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from aicd_cli_adapters import registry
 from aicd_orchestration import quality, router
 from aicd_orchestration.review_flow import WRITING_ROLES
 from aicd_platform.ids import uuid7
 
 ALL_PROVIDERS = ("codex", "claude")
 _PROVIDER_FAILURES = ("PROCESS_FAILED", "TIMEOUT")
+
+
+async def _workspace_sessions(conn: AsyncConnection) -> dict[str, int]:
+    """Сессии провайдеров в workspace текущего RLS-контекста: попытки задач в статусе RUNNING (попытка создаётся
+    в той же транзакции, что и решение Router, поэтому учитывает и ещё не запущенный процесс CLI)."""
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT a.provider, count(*) FROM task_attempts a WHERE a.status = 'RUNNING'"
+                " AND a.workspace_id = app_current_workspace() GROUP BY a.provider"
+            )
+        )
+    ).all()
+    return {str(r[0]): int(r[1]) for r in rows}
 
 
 async def _candidates(conn: AsyncConnection, now: datetime) -> list[router.Candidate]:
@@ -44,8 +59,19 @@ async def _candidates(conn: AsyncConnection, now: datetime) -> list[router.Candi
         .mappings()
         .all()
     )
+    # Настройки провайдера в workspace (policies provider_settings; без строки — значения по умолчанию).
+    settings = await registry.workspace_settings_by_code(conn)
+    sessions = await _workspace_sessions(conn)
+
+    def ws_setting(code: str) -> dict[str, Any]:
+        return settings.get(code) or registry.default_workspace_settings()
+
     return [
         router.Candidate(
+            workspace_enabled=bool(ws_setting(r["code"])["enabled"]),
+            allowed_roles=frozenset(ws_setting(r["code"])["allowed_roles"]),
+            workspace_active=sessions.get(r["code"], 0),
+            workspace_max_sessions=int(ws_setting(r["code"])["max_parallel_sessions"]),
             installation_id=r["id"],
             provider=r["code"],
             enabled=bool(r["enabled"]),
@@ -156,6 +182,12 @@ async def select(
             conn, workspace_id=run["workspace_id"], role=task["agent_role"], providers=ALL_PROVIDERS, now=now
         ),
         weights=routing_policy.get("weights") or dict(router.DEFAULT_WEIGHTS),
+    )
+    # Лимит сессий провайдера в workspace (max_parallel_sessions) считается по всем run workspace: решения разных run
+    # сериализуются блокировкой транзакции на workspace (run заблокирован вызывающим только свой).
+    await conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended('aicd:provider_sessions:' || :ws, 0))"),
+        {"ws": str(run["workspace_id"])},
     )
     decision = router.route(request, await _candidates(conn, now))
     if decision.outcome != "WAIT":  # ожидание слота — не решение; повторится при освобождении
