@@ -615,9 +615,30 @@ GRANT SELECT (id, idempotency_key) ON external_actions TO aicd_sysfn;
 GRANT INSERT (id, workspace_id, action_type, idempotency_key, target, request, request_hash) ON external_actions TO aicd_sysfn;
 -- trg_external_actions_transition выполняется от имени владельца функции (aicd_sysfn) и читает справочник.
 GRANT SELECT ON allowed_transitions TO aicd_sysfn;
+
+-- Воркер индексации видит только свой workspace (RLS): workspace с заданиями в очереди и «зависшими»
+-- RUNNING (потерянная аренда, повтор) — как sys_schedulable_workspaces (0003).
+CREATE FUNCTION sys_indexing_workspaces(p_limit int, p_stale_seconds int)
+RETURNS TABLE (workspace_id uuid)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, aicd AS $$
+  SELECT j.workspace_id
+    FROM aicd.indexing_jobs j
+   WHERE j.status = 'QUEUED'
+      OR (j.status = 'RUNNING' AND j.started_at < now() - make_interval(secs => greatest(p_stale_seconds, 60)))
+   GROUP BY j.workspace_id
+   ORDER BY min(j.created_at), j.workspace_id
+   LIMIT greatest(p_limit, 0)
+$$;
+GRANT SELECT (workspace_id, status, created_at, started_at) ON indexing_jobs TO aicd_sysfn;
+GRANT CREATE ON SCHEMA aicd TO aicd_sysfn;
+ALTER FUNCTION sys_indexing_workspaces(int, int) OWNER TO aicd_sysfn;
+REVOKE CREATE ON SCHEMA aicd FROM aicd_sysfn;
+REVOKE ALL ON FUNCTION sys_indexing_workspaces(int, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION sys_indexing_workspaces(int, int) TO aicd_worker;
 """
 
 DOWNGRADE = r"""
+DROP FUNCTION IF EXISTS sys_indexing_workspaces(int, int);
 DROP FUNCTION IF EXISTS sys_plan_docs_download(uuid, text, jsonb);
 REVOKE SELECT ON allowed_transitions FROM aicd_sysfn;
 REVOKE INSERT (id, workspace_id, action_type, idempotency_key, target, request, request_hash) ON external_actions FROM aicd_sysfn;

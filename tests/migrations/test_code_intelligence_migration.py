@@ -755,3 +755,23 @@ def test_plan_docs_download(database: testdb.TestDatabase, admin: psycopg.Connec
     with psycopg.connect(database.url_for("aicd_worker")) as conn:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             _plan(conn, source)
+
+
+def test_sys_indexing_workspaces_lists_queued_and_stale_jobs(database: testdb.TestDatabase) -> None:
+    """Воркер индексации находит workspace с заданиями вне своего RLS-контекста; aicd_app — нет."""
+    with connect_admin(database) as conn:
+        tenant = seed_tenant(conn)
+        repo = conn.execute(
+            "SELECT id FROM repositories WHERE workspace_id = %s LIMIT 1", (tenant.workspace_id,)
+        ).fetchone()
+        if repo is None:
+            pytest.skip("seed_tenant без репозитория")
+        conn.execute(
+            "INSERT INTO indexing_jobs (id, workspace_id, repository_id, commit_sha, kind) VALUES (%s, %s, %s, %s, 'full')",
+            (uuid7(), tenant.workspace_id, repo[0], "c" * 40),
+        )
+    with psycopg.connect(database.url_for("aicd_worker")) as worker:
+        found = {r[0] for r in worker.execute("SELECT workspace_id FROM sys_indexing_workspaces(1000, 600)")}
+    assert tenant.workspace_id in found
+    with psycopg.connect(database.url_for("aicd_app")) as app, pytest.raises(psycopg.errors.InsufficientPrivilege):
+        app.execute("SELECT * FROM sys_indexing_workspaces(10, 600)")
