@@ -18,7 +18,9 @@ from aicd_orchestration.planner import TaskSpec
 from aicd_platform.ids import uuid7
 
 
-async def install_plan(conn: AsyncConnection, run_id: uuid.UUID, tasks: list[TaskSpec]) -> tuple[int, dict[str, uuid.UUID]]:
+async def install_plan(
+    conn: AsyncConnection, run_id: uuid.UUID, tasks: list[TaskSpec]
+) -> tuple[int, dict[str, uuid.UUID]]:
     run = await store.load_run(conn, run_id, lock=True)
     if run is None:
         raise LookupError(str(run_id))
@@ -33,9 +35,19 @@ async def install_plan(conn: AsyncConnection, run_id: uuid.UUID, tasks: list[Tas
                 " complexity, risk_level, acceptance_criteria)"
                 " VALUES (:id, :ws, :run, :pv, :key, :role, :title, :instr, :cx, :risk, CAST(:ac AS jsonb))"
             ),
-            {"id": ids[t.key], "ws": run.workspace_id, "run": run_id, "pv": plan_version, "key": t.key,
-             "role": t.role, "title": t.title, "instr": t.instructions, "cx": t.complexity, "risk": t.risk_level,
-             "ac": json.dumps(list(t.acceptance_criteria), ensure_ascii=False)},
+            {
+                "id": ids[t.key],
+                "ws": run.workspace_id,
+                "run": run_id,
+                "pv": plan_version,
+                "key": t.key,
+                "role": t.role,
+                "title": t.title,
+                "instr": t.instructions,
+                "cx": t.complexity,
+                "risk": t.risk_level,
+                "ac": json.dumps(list(t.acceptance_criteria), ensure_ascii=False),
+            },
         )
     for t in tasks:
         for dep in t.depends_on:
@@ -47,7 +59,8 @@ async def install_plan(conn: AsyncConnection, run_id: uuid.UUID, tasks: list[Tas
                 {"ws": run.workspace_id, "run": run_id, "t": ids[t.key], "d": ids[dep]},
             )
     await conn.execute(
-        text("UPDATE runs SET plan_version = :pv, version = version + 1 WHERE id = :id"), {"pv": plan_version, "id": run_id}
+        text("UPDATE runs SET plan_version = :pv, version = version + 1 WHERE id = :id"),
+        {"pv": plan_version, "id": run_id},
     )
     return plan_version, ids
 

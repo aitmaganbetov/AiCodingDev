@@ -34,29 +34,43 @@ async def create_run(
     routing_strategy: str = "adaptive",
 ) -> dict[str, Any]:
     settings = (
-        await conn.execute(
-            text(
-                "SELECT s.documentation_mode, s.quality_profile, s.max_parallel_tasks, s.max_review_loops,"
-                " s.security_profile, p.status FROM project_settings s JOIN projects p ON p.id = s.project_id"
-                " WHERE s.project_id = :p"
-            ),
-            {"p": project_id},
+        (
+            await conn.execute(
+                text(
+                    "SELECT s.documentation_mode, s.quality_profile, s.max_parallel_tasks, s.max_review_loops,"
+                    " s.security_profile, p.status FROM project_settings s JOIN projects p ON p.id = s.project_id"
+                    " WHERE s.project_id = :p"
+                ),
+                {"p": project_id},
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if settings is None:
         raise ProblemError("not_found")
     if settings["status"] != "ACTIVE":
         raise ProblemError("invalid_state_transition", detail="Проект не активен")
     repos = (
-        await conn.execute(
-            text("SELECT id, last_synced_commit_sha FROM repositories WHERE project_id = :p AND status = 'ACTIVE'"),
-            {"p": project_id},
+        (
+            await conn.execute(
+                text("SELECT id, last_synced_commit_sha FROM repositories WHERE project_id = :p AND status = 'ACTIVE'"),
+                {"p": project_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     if len(repos) != 1:
         # OQ-22: в v1 run требует ровно один активный репозиторий проекта.
-        raise ProblemError("validation_error", errors=[FieldError(
-            "/project_id", "repository_required", "у проекта должен быть ровно один активный репозиторий")])
+        raise ProblemError(
+            "validation_error",
+            errors=[
+                FieldError(
+                    "/project_id", "repository_required", "у проекта должен быть ровно один активный репозиторий"
+                )
+            ],
+        )
     profile_code = quality_profile or settings["quality_profile"]
     profile_id = (
         await conn.execute(
@@ -74,7 +88,10 @@ async def create_run(
         "approval_policy": approval_policy,
         "quality_profile": {"code": profile_code, "id": str(profile_id)},
         "documentation_mode": settings["documentation_mode"],
-        "limits": {"max_parallel_tasks": settings["max_parallel_tasks"], "max_review_loops": settings["max_review_loops"]},
+        "limits": {
+            "max_parallel_tasks": settings["max_parallel_tasks"],
+            "max_review_loops": settings["max_review_loops"],
+        },
         "security_profile": settings["security_profile"],
     }
     run_id = uuid7()
@@ -86,21 +103,49 @@ async def create_run(
             " base_commit_sha, quality_profile, quality_profile_id, approval_policy, documentation_mode, policy_snapshot)"
             " VALUES (:id, :ws, :p, :repo, :by, :mode, :obj, :sha, :qp, :qpid, :ap, :dm, CAST(:snap AS jsonb))"
         ),
-        {"id": run_id, "ws": workspace_id, "p": project_id, "repo": repos[0]["id"], "by": requested_by, "mode": mode,
-         "obj": objective, "sha": repos[0]["last_synced_commit_sha"], "qp": profile_code, "qpid": profile_id,
-         "ap": approval_policy, "dm": settings["documentation_mode"], "snap": json.dumps(snapshot)},
+        {
+            "id": run_id,
+            "ws": workspace_id,
+            "p": project_id,
+            "repo": repos[0]["id"],
+            "by": requested_by,
+            "mode": mode,
+            "obj": objective,
+            "sha": repos[0]["last_synced_commit_sha"],
+            "qp": profile_code,
+            "qpid": profile_id,
+            "ap": approval_policy,
+            "dm": settings["documentation_mode"],
+            "snap": json.dumps(snapshot),
+        },
     )
     await outbox.emit(
-        conn, event_type="run.state_changed", aggregate_type="run", aggregate_id=run_id, workspace_id=workspace_id,
-        run_id=run_id, payload={"from": None, "to": "CREATED", "version": 0},
+        conn,
+        event_type="run.state_changed",
+        aggregate_type="run",
+        aggregate_id=run_id,
+        workspace_id=workspace_id,
+        run_id=run_id,
+        payload={"from": None, "to": "CREATED", "version": 0},
     )
     await outbox.emit(
-        conn, event_type="run.created", aggregate_type="run", aggregate_id=run_id, workspace_id=workspace_id,
-        run_id=run_id, payload={"mode": mode},
+        conn,
+        event_type="run.created",
+        aggregate_type="run",
+        aggregate_id=run_id,
+        workspace_id=workspace_id,
+        run_id=run_id,
+        payload={"mode": mode},
     )
     await audit.record(
-        conn, action="run.create", resource_type="run", resource_id=run_id, actor_type="user", actor_id=requested_by,
-        workspace_id=workspace_id, metadata={"mode": mode, "project_id": str(project_id)},
+        conn,
+        action="run.create",
+        resource_type="run",
+        resource_id=run_id,
+        actor_type="user",
+        actor_id=requested_by,
+        workspace_id=workspace_id,
+        metadata={"mode": mode, "project_id": str(project_id)},
     )
     return {"run_id": run_id, "status": "CREATED"}
 
@@ -128,14 +173,15 @@ async def command(
                 raise ProblemError("invalid_state_transition", extensions={"current_status": current.status})
             return current  # уже не на паузе — no-op
         target = current.resume_status or "RUNNING"
-    assert target is not None
+    if target is None:  # pragma: no cover — все команды сопоставлены выше
+        raise ProblemError("malformed_request")
     if current.status == target:
         return current
     if not fsm.can_transition("run", current.status, target):
         raise ProblemError("invalid_state_transition", extensions={"current_status": current.status})
     extra: dict[str, Any] = {}
     if command == "cancel":
-        extra["cancel_requested_at"] = store._NOW  # noqa: SLF001
+        extra["cancel_requested_at"] = store._NOW
     new = await store.transition_run(conn, run_id, target, reason=reason or f"user_{command}", extra=extra)
     if command == "cancel":
         await conn.execute(
@@ -147,7 +193,13 @@ async def command(
             {"r": run_id},
         )
     await audit.record(
-        conn, action=f"run.{command}_requested", resource_type="run", resource_id=run_id, actor_type="user",
-        actor_id=actor_id, workspace_id=workspace_id, metadata={"from": current.status, "to": new.status},
+        conn,
+        action=f"run.{command}_requested",
+        resource_type="run",
+        resource_id=run_id,
+        actor_type="user",
+        actor_id=actor_id,
+        workspace_id=workspace_id,
+        metadata={"from": current.status, "to": new.status},
     )
     return new

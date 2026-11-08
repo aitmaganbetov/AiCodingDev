@@ -21,10 +21,12 @@ dependencies = [
   "pyyaml",
   "jsonschema",
   "httpx>=0.28.1",
+  "dramatiq[redis]>=2.2.1",
 ]
 
 [project.scripts]
 aicd = "aicd_cli.main:main"
+aicd-worker = "aicd_worker.main:main"
 
 [dependency-groups]
 dev = [
@@ -62,6 +64,7 @@ packages = [
   "packages/collaboration/aicd_collaboration",
   "apps/api/aicd_api",
   "apps/cli/aicd_cli",
+  "apps/worker/aicd_worker",
 ]
 
 [tool.uv]
@@ -74,7 +77,7 @@ src = ["packages/*", "apps/*", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "A", "C4", "SIM", "RUF", "ASYNC", "PT", "TID"]
-ignore = ["RUF001", "RUF002", "RUF003"]  # кириллица в строках/комментариях допустима
+ignore = ["RUF001", "RUF002", "RUF003", "E501"]  # кириллица допустима; длину строк кода контролирует ruff format
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Header"]
@@ -89,9 +92,9 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
-mypy_path = "packages/platform:packages/contracts:packages/identity:packages/projects:packages/security:packages/cli_adapters:packages/orchestration:packages/verification:packages/collaboration:apps/api:apps/cli"
+mypy_path = "packages/platform:packages/contracts:packages/identity:packages/projects:packages/security:packages/cli_adapters:packages/orchestration:packages/verification:packages/collaboration:apps/api:apps/cli:apps/worker"
 explicit_package_bases = true
-files = ["packages", "apps/api", "apps/cli", "tests", "scripts"]
+files = ["packages", "apps/api", "apps/cli", "apps/worker", "tests", "scripts"]
 exclude = ["^infrastructure/migrations/", "^apps/web/"]
 
 [[tool.mypy.overrides]]
@@ -116,19 +119,20 @@ branch = true
 concurrency = ["greenlet", "thread"]
 omit = ["*/aicd_cli_adapters/fake/fake_cli.py"]  # исполняется в дочернем процессе (сценарии проверяются тестами адаптера)
 source = ["aicd_platform", "aicd_identity", "aicd_projects", "aicd_security", "aicd_api", "aicd_contracts", "aicd_cli",
-          "aicd_cli_adapters", "aicd_orchestration", "aicd_verification", "aicd_collaboration"]
+          "aicd_cli_adapters", "aicd_orchestration", "aicd_verification", "aicd_collaboration", "aicd_worker"]
 
 [tool.importlinter]
 root_packages = ["aicd_platform", "aicd_contracts", "aicd_security", "aicd_identity", "aicd_projects", "aicd_cli_adapters",
-                 "aicd_orchestration", "aicd_verification", "aicd_collaboration", "aicd_api", "aicd_cli"]
+                 "aicd_orchestration", "aicd_verification", "aicd_collaboration", "aicd_api", "aicd_cli", "aicd_worker"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Слои: приложения → домены → security → platform/contracts"
 type = "layers"
 layers = [
-  "aicd_api | aicd_cli",
-  "aicd_projects | aicd_cli_adapters | aicd_orchestration | aicd_verification | aicd_collaboration",
+  "aicd_api | aicd_cli | aicd_worker",
+  "aicd_orchestration",
+  "aicd_projects | aicd_cli_adapters | aicd_verification | aicd_collaboration",
   "aicd_identity",
   "aicd_security",
   "aicd_platform",
@@ -138,7 +142,7 @@ layers = [
 [[tool.importlinter.contracts]]
 name = "Приватные модули домена (repository) недоступны другим модулям — только через api"
 type = "forbidden"
-source_modules = ["aicd_api", "aicd_cli", "aicd_projects", "aicd_platform", "aicd_security"]
+source_modules = ["aicd_api", "aicd_cli", "aicd_worker", "aicd_projects", "aicd_platform", "aicd_security"]
 forbidden_modules = ["aicd_identity.repository"]
 allow_indirect_imports = true
 
@@ -147,13 +151,13 @@ name = "Платформенный слой и security не зависят от
 type = "forbidden"
 source_modules = ["aicd_platform", "aicd_security", "aicd_contracts"]
 forbidden_modules = ["aicd_identity", "aicd_projects", "aicd_cli_adapters", "aicd_orchestration", "aicd_verification",
-                     "aicd_collaboration", "aicd_api", "aicd_cli"]
+                     "aicd_collaboration", "aicd_api", "aicd_cli", "aicd_worker"]
 
 [[tool.importlinter.contracts]]
 name = "Запрет SDK AI-провайдеров (ТЗ §1, ADR-0003)"
 type = "forbidden"
 source_modules = ["aicd_platform", "aicd_contracts", "aicd_security", "aicd_identity", "aicd_projects",
                   "aicd_cli_adapters", "aicd_orchestration", "aicd_verification", "aicd_collaboration", "aicd_api",
-                  "aicd_cli"]
+                  "aicd_cli", "aicd_worker"]
 forbidden_modules = ["openai", "anthropic", "mistralai", "cohere", "ollama", "langchain", "litellm"]
 ignore_imports = []

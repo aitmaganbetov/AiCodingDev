@@ -14,8 +14,18 @@ RATE_LIMIT_CAP: Final = 3600
 JITTER: Final = 0.2
 
 # Ретраемые категории (failure_category). RATE_LIMITED не расходует max_attempts.
-RETRYABLE: Final = frozenset({"TIMEOUT", "RATE_LIMITED", "PROCESS_FAILED", "OUTPUT_PARSE_ERROR", "LEASE_LOST",
-                              "WORKER_CRASH", "GATE_FAILED", "REVIEW_REJECTED"})
+RETRYABLE: Final = frozenset(
+    {
+        "TIMEOUT",
+        "RATE_LIMITED",
+        "PROCESS_FAILED",
+        "OUTPUT_PARSE_ERROR",
+        "LEASE_LOST",
+        "WORKER_CRASH",
+        "GATE_FAILED",
+        "REVIEW_REJECTED",
+    }
+)
 BLOCKING: Final[dict[str, str]] = {"AUTH_REQUIRED": "AUTH_REQUIRED"}
 NOT_COUNTED: Final = frozenset({"RATE_LIMITED", "LEASE_LOST"})
 
@@ -28,13 +38,14 @@ class RetryDecision:
     counts_attempt: bool = True
 
 
-def backoff_seconds(attempt: int, *, rate_limited: bool = False, retry_after: int | None = None,
-                    rng: random.Random | None = None) -> float:
+def backoff_seconds(
+    attempt: int, *, rate_limited: bool = False, retry_after: int | None = None, rng: random.Random | None = None
+) -> float:
     """min(base·2^(n−1), cap) ± 20% jitter; для RATE_LIMITED — не меньше retry-after CLI."""
     rnd = rng or random.Random()  # noqa: S311 — jitter, не криптография
     base, cap = (RATE_LIMIT_BASE, RATE_LIMIT_CAP) if rate_limited else (BASE_SECONDS, CAP_SECONDS)
     raw = min(base * 2 ** max(attempt - 1, 0), cap)
-    value = raw * (1 + rnd.uniform(-JITTER, JITTER))
+    value = float(raw) * (1 + rnd.uniform(-JITTER, JITTER))
     if retry_after is not None:
         value = max(value, float(retry_after))
     return value
@@ -59,8 +70,9 @@ def decide(
     counts = failure_category not in NOT_COUNTED
     if counts and attempt_count >= max_attempts:
         return RetryDecision("fail")
-    delay = backoff_seconds(attempt_count, rate_limited=failure_category == "RATE_LIMITED",
-                            retry_after=retry_after, rng=rng)
+    delay = backoff_seconds(
+        attempt_count, rate_limited=failure_category == "RATE_LIMITED", retry_after=retry_after, rng=rng
+    )
     if retry_spent_seconds + delay > retry_budget_seconds:
         return RetryDecision("fail")
     return RetryDecision("retry", next_attempt_at=now + timedelta(seconds=delay), counts_attempt=counts)

@@ -22,6 +22,7 @@ def make_request(
     objective: str = "Добавить документ",
     timeout_seconds: int = 60,
     small_limits: dict[str, Any] | None = None,
+    task_attempt_id: uuid.UUID | None = None,
 ) -> ExecutionRequest:
     data = {
         "contract_version": "1.0",
@@ -34,7 +35,7 @@ def make_request(
         "limits": {"timeout_seconds": timeout_seconds, "max_attempts": 2},
         "permissions": {"network": "none", "write_scope": "worktree", "production_access": False},
         "run_id": str(uuid7()),
-        "task_attempt_id": str(uuid7()),
+        "task_attempt_id": str(task_attempt_id or uuid7()),
         "workspace_id": str(workspace_id or uuid7()),
         "command_profile": f"{provider}/agent_task@1",
     }

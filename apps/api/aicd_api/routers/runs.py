@@ -34,8 +34,9 @@ from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, en
 
 router = APIRouter(tags=["runs"])
 
-RunMode = Literal["CREATE", "DEVELOP", "DEBUG", "AUDIT", "MODERNIZE", "SECURITY", "OPTIMIZE", "TEST", "MAINTAIN",
-                  "DOCUMENT", "REVIEW"]
+RunMode = Literal[
+    "CREATE", "DEVELOP", "DEBUG", "AUDIT", "MODERNIZE", "SECURITY", "OPTIMIZE", "TEST", "MAINTAIN", "DOCUMENT", "REVIEW"
+]
 Limit = Annotated[int, Query(ge=1, le=MAX_LIMIT)]
 Cursor = Annotated[str | None, Query(max_length=1024)]
 
@@ -65,7 +66,7 @@ async def _resolve(request: Request, principal: identity.Principal, fn: str, res
     """Workspace ресурса через SECURITY DEFINER функцию (только для членов) — иначе 404 (AC-12)."""
     state = app_state(request)
     async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
-        ws = (await conn.execute(text(f"SELECT {fn}(:id)"), {"id": resource_id})).scalar_one_or_none()  # noqa: S608
+        ws = (await conn.execute(text(f"SELECT {fn}(:id)"), {"id": resource_id})).scalar_one_or_none()
         role = await identity.workspace_role(conn, ws) if ws else None
     if ws is None or role is None:
         raise ProblemError("not_found")
@@ -77,38 +78,53 @@ async def _resolve(request: Request, principal: identity.Principal, fn: str, res
 
 def _run_summary(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        "id": row["id"], "project_id": row["project_id"], "workspace_id": row["workspace_id"], "mode": row["mode"],
-        "objective": row["objective"], "status": row["status"], "blocked_reason": row["blocked_reason"],
+        "id": row["id"],
+        "project_id": row["project_id"],
+        "workspace_id": row["workspace_id"],
+        "mode": row["mode"],
+        "objective": row["objective"],
+        "status": row["status"],
+        "blocked_reason": row["blocked_reason"],
         "requested_by": {"id": row["requested_by"], "display_name": row["requested_by_name"]},
-        "quality_profile": row["quality_profile"], "version": row["version"], "created_at": row["created_at"],
-        "started_at": row["started_at"], "finished_at": row["finished_at"],
+        "quality_profile": row["quality_profile"],
+        "version": row["version"],
+        "created_at": row["created_at"],
+        "started_at": row["started_at"],
+        "finished_at": row["finished_at"],
     }
 
 
-_RUN_SELECT = (
-    "SELECT r.*, u.display_name AS requested_by_name FROM runs r JOIN users u ON u.id = r.requested_by"
-)
+_RUN_SELECT = "SELECT r.*, u.display_name AS requested_by_name FROM runs r JOIN users u ON u.id = r.requested_by"
 
 
 @router.post("/runs", status_code=201, **op("createRun", "run:create"))
-async def create_run(request: Request, body: RunCreateRequest,
-                     principal: identity.Principal = Depends(current_principal)) -> Response:
+async def create_run(
+    request: Request, body: RunCreateRequest, principal: identity.Principal = Depends(current_principal)
+) -> Response:
     access = await project_access(request, principal, body.project_id)
     await authorize(request, access, "run:create")
 
     async def command(conn: AsyncConnection) -> CommandResult:
         created = await runs_service.create_run(
-            conn, workspace_id=access.workspace_id, project_id=body.project_id, requested_by=principal.user_id,
-            mode=body.mode, objective=body.objective, quality_profile=body.quality_profile,
+            conn,
+            workspace_id=access.workspace_id,
+            project_id=body.project_id,
+            requested_by=principal.user_id,
+            mode=body.mode,
+            objective=body.objective,
+            quality_profile=body.quality_profile,
             approval_policy=body.approval_policy,
-            allowed_providers=list(body.routing.allowed_providers) if body.routing and body.routing.allowed_providers
+            allowed_providers=list(body.routing.allowed_providers)
+            if body.routing and body.routing.allowed_providers
             else None,
             routing_strategy=body.routing.strategy if body.routing else "adaptive",
         )
         run_id = created["run_id"]
-        return CommandResult(201, {"run_id": run_id, "status": "CREATED",
-                                   "event_stream": f"/api/v1/runs/{run_id}/events"},
-                             {"Location": f"/api/v1/runs/{run_id}", "ETag": etag(0)})
+        return CommandResult(
+            201,
+            {"run_id": run_id, "status": "CREATED", "event_stream": f"/api/v1/runs/{run_id}/events"},
+            {"Location": f"/api/v1/runs/{run_id}", "ETag": etag(0)},
+        )
 
     return await run_idempotent(request, access.db(), body.model_dump(mode="json"), command)
 
@@ -127,8 +143,14 @@ async def list_runs(
     access = await workspace_access(request, principal, parse_workspace_header(request))
     await authorize(request, access, "run:read")
     state = app_state(request)
-    filters = {"r": "runs", "ws": str(access.workspace_id), "p": str(project_id), "s": sorted(status or []),
-               "m": mode, "ca": str(created_after)}
+    filters = {
+        "r": "runs",
+        "ws": str(access.workspace_id),
+        "p": str(project_id),
+        "s": sorted(status or []),
+        "m": mode,
+        "ca": str(created_after),
+    }
     clauses = ["r.workspace_id = app_current_workspace()"]
     params: dict[str, Any] = {"lim": limit + 1}
     if project_id:
@@ -159,26 +181,41 @@ async def list_runs(
 
 
 @router.get("/runs/{run_id}", **op("getRun", "run:read"))
-async def get_run(request: Request, run_id: Annotated[uuid.UUID, Path()],
-                  principal: identity.Principal = Depends(current_principal)) -> Response:
+async def get_run(
+    request: Request, run_id: Annotated[uuid.UUID, Path()], principal: identity.Principal = Depends(current_principal)
+) -> Response:
     access = await _resolve(request, principal, "sys_resolve_run_workspace", run_id)
     await authorize(request, access, "run:read")
     async with transaction(app_state(request).engine, access.db()) as conn:
         row = (await conn.execute(text(_RUN_SELECT + " WHERE r.id = :id"), {"id": run_id})).mappings().first()
         if row is None:
             raise ProblemError("not_found")
-        counts = dict((await conn.execute(text(
-            "SELECT status, count(*) FROM tasks WHERE run_id = :id AND superseded_at IS NULL GROUP BY status"),
-            {"id": run_id})).all())
-        pending = (await conn.execute(text(
-            "SELECT count(*) FROM approvals WHERE run_id = :id AND status = 'PENDING'"), {"id": run_id})).scalar_one()
+        counts: dict[str, int] = dict(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT status, count(*) FROM tasks WHERE run_id = :id AND superseded_at IS NULL GROUP BY status"
+                    ),
+                    {"id": run_id},
+                )
+            ).all()
+        )
+        pending = (
+            await conn.execute(
+                text("SELECT count(*) FROM approvals WHERE run_id = :id AND status = 'PENDING'"), {"id": run_id}
+            )
+        ).scalar_one()
     snapshot = row["policy_snapshot"] or {}
     body = {
         **_run_summary(dict(row)),
-        "repository_id": row["repository_id"], "base_commit_sha": row["base_commit_sha"],
-        "approval_policy": row["approval_policy"], "plan_version": row["plan_version"],
-        "routing": snapshot.get("routing", {}), "task_counts": {k: int(v) for k, v in counts.items()},
-        "pending_approvals": int(pending), "updated_at": row["updated_at"],
+        "repository_id": row["repository_id"],
+        "base_commit_sha": row["base_commit_sha"],
+        "approval_policy": row["approval_policy"],
+        "plan_version": row["plan_version"],
+        "routing": snapshot.get("routing", {}),
+        "task_counts": {k: int(v) for k, v in counts.items()},
+        "pending_approvals": int(pending),
+        "updated_at": row["updated_at"],
         "links": {"tasks": f"/api/v1/runs/{run_id}/tasks", "events": f"/api/v1/runs/{run_id}/events"},
     }
     tag = etag(row["version"])
@@ -215,15 +252,37 @@ async def get_run_tasks(
         params.update(ct=datetime.fromisoformat(t), cid=uuid.UUID(i))
     async with transaction(state.engine, access.db()) as conn:
         run = (await conn.execute(text("SELECT plan_version FROM runs WHERE id = :id"), {"id": run_id})).scalar_one()
-        rows = [dict(r) for r in (await conn.execute(text(
-            "SELECT t.*, (SELECT a.provider FROM task_attempts a WHERE a.task_id = t.id ORDER BY a.attempt_no DESC"
-            " LIMIT 1) AS current_provider FROM tasks t WHERE " + " AND ".join(clauses)  # noqa: S608
-            + " ORDER BY t.created_at, t.id LIMIT :lim"), params)).mappings().all()]
+        rows = [
+            dict(r)
+            for r in (
+                await conn.execute(
+                    text(
+                        "SELECT t.*, (SELECT a.provider FROM task_attempts a WHERE a.task_id = t.id ORDER BY a.attempt_no DESC"  # noqa: S608 — условия из фиксированного списка, значения — bind
+                        " LIMIT 1) AS current_provider FROM tasks t WHERE "
+                        + " AND ".join(clauses)
+                        + " ORDER BY t.created_at, t.id LIMIT :lim"
+                    ),
+                    params,
+                )
+            )
+            .mappings()
+            .all()
+        ]
         page = rows[:limit]
         ids = [r["id"] for r in page]
-        edges = [dict(e) for e in (await conn.execute(text(
-            "SELECT task_id, depends_on_task_id, dependency_type FROM task_dependencies WHERE task_id = ANY(:ids)"),
-            {"ids": ids})).mappings().all()]
+        edges = [
+            dict(e)
+            for e in (
+                await conn.execute(
+                    text(
+                        "SELECT task_id, depends_on_task_id, dependency_type FROM task_dependencies WHERE task_id = ANY(:ids)"
+                    ),
+                    {"ids": ids},
+                )
+            )
+            .mappings()
+            .all()
+        ]
     deps: dict[uuid.UUID, list[uuid.UUID]] = {}
     for e in edges:
         deps.setdefault(e["task_id"], []).append(e["depends_on_task_id"])
@@ -231,82 +290,155 @@ async def get_run_tasks(
     if len(rows) > limit:
         last = page[-1]
         next_cursor = encode_cursor(state.secret_key, [last["created_at"].isoformat(), str(last["id"])], filters)
-    return json_response({"run_id": run_id, "plan_version": run, "tasks": [_task_summary(r, deps) for r in page],
-                          "edges": edges, "next_cursor": next_cursor})
+    return json_response(
+        {
+            "run_id": run_id,
+            "plan_version": run,
+            "tasks": [_task_summary(r, deps) for r in page],
+            "edges": edges,
+            "next_cursor": next_cursor,
+        }
+    )
 
 
 def _task_summary(row: dict[str, Any], deps: dict[uuid.UUID, list[uuid.UUID]]) -> dict[str, Any]:
     return {
-        "id": row["id"], "run_id": row["run_id"], "agent_role": row["agent_role"], "title": row["title"],
-        "status": row["status"], "blocked_reason": row["blocked_reason"], "complexity": f"L{row['complexity']}",
-        "risk_level": row["risk_level"], "current_provider": row.get("current_provider"),
-        "attempt_count": row["attempt_count"], "max_attempts": row["max_attempts"],
-        "depends_on": deps.get(row["id"], []), "version": row["version"], "updated_at": row["updated_at"],
+        "id": row["id"],
+        "run_id": row["run_id"],
+        "agent_role": row["agent_role"],
+        "title": row["title"],
+        "status": row["status"],
+        "blocked_reason": row["blocked_reason"],
+        "complexity": f"L{row['complexity']}",
+        "risk_level": row["risk_level"],
+        "current_provider": row.get("current_provider"),
+        "attempt_count": row["attempt_count"],
+        "max_attempts": row["max_attempts"],
+        "depends_on": deps.get(row["id"], []),
+        "version": row["version"],
+        "updated_at": row["updated_at"],
     }
 
 
-async def _run_command(request: Request, run_id: uuid.UUID, principal: identity.Principal,
-                       command: Literal["pause", "resume", "cancel"], body: CommandBody | None) -> Response:
+async def _run_command(
+    request: Request,
+    run_id: uuid.UUID,
+    principal: identity.Principal,
+    command: Literal["pause", "resume", "cancel"],
+    body: CommandBody | None,
+) -> Response:
     access = await _resolve(request, principal, "sys_resolve_run_workspace", run_id)
     await authorize(request, access, "run:control")
     expected = parse_if_match(request.headers.get("if-match"))
 
     async def do(conn: AsyncConnection) -> CommandResult:
-        state = await runs_service.command(conn, run_id=run_id, workspace_id=access.workspace_id,
-                                           actor_id=principal.user_id, command=command, expected_version=expected,
-                                           reason=body.reason if body else None)
-        return CommandResult(202, {"run_id": run_id, "command": command, "status": state.status,
-                                   "version": state.version, "accepted_at": utcnow()}, {"ETag": etag(state.version)})
+        state = await runs_service.command(
+            conn,
+            run_id=run_id,
+            workspace_id=access.workspace_id,
+            actor_id=principal.user_id,
+            command=command,
+            expected_version=expected,
+            reason=body.reason if body else None,
+        )
+        return CommandResult(
+            202,
+            {
+                "run_id": run_id,
+                "command": command,
+                "status": state.status,
+                "version": state.version,
+                "accepted_at": utcnow(),
+            },
+            {"ETag": etag(state.version)},
+        )
 
     return await run_idempotent(request, access.db(), {"command": command, **(body.model_dump() if body else {})}, do)
 
 
 @router.post("/runs/{run_id}/pause", status_code=202, **op("pauseRun", "run:control"))
-async def pause_run(request: Request, run_id: Annotated[uuid.UUID, Path()], body: CommandBody | None = None,
-                    principal: identity.Principal = Depends(current_principal)) -> Response:
+async def pause_run(
+    request: Request,
+    run_id: Annotated[uuid.UUID, Path()],
+    body: CommandBody | None = None,
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
     return await _run_command(request, run_id, principal, "pause", body)
 
 
 @router.post("/runs/{run_id}/resume", status_code=202, **op("resumeRun", "run:control"))
-async def resume_run(request: Request, run_id: Annotated[uuid.UUID, Path()], body: CommandBody | None = None,
-                     principal: identity.Principal = Depends(current_principal)) -> Response:
+async def resume_run(
+    request: Request,
+    run_id: Annotated[uuid.UUID, Path()],
+    body: CommandBody | None = None,
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
     return await _run_command(request, run_id, principal, "resume", body)
 
 
 @router.post("/runs/{run_id}/cancel", status_code=202, **op("cancelRun", "run:control"))
-async def cancel_run(request: Request, run_id: Annotated[uuid.UUID, Path()], body: CommandBody | None = None,
-                     principal: identity.Principal = Depends(current_principal)) -> Response:
+async def cancel_run(
+    request: Request,
+    run_id: Annotated[uuid.UUID, Path()],
+    body: CommandBody | None = None,
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
     return await _run_command(request, run_id, principal, "cancel", body)
 
 
 @router.get("/tasks/{task_id}", **op("getTask", "run:read"))
-async def get_task(request: Request, task_id: Annotated[uuid.UUID, Path()],
-                   principal: identity.Principal = Depends(current_principal)) -> Response:
+async def get_task(
+    request: Request, task_id: Annotated[uuid.UUID, Path()], principal: identity.Principal = Depends(current_principal)
+) -> Response:
     access = await _resolve(request, principal, "sys_resolve_task_workspace", task_id)
     await authorize(request, access, "run:read")
     async with transaction(app_state(request).engine, access.db()) as conn:
-        row = (await conn.execute(text(
-            "SELECT t.*, (SELECT a.provider FROM task_attempts a WHERE a.task_id = t.id ORDER BY a.attempt_no DESC"
-            " LIMIT 1) AS current_provider FROM tasks t WHERE t.id = :id"), {"id": task_id})).mappings().first()
+        row = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT t.*, (SELECT a.provider FROM task_attempts a WHERE a.task_id = t.id ORDER BY a.attempt_no DESC"
+                        " LIMIT 1) AS current_provider FROM tasks t WHERE t.id = :id"
+                    ),
+                    {"id": task_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
         if row is None:
             raise ProblemError("not_found")
-        deps = list((await conn.execute(text(
-            "SELECT depends_on_task_id FROM task_dependencies WHERE task_id = :id"), {"id": task_id})).scalars().all())
+        deps = list(
+            (
+                await conn.execute(
+                    text("SELECT depends_on_task_id FROM task_dependencies WHERE task_id = :id"), {"id": task_id}
+                )
+            )
+            .scalars()
+            .all()
+        )
     data = dict(row)
     body = {
         **_task_summary(data, {task_id: deps}),
-        "instructions": data["instructions"], "acceptance_criteria": list(data["acceptance_criteria"] or []),
-        "review_loop_count": data["review_loop_count"], "next_attempt_at": data["next_attempt_at"],
-        "timeout_seconds": data["timeout_seconds"], "created_at": data["created_at"],
+        "instructions": data["instructions"],
+        "acceptance_criteria": list(data["acceptance_criteria"] or []),
+        "review_loop_count": data["review_loop_count"],
+        "next_attempt_at": data["next_attempt_at"],
+        "timeout_seconds": data["timeout_seconds"],
+        "created_at": data["created_at"],
         "links": {"run": f"/api/v1/runs/{data['run_id']}", "attempts": f"/api/v1/tasks/{task_id}/attempts"},
     }
     return json_response(body, headers={"ETag": etag(data["version"])})
 
 
 @router.get("/tasks/{task_id}/attempts", **op("listTaskAttempts", "run:read"))
-async def list_attempts(request: Request, task_id: Annotated[uuid.UUID, Path()],
-                        principal: identity.Principal = Depends(current_principal),
-                        limit: Limit = DEFAULT_LIMIT, cursor: Cursor = None) -> Response:
+async def list_attempts(
+    request: Request,
+    task_id: Annotated[uuid.UUID, Path()],
+    principal: identity.Principal = Depends(current_principal),
+    limit: Limit = DEFAULT_LIMIT,
+    cursor: Cursor = None,
+) -> Response:
     access = await _resolve(request, principal, "sys_resolve_task_workspace", task_id)
     await authorize(request, access, "run:read")
     state = app_state(request)
@@ -315,24 +447,53 @@ async def list_attempts(request: Request, task_id: Annotated[uuid.UUID, Path()],
     if cursor:
         after = int(decode_cursor(state.secret_key, cursor, filters)[0])
     async with transaction(state.engine, access.db()) as conn:
-        rows = [dict(r) for r in (await conn.execute(text(
-            "SELECT a.*, t.agent_role FROM task_attempts a JOIN tasks t ON t.id = a.task_id"
-            " WHERE a.task_id = :t AND a.attempt_no > :after ORDER BY a.attempt_no LIMIT :lim"),
-            {"t": task_id, "after": after, "lim": limit + 1})).mappings().all()]
+        rows = [
+            dict(r)
+            for r in (
+                await conn.execute(
+                    text(
+                        "SELECT a.*, t.agent_role FROM task_attempts a JOIN tasks t ON t.id = a.task_id"
+                        " WHERE a.task_id = :t AND a.attempt_no > :after ORDER BY a.attempt_no LIMIT :lim"
+                    ),
+                    {"t": task_id, "after": after, "lim": limit + 1},
+                )
+            )
+            .mappings()
+            .all()
+        ]
         page = rows[:limit]
-        execs = [dict(e) for e in (await conn.execute(text(
-            "SELECT id, task_attempt_id, status, exit_code, failure_category, output_artifact_id, started_at,"
-            " finished_at FROM cli_executions WHERE task_attempt_id = ANY(:ids) ORDER BY created_at"),
-            {"ids": [r["id"] for r in page]})).mappings().all()]
+        execs = [
+            dict(e)
+            for e in (
+                await conn.execute(
+                    text(
+                        "SELECT id, task_attempt_id, status, exit_code, failure_category, output_artifact_id, started_at,"
+                        " finished_at FROM cli_executions WHERE task_attempt_id = ANY(:ids) ORDER BY created_at"
+                    ),
+                    {"ids": [r["id"] for r in page]},
+                )
+            )
+            .mappings()
+            .all()
+        ]
     by_attempt: dict[uuid.UUID, list[dict[str, Any]]] = {}
     for e in execs:
         attempt = e.pop("task_attempt_id")
         by_attempt.setdefault(attempt, []).append(e)
-    items = [{
-        "id": r["id"], "task_id": r["task_id"], "attempt_no": r["attempt_no"], "status": r["status"],
-        "provider": r["provider"], "agent_role": r["agent_role"], "started_at": r["started_at"],
-        "finished_at": r["finished_at"], "failure_category": r["failure_category"],
-        "executions": by_attempt.get(r["id"], []),
-    } for r in page]
+    items = [
+        {
+            "id": r["id"],
+            "task_id": r["task_id"],
+            "attempt_no": r["attempt_no"],
+            "status": r["status"],
+            "provider": r["provider"],
+            "agent_role": r["agent_role"],
+            "started_at": r["started_at"],
+            "finished_at": r["finished_at"],
+            "failure_category": r["failure_category"],
+            "executions": by_attempt.get(r["id"], []),
+        }
+        for r in page
+    ]
     next_cursor = encode_cursor(state.secret_key, [page[-1]["attempt_no"]], filters) if len(rows) > limit else None
     return json_response({"items": items, "next_cursor": next_cursor})

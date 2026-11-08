@@ -45,7 +45,17 @@ async def emit(
             " schema_version, payload, correlation_id, causation_id)"
             " VALUES (:id, :ws, :run, :atype, :aid, :etype, :sv, CAST(:payload AS jsonb), :corr, :cause)"
         ),
-        {"id": event_id, "ws": workspace_id, "run": run_id, "atype": aggregate_type, "aid": aggregate_id,
-         "etype": event_type, "sv": schema_version, "payload": body, "corr": correlation_id, "cause": causation_id},
+        {
+            "id": event_id,
+            "ws": workspace_id,
+            "run": run_id,
+            "atype": aggregate_type,
+            "aid": aggregate_id,
+            "etype": event_type,
+            "sv": schema_version,
+            "payload": body,
+            "corr": correlation_id,
+            "cause": causation_id,
+        },
     )
     return event_id

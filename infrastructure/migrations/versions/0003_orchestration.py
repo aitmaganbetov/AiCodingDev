@@ -21,6 +21,8 @@ Create Date: 2026-11-08
     FAILED, approvals → CANCELLED/EXPIRED, gate → ERROR/SKIPPED), в COMPLETED — никакие;
   * trg_tasks_success_guard: обязательный gate задачи должен быть PASS/NOT_APPLICABLE (как §18.4 для run);
   * trg_project_settings_policy_scope дополнительно требует policies.project_id IS NULL или = project_id.
+  * trg_fn_task_dependencies_same_run: self-dependency не маскируется ошибкой «cross-run» — её отклоняет
+    ck_task_dependencies_no_self (исправлено и в §18.1 документа).
 Добавлены FK, отложенные миграциями 0001/0002: worktrees.run_id/task_id, cli_executions.task_attempt_id,
 artifacts.run_id, project_settings.routing_policy_id (+ trg_project_settings_policy_scope, §6.2).
 maint_ensure_monthly_partitions расширена таблицей outbox_events (§20.1).
@@ -960,9 +962,11 @@ CREATE TRIGGER trg_runs_quality_profile_scope BEFORE INSERT OR UPDATE OF quality
 -- ---------------------------------------------------------------------------------------------
 CREATE FUNCTION trg_fn_task_dependencies_same_run() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  -- self-dependency отклоняет ck_task_dependencies_no_self (тогда в IN одна задача)
   IF (SELECT count(*) FROM tasks
        WHERE id IN (NEW.task_id, NEW.depends_on_task_id)
-         AND run_id = NEW.run_id AND workspace_id = NEW.workspace_id) <> 2 THEN
+         AND run_id = NEW.run_id AND workspace_id = NEW.workspace_id)
+     <> 2 - (NEW.task_id = NEW.depends_on_task_id)::int THEN
     RAISE EXCEPTION 'task dependency must link tasks of the same run %', NEW.run_id USING ERRCODE = '23514';
   END IF;
   -- сериализация изменений плана run (см. 18.2)

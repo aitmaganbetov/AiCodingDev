@@ -9,10 +9,22 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
-AGENT_ROLES = frozenset({
-    "requirements", "architect", "planner", "developer", "reviewer", "security", "qa", "database",
-    "performance", "devops", "maintenance", "documentation",
-})
+AGENT_ROLES = frozenset(
+    {
+        "requirements",
+        "architect",
+        "planner",
+        "developer",
+        "reviewer",
+        "security",
+        "qa",
+        "database",
+        "performance",
+        "devops",
+        "maintenance",
+        "documentation",
+    }
+)
 VERIFYING_ROLES = frozenset({"reviewer", "qa", "security"})
 
 
@@ -43,7 +55,7 @@ class PlanValidationError(Exception):
 def topological_order(tasks: list[PlannedTask]) -> list[str]:
     """Порядок Кана; при цикле — PlanValidationError('PLAN_CYCLE_DETECTED') с вершинами цикла."""
     keys = {t.key for t in tasks}
-    indegree: dict[str, int] = {k: 0 for k in keys}
+    indegree: dict[str, int] = dict.fromkeys(keys, 0)
     children: dict[str, list[str]] = defaultdict(list)
     for t in tasks:
         for dep in t.depends_on:
@@ -70,7 +82,7 @@ def _find_cycle(graph: dict[str, tuple[str, ...]]) -> list[str]:
 
     def dfs(node: str) -> list[str] | None:
         if node in visiting:
-            return [*visiting[visiting.index(node):], node]
+            return [*visiting[visiting.index(node) :], node]
         if node in seen or node not in graph:
             return None
         visiting.append(node)
@@ -109,8 +121,9 @@ def validate_plan(tasks: list[PlannedTask], limits: PlanLimits | None = None) ->
             raise PlanValidationError("PLAN_CYCLE_DETECTED", "задача зависит от самой себя", {"cycle": [t.key, t.key]})
         missing = [d for d in t.depends_on if d not in known]
         if missing:
-            raise PlanValidationError("PLAN_UNKNOWN_DEPENDENCY", "зависимость от несуществующей задачи",
-                                      {"task": t.key, "missing": missing})
+            raise PlanValidationError(
+                "PLAN_UNKNOWN_DEPENDENCY", "зависимость от несуществующей задачи", {"task": t.key, "missing": missing}
+            )
     order = topological_order(tasks)
     depth = _depths(tasks, order)
     if max(depth.values()) > limits.max_depth:
@@ -135,8 +148,9 @@ def _require_verification_for_l3(tasks: list[PlannedTask]) -> None:
             dependents[d].append(t)
     for t in tasks:
         if t.role == "developer" and t.complexity >= 3 and not _reaches_verifier(t.key, dependents):
-            raise PlanValidationError("PLAN_MISSING_VERIFICATION",
-                                      "задача developer уровня L3+ без последующей проверки", {"task": t.key})
+            raise PlanValidationError(
+                "PLAN_MISSING_VERIFICATION", "задача developer уровня L3+ без последующей проверки", {"task": t.key}
+            )
 
 
 def _reaches_verifier(key: str, dependents: dict[str, list[PlannedTask]]) -> bool:

@@ -30,6 +30,7 @@ from aicd_security.local_runner import LocalProcessRunner
 from tests.conftest import init_git_repo
 from tests.support import db as testdb
 from tests.support.cli import make_request
+from tests.support.orchestration import seed_task_attempt
 
 pytestmark = pytest.mark.db
 
@@ -46,9 +47,11 @@ class Env:
     other_workspace_id: uuid.UUID
     installation_id: uuid.UUID
     database: testdb.TestDatabase
+    attempt_id: uuid.UUID  # task_attempts в workspace_id (FK cli_executions.task_attempt_id, миграция 0003)
+    other_attempt_id: uuid.UUID
 
 
-def _seed(database: testdb.TestDatabase) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+def _seed(database: testdb.TestDatabase) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
     ws, ws2, user, host, inst = uuid7(), uuid7(), uuid7(), uuid7(), uuid7()
     with psycopg.connect(database.url_for("aicd_app")) as conn:
         conn.execute("INSERT INTO users (id, email, display_name) VALUES (%s, %s, 'gw')", (user, f"{user}@gw.test"))
@@ -74,12 +77,12 @@ def _seed(database: testdb.TestDatabase) -> tuple[uuid.UUID, uuid.UUID, uuid.UUI
             " SELECT %s, id, %s, '/usr/bin/python3', 'AUTHENTICATED', 1 FROM cli_providers WHERE code = 'codex'",
             (inst, host),
         )
-    return ws, ws2, inst
+    return ws, ws2, inst, seed_task_attempt(database, ws, user), seed_task_attempt(database, ws2, user)
 
 
 @pytest.fixture
 async def env(database: testdb.TestDatabase, tmp_path: Path) -> AsyncIterator[Env]:
-    ws, ws2, inst = _seed(database)
+    ws, ws2, inst, attempt, other_attempt = _seed(database)
     engine = create_engine(database.url_for("aicd_worker"))
     store = FileSystemArtifactStore(tmp_path / "artifacts")
     worktrees = WorktreeManager(tmp_path / "worktrees")
@@ -93,7 +96,7 @@ async def env(database: testdb.TestDatabase, tmp_path: Path) -> AsyncIterator[En
         return worktrees.diff(worktrees.path_for(request.workspace.worktree_id), base)
 
     gateway = ExecutionGateway(engine=engine, store=store, diff_provider=diff_provider)
-    yield Env(engine, gateway, store, worktrees, repo, base, ws, ws2, inst, database)
+    yield Env(engine, gateway, store, worktrees, repo, base, ws, ws2, inst, database, attempt, other_attempt)
     await engine.dispose()
 
 
@@ -134,7 +137,7 @@ async def _row(env: Env, execution_id: uuid.UUID, ws: uuid.UUID) -> dict[str, ob
 
 
 async def test_success_persists_fsm_artifacts_diff_usage(env: Env) -> None:
-    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id)
+    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id, task_attempt_id=env.attempt_id)
     events: list[str] = []
 
     async def on_event(e: object) -> None:
@@ -182,7 +185,7 @@ async def test_success_persists_fsm_artifacts_diff_usage(env: Env) -> None:
     ],
 )
 async def test_failures_recorded(env: Env, scenario: str, status: str, failure: str) -> None:
-    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id)
+    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id, task_attempt_id=env.attempt_id)
     outcome = await env.gateway.run(request, _adapter(env, scenario), installation_id=env.installation_id)
     row = await _row(env, request.execution_id, env.workspace_id)
     assert row["status"] == status and row["failure_category"] == failure and outcome.result.status == "failed"
@@ -190,7 +193,10 @@ async def test_failures_recorded(env: Env, scenario: str, status: str, failure: 
 
 async def test_timeout_recorded(env: Env) -> None:
     request = make_request(
-        worktree_id=_worktree(env), workspace_id=env.workspace_id, small_limits={"timeout_seconds": 1}
+        worktree_id=_worktree(env),
+        workspace_id=env.workspace_id,
+        task_attempt_id=env.attempt_id,
+        small_limits={"timeout_seconds": 1},
     )
     adapter = _adapter(env, "timeout")
     adapter._grace = 0.5
@@ -208,15 +214,21 @@ async def test_concurrency_limit_counts_all_workspaces(env: Env) -> None:
                 "INSERT INTO cli_executions (id, workspace_id, task_attempt_id, installation_id, command_profile,"
                 " request_hash, timeout_seconds, fencing_token) VALUES (:id, :ws, :a, :i, 'busy', :h, 60, 1)"
             ),
-            {"id": uuid7(), "ws": env.other_workspace_id, "a": uuid7(), "i": env.installation_id, "h": "0" * 64},
+            {
+                "id": uuid7(),
+                "ws": env.other_workspace_id,
+                "a": env.other_attempt_id,
+                "i": env.installation_id,
+                "h": "0" * 64,
+            },
         )
-    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id)
+    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id, task_attempt_id=env.attempt_id)
     with pytest.raises(ConcurrencyLimitReachedError):
         await env.gateway.run(request, _adapter(env, "success_diff"), installation_id=env.installation_id)
 
 
 async def test_db_rejects_invalid_transition_and_stale_token(env: Env) -> None:
-    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id)
+    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id, task_attempt_id=env.attempt_id)
     token = await env.gateway._admit(request, env.installation_id)
     with pytest.raises(StaleFencingTokenError):
         await env.gateway._transition(request, token + 1000, "STARTING")
@@ -225,7 +237,7 @@ async def test_db_rejects_invalid_transition_and_stale_token(env: Env) -> None:
 
 
 async def test_execution_rows_isolated_by_workspace(env: Env) -> None:
-    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id)
+    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id, task_attempt_id=env.attempt_id)
     await env.gateway.run(request, _adapter(env, "success_diff"), installation_id=env.installation_id)
     async with env.engine.begin() as conn:
         await conn.execute(text("SELECT set_config('app.workspace_id', :w, true)"), {"w": str(env.other_workspace_id)})

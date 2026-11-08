@@ -2645,9 +2645,11 @@ FK отсутствуют намеренно: аудит должен переж
 ```sql
 CREATE FUNCTION trg_fn_task_dependencies_same_run() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  -- self-dependency отклоняет ck_task_dependencies_no_self (тогда в IN одна задача)
   IF (SELECT count(*) FROM tasks
        WHERE id IN (NEW.task_id, NEW.depends_on_task_id)
-         AND run_id = NEW.run_id AND workspace_id = NEW.workspace_id) <> 2 THEN
+         AND run_id = NEW.run_id AND workspace_id = NEW.workspace_id)
+     <> 2 - (NEW.task_id = NEW.depends_on_task_id)::int THEN
     RAISE EXCEPTION 'task dependency must link tasks of the same run %', NEW.run_id USING ERRCODE = '23514';
   END IF;
   -- сериализация изменений плана run (см. 18.2)

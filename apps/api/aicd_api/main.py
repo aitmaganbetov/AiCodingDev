@@ -75,7 +75,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.middleware("http")(request_context_middleware)
     app.add_middleware(BodyLimitMiddleware)
     errors.install(app)
-    for router in (health.router, auth.router, workspaces.router, projects.router, providers.router, runs.router,
-                   audit.router):
+    for router in (
+        health.router,
+        auth.router,
+        workspaces.router,
+        projects.router,
+        providers.router,
+        runs.router,
+        audit.router,
+    ):
         app.include_router(router, prefix=API_PREFIX)
     return app

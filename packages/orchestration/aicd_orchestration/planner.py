@@ -25,9 +25,17 @@ class TaskSpec:
 
 
 _PRIMARY_ROLE = {
-    "CREATE": "developer", "DEVELOP": "developer", "DEBUG": "maintenance", "MODERNIZE": "maintenance",
-    "MAINTAIN": "maintenance", "OPTIMIZE": "performance", "TEST": "qa", "DOCUMENT": "documentation",
-    "AUDIT": "reviewer", "REVIEW": "reviewer", "SECURITY": "security",
+    "CREATE": "developer",
+    "DEVELOP": "developer",
+    "DEBUG": "maintenance",
+    "MODERNIZE": "maintenance",
+    "MAINTAIN": "maintenance",
+    "OPTIMIZE": "performance",
+    "TEST": "qa",
+    "DOCUMENT": "documentation",
+    "AUDIT": "reviewer",
+    "REVIEW": "reviewer",
+    "SECURITY": "security",
 }
 _WRITES_CODE = frozenset({"developer", "maintenance", "performance", "documentation", "qa"})
 
@@ -36,16 +44,27 @@ def template_plan(mode: str, objective: str, *, complexity: int = 3, risk_level:
     role = _PRIMARY_ROLE[mode]
     criteria = ("Изменение выполнено в worktree задачи", "Обязательные проверки качества пройдены")
     main = TaskSpec(
-        key="main", role=role, title=f"{mode}: {objective[:200]}", instructions=objective,
-        complexity=complexity, risk_level=risk_level, acceptance_criteria=criteria,
+        key="main",
+        role=role,
+        title=f"{mode}: {objective[:200]}",
+        instructions=objective,
+        complexity=complexity,
+        risk_level=risk_level,
+        acceptance_criteria=criteria,
     )
     plan = [main]
     if role in _WRITES_CODE and complexity >= 3:
-        plan.append(TaskSpec(
-            key="review", role="reviewer", title="Независимое ревью изменения",
-            instructions="Проверить изменение задачи main на корректность, безопасность и соответствие критериям.",
-            complexity=2, risk_level=risk_level, depends_on=("main",),
-            acceptance_criteria=("Найденные проблемы зафиксированы как findings",),
-        ))
+        plan.append(
+            TaskSpec(
+                key="review",
+                role="reviewer",
+                title="Независимое ревью изменения",
+                instructions="Проверить изменение задачи main на корректность, безопасность и соответствие критериям.",
+                complexity=2,
+                risk_level=risk_level,
+                depends_on=("main",),
+                acceptance_criteria=("Найденные проблемы зафиксированы как findings",),
+            )
+        )
     validate_plan([PlannedTask(t.key, t.role, t.complexity, t.depends_on) for t in plan])
     return plan

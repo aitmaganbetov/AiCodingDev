@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 
 DEFAULT_TTL_SECONDS = 60
@@ -55,8 +56,14 @@ async def acquire(
                 " WHERE worker_leases.released_at IS NOT NULL OR worker_leases.lease_until < now()"
                 " RETURNING fencing_token, lease_until"
             ),
-            {"id": uuid7(), "rt": resource_type, "rid": resource_id, "ws": workspace_id, "wid": worker_id,
-             "ttl": ttl_seconds},
+            {
+                "id": uuid7(),
+                "rt": resource_type,
+                "rid": resource_id,
+                "ws": workspace_id,
+                "wid": worker_id,
+                "ttl": ttl_seconds,
+            },
         )
     ).first()
     if row is None:
@@ -100,7 +107,9 @@ async def is_current(conn: AsyncConnection, resource_type: str, resource_id: uui
     return value is not None
 
 
-async def expired(conn: AsyncConnection, resource_type: str, limit: int = 100) -> list[tuple[uuid.UUID, uuid.UUID | None]]:
+async def expired(
+    conn: AsyncConnection, resource_type: str, limit: int = 100
+) -> list[tuple[uuid.UUID, uuid.UUID | None]]:
     """Истёкшие неосвобождённые аренды (для reaper): (resource_id, workspace_id)."""
     rows = (
         await conn.execute(
@@ -111,4 +120,27 @@ async def expired(conn: AsyncConnection, resource_type: str, limit: int = 100) -
             {"rt": resource_type, "lim": limit},
         )
     ).all()
+    return [(r[0], r[1]) for r in rows]
+
+
+async def reap_expired_leases(
+    engine: AsyncEngine, resource_type: str = "task", limit: int = 100
+) -> list[tuple[uuid.UUID, uuid.UUID | None]]:
+    """Освобождает истёкшие аренды (reaper, DATA_FLOW §5); возвращает (resource_id, workspace_id).
+
+    Перевод самих ресурсов (задача LEASED→READY / RUNNING→RETRY_WAIT(LEASE_LOST)) выполняет владелец домена.
+    После освобождения «зомби»-воркер не пройдёт `is_current` и не запишет результат.
+    """
+    async with transaction(engine, DbContext(actor_type="system")) as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "UPDATE worker_leases SET released_at = now() WHERE id IN ("
+                    " SELECT id FROM worker_leases WHERE resource_type = :rt AND released_at IS NULL"
+                    " AND lease_until < now() ORDER BY lease_until LIMIT :lim FOR UPDATE SKIP LOCKED)"
+                    " RETURNING resource_id, workspace_id"
+                ),
+                {"rt": resource_type, "lim": limit},
+            )
+        ).all()
     return [(r[0], r[1]) for r in rows]

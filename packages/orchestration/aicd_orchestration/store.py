@@ -38,14 +38,18 @@ class RunState:
 
 async def load_run(conn: AsyncConnection, run_id: uuid.UUID, *, lock: bool = False) -> RunState | None:
     row = (
-        await conn.execute(
-            text(
-                "SELECT id, workspace_id, status, version, resume_status, plan_version, approved_plan_version"
-                " FROM runs WHERE id = :id" + (" FOR UPDATE" if lock else "")
-            ),
-            {"id": run_id},
+        (
+            await conn.execute(
+                text(
+                    "SELECT id, workspace_id, status, version, resume_status, plan_version, approved_plan_version"  # noqa: S608 — константа
+                    " FROM runs WHERE id = :id" + (" FOR UPDATE" if lock else "")
+                ),
+                {"id": run_id},
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     return RunState(**row) if row else None
 
 
@@ -75,8 +79,9 @@ async def transition_run(
     # Ограничения CHECK: blocked_reason только в BLOCKED, resume_status только в PAUSED/BLOCKED.
     fields.setdefault("blocked_reason", fields.get("blocked_reason") if target == "BLOCKED" else None)
     if target in ("PAUSED", "BLOCKED"):
-        fields.setdefault("resume_status", current.status if current.status in fsm.RESUMABLE_RUN_STATES
-                          else current.resume_status)
+        fields.setdefault(
+            "resume_status", current.status if current.status in fsm.RESUMABLE_RUN_STATES else current.resume_status
+        )
     else:
         fields["resume_status"] = None
     if target in fsm.TERMINAL["run"]:
@@ -95,15 +100,29 @@ async def transition_run(
     if result.rowcount != 1:
         raise VersionConflictError(None, None)
     await outbox.emit(
-        conn, event_type="run.state_changed", aggregate_type="run", aggregate_id=run_id,
-        workspace_id=current.workspace_id, run_id=run_id,
-        payload={"from": current.status, "to": target, "reason": reason, "version": current.version + 1,
-                 "blocked_reason": fields.get("blocked_reason")},
+        conn,
+        event_type="run.state_changed",
+        aggregate_type="run",
+        aggregate_id=run_id,
+        workspace_id=current.workspace_id,
+        run_id=run_id,
+        payload={
+            "from": current.status,
+            "to": target,
+            "reason": reason,
+            "version": current.version + 1,
+            "blocked_reason": fields.get("blocked_reason"),
+        },
     )
     if target in fsm.TERMINAL["run"]:
         await outbox.emit(
-            conn, event_type="run.completed", aggregate_type="run", aggregate_id=run_id,
-            workspace_id=current.workspace_id, run_id=run_id, payload={"final_status": target},
+            conn,
+            event_type="run.completed",
+            aggregate_type="run",
+            aggregate_id=run_id,
+            workspace_id=current.workspace_id,
+            run_id=run_id,
+            payload={"final_status": target},
         )
     new = await load_run(conn, run_id)
     if new is None:  # pragma: no cover
@@ -122,10 +141,15 @@ async def transition_task(
 ) -> str:
     """Переход задачи; возвращает предыдущее состояние. Пишет outbox `task.state_changed`."""
     row = (
-        await conn.execute(
-            text("SELECT workspace_id, run_id, status, version FROM tasks WHERE id = :id FOR UPDATE"), {"id": task_id}
+        (
+            await conn.execute(
+                text("SELECT workspace_id, run_id, status, version FROM tasks WHERE id = :id FOR UPDATE"),
+                {"id": task_id},
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if row is None:
         raise LookupError(str(task_id))
     if expected_from is not None and row["status"] != expected_from:
@@ -156,10 +180,19 @@ async def transition_task(
     if result.rowcount != 1:
         raise VersionConflictError(None, None)
     await outbox.emit(
-        conn, event_type="task.state_changed", aggregate_type="task", aggregate_id=task_id,
-        workspace_id=row["workspace_id"], run_id=row["run_id"],
-        payload={"task_id": str(task_id), "from": row["status"], "to": target, "reason": reason,
-                 "blocked_reason": fields.get("blocked_reason")},
+        conn,
+        event_type="task.state_changed",
+        aggregate_type="task",
+        aggregate_id=task_id,
+        workspace_id=row["workspace_id"],
+        run_id=row["run_id"],
+        payload={
+            "task_id": str(task_id),
+            "from": row["status"],
+            "to": target,
+            "reason": reason,
+            "blocked_reason": fields.get("blocked_reason"),
+        },
     )
     return str(row["status"])
 
@@ -170,11 +203,30 @@ class _Now:
 
 _NOW: Any = _Now()
 
-_RUN_COLUMNS = frozenset({
-    "blocked_reason", "resume_status", "failure_category", "failure_message", "cancel_requested_at",
-    "plan_version", "approved_plan_version", "base_commit_sha", "started_at", "finished_at",
-})
-_TASK_COLUMNS = frozenset({
-    "blocked_reason", "next_attempt_at", "attempt_count", "retry_spent_seconds", "review_loop_count",
-    "lease_fencing_token", "superseded_at", "started_at", "finished_at",
-})
+_RUN_COLUMNS = frozenset(
+    {
+        "blocked_reason",
+        "resume_status",
+        "failure_category",
+        "failure_message",
+        "cancel_requested_at",
+        "plan_version",
+        "approved_plan_version",
+        "base_commit_sha",
+        "started_at",
+        "finished_at",
+    }
+)
+_TASK_COLUMNS = frozenset(
+    {
+        "blocked_reason",
+        "next_attempt_at",
+        "attempt_count",
+        "retry_spent_seconds",
+        "review_loop_count",
+        "lease_fencing_token",
+        "superseded_at",
+        "started_at",
+        "finished_at",
+    }
+)
