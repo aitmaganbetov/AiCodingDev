@@ -58,7 +58,7 @@ class StreamConfig:
     max_lifetime_seconds: float = 30 * 60
     replay_batch: int = 500
     max_streams_per_user: int = 5
-    max_streams_per_process: int = 1000
+    max_streams_per_process: int = 250  # утверждённый SLO P9-04: p95 ≤ 2 с при ≤ 200–300 потоках на процесс
     retry_ms: int = 3000
 
 

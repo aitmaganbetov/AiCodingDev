@@ -99,7 +99,7 @@
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
 | P4-01 | Миграции: agent_profiles, agent_assignments, routing_decisions, agent_messages, message_deliveries, chat_threads, chat_messages, agent_activity_events | FR-AGENT-01, FR-ACP-01 | P3-01 | P0 | Migration + RLS + CHECK 32 KiB | DONE |
-| P4-02 | 12 профилей ролей + шаблоны инструкций v1 + версионирование + seed | FR-AGENT-01, FR-AGENT-02 | P4-01 | P0 | Snapshot-тесты шаблонов; ревью человеком | IN_REVIEW |
+| P4-02 | 12 профилей ролей + шаблоны инструкций v1 + версионирование + seed | FR-AGENT-01, FR-AGENT-02 | P4-01 | P0 | Snapshot-тесты шаблонов; ревью человеком | DONE |
 | P4-03 | Сборка промпта с fencing недоверенных данных; контракт файла результата `.aicd/result.json`; парсер claims/ACP | FR-ACP-06, NFR-SEC-03 | P4-02, P2-03 | P0 | Prompt-injection corpus не меняет policy-блок | DONE |
 | P4-04 | ACP: 12 payload-схем, брокер (schema → size → ACL → policy → correlation → loop limits → persist+outbox) | FR-ACP-01, FR-ACP-02, FR-ACP-03 | P4-01, P3-03 | P0 | Contract + negative тесты по каждому типу | DONE |
 | P4-05 | Доставка ACP: deliveries, retries, DLQ, проекция в чат и activity | FR-ACP-05, FR-CHAT-02 | P4-04 | P0 | Дубль доставки → один эффект | DONE |
@@ -191,7 +191,7 @@
 | P9-06 | Runbooks: recovery, backups, CLI auth, incident response | NFR-MAINT-01 | P9-05 | P0 | Ревью оператором | IN_REVIEW |
 | P9-07 | Ревизия threat model, закрытие critical/high | NFR-SEC-04, NFR-SEC-06 | P9-02 | P0 | Release security gate | IN_REVIEW |
 | P9-08 | Supply chain релиза: SBOM, подпись, provenance | NFR-SEC-05 | P6-07 | P1 | Проверяемая подпись | IN_REVIEW |
-| P9-09 | Release checklist, инструкция установки, README | NFR-MAINT-01 | P9-01…08 | P0 | Утверждение владельцем | IN_REVIEW |
+| P9-09 | Release checklist, инструкция установки, README | NFR-MAINT-01 | P9-01…08 | P0 | Утверждение владельцем | DONE |
 | P9-10 | Подтверждение coverage core ≥ 85% и 100% обязательных тестов | FR-QG-06 | P9-01 | P0 | Отчёт покрытия | DONE |
 
 ---
