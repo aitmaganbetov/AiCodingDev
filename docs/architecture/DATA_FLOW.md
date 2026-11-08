@@ -190,7 +190,9 @@ stateDiagram-v2
   COMPLETED --> [*]
 ```
 
-`ASK` (вопрос) — упрощённый путь: `RECEIVED → DISPATCHED → ACKNOWLEDGED → COMPLETED` (ответ агента = ACP `ANSWER`), без replan. `PAUSE/RESUME/STOP` — прямые команды FSM run (с impact preview для STOP). `APPROVE/REJECT` в чате = вызов `approvals.decide()` с теми же RBAC-правилами. UI различает **delivered** (`DISPATCHED`), **acknowledged** (`ACKNOWLEDGED`) и **done** (`COMPLETED`) — ТЗ §11.
+`ASK` (вопрос) — упрощённый путь: `RECEIVED → DISPATCHED → ACKNOWLEDGED → COMPLETED` (ответ агента = ACP `ANSWER`), без replan.
+
+**Доставка и выполнение (реализация, `aicd_orchestration.directives`):** `DISPATCHED` — строки `directive_acknowledgements` (`PENDING`) созданы для задач-получателей (задачи замены/новые задачи; для `CONTEXT_ONLY` — затронутые задачи). Ack `DELIVERED` — в транзакции старта попытки задачи-получателя (`LEASED → RUNNING`): поручение входит в её инструкции и в раздел `directives` Context Pack с `directive_id`. Ack `ACKNOWLEDGED`/`REJECTED` — по принятому итогу агента (`directive_acks`: `accepted`/`not_applicable` / `cannot_comply`; без записи — неявное `accepted`). Директива `ACKNOWLEDGED`, когда все ack `ACKNOWLEDGED`; `COMPLETED`, когда задачи-получатели и их производные по `origin_task_id` (замены, fix-задачи), кроме вытесненных, `SUCCEEDED` (обязательные gates пройдены); `FAILED` с причиной — отказ агента, `FAILED`/`CANCELLED` задачи, отмена или завершение run раньше, ack, не доставленный/не подтверждённый до завершения задачи (открытые ack → `EXPIRED`). Статус выводится из состояния БД в транзакции `tick` и обработчика отмены run — повторная обработка событий идемпотентна. `STOP` — команда: ack нет, `COMPLETED` по достижении целевого статуса run/задачи. `PAUSE/RESUME/STOP` — прямые команды FSM run (с impact preview для STOP). `APPROVE/REJECT` в чате = вызов `approvals.decide()` с теми же RBAC-правилами. UI различает **delivered** (`DISPATCHED`), **acknowledged** (`ACKNOWLEDGED`) и **done** (`COMPLETED`) — ТЗ §11.
 
 ### 3.5 Approval
 
@@ -250,6 +252,8 @@ sequenceDiagram
 - `CONTEXT_ONLY` — директива добавляется в контекст **следующей** попытки/задачи; текущий процесс не трогается.
 - `REPLAN_REQUIRED`/`TASK_CANCEL` — текущее исполнение завершается штатно (если до таймаута ≤ `safe_point_wait`, default 5 мин) либо отменяется; worktree фиксируется WIP-коммитом в ветке задачи, diff сохраняется artifact'ом.
 - `RESTART_REQUIRED` — отмена исполнения, попытка помечается `CANCELLED`, не расходует retry budget.
+
+Сигнал safe point между процессами: команду (pause/cancel run, применённое поручение) фиксирует в БД API или `worker-orchestrator`, а CLI-процесс принадлежит `worker-exec`. Исполнитель попытки периодически (`Orchestrator.cancel_poll_seconds`, по умолчанию 5 с) читает флаг — run `PAUSED`/`CANCELLED` или применённое влияние `REPLAN_REQUIRED`/`TASK_CANCEL` на задачу — и штатно останавливает свой процесс (`cancel(reason)` адаптера: `pause` / `run_cancel` / `directive`); in-process хук — лишь ускорение в том же процессе. Replan в утверждённом плане: рёбра утверждённой `plan_version` неизменяемы, поэтому не начатые задачи, зависящие от заменённых, пересоздаются в новой версии вместе с заменами (`directive_impacts` `TASK_ADD`, `details.reason = dependent_of_replaced`).
 
 ## 7. Checkpoint и recovery
 

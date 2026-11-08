@@ -1431,6 +1431,7 @@ CREATE TABLE directive_acknowledgements (
 );
 CREATE INDEX ix_directive_ack_pending ON directive_acknowledgements (workspace_id, directive_id) WHERE status IN ('PENDING','DELIVERED');
 ```
+Жизненный цикл строки (реализация `aicd_orchestration.directives`): `PENDING` (dispatch) → `DELIVERED` (`delivered_at`; старт попытки задачи-получателя, получатель уровня run при этом привязывается к задаче своей роли) → `ACKNOWLEDGED` (`acknowledged_at`; принятый итог агента) | `REJECTED` (агент `cannot_comply`); `PENDING`/`DELIVERED` → `EXPIRED` при завершении задачи без доставки/подтверждения, отмене/завершении run или `FAILED` поручения. Открытая строка задачи, вытесненной заменой, переносится на замену (снова `PENDING`). `acp_message_id` остаётся `NULL`: доставка идёт через инструкции задачи и раздел `directives` Context Pack, отдельного ACP-сообщения нет.
 
 ### 9.9 `agent_activity_events` (T, collaboration) — партиционирована помесячно
 Лента активности (CLI normalized events, переходы, отклонённые ACP, recovery) для `GET /runs/{id}/activity` и timeline (ТЗ §7.2, §11). Самая объёмная таблица (вывод CLI) → `PARTITION BY RANGE (occurred_at)`.

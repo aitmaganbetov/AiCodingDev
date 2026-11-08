@@ -1318,34 +1318,8 @@ class Directives:
             if task["status"] in fsm.TERMINAL["task"] or imp["impact_type"] not in ("REPLAN_REQUIRED", "TASK_CANCEL"):
                 continue
             if imp["impact_type"] == "REPLAN_REQUIRED":
-                new_id = uuid7()
                 instructions = (task["instructions"] + "\n\n" + fence)[-MAX_INSTRUCTIONS:]
-                await conn.execute(
-                    text(
-                        "INSERT INTO tasks (id, workspace_id, run_id, plan_version, task_key, origin_task_id,"
-                        " agent_role, title, instructions, complexity, risk_level, acceptance_criteria, max_attempts,"
-                        " timeout_seconds, retry_budget_seconds, max_review_loops) VALUES (:id, :ws, :run, :pv, :key,"
-                        " :origin, :role, :title, :instr, :cx, :risk, CAST(:ac AS jsonb), :ma, :to, :rb, :mrl)"
-                    ),
-                    {
-                        "id": new_id,
-                        "ws": task["workspace_id"],
-                        "run": run.id,
-                        "pv": pv,
-                        "key": task["task_key"],
-                        "origin": task["id"],
-                        "role": task["agent_role"],
-                        "title": task["title"],
-                        "instr": instructions,
-                        "cx": task["complexity"],
-                        "risk": task["risk_level"],
-                        "ac": json.dumps(task["acceptance_criteria"], ensure_ascii=False),
-                        "ma": task["max_attempts"],
-                        "to": task["timeout_seconds"],
-                        "rb": task["retry_budget_seconds"],
-                        "mrl": task["max_review_loops"],
-                    },
-                )
+                new_id = await _copy_task(conn, task, plan_version=pv, instructions=instructions)
                 replacements[task["id"]] = new_id
                 new_tasks.append({"id": new_id, "agent_role": task["agent_role"], "replaces": task["id"]})
             if task["status"] in NOT_STARTED:
@@ -1359,6 +1333,7 @@ class Directives:
                 await conn.execute(
                     text("DELETE FROM task_dependencies WHERE depends_on_task_id = :t"), {"t": task["id"]}
                 )
+        cascaded = await self._replace_dependents(conn, d, pv, replacements, now)
         for old, new in replacements.items():
             deps = (
                 (
@@ -1377,13 +1352,6 @@ class Directives:
                     ),
                     {"ws": d["workspace_id"], "run": run.id, "t": new, "dep": replacements.get(dep, dep)},
                 )
-            await conn.execute(
-                text(
-                    "UPDATE task_dependencies SET depends_on_task_id = :new WHERE depends_on_task_id = :old"
-                    " AND NOT (task_id = ANY(:replaced))"
-                ),
-                {"new": new, "old": old, "replaced": list(replacements)},
-            )
         if d["impact_status"] == "TASK_ADD" and not replacements:
             new_id = uuid7()
             role = d["target_role"] or "developer"
@@ -1420,19 +1388,16 @@ class Directives:
                 },
             )
             new_tasks.append({"id": new_id, "agent_role": role, "replaces": None})
-        for t in new_tasks:
+        for t in [*new_tasks, *cascaded]:
+            details = {"replaces": str(t["replaces"]) if t["replaces"] else None, "plan_version": pv}
+            if t.get("dependency"):
+                details["reason"] = "dependent_of_replaced"
             await conn.execute(
                 text(
                     "INSERT INTO directive_impacts (workspace_id, run_id, directive_id, task_id, impact_type, resolution,"
                     " details, resolved_at) VALUES (:ws, :run, :d, :t, 'TASK_ADD', 'APPLIED', CAST(:det AS jsonb), now())"
                 ),
-                {
-                    "ws": d["workspace_id"],
-                    "run": run.id,
-                    "d": d["id"],
-                    "t": t["id"],
-                    "det": json.dumps({"replaces": str(t["replaces"]) if t["replaces"] else None, "plan_version": pv}),
-                },
+                {"ws": d["workspace_id"], "run": run.id, "d": d["id"], "t": t["id"], "det": json.dumps(details)},
             )
         approved = pv if current.approved_plan_version is not None else None
         await conn.execute(
@@ -1491,6 +1456,51 @@ class Directives:
             },
         )
         return pv, new_tasks, cancel_ids
+
+    async def _replace_dependents(
+        self,
+        conn: AsyncConnection,
+        d: dict[str, Any],
+        pv: int,
+        replacements: dict[uuid.UUID, uuid.UUID],
+        now: Any,
+    ) -> list[dict[str, Any]]:
+        """Не начатые задачи, (транзитивно) зависящие от заменённых, пересоздаются в новой plan_version.
+
+        Рёбра утверждённой версии плана неизменяемы (триггер БД, DATA_FLOW §4.3: replan — новая plan_version),
+        поэтому зависимая задача не может «переключиться» на замену — пересоздаётся вместе с ней (без текста
+        поручения: это не получатель, а структурная копия). Зависимые незавершённой задачи сами ещё не начаты.
+        """
+        if not replacements:
+            return []
+        rows = (
+            (
+                await conn.execute(
+                    text(
+                        "WITH RECURSIVE dep(id) AS (SELECT task_id FROM task_dependencies"
+                        "  WHERE depends_on_task_id = ANY(:ids)"
+                        " UNION SELECT x.task_id FROM task_dependencies x JOIN dep ON x.depends_on_task_id = dep.id)"
+                        " SELECT t.* FROM tasks t JOIN dep ON dep.id = t.id WHERE t.superseded_at IS NULL"
+                        " AND t.status = ANY(:not_started) AND NOT (t.id = ANY(:ids))"
+                        " ORDER BY t.created_at, t.id FOR UPDATE OF t"
+                    ),
+                    {"ids": list(replacements), "not_started": sorted(NOT_STARTED)},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        cascaded: list[dict[str, Any]] = []
+        for task in rows:
+            new_id = await _copy_task(conn, task, plan_version=pv, instructions=task["instructions"])
+            replacements[task["id"]] = new_id
+            cascaded.append(
+                {"id": new_id, "agent_role": task["agent_role"], "replaces": task["id"], "dependency": True}
+            )
+            await store.transition_task(
+                conn, task["id"], "CANCELLED", reason=f"directive:{d['id']}", extra={"superseded_at": now}
+            )
+        return cascaded
 
     async def _acknowledgements(
         self, conn: AsyncConnection, d: dict[str, Any], impacts: list[dict[str, Any]], new_tasks: list[dict[str, Any]]
@@ -1579,6 +1589,38 @@ class Directives:
             r["impacts"] = [dict(i) for i in impacts if i["directive_id"] == r["id"]]
             r["acknowledgements"] = [dict(a) for a in acks if a["directive_id"] == r["id"]]
         return rows
+
+
+async def _copy_task(conn: AsyncConnection, task: Any, *, plan_version: int, instructions: str) -> uuid.UUID:
+    """Копия задачи в новой plan_version (замена: `origin_task_id` = исходная)."""
+    new_id = uuid7()
+    await conn.execute(
+        text(
+            "INSERT INTO tasks (id, workspace_id, run_id, plan_version, task_key, origin_task_id,"
+            " agent_role, title, instructions, complexity, risk_level, acceptance_criteria, max_attempts,"
+            " timeout_seconds, retry_budget_seconds, max_review_loops) VALUES (:id, :ws, :run, :pv, :key,"
+            " :origin, :role, :title, :instr, :cx, :risk, CAST(:ac AS jsonb), :ma, :to, :rb, :mrl)"
+        ),
+        {
+            "id": new_id,
+            "ws": task["workspace_id"],
+            "run": task["run_id"],
+            "pv": plan_version,
+            "key": task["task_key"],
+            "origin": task["id"],
+            "role": task["agent_role"],
+            "title": task["title"],
+            "instr": instructions,
+            "cx": task["complexity"],
+            "risk": task["risk_level"],
+            "ac": json.dumps(task["acceptance_criteria"], ensure_ascii=False),
+            "ma": task["max_attempts"],
+            "to": task["timeout_seconds"],
+            "rb": task["retry_budget_seconds"],
+            "mrl": task["max_review_loops"],
+        },
+    )
+    return new_id
 
 
 async def _project_of(conn: AsyncConnection, run_id: uuid.UUID) -> uuid.UUID:

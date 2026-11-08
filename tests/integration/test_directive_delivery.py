@@ -220,7 +220,8 @@ async def _sse_payloads(engine: AsyncEngine, directive_id: str) -> list[dict[str
                     text(
                         "SELECT id, created_at, workspace_id, run_id, aggregate_type, aggregate_id, event_type,"
                         " schema_version, payload, correlation_id, causation_id FROM outbox_events"
-                        " WHERE aggregate_id = :a AND event_type LIKE 'directive.%' ORDER BY created_at, id"
+                        " WHERE aggregate_id = :a AND event_type IN ('directive.state_changed', 'directive.ack_changed')"
+                        " ORDER BY created_at, id"
                     ),
                     {"a": uuid.UUID(directive_id)},
                 )
@@ -318,7 +319,14 @@ async def test_implicit_ack_and_completion_with_scripted_agent(world: Slice, dat
     did = await scene.submit("CHANGE_REQUEST", {"type": "role", "role": "developer"})
     await scene.process(did, orch)
     assert set(scene.acks(did)) == {"developer"}
-    main_v2 = scene.tasks()["main"][0]
+    main_v2, review_v2 = scene.tasks()["main"][0], scene.tasks()["review"][0]
+    # Рёбра утверждённого плана неизменяемы: не начатый зависимый review пересоздан в новой plan_version.
+    assert scene.rows("SELECT depends_on_task_id FROM task_dependencies WHERE task_id = %s", review_v2) == [(main_v2,)]
+    assert scene.rows(
+        "SELECT count(*) FROM tasks WHERE run_id = %s AND superseded_at IS NOT NULL AND status = 'CANCELLED'", scene.run
+    ) == [(2,)]
+    assert [i["task_id"] for i in (await scene.view(did))["impacts"] if i["impact_type"] == "TASK_ADD"] == [
+        str(main_v2), str(review_v2)]  # fmt: skip
 
     # Попытка стартует: DELIVERED в транзакции LEASED → RUNNING (до исполнения CLI).
     async with transaction(world.worker, DbContext(workspace_id=scene.ws, actor_type="system")) as conn:

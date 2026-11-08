@@ -1175,10 +1175,10 @@ export interface components {
          */
         DirectiveImpactStatus: "PENDING" | "READY" | "NOT_REQUIRED" | "FAILED";
         /**
-         * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+         * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения. Значения — `directive_acknowledgements.status` (DATABASE_DESIGN §9.8): DELIVERED — попытка задачи-получателя стартовала с поручением; ACKNOWLEDGED — итог агента принят (accepted/not_applicable); REJECTED — агент ответил cannot_comply; EXPIRED — получатель не получил/не подтвердил поручение до завершения задачи или run. FAILED сохранено для совместимости и сервером не выдаётся.
          * @enum {string}
          */
-        DirectiveAckStatus: "PENDING" | "DELIVERED" | "ACKNOWLEDGED" | "FAILED";
+        DirectiveAckStatus: "PENDING" | "DELIVERED" | "ACKNOWLEDGED" | "REJECTED" | "EXPIRED" | "FAILED";
         /**
          * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
          * @enum {string}
@@ -2263,6 +2263,13 @@ export interface components {
         DirectiveAck: {
             recipient_role: components["schemas"]["AgentRole"];
             status: components["schemas"]["DirectiveAckStatus"];
+            /**
+             * Format: uuid
+             * @description задача-получатель (null — получатель уровня run, ещё не привязан к задаче)
+             */
+            task_id?: string | null;
+            /** Format: date-time */
+            delivered_at?: string | null;
             /** Format: date-time */
             acknowledged_at?: string | null;
         };
@@ -2647,11 +2654,24 @@ export interface components {
             approval_id?: string | null;
             expected_run_version: number;
         };
+        /** @description Переход Directive FSM либо изменение ack получателя (доменное `directive.ack_changed`: from_status = to_status, поле `recipients`). Нормативная схема — sse-event.schema.json `directive_state_changed`. */
         DirectiveStateChangedPayload: {
             /** Format: uuid */
             directive_id: string;
-            from_status: components["schemas"]["DirectiveStatus"];
+            directive_type: components["schemas"]["DirectiveType"];
+            from_status: components["schemas"]["DirectiveStatus"] | null;
             to_status: components["schemas"]["DirectiveStatus"];
+            reason?: string;
+            recipients?: {
+                role: components["schemas"]["AgentRole"];
+                /** @enum {string} */
+                ack_status: "PENDING" | "DELIVERED" | "ACKNOWLEDGED" | "REJECTED" | "EXPIRED" | "COMPLETED" | "FAILED";
+                /** Format: uuid */
+                execution_id?: string | null;
+                /** Format: date-time */
+                at?: string | null;
+            }[];
+            /** @description устарело (не выдаётся сервером); используйте `recipients` */
             acknowledgement?: components["schemas"]["DirectiveAck"] | null;
         };
         ApprovalRequestedPayload: {

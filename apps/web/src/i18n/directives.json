@@ -152,6 +152,8 @@
         "PENDING": "Ожидает",
         "DELIVERED": "Доставлено",
         "ACKNOWLEDGED": "Подтвердил",
+        "REJECTED": "Отказался",
+        "EXPIRED": "Не доставлено",
         "FAILED": "Ошибка"
       },
       "completion": {

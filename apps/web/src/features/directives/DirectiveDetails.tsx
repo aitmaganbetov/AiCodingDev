@@ -11,7 +11,14 @@ import { roleLabel } from '../runs/labels';
 import { directiveSteps, type StepState } from './directiveModel';
 
 const STEP_TONE: Record<StepState, Tone> = { done: 'success', current: 'info', pending: 'neutral', skipped: 'neutral', failed: 'danger' };
-const ACK_TONE: Record<string, Tone> = { ACKNOWLEDGED: 'success', DELIVERED: 'info', PENDING: 'neutral', FAILED: 'danger' };
+const ACK_TONE: Record<string, Tone> = {
+  ACKNOWLEDGED: 'success',
+  DELIVERED: 'info',
+  PENDING: 'neutral',
+  REJECTED: 'danger',
+  EXPIRED: 'warning',
+  FAILED: 'danger',
+};
 
 interface Props {
   directive: Directive;
@@ -120,8 +127,13 @@ export function DirectiveDetails({ directive: d, taskTitle, taskHref, approvalsH
         </H>
         {acks.length > 0 ? (
           <ul className="flex flex-col gap-1">
-            {acks.map((a) => (
-              <li key={a.recipient_role} className="flex flex-wrap items-center gap-2">
+            {acks.map((a, i) => (
+              <li
+                key={`${a.recipient_role}-${a.task_id ?? 'run'}-${i}`}
+                className="flex flex-wrap items-center gap-2"
+                data-testid="directive-ack"
+                data-status={a.status}
+              >
                 <span>{roleLabel(t, a.recipient_role)}</span>
                 <Badge tone={ACK_TONE[a.status] ?? 'neutral'}>{t(`directives.enums.ack.${a.status}`, { defaultValue: a.status })}</Badge>
                 {a.acknowledged_at ? <Timestamp value={a.acknowledged_at} format="time" className="text-fg-muted" /> : null}

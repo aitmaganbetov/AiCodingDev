@@ -163,7 +163,7 @@
 | P7-11 | Approvals screen/поток | FR-APR-03 | P3-10 | P0 | AC-13 E2E | DONE |
 | P7-12 | Knowledge/Documentation screen | FR-DOC-06 | P5-10 | P1 | E2E | DONE |
 | P7-13 | Settings/Audit screen | FR-AUD-02 | P1-11 | P0 | E2E | DONE |
-| P7-14 | E2E-набор Mission Control + impact/replan UI тесты | AC-05, AC-06, AC-08 | P7-* | P0 | Зелёный | IN_PROGRESS |
+| P7-14 | E2E-набор Mission Control + impact/replan UI тесты | AC-05, AC-06, AC-08 | P7-* | P0 | Зелёный | DONE |
 
 ## Phase 8 — GitHub Integrations & Analytics
 
@@ -279,7 +279,7 @@
 
 ### Phase 7 — Mission Control & Live Agent Chat (2026-11-08)
 
-Окружение проверки: PostgreSQL 17, Redis 7, RustFS (S3), Docker; Chromium + Playwright; агенты — Fake CLI. Итог: `uv run pytest` → **2402 passed, 3 skipped** (PHPStan ×2, офлайн-БД Trivy — OQ-43); ruff, ruff format, mypy, import-linter (4 kept), запрет AI SDK, `gen_contract_models --check` — OK. Web (`apps/web`): `pnpm check:api`, `typecheck`, `lint` (0), `test` → 138 passed, `build`, `e2e` (mocked, ответы сверяются с контрактом, axe светлая/тёмная) → 56 passed, `e2e:live` (реальные API + воркеры outbox/orchestrator/exec + PG + Redis + S3 + Fake CLI) → 4 passed.
+Окружение проверки: PostgreSQL 17, Redis 7, RustFS (S3), Docker; Chromium + Playwright; агенты — Fake CLI. Итог: `uv run pytest` → **2411 passed, 3 skipped** (PHPStan ×2, офлайн-БД Trivy — OQ-43); ruff, ruff format, mypy, import-linter (4 kept), запрет AI SDK, `gen_contract_models --check` — OK. Web (`apps/web`): `pnpm check:api`, `typecheck`, `lint` (0), `test` → 138 passed, `build`, `e2e` (mocked, ответы сверяются с контрактом, axe светлая/тёмная) → 56 passed, `e2e:live` (реальные API + воркеры outbox/orchestrator/exec + PG + Redis + S3 + Fake CLI) → 4 passed.
 
 | Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
 |---|---|---|---|
@@ -296,9 +296,9 @@
 | P7-11 | DONE | `src/features/approvals/**` | `approvals.spec.ts`: AC-13 (утверждение плана → RUNNING по SSE), четыре глаза, отклонение с причиной |
 | P7-12 | DONE | `src/features/knowledge/**` | `knowledge.spec.ts`: обновление кэша только после согласия, политика OFF/SMART/STRICT |
 | P7-13 | DONE | `src/features/{settings,audit}/**` | `settings.spec.ts`, `audit.spec.ts`: участники, фильтры аудита в URL, фокус сохраняется |
-| P7-14 | IN_PROGRESS | `apps/web/e2e/live/**`, `tests/support/web_live_stack.py`, `playwright.live.config.ts` | `pnpm e2e:live` → 4 passed (AC-05, AC-06, AC-08 — обрыв API посреди run, seq 1..N без дублей; smoke). Не закрыто: этапы поручения DELIVERED/ACKNOWLEDGED/COMPLETED для CHANGE_REQUEST в backend (см. OQ-45) — в работе |
+| P7-14 | DONE | `apps/web/e2e/live/**`, `tests/support/web_live_stack.py`, `playwright.live.config.ts`; `aicd_orchestration/{directives,engine,cli_executor}.py` (доставка/подтверждение/выполнение поручений, наблюдатель отмены в exec) | `pnpm e2e:live` → 4 passed: AC-05; AC-06 — PAUSE/RESUME и CHANGE_REQUEST: impact → confirm → план v2 → доставлено → подтверждено агентами → выполнено; AC-08 — обрыв API посреди run, seq 1..N без дублей; smoke. `tests/integration/test_directive_delivery.py` → 8 passed (явное/неявное подтверждение, cannot_comply → FAILED, провал задачи замены, отмена run → EXPIRED, STOP, остановка RUNNING-задачи из другого процесса по поручению и паузе) |
 
-Найдено и исправлено при сведении: compliance.evaluate(run) не вызывался перед guard завершения (блокирующие контроли не учитывались); шаги поручений не обрабатывались ни одним воркером (поручения оставались в IMPACT_ANALYSIS_PENDING); `downloadArtifact` не имел обработчика; заголовок страницы перехватывал фокус при смене вкладки/фильтра.
+Найдено и исправлено при сведении: compliance.evaluate(run) не вызывался перед guard завершения (блокирующие контроли не учитывались); шаги поручений не обрабатывались ни одним воркером (поручения оставались в IMPACT_ANALYSIS_PENDING); `downloadArtifact` не имел обработчика; заголовок страницы перехватывал фокус при смене вкладки/фильтра; поручения останавливались на DISPATCHED (DELIVERED/ACKNOWLEDGED/COMPLETED не были реализованы); перепланирование в утверждённом плане падало на триггере неизменяемых рёбер (зависимые задачи теперь пересоздаются в новой версии плана); взаимоблокировка tick ↔ переход задачи (порядок блокировок run → строки подтверждений).
 
 ### Phase 6 — Quality, Security & Standards (2026-11-08)
 

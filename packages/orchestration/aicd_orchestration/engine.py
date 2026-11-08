@@ -800,15 +800,13 @@ class Orchestrator:
             task = await _task_row(conn, task_id)
             if task is None:  # pragma: no cover
                 return
-            if (
+            result_accepted = (
                 outcome.status == "completed"
                 and rejected_category is None
                 and io is not None
                 and io.result_status == "parsed"
                 and task["status"] != "CANCELLED"
-            ):
-                # Итог агента принят: доставленные поручения подтверждены/отклонены (EVENT_SCHEMAS §4).
-                await directives.acknowledge(conn, task_id, io.directive_acks, execution_id=outcome.execution_id)
+            )
             analysis_done = (
                 read_only
                 and outcome.status == "completed"
@@ -834,6 +832,10 @@ class Orchestrator:
                     or ("CANCELLED" if outcome.status == "cancelled" else "PROCESS_FAILED")
                 )
                 await self._after_failure(conn, task, attempt_id, category, outcome, spent, run)
+            if result_accepted and io is not None:
+                # Итог агента принят: доставленные поручения подтверждены/отклонены (EVENT_SCHEMAS §4). После
+                # перехода задачи: порядок блокировок run → ack тот же, что у tick (reconcile_run), без deadlock.
+                await directives.acknowledge(conn, task_id, io.directive_acks, execution_id=outcome.execution_id)
             await leases.release(conn, lease)
 
     async def _after_failure(

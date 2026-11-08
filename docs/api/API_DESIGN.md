@@ -375,6 +375,8 @@ stateDiagram-v2
 
 UI обязан показывать «принято сервером» (202), «доставлено» (ACKNOWLEDGED) и «выполнено» (COMPLETED) разными состояниями. `exit_code=0` CLI не переводит поручение в `COMPLETED` (ТЗ §9.3, AC-11).
 
+`delivery.acknowledgements[]` — по получателю: `status` (`PENDING` → `DELIVERED` на старте попытки задачи-получателя → `ACKNOWLEDGED` по принятому итогу агента (`directive_acks`, без записи — неявное `accepted`) | `REJECTED` (`cannot_comply`) | `EXPIRED` (не доставлено/не подтверждено до завершения задачи или run)), `task_id`, `delivered_at`, `acknowledged_at`. Правила продвижения и отказа — EVENT_SCHEMAS §4, DATA_FLOW §3.4; изменения приходят SSE-событием `directive.state_changed` (переход статуса либо `recipients` при изменении ack).
+
 ## 13. SSE: `GET /runs/{run_id}/events` (ТЗ §8.3, ADR-0011)
 
 **Источник:** durable-таблица `run_event_log` (`PK(run_id, seq)`, `event_id UNIQUE`); Redis pub/sub — только сигнал «есть новые события» (wake-up). Данные всегда читаются из PostgreSQL, поэтому нет пропусков и нарушений порядка при рестарте Redis.

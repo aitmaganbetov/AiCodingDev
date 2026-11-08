@@ -6,7 +6,8 @@ import { loginLive, requireStack, runBase, stack, startDevelopRun, type LiveFixt
  * P7-14: сквозные сценарии Mission Control против настоящего стенда (ТЗ §18 этап 5).
  * AC-05 — межагентные сообщения и handoff появляются в Live Agent Chat в реальном времени, граф — live;
  * AC-06 — поручения: команда PAUSE/RESUME (доставлено → подтверждено → выполнено, run реагирует) и
- *         CHANGE_REQUEST с impact preview → подтверждение → checkpoint → новая plan_version → доставлено;
+ *         CHANGE_REQUEST с impact preview → подтверждение → checkpoint → новая plan_version → доставлено →
+ *         подтверждено агентами (directive_acks итога) → выполнено (задачи замены прошли проверки);
  * AC-08 — разрыв SSE на стороне сервера посреди run: переподключение с Last-Event-ID, без дублей и пропусков.
  * Исполнитель задач — Fake CLI (сценарий `agent`: developer → REVIEW_REQUEST → независимый reviewer).
  */
@@ -126,7 +127,7 @@ test('AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into
   await graph.close();
 });
 
-test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; CHANGE_REQUEST impact preview → confirm → replan (new plan version)', async ({
+test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; CHANGE_REQUEST impact preview → confirm → replan (new plan version) → acknowledged by agents → completed', async ({
   page,
 }) => {
   const project = await stack.project('AC-06');
@@ -192,10 +193,26 @@ test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; 
   await expectNoSeriousA11yViolations(page, 'directive dispatched (real stack)');
   await track.getByRole('button', { name: 'Закрыть' }).first().click();
 
-  // Run реагирует: граф перестроен по новой версии плана, задачи замены исполняются до завершения run.
+  // Run реагирует: граф перестроен по новой версии плана.
   await page.goto(`${base}/graph`);
   await expect(page.getByText('План v2')).toBeVisible({ timeout: 30_000 });
+
+  // Исполнитель запущен: попытки задач замены получают поручение (доставлено), агенты подтверждают его в итоге
+  // (directive_acks), задачи проходят обязательные проверки → «выполнено». Карточка обновляется по SSE, без перезагрузки.
+  await page.goto(`${base}/chat`);
+  const card = page.getByTestId('directive-card').filter({ hasText: 'Добавьте также экспорт в XLSX' });
+  const cardStep = (id: string) => card.locator(`[data-step="${id}"]`);
+  await expect(card.getByTestId('directive-delivery')).toHaveText('доставлено, ждём подтверждения агентов');
+  await expect(card.getByTestId('directive-ack')).toHaveCount(2);
   await stack.startExec();
+  await expect(cardStep('acknowledged')).toHaveAttribute('data-state', 'done', { timeout: 120_000 });
+  await expect(card.getByTestId('directive-delivery')).toHaveText('подтверждено агентами');
+  await expect(card.locator('[data-testid="directive-ack"][data-status="ACKNOWLEDGED"]')).toHaveCount(2);
+  await expect(cardStep('completed')).toHaveAttribute('data-state', 'done', { timeout: 120_000 });
+  await expect(card.getByTestId('directive-completion')).toHaveText('выполнено');
+  await expectNoSeriousA11yViolations(page, 'directive acknowledged and completed (real stack)');
+
+  await page.goto(`${base}/graph`);
   const canvas = page.getByTestId('run-graph-canvas');
   await expect(canvas.locator('[data-task-id][data-status="SUCCEEDED"]')).toHaveCount(2, { timeout: 120_000 });
   await page.goto(base);
