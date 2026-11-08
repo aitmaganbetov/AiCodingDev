@@ -11,7 +11,19 @@ from redis.asyncio import Redis
 from aicd_api import errors
 from aicd_api.middleware import BodyLimitMiddleware, request_context_middleware
 from aicd_api.ratelimit import RateLimiter
-from aicd_api.routers import approvals, audit, auth, directives, events, health, projects, providers, runs, workspaces
+from aicd_api.routers import (
+    approvals,
+    audit,
+    auth,
+    chat,
+    directives,
+    events,
+    health,
+    projects,
+    providers,
+    runs,
+    workspaces,
+)
 from aicd_api.state import AppState
 from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.config import Settings, get_settings
@@ -65,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         runs.router,
         approvals.router,
         directives.router,
+        chat.router,
         events.router,
         audit.router,
     ):

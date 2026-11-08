@@ -103,7 +103,9 @@ async def post_user_message(
         row = (
             (
                 await conn.execute(
-                    text("SELECT id, scope, target_role, target_task_id FROM chat_threads WHERE id = :t AND run_id = :r"),
+                    text(
+                        "SELECT id, scope, target_role, target_task_id FROM chat_threads WHERE id = :t AND run_id = :r"
+                    ),
                     {"t": thread_id, "r": run_id},
                 )
             )

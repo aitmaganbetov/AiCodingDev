@@ -1,4 +1,4 @@
-"""Runs и tasks (ТЗ §8, P3-08): создание, чтение, DAG, команды pause/resume/cancel, попытки."""
+"""Runs и tasks (ТЗ §8, P3-08, P4-12): создание, чтение, DAG, команды pause/resume/cancel, попытки, ACP-сообщения."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
+from aicd_platform.redaction import redact_value
 
 router = APIRouter(tags=["runs"])
 
@@ -426,7 +427,11 @@ async def get_task(
         "next_attempt_at": data["next_attempt_at"],
         "timeout_seconds": data["timeout_seconds"],
         "created_at": data["created_at"],
-        "links": {"run": f"/api/v1/runs/{data['run_id']}", "attempts": f"/api/v1/tasks/{task_id}/attempts"},
+        "links": {
+            "run": f"/api/v1/runs/{data['run_id']}",
+            "attempts": f"/api/v1/tasks/{task_id}/attempts",
+            "messages": f"/api/v1/tasks/{task_id}/messages",
+        },
     }
     return json_response(body, headers={"ETag": etag(data["version"])})
 
@@ -452,7 +457,9 @@ async def list_attempts(
             for r in (
                 await conn.execute(
                     text(
-                        "SELECT a.*, t.agent_role FROM task_attempts a JOIN tasks t ON t.id = a.task_id"
+                        "SELECT a.*, t.agent_role, rd.reason AS routing_reason FROM task_attempts a"
+                        " JOIN tasks t ON t.id = a.task_id"
+                        " LEFT JOIN routing_decisions rd ON rd.id = a.routing_decision_id"
                         " WHERE a.task_id = :t AND a.attempt_no > :after ORDER BY a.attempt_no LIMIT :lim"
                     ),
                     {"t": task_id, "after": after, "lim": limit + 1},
@@ -492,8 +499,77 @@ async def list_attempts(
             "finished_at": r["finished_at"],
             "failure_category": r["failure_category"],
             "executions": by_attempt.get(r["id"], []),
+            "routing_reason": r["routing_reason"],
         }
         for r in page
     ]
     next_cursor = encode_cursor(state.secret_key, [page[-1]["attempt_no"]], filters) if len(rows) > limit else None
     return json_response({"items": items, "next_cursor": next_cursor})
+
+
+AcpMessageType = Literal[
+    "TASK_ASSIGN", "HANDOFF", "QUESTION", "ANSWER", "REVIEW_REQUEST", "FINDING", "FIX_REQUEST", "EVIDENCE_SUBMITTED",
+    "DECISION_PROPOSAL", "DECISION_RECORDED", "BLOCKED", "TASK_COMPLETED",
+]  # fmt: skip
+
+
+def _acp_message(r: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "message_id": r["id"],
+        "protocol": r["protocol"],
+        "run_id": r["run_id"],
+        "task_id": r["task_id"],
+        "task_attempt_id": r["task_attempt_id"],
+        "from": {"role": r["sender_role"], "provider": r["sender_provider"], "user_id": r["sender_user_id"]},
+        "to": {"role": r["recipient_role"], "task_id": r["recipient_task_id"]},
+        "type": r["message_type"],
+        "correlation_id": r["correlation_id"],
+        "reply_to_id": r["reply_to_id"],
+        "schema_version": r["schema_version"],
+        # Payload — недоверенные данные агента (ACP §8): отдаются как данные, секреты редактируются на чтении.
+        "payload": redact_value(r["payload"]),
+        "created_at": r["created_at"],
+    }
+
+
+@router.get("/tasks/{task_id}/messages", **op("listTaskMessages", "run:read"))
+async def list_task_messages(
+    request: Request,
+    task_id: Annotated[uuid.UUID, Path()],
+    principal: identity.Principal = Depends(current_principal),
+    type: Annotated[list[AcpMessageType] | None, Query()] = None,  # noqa: A002 — имя query-параметра из контракта
+    correlation_id: uuid.UUID | None = None,
+    limit: Limit = DEFAULT_LIMIT,
+    cursor: Cursor = None,
+) -> Response:
+    """ACP-сообщения задачи (P4-12): отправленные из задачи (`task_id`) и адресованные ей (`to.task_id`)."""
+    access = await _resolve(request, principal, "sys_resolve_task_workspace", task_id)
+    await authorize(request, access, "run:read")
+    state = app_state(request)
+    filters = {"r": "task_messages", "t": str(task_id), "ty": sorted(type or []), "c": str(correlation_id)}
+    clauses = ["(m.task_id = :t OR m.recipient_task_id = :t)"]
+    params: dict[str, Any] = {"t": task_id, "lim": limit + 1}
+    if type:
+        clauses.append("m.message_type::text = ANY(:types)")
+        params["types"] = list(type)
+    if correlation_id:
+        clauses.append("m.correlation_id = :corr")
+        params["corr"] = correlation_id
+    if cursor:
+        t, i = decode_cursor(state.secret_key, cursor, filters)
+        clauses.append("(m.created_at, m.id) > (:ct, :cid)")
+        params.update(ct=datetime.fromisoformat(t), cid=uuid.UUID(i))
+    sql = (
+        "SELECT m.id, m.protocol, m.run_id, m.task_id, m.task_attempt_id, m.sender_role,"  # noqa: S608 — условия из фиксированного списка, значения — bind
+        " m.sender_provider::text AS sender_provider, m.sender_user_id, m.recipient_role, m.recipient_task_id,"
+        " m.message_type::text AS message_type, m.correlation_id, m.reply_to_id, m.schema_version, m.payload,"
+        " m.created_at FROM agent_messages m WHERE " + " AND ".join(clauses) + " ORDER BY m.created_at, m.id LIMIT :lim"
+    )
+    async with transaction(state.engine, access.db()) as conn:
+        rows = [dict(r) for r in (await conn.execute(text(sql), params)).mappings().all()]
+    page = rows[:limit]
+    next_cursor = None
+    if len(rows) > limit:
+        last = page[-1]
+        next_cursor = encode_cursor(state.secret_key, [last["created_at"].isoformat(), str(last["id"])], filters)
+    return json_response({"items": [_acp_message(r) for r in page], "next_cursor": next_cursor})

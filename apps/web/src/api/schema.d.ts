@@ -900,6 +900,11 @@ export interface components {
          */
         AcpMessageType: "TASK_ASSIGN" | "HANDOFF" | "QUESTION" | "ANSWER" | "REVIEW_REQUEST" | "FINDING" | "FIX_REQUEST" | "EVIDENCE_SUBMITTED" | "DECISION_PROPOSAL" | "DECISION_RECORDED" | "BLOCKED" | "TASK_COMPLETED";
         /**
+         * @description Участник ACP: agent_role ∪ псевдороли orchestrator и user (AGENT_COMMUNICATION_PROTOCOL.md §1, §11 acp_participant); требует утверждения.
+         * @enum {string}
+         */
+        AcpParticipant: "requirements" | "architect" | "planner" | "developer" | "reviewer" | "security" | "qa" | "database" | "performance" | "devops" | "maintenance" | "documentation" | "orchestrator" | "user";
+        /**
          * @description Каноническое перечисление (docs/README.md §3).
          * @enum {string}
          */
@@ -1529,12 +1534,27 @@ export interface components {
             run_id: string;
             /** Format: uuid */
             task_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Попытка-отправитель (конверт ACP §2); null для orchestrator/user
+             */
+            task_attempt_id?: string | null;
             from: {
-                role: components["schemas"]["AgentRole"];
+                role: components["schemas"]["AcpParticipant"];
                 provider?: components["schemas"]["CliProvider"] | null;
+                /**
+                 * Format: uuid
+                 * @description Только при role = user (ACP §2)
+                 */
+                user_id?: string | null;
             };
             to: {
-                role: components["schemas"]["AgentRole"];
+                role: components["schemas"]["AcpParticipant"];
+                /**
+                 * Format: uuid
+                 * @description Конкретная задача-получатель (inbox, ACP §7)
+                 */
+                task_id?: string | null;
             };
             type: components["schemas"]["AcpMessageType"];
             /** Format: uuid */
