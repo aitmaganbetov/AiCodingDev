@@ -23,7 +23,12 @@ from aicd_code_intelligence.index.gitsource import (
 )
 from aicd_code_intelligence.index.policy import IndexPolicy
 
-GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "HOME": "/nonexistent", "PATH": os.environ["PATH"]}
+GIT_ENV = {
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "HOME": "/nonexistent",
+    "PATH": os.environ["PATH"],
+}
 
 
 def git(repo: Path, *args: str) -> str:
@@ -187,10 +192,15 @@ def test_rejects_bad_commit_and_missing_objects(repo: Path) -> None:
 
 def test_tree_parsing_drops_unsafe_paths() -> None:
     sha = "a" * 40
-    raw = b"".join(
-        f"100644 blob {sha} 3\t{p}".encode() + b"\x00"
-        for p in ["ok.py", "../escape.py", "/abs.py", "a/./b.py", "dir/../x", "tab\tname"]
-    ) + b"100644 blob " + sha.encode() + b" 3\tctl\x01.py\x00"
+    raw = (
+        b"".join(
+            f"100644 blob {sha} 3\t{p}".encode() + b"\x00"
+            for p in ["ok.py", "../escape.py", "/abs.py", "a/./b.py", "dir/../x", "tab\tname"]
+        )
+        + b"100644 blob "
+        + sha.encode()
+        + b" 3\tctl\x01.py\x00"
+    )
     entries, unsafe = parse_ls_tree(raw)
     assert [e.path for e in entries] == ["ok.py"]
     assert "../escape.py" in unsafe and "/abs.py" in unsafe and "ctl\x01.py" in unsafe

@@ -96,9 +96,7 @@ def test_broken_sources_do_not_raise() -> None:
 
 def test_empty_file_has_module_symbol() -> None:
     analysis = analyze_file("pkg/__init__.py", "python", b"")
-    assert [(s.kind, s.qualified_name, s.start_line, s.end_line) for s in analysis.symbols] == [
-        ("module", "pkg", 1, 1)
-    ]
+    assert [(s.kind, s.qualified_name, s.start_line, s.end_line) for s in analysis.symbols] == [("module", "pkg", 1, 1)]
 
 
 def test_language_detection() -> None:
@@ -140,7 +138,12 @@ def test_chunks_reference_git_lines() -> None:
     content = "".join(f"line {i}\n" for i in range(1, 251)).encode()
     analysis = analyze_file("big.py", "python", content)
     chunks = build_chunks(
-        path="big.py", language="python", content=content, symbols=analysis.symbols, chunk_lines=120, max_symbol_chunk_lines=400
+        path="big.py",
+        language="python",
+        content=content,
+        symbols=analysis.symbols,
+        chunk_lines=120,
+        max_symbol_chunk_lines=400,
     )
     assert [(c.start_line, c.end_line) for c in chunks] == [(1, 120), (121, 240), (241, 250)]
     assert chunks[0].text_ref("a" * 40) == f"git:{'a' * 40}#L1-L120"

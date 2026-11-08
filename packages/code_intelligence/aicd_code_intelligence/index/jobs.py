@@ -158,8 +158,10 @@ async def run_indexing_job(
                 {"repo": repository_id, "sha": commit_sha, "ver": INDEX_VERSION},
             )
         ).first()
-        base = None if kind == "full" or existing is not None else await latest_ready_snapshot(
-            conn, repository_id=repository_id
+        base = (
+            None
+            if kind == "full" or existing is not None
+            else await latest_ready_snapshot(conn, repository_id=repository_id)
         )
         effective_kind = "incremental" if base is not None else "full"
         await conn.execute(

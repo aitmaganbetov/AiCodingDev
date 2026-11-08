@@ -34,7 +34,20 @@ QUALIFIED_MAX = 4096
 MAX_SYMBOLS_PER_FILE = 5000
 
 SYMBOL_KINDS: frozenset[str] = frozenset(
-    {"module", "class", "interface", "function", "method", "variable", "constant", "type", "enum", "test", "route", "other"}
+    {
+        "module",
+        "class",
+        "interface",
+        "function",
+        "method",
+        "variable",
+        "constant",
+        "type",
+        "enum",
+        "test",
+        "route",
+        "other",
+    }
 )
 
 _UPPER_CONST = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
@@ -484,7 +497,9 @@ def _javascript(content: bytes, root: Node, path: str, is_test: bool, b: _Builde
         if child.type == "export_statement":
             decl = child.child_by_field_name("declaration")
             if decl is None:
-                decl = next((c for c in child.named_children if c.type in _JS_CLASSES or c.type in _JS_FUNCTION_VALUES), None)
+                decl = next(
+                    (c for c in child.named_children if c.type in _JS_CLASSES or c.type in _JS_FUNCTION_VALUES), None
+                )
                 if decl is not None and decl.type in _JS_FUNCTION_VALUES:
                     b.add(
                         name="default",
@@ -528,7 +543,9 @@ def _javascript(content: bytes, root: Node, path: str, is_test: bool, b: _Builde
 
 # --- PHP -------------------------------------------------------------------------------------
 
-_PHP_INCLUDES = frozenset({"require_expression", "require_once_expression", "include_expression", "include_once_expression"})
+_PHP_INCLUDES = frozenset(
+    {"require_expression", "require_once_expression", "include_expression", "include_once_expression"}
+)
 
 
 def _php(content: bytes, root: Node, path: str, is_test: bool, b: _Builder) -> None:

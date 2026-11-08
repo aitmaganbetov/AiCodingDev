@@ -155,9 +155,7 @@ def ripgrep_search(
 ) -> TextSearchResult:
     """Точный поиск в каталоге экспорта снимка. Пути в результате — относительные пути снимка."""
     limits = limits or SearchLimits()
-    argv = build_rg_argv(
-        rg_binary or _rg_binary(), query, regex=regex, case_sensitive=case_sensitive, limits=limits
-    )
+    argv = build_rg_argv(rg_binary or _rg_binary(), query, regex=regex, case_sensitive=case_sensitive, limits=limits)
     env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
     result = TextSearchResult()
     proc = subprocess.Popen(  # noqa: S603 — argv-массив, без shell
@@ -227,9 +225,7 @@ def export_dir_name(commit_sha: str) -> str:
     return f"{validate_commit_sha(commit_sha)}-v{INDEX_VERSION}"
 
 
-def materialize_export(
-    repo: Path, commit_sha: str, files: Iterable[tuple[str, str]], cache_root: Path
-) -> Path:
+def materialize_export(repo: Path, commit_sha: str, files: Iterable[tuple[str, str]], cache_root: Path) -> Path:
     """Каталог с текстовыми файлами снимка (`(path, blob_sha)`), из кэша или построенный заново."""
     cache_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     final = cache_root / export_dir_name(commit_sha)
@@ -305,9 +301,7 @@ class ChunkHit:
     metadata: dict[str, Any]
 
 
-async def fts_search(
-    conn: AsyncConnection, *, snapshot_id: uuid.UUID, query: str, limit: int = 50
-) -> list[ChunkHit]:
+async def fts_search(conn: AsyncConnection, *, snapshot_id: uuid.UUID, query: str, limit: int = 50) -> list[ChunkHit]:
     """FTS по фрагментам снимка (RLS: соединение с контекстом workspace)."""
     validate_query(query)
     parts = split_identifiers(query)
@@ -366,4 +360,3 @@ async def snapshot_text_files(conn: AsyncConnection, *, snapshot_id: uuid.UUID) 
         {"snapshot": snapshot_id},
     )
     return [(r[0], r[1]) for r in rows]
-

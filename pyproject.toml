@@ -84,6 +84,7 @@ package = true
 line-length = 120
 target-version = "py312"
 src = ["packages/*", "apps/*", "tests"]
+extend-exclude = ["tests/fixtures/code"]  # исходники-фикстуры индексатора (P5-03), не код проекта
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "A", "C4", "SIM", "RUF", "ASYNC", "PT", "TID"]
@@ -105,7 +106,7 @@ plugins = ["pydantic.mypy"]
 mypy_path = "packages/platform:packages/contracts:packages/identity:packages/projects:packages/security:packages/cli_adapters:packages/orchestration:packages/verification:packages/collaboration:packages/code_intelligence:apps/api:apps/cli:apps/worker"
 explicit_package_bases = true
 files = ["packages", "apps/api", "apps/cli", "apps/worker", "tests", "scripts"]
-exclude = ["^infrastructure/migrations/", "^apps/web/"]
+exclude = ["^infrastructure/migrations/", "^apps/web/", "^tests/fixtures/code/"]
 
 [[tool.mypy.overrides]]
 module = ["boto3.*", "botocore.*"]
