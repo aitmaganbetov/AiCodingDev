@@ -4,7 +4,7 @@
  * по SSE (chat.message). P7-07: панель поручений (DirectivesPanel). Тексты агентов — только текст.
  */
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { chatApi, chatKeys, type ChatFilters } from '../../api/chat';
@@ -52,7 +52,15 @@ export function ChatPage() {
   const { workspaceId, membership } = useCurrentWorkspace();
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
-  const filters = useMemo(() => filtersFromParams(params), [params]);
+  // Фильтры живут в URL (ссылкой можно поделиться); локальная копия применяется сразу, пока
+  // навигация роутера (transition) не зафиксировала новый URL, — контролы не «откатываются».
+  const paramsKey = params.toString();
+  const [local, setLocal] = useState(() => ({ seen: paramsKey, filters: filtersFromParams(params) }));
+  let filters = local.filters;
+  if (local.seen !== paramsKey) {
+    filters = filtersFromParams(params);
+    setLocal({ seen: paramsKey, filters });
+  }
   const complete = filtersComplete(filters);
   const { run, isTerminal } = useRunDetail(runId, Boolean(membership));
   const { tasks } = useRunTasks(runId, { all: true, enabled: Boolean(membership) });
@@ -101,7 +109,13 @@ export function ChatPage() {
     [workspaceId, projectId, runId],
   );
 
-  const setFilters = useCallback((next: ChatFilters) => setParams(paramsFromFilters(next), { replace: true }), [setParams]);
+  const setFilters = useCallback(
+    (next: ChatFilters) => {
+      setLocal({ seen: paramsKey, filters: next });
+      setParams(paramsFromFilters(next), { replace: true });
+    },
+    [setParams, paramsKey],
+  );
   const onMention = useCallback((role: AgentRole) => setFilters({ stream: 'role', role }), [setFilters]);
 
   if (!workspaceId || !membership) return <WorkspaceNotFound />;

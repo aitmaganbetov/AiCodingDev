@@ -18,7 +18,7 @@ const SECTIONS = [
 
 /** Заглушки «в разработке»: разделы меню + контекстные экраны run (чат, задача). */
 /** Разделы, реализованные экранами (axe — в их собственных spec); остальные пока заглушки. */
-const IMPLEMENTED = new Set(['projects', 'dashboard', 'knowledge', 'providers', 'settings', 'audit']);
+const IMPLEMENTED = new Set(['projects', 'dashboard', 'knowledge', 'providers', 'settings', 'audit', 'approvals', 'quality', 'compliance']);
 
 const PLACEHOLDERS = [
   ...SECTIONS.filter((s) => !IMPLEMENTED.has(s.path)).map((s) => ({ path: s.path, title: s.name === 'Запуски' ? 'Запуски' : s.name })),
@@ -89,6 +89,7 @@ test('keyboard-only: skip link, sidebar in tab order, Enter opens a section, sho
   api,
 }) => {
   const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
+  api.route('GET', '/api/v1/approvals', 'listApprovals', () => ({ status: 200, body: { items: [], next_cursor: null } }));
   await login(page, api);
   await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда Альфа' })).toBeFocused();
 

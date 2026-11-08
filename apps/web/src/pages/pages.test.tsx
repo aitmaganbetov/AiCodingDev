@@ -273,11 +273,12 @@ describe('layout', () => {
     expect(within(nav).getByRole('link', { name: 'Одобрения' })).toBeInTheDocument();
   });
 
-  it('renders "under construction" placeholders for Phase 7 sections and 404 for unknown paths', async () => {
+  // Разделы approvals/quality/compliance реализованы (P7-10/P7-11): их экраны — в своих тестах и e2e.
+  it('renders 404 for unknown paths inside a workspace', async () => {
     mockFetch({ 'GET /api/v1/auth/session': () => json(200, session('developer')) });
-    renderApp(`/w/${WS_ID}/approvals`);
-    expect(await screen.findByRole('heading', { level: 1, name: 'Одобрения' })).toBeInTheDocument();
-    expect(screen.getByTestId('area-placeholder')).toHaveTextContent('Раздел в разработке');
+    renderApp(`/w/${WS_ID}/no-such-screen`);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Страница не найдена' })).toBeInTheDocument();
+    expect(screen.queryByTestId('area-placeholder')).not.toBeInTheDocument();
   });
 
   it('opens the keyboard shortcuts dialog with "?" and navigates with "g" sequences', async () => {
