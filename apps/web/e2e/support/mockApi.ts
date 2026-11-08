@@ -31,7 +31,7 @@ export interface MockUser {
   display_name: string;
 }
 
-interface Reply {
+export interface Reply {
   status: number;
   body?: unknown;
   headers?: Record<string, string>;
@@ -69,7 +69,7 @@ export function sseFrame(e: MockRunEvent): string {
   return `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
 }
 
-function problem(status: number, code: S['Problem']['code'], extra: Partial<S['Problem']> = {}): Reply {
+export function problem(status: number, code: S['Problem']['code'], extra: Partial<S['Problem']> = {}): Reply {
   return {
     status,
     body: {
@@ -102,8 +102,22 @@ const ROUTES: { method: string; path: string; operationId: string }[] = [
   { method: 'POST', path: '/api/v1/runs/{id}/cancel', operationId: 'cancelRun' },
 ];
 
-function matchRoute(method: string, pathname: string): { operationId: string; id: string | undefined } | null {
-  for (const r of ROUTES) {
+/** Запрос к дополнительной операции мока (MockApi.route). */
+export interface MockRequest {
+  url: URL;
+  headers: Record<string, string>;
+  body: unknown;
+  /** Значение `{id}` из шаблона пути. */
+  id: string | undefined;
+  workspaceId: string | undefined;
+}
+
+function matchRoute(
+  method: string,
+  pathname: string,
+  extra: readonly { method: string; path: string; operationId: string }[] = [],
+): { operationId: string; id: string | undefined } | null {
+  for (const r of [...ROUTES, ...extra]) {
     if (r.method !== method) continue;
     const re = new RegExp(`^${r.path.replace('{id}', '([^/]+)')}$`);
     const m = re.exec(pathname);
@@ -145,6 +159,16 @@ export class MockApi {
    * SSE-ответ не досылается — как при реальном обрыве (без «призрачных» подключений в журнале).
    */
   offline = false;
+  private readonly extraRoutes: { method: string; path: string; operationId: string; handler: (req: MockRequest) => Reply }[] = [];
+
+  /**
+   * Дополнительная операция контракта для E2E экрана (вызывается из своего spec-файла,
+   * этот файл менять не нужно). Путь — шаблон с `{id}`, ответ валидируется по контракту operationId.
+   * Пример: `api.route('GET', '/api/v1/approvals', 'listApprovals', () => ({ status: 200, body: {...} }))`.
+   */
+  route(method: string, path: string, operationId: string, handler: (req: MockRequest) => Reply): void {
+    this.extraRoutes.push({ method, path, operationId, handler });
+  }
 
   addRun(project: S['Project'], init: Partial<S['Run']> = {}): S['Run'] {
     const run: S['Run'] = {
@@ -328,7 +352,7 @@ export class MockApi {
     const req = route.request();
     const url = new URL(req.url());
     const method = req.method();
-    const match = matchRoute(method, url.pathname);
+    const match = matchRoute(method, url.pathname, this.extraRoutes);
     if (!match) {
       this.violations.push(`unexpected request ${method} ${url.pathname}`);
       await route.fulfill({ status: 404, contentType: 'application/problem+json', body: JSON.stringify(problem(404, 'not_found').body) });
@@ -537,8 +561,12 @@ export class MockApi {
           body: { run_id: run.id, command, status: run.status, version: run.version, accepted_at: '2026-11-08T09:30:00Z' },
         };
       }
-      default:
-        return problem(404, 'not_found');
+      default: {
+        const extra = this.extraRoutes.find((r) => r.operationId === operationId);
+        return extra
+          ? extra.handler({ url, headers, body, id, workspaceId: headers['x-workspace-id'] })
+          : problem(404, 'not_found');
+      }
     }
   }
 }

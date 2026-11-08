@@ -244,6 +244,46 @@ export interface paths {
         patch: operations["updateDocumentationPolicy"];
         trace?: never;
     };
+    "/projects/{project_id}/controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Применимость контролей проекта [дополнение к ТЗ]
+         * @description Экран Standards & Compliance: каждый активный контроль реестра с применимостью для проекта (черновик системы или утверждение admin, ТЗ §13), обоснованием, ответственной ролью и блокирующим статусом. effective_blocking — с учётом умолчания платформы для профиля качества проекта (контроли роли security блокируют в strict/critical). Порядок — стандарт, контроль.
+         */
+        get: operations["listProjectControls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/controls/{control_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Утвердить применимость контроля [дополнение к ТЗ]
+         * @description Черновик → утверждено (или пересмотр утверждения): applicability, rationale (обязателен, кроме applicable — иначе 422), ответственная роль и blocking (null — умолчание платформы). Утверждает пользователь сессии (ТЗ §13; триггер БД §13.3). Неактивный/неизвестный контроль ⇒ 404.
+         */
+        post: operations["approveProjectControl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs": {
         parameters: {
             query?: never;
@@ -661,6 +701,83 @@ export interface paths {
         get: operations["getRunReport"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Находки run [дополнение к ТЗ]
+         * @description Полный список находок run с фильтрами (QualityReport.findings усечён до 200). Порядок — severity desc, затем created_at, id. Свободный текст редактируется (секреты).
+         */
+        get: operations["listRunFindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings/{finding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Находка [дополнение к ТЗ] */
+        get: operations["getFinding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings/{finding_id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Решение человека по находке [дополнение к ТЗ]
+         * @description Жизненный цикл находки (DATABASE_DESIGN §18.3, QUALITY_GATES §5.3): OPEN → ACKNOWLEDGED | FALSE_POSITIVE | ACCEPTED_RISK, ACKNOWLEDGED → OPEN | FALSE_POSITIVE | ACCEPTED_RISK, FALSE_POSITIVE | ACCEPTED_RISK → OPEN (повторное открытие). FIXED/VERIFIED_FIXED выставляет только Verification Engine. Право зависит от to_status (API_DESIGN §5.5): ACCEPTED_RISK — admin и выше, остальные — reviewer и выше. ACCEPTED_RISK выше допустимого профилем run уровня (critical-профиль: не выше high) ⇒ 422. Недопустимый переход ⇒ 409 invalid_state_transition (current_status). If-Match — ETag находки.
+         */
+        post: operations["transitionFinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/compliance/{control_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Вердикт человека по контролю [дополнение к ТЗ]
+         * @description QUALITY_GATES §8.2: вердикт PASS/FAIL человека для контроля manual/document_check/agent_review (текущий статус MANUAL_REVIEW или UNVERIFIED) или переопределение UNVERIFIED автоматического контроля — с обоснованием (notes) и evidence этого run (первое — evidence вердикта; для PASS — VERIFIED). Прежний вердикт заменяется (superseded_at), история сохраняется. Применимость контроля должна быть утверждена (applicable/tailored), run — не терминален, иначе 409 invalid_state_transition. Evidence не этого run или не VERIFIED для PASS ⇒ 422.
+         */
+        post: operations["reviewComplianceControl"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1665,6 +1782,23 @@ export interface components {
             status: components["schemas"]["FindingStatus"];
             /** Format: uuid */
             evidence_id?: string | null;
+            /** Format: uuid */
+            run_id?: string;
+            /** @enum {string} */
+            source?: "gate" | "agent_review" | "manual" | "github";
+            fixed_in_commit_sha?: string | null;
+            /** @description Коды контролей (standard_controls.control_code), к которым относится находка */
+            control_refs?: string[];
+            /** @description Кто принял последнее решение (ACKNOWLEDGED/FALSE_POSITIVE/ACCEPTED_RISK); null — открыта/система */
+            resolved_by?: components["schemas"]["UserRef"] | null;
+            /** @description Обоснование последнего решения человека (секреты редактируются) */
+            resolution_reason?: string | null;
+            /** @description Версия для ETag/If-Match */
+            version?: number;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
         };
         /** @description findings усечены до 200 (сортировка по severity desc); полный список — в отчёте/artifact. */
         QualityReport: {
@@ -1711,6 +1845,15 @@ export interface components {
             reviewed_by?: components["schemas"]["UserRef"] | null;
             /** Format: date-time */
             checked_at?: string | null;
+            /**
+             * Format: uuid
+             * @description Актуальная строка compliance_results
+             */
+            result_id?: string | null;
+            /** @description Пояснение вердикта (обоснование человека или движка; секреты редактируются) */
+            notes?: string | null;
+            /** @description Блокирует завершение run при FAIL (project_controls.blocking или умолчание платформы) */
+            blocking?: boolean;
         };
         /** @description Страница ComplianceRow (cursor pagination). */
         CompliancePage: {
@@ -1723,6 +1866,83 @@ export interface components {
             };
             /** @description Автоматические проверки не являются официальной сертификацией (ТЗ §13) */
             disclaimer?: string;
+        };
+        /** @description Страница Finding (cursor pagination). */
+        FindingPage: {
+            items: components["schemas"]["Finding"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        FindingTransitionRequest: {
+            /** @enum {string} */
+            to_status: "OPEN" | "ACKNOWLEDGED" | "FALSE_POSITIVE" | "ACCEPTED_RISK";
+            /** @description Обоснование решения (обязательно) */
+            reason: string;
+        };
+        ComplianceReviewRequest: {
+            /** @enum {string} */
+            status: "PASS" | "FAIL";
+            /** @description Обоснование вердикта */
+            notes: string;
+            /** @description Evidence этого run; первое — evidence вердикта (для PASS — VERIFIED) */
+            evidence_ids: string[];
+        };
+        /**
+         * @description Состояние применимости контроля в проекте: approved — утверждена человеком; draft — черновик системы; missing — строки нет. Предлагаемое дополнение (API_DESIGN.md §19).
+         * @enum {string}
+         */
+        ControlApprovalState: "approved" | "draft" | "missing";
+        ProjectControl: {
+            /** Format: uuid */
+            control_id: string;
+            standard_code: string;
+            edition: string;
+            standard_title?: string;
+            clause_ref: string;
+            control_code: string;
+            /** @description Формулировка платформы (не текст стандарта) */
+            description: string;
+            /** @enum {string} */
+            verification_method: "automated_gate" | "agent_review" | "manual" | "document_check";
+            gate_type?: string | null;
+            default_agent_role?: components["schemas"]["AgentRole"] | null;
+            approval_state: components["schemas"]["ControlApprovalState"];
+            applicability: components["schemas"]["ApplicabilityStatus"];
+            /**
+             * @description Значение строки project_controls (черновик или утверждённое); null — строки нет
+             * @enum {string|null}
+             */
+            proposed_applicability?: "applicable" | "not_applicable" | "tailored" | null;
+            rationale?: string | null;
+            /** @description Ответственная роль (переопределение проекта или роль контроля по умолчанию) */
+            agent_role?: components["schemas"]["AgentRole"] | null;
+            /** @description Явное значение project_controls.blocking; null — умолчание платформы */
+            blocking: boolean | null;
+            /** @description С учётом умолчания платформы для профиля качества проекта */
+            effective_blocking: boolean;
+            approved_by?: components["schemas"]["UserRef"] | null;
+            /** Format: date-time */
+            approved_at?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        /** @description Страница ProjectControl (cursor pagination). */
+        ProjectControlPage: {
+            items: components["schemas"]["ProjectControl"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+            quality_profile?: components["schemas"]["QualityProfile"];
+            /** @description Автоматические проверки не являются официальной сертификацией (ТЗ §13) */
+            disclaimer?: string;
+        };
+        ProjectControlApprovalRequest: {
+            /** @enum {string} */
+            applicability: "applicable" | "not_applicable" | "tailored";
+            /** @description Обязателен для not_applicable и tailored */
+            rationale?: string;
+            agent_role?: components["schemas"]["AgentRole"];
+            /** @description null или отсутствует — умолчание платформы */
+            blocking?: boolean | null;
         };
         RunReport: {
             run: components["schemas"]["Run"];
@@ -2633,6 +2853,8 @@ export interface components {
         SourceId: string;
         EvidenceId: string;
         ArtifactId: string;
+        FindingId: string;
+        ControlId: string;
     };
     requestBodies: never;
     headers: {
@@ -3370,6 +3592,87 @@ export interface operations {
             412: components["responses"]["PreconditionFailed"];
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listProjectControls: {
+        parameters: {
+            query?: {
+                standard_code?: string;
+                approval_state?: components["schemas"]["ControlApprovalState"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectControlPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    approveProjectControl: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                control_id: components["parameters"]["ControlId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectControlApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectControl"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
@@ -4359,6 +4662,179 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listRunFindings: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                severity?: components["schemas"]["FindingSeverity"][];
+                /** @description Повторяемый параметр */
+                status?: components["schemas"]["FindingStatus"][];
+                task_id?: string;
+                /** @description Только находки, связанные с контролем (findings.control_refs) */
+                control_ref?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                run_id: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getFinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                finding_id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Finding"];
+                };
+            };
+            /** @description Не изменилась (If-None-Match) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    transitionFinding: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Сильный ETag текущей версии. Отсутствует ⇒ 428, не совпадает ⇒ 412. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                finding_id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindingTransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Finding"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["PreconditionFailed"];
+            422: components["responses"]["Unprocessable"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    reviewComplianceControl: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                run_id: components["parameters"]["RunId"];
+                control_id: components["parameters"]["ControlId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComplianceReviewRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComplianceRow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];

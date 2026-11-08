@@ -46,6 +46,6 @@ test('live smoke: login → workspace → projects → create project → logout
   await expectNoSeriousA11yViolations(page, 'projects (list)');
 
   await page.getByRole('button', { name: /Меню пользователя/ }).click();
-  await page.getByRole('button', { name: 'Выйти' }).click();
+  await page.getByRole('menuitem', { name: 'Выйти' }).click();
   await expect(page.getByText('Вы вышли из системы.')).toBeVisible();
 });

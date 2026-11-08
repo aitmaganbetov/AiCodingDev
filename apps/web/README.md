@@ -1,6 +1,6 @@
-# apps/web — web shell (P1-13) + Run view (P3-15)
+# apps/web — Mission Control (P1-13, P3-15, P7-01, P7-02)
 
-SPA AiCodingDev: вход, layout, рабочие пространства, проекты, запуски (runs) и экран run с лентой событий SSE. Архитектура — ADR-0014; правила API — `docs/api/API_DESIGN.md`; контракт — `packages/contracts/openapi.yaml` (единственный источник, ADR-0013).
+SPA AiCodingDev: вход, каркас Mission Control (боковая навигация по всем разделам Phase 7, переключатель workspace, клавиатурные сочетания, светлая/тёмная тема), рабочие пространства, проекты, запуски и экран run с лентой событий SSE. Экраны Phase 7, ещё не реализованные, открываются как заглушки «Раздел в разработке». Архитектура — ADR-0014; правила API — `docs/api/API_DESIGN.md`; контракт — `packages/contracts/openapi.yaml` (единственный источник, ADR-0013).
 
 ## Команды (pnpm, Node ≥ 22.12)
 
@@ -18,17 +18,57 @@ SPA AiCodingDev: вход, layout, рабочие пространства, пр
 
 ## Структура
 
-- `src/api/client.ts` — fetch-клиент: база `/api/v1`, `credentials: 'same-origin'`, `X-CSRF-Token` (из `SessionInfo.csrf_token`, fallback — cookie `aicd_csrf`) на небезопасных методах, `Idempotency-Key` на POST-командах (`IdempotentIntent`: один ключ на намерение, тот же ключ при повторе), `X-Workspace-Id` для `/projects`, разбор `application/problem+json` в `ApiError`, 401 → переход на `/login?next=…`. Автоповторы — только безопасные (GET или POST с ключом: сетевая ошибка, `idempotency_key_in_flight`, 503 для GET).
-- `src/api/schema.d.ts` — сгенерированные типы (не править вручную).
-- `src/auth/` — сессия (`GET /auth/session`), охрана маршрутов, мост 401 → вход.
-- `src/pages/` — Login, Workspaces (список + создание), Projects (список с cursor-пагинацией + создание), Runs проекта (`/w/:ws/projects/:project/runs`: список + форма запуска), Run (`…/runs/:run`: статус, blocked_reason, ожидающие одобрения, задачи с «зависит от», pause/resume/cancel по статусу и праву `run:control`, лента событий), 404.
-- `src/api/runEvents.ts` — клиент SSE `GET /runs/{id}/events` на `fetch` + `ReadableStream` (а не `EventSource`: нужен HTTP-статус для 410/401/403/429/503 и явный `Last-Event-ID` при любом переподключении; зависимостей не добавляет). Дедупликация: событие с `seq ≤ последнего` или повторным `event_id` отбрасывается (EVENT_SCHEMAS §5). Реконнект: после обрыва/закрытия сервером — с `Last-Event-ID` = последний принятый seq через `retry:` сервера (backoff только при ошибках, watchdog 45 с без heartbeat); `410 replay_window_exceeded` → перечитать run/задачи и продолжить с `after_seq` = `last_seq` из problem; после `run.completed` или терминального статуса — без реконнекта. События `*.state_changed`/`run.completed`/`approval.*`/`gate.completed` инвалидируют запросы run/задач (одна инвалидация на пачку). Лента держит последние 500 событий.
-- `src/components/` — layout (skip link, переключатель workspace, меню пользователя, навигация только по реализованным разделам), состояния loading/empty/error, поля форм с ошибками по `errors[].pointer`.
-- `src/i18n/ru.json` — все строки UI (локаль `ru` по умолчанию; новая локаль — ещё один ресурс).
-- `e2e/support/contract.ts` — ajv (JSON Schema 2020-12) по схемам самого контракта: тела запросов UI, обязательные заголовки, CSRF и тела ответов моков; SSE-кадры мока — по `packages/contracts/schemas/events/1.0/sse-event.schema.json`; нарушения валят тест.
-- `e2e/mocked/run.spec.ts` — Run view: обрыв SSE посреди кадра → реконнект с `Last-Event-ID`, сервер повторяет часть событий → в ленте каждое событие ровно один раз и без пропусков; 410 → `after_seq`; pause/cancel через событие; форма запуска; права viewer.
+```
+src/
+  App.tsx                 дерево маршрутов из реестра областей + провайдеры (Query, SSE, Tooltip, Toast)
+  routes/<area>.tsx       область = маршруты + пункт навигации (AreaModule); routes/index.ts — список областей
+  layout/                 AppLayout (skip link, sidebar/drawer, шапка), Sidebar, WorkspaceSwitcher (Popover),
+                          UserMenu (DropdownMenu: тема, выход), ShortcutsDialog, WorkspaceGuard (/w/:workspaceId)
+  pages/                  страницы; AreaPlaceholderPage (заглушка), NotFoundPage (404), ForbiddenPage (403)
+  components/ui/          дизайн-система (импорт из components/ui): Button/ButtonLink/IconButton, Badge/Callout,
+                          Card, Table (сортируемые заголовки), CodeBlock, Timestamp/RelativeTime, Toolbar, Kbd, Icon,
+                          Dialog, Menu (DropdownMenu), Tabs, Tooltip, Popover, Toast (useToast)
+  components/states.tsx   LoadingState/Skeleton, EmptyState, ErrorState, ForbiddenState, UnderConstructionState
+  components/             LoadMore (cursor-пагинация), StatusBadge/statusTone, PageHeading, form
+  styles/tokens.css       дизайн-токены (CSS-переменные; светлая/тёмная тема)
+  api/client.ts           ядро транспорта: fetch, CSRF, Idempotency-Key, If-Match, problem+json, openEventStream
+  api/<area>.ts           операции области: auth, workspaces, projects, runs (+ ключи TanStack Query *Keys)
+  api/sse.ts              парсер text/event-stream, дедуп, EventStream (одно соединение с возобновлением)
+  api/streamManager.ts    StreamManager: общие потоки, ref-counting, лимит 5, offline/online, скрытая вкладка
+  api/useEventStream.tsx  хук + провайдер менеджера; api/useRunEvents.ts / runEvents.ts — поток run
+  i18n/<area>.json        строки UI (namespace = имя файла), i18n/index.ts подхватывает файлы сам
+  lib/                    permissions (полный каталог прав §5.1), theme, shortcuts, format, problem, storage
+```
 
-Права в UI (скрытие «Создать проект» для ролей без `project:create`) — только UX; авторизацию выполняет сервер.
+### Как добавить экран (параллельная работа без правки общих файлов)
+
+1. **Маршрут и меню.** Заменить содержимое своего `src/routes/<area>.tsx` (файлы есть для всех областей Phase 7: dashboard, projects, runs, chat, tasks, approvals, quality, compliance, knowledge, providers, settings, audit): `workspaceRoutes` — пути относительно `/w/:workspaceId/` (членство уже проверено `WorkspaceGuard`), `nav` — пункт меню (группа, порядок, буква `g`-сочетания, `permission`). Право по роли — `<RequirePermission permission="…">`. Тяжёлые экраны (React Flow, Monaco) — `lazy(() => import(...))`: `Suspense` уже есть в `AppRoutes`. Экран «домой» после входа — `home: { path, priority }` (сейчас projects с priority 0; Dashboard ставит больше). Новая область (которой нет в списке) — новый файл + одна строка в `routes/index.ts`.
+2. **Страницы** — `src/pages/<area>/…` (или `src/features/<area>/`), компоненты — из `components/ui` и `components/states.tsx`; заголовок — `PageHeading` (title документа + фокус на h1).
+3. **API** — новый файл `src/api/<area>.ts` по образцу `runs.ts`: типы из `Schemas[...]`/`JsonBody<'op'>`/`JsonResponse<'op', 200>`/`Query<'op'>`, вызовы через `request()`, ключи кэша `<area>Keys`. `client.ts` не меняется.
+4. **Строки** — только в своём `src/i18n/<area>.json`, под группой с именем области (`{ "approvals": { … } }`): ключ `approvals.title` работает через `t()` из любого компонента. Свои перечисления — `<area>.enums.*` (общие `enums.*` в common.json не трогать).
+5. **События run** — `useRunEvents(runId, { filters, onEvents, onResync })`: экраны одного run (граф, чат, лента) делят одно соединение; фильтр `types`/`task_id` — отдельный поток.
+6. **Тесты** — unit рядом с кодом; E2E — свой `e2e/mocked/<area>.spec.ts`: операции своей области регистрируются в мок прямо из spec (`api.route(method, path, operationId, handler)` — ответы валидируются по контракту, `mockApi.ts` не меняется), вход — `login()` из `e2e/support/session.ts`, a11y — `expectNoSeriousA11yViolations`.
+
+### Дизайн-система (P7-01)
+
+- Только семантические цвета Tailwind (`bg-surface`, `text-fg`, `text-fg-muted`, `border-border`, `bg-accent`, `text-link`, `{neutral|info|success|warning|danger}-{soft,border,fg}`, `text-danger-text`) — значения в `styles/tokens.css`. Тема: `prefers-color-scheme`, принудительно — `<html data-theme>` (меню пользователя, `lib/theme.ts`). Контраст AA для всех пар текст/фон и ≥ 3:1 для границ полей и кольца фокуса проверяет `styles/tokens.test.ts`.
+- Фокус: видимое кольцо 3px (`--color-focus`) на `:focus-visible`; после навигации фокус на h1; диалоги возвращают фокус открывшему элементу; цели касания ≥ 44px (`min-h-touch`).
+- Клавиатура: `?` — справка, `g` + буква — раздел, Esc — закрыть слой; односимвольные сочетания отключаются в справке (WCAG 2.1.4). Мобильная навигация (< 768px) — Dialog-drawer.
+- Radix-обёртки задают доступные имена и классы; меню немодальные (модальный режим Radix скрывает `#root` через aria-hidden → axe `aria-hidden-focus`).
+
+### SSE (P7-02)
+
+`StreamManager` (один на вкладку) держит по одному `EventStream` на (путь + фильтры). Подписчики делят соединение (ref-counting, закрытие через 1,5 с после последней отписки), поздний подписчик получает буфер принятых событий (до 1000). Не более 5 одновременных потоков (API_DESIGN §13: 6-й ⇒ 429) — лишние ждут в очереди (`queued`). `EventStream`: `Last-Event-ID` = последний принятый seq при любом переподключении, дедуп по seq/event_id, `retry:` сервера, экспоненциальный backoff с джиттером при ошибках подряд (429/503 — по Retry-After), watchdog 45 с без байтов (heartbeat 15 с), `410 replay_window_exceeded` → `onResync` (перечитать REST) и продолжение с `after_seq = last_seq` (OQ-35, вариант a), 401/403/404 — `failed`. `offline` разрывает потоки (без попыток), `online` переподключает сразу; вкладка скрыта > 60 с — потоки на паузе (`paused`), при возврате — возобновление.
+
+### Тесты
+
+- `src/api/client.test.ts`, `runEvents.test.ts`, `streamManager.test.ts`, `useRunEvents.test.tsx` — транспорт, парсер, дедуп, реконнект, ref-counting, лимит, offline/online, видимость, 410, restart.
+- `src/components/ui/ui.test.tsx` — Table (сортировка, aria-sort), Toolbar (roving tabindex), Dialog/Menu/Tabs/Toast, CodeBlock, время; `src/i18n/i18n.test.ts`, `src/routes/routes.test.ts`, `src/styles/tokens.test.ts`.
+- `e2e/mocked/layout.spec.ts` — axe (serious/critical) в светлой и тёмной теме для layout, всех заглушек, 404/403, диалога справки, меню и переключателя; клавиатура через sidebar и диалоги; мобильный drawer; тема.
+- `e2e/mocked/sse.spec.ts` — обрыв сети (`context.setOffline`): поток `offline` без попыток подключения, после `online` — `Last-Event-ID`, сервер повторяет часть событий, в ленте каждое событие ровно один раз и без пропусков; обрыв посреди кадра.
+- `e2e/support/contract.ts` — ajv (JSON Schema 2020-12) по схемам самого контракта: тела запросов UI, обязательные заголовки, CSRF и тела ответов моков; SSE-кадры мока — по `packages/contracts/schemas/events/1.0/sse-event.schema.json`; нарушения валят тест.
+
+Права в UI (скрытие пунктов меню и действий) — только UX; авторизацию выполняет сервер.
 
 ## Зависимости (точные версии; обоснование)
 
@@ -37,6 +77,13 @@ Runtime:
 - `react-router` 7.18.4 — маршрутизация (ADR-0014); v8 требует React 19.
 - `@tanstack/react-query` 5.104.5 — кэш/загрузка данных, infinite queries для cursor-пагинации (ADR-0014).
 - `i18next` 26.5.7, `react-i18next` 17.1.5 — i18n, ключи вместо литералов (ADR-0014).
+- Radix UI primitives (ADR-0014 п.5; React 16.8–19; только используемые пакеты):
+  - `@radix-ui/react-dialog` 1.3.1 — модальные диалоги (справка по клавишам, мобильная навигация; далее — подтверждения директив/одобрений): ловушка фокуса, aria-modal, возврат фокуса;
+  - `@radix-ui/react-dropdown-menu` 2.2.1 — меню пользователя (APG Menu Button, radio-пункты темы); далее — меню действий строк;
+  - `@radix-ui/react-popover` 1.3.1 — переключатель workspace (список ссылок), далее — фильтры чата/таблиц;
+  - `@radix-ui/react-tooltip` 1.4.1 — подсказки кнопок-иконок (видны при фокусе, Escape скрывает — WCAG 1.4.13);
+  - `@radix-ui/react-tabs` 1.2.1 — вкладки внутри экрана (Task Detail, Evidence, Compliance);
+  - `@radix-ui/react-toast` 1.3.1 — уведомления (live region, F8, пауза таймера) для статусов команд/директив.
 
 Dev:
 - `vite` 7.3.7, `@vitejs/plugin-react` 5.2.0 — сборка/dev server (ТЗ §3).
@@ -49,7 +96,7 @@ Dev:
 - `eslint` 9.39.5, `@eslint/js` 9.39.5, `typescript-eslint` 8.72.0, `eslint-plugin-jsx-a11y` 6.10.2, `eslint-plugin-react-hooks` 7.1.1, `globals` 16.5.0 — линтинг (eslint 9: jsx-a11y не поддерживает 10).
 - `@types/react` 18.3.31, `@types/react-dom` 18.3.7, `@types/node` 22.20.5 — типы.
 
-Не добавлены (минимальность): Radix UI (ADR-0014 п.5) — в shell нет сложных виджетов; переключатель workspace и меню пользователя сделаны по disclosure-паттерну на нативных `button`/ссылках. Подключить при появлении диалогов/комбобоксов (P7-01). `openapi-fetch` — свой клиент из ~300 строк закрывает CSRF/idempotency/problem.
+Не добавлены: `openapi-fetch` — свой клиент закрывает CSRF/idempotency/problem; `@xyflow/react`, Monaco — добавят экраны P7-05/P7-08 (lazy); иконки — свой набор SVG (`components/ui/Icon.tsx`) без зависимости; Radix Toolbar — `Toolbar` на roving tabindex в ~60 строк.
 
 ## Ошибки по контракту
 
