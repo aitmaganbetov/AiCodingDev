@@ -253,7 +253,8 @@ test('quality: findings list with filters, finding detail renders untrusted text
   await expect(table.locator('tbody tr')).toHaveCount(3);
   await page.getByLabel('Критичность').selectOption('high');
   await expect(table.locator('tbody tr')).toHaveCount(1);
-  expect(api.requests.filter((r) => r.operationId === 'listRunFindings')).toHaveLength(2);
+  // Фильтр — серверный (новый запрос); SSE может добавить перечитывания, поэтому «не меньше двух».
+  expect(api.requests.filter((r) => r.operationId === 'listRunFindings').length).toBeGreaterThanOrEqual(2);
   await expectNoSeriousA11yViolations(page, 'findings tab');
 
   // Недоверенный текст находки — только как текст.

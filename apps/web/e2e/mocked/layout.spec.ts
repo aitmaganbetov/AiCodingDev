@@ -22,8 +22,7 @@ const IMPLEMENTED = new Set(['projects', 'dashboard', 'knowledge', 'providers', 
 
 const PLACEHOLDERS = [
   ...SECTIONS.filter((s) => !IMPLEMENTED.has(s.path)).map((s) => ({ path: s.path, title: s.name === 'Запуски' ? 'Запуски' : s.name })),
-  { path: 'projects/p-1/runs/r-1/chat', title: 'Live Agent Chat' },
-  { path: 'projects/p-1/runs/r-1/tasks/t-1', title: 'Задача' },
+  // Контекстные экраны run (граф, чат, задача) реализованы (P7-05..P7-08): axe — в run-graph/chat/tasks.spec.ts.
 ];
 
 for (const scheme of ['light', 'dark'] as const) {
