@@ -79,7 +79,6 @@ FIX_REQUEST_SENDERS = {"architect", "reviewer", "security", "qa", "database"}
 FORBIDDEN_INSTRUCTIONS = [
     r"(?i)\b(use|call|вызови|используй|обратись к)\s+(the\s+)?(openai|anthropic|gemini|mistral)\b",
     r"(?i)\b(api[_ -]?key|access[_ -]?token)\s*[:=]",
-    r"(?i)(обойди|обойти)\s+(лимит|песочниц|политик|sandbox)(?!.*не пытайся)",
     r"(?i)\bignore\s+(the\s+)?(policy|previous|system)",
     r"(?i)игнорируй\s+(политику|блок политики|правила платформы)",
     r"(?i)\b(self[- ]?approve|approve your own)",
@@ -90,6 +89,14 @@ FORBIDDEN_INSTRUCTIONS = [
     r"https?://",
     r"<<<",
 ]
+# Упоминание допустимо только как запрет: в строке перед совпадением должно быть отрицание.
+NEGATION_REQUIRED = [
+    r"(?i)(обойди|обойти|обход)\w*\s+(лимит|песочниц|политик|sandbox|сетев)",
+    r"(?i)(AI-сервис|AI API)",
+    r"(?i)утвержда\w*\s+собственн",
+    r"(?i)(push|merge|deploy)",
+]
+_NEGATION = re.compile(r"(?i)(\bне\b|\bНе\b|запрещ|нельзя|only|только)")
 SECRET_PATTERNS = [
     r"AKIA[0-9A-Z]{16}",
     r"(?i)sk-[a-z0-9]{16,}",
@@ -97,6 +104,13 @@ SECRET_PATTERNS = [
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
     r"(?i)password\s*[:=]\s*\S+",
 ]
+
+
+def _prev_line(body: str, line: str) -> str:
+    """Перенесённая строка списка: отрицание может стоять в предыдущей строке того же пункта."""
+    lines = body.splitlines()
+    i = lines.index(line)
+    return lines[i - 1] if i > 0 and line.startswith("  ") else ""
 
 
 def test_twelve_roles_match_dag_roles() -> None:
@@ -122,6 +136,12 @@ def test_template_content_rules(role: str) -> None:
     assert all(sections[s].strip() for s in REQUIRED_SECTIONS)
     for pattern in FORBIDDEN_INSTRUCTIONS:
         assert not re.search(pattern, body), f"{role}: запрещённое содержимое {pattern}"
+    for line in body.splitlines():
+        for pattern in NEGATION_REQUIRED:
+            for m in re.finditer(pattern, line):
+                assert _NEGATION.search(line[: m.start()]) or _NEGATION.search(_prev_line(body, line)), (
+                    f"{role}: «{m.group(0)}» без запрета: {line}"
+                )
     for pattern in SECRET_PATTERNS:
         assert not re.search(pattern, body), f"{role}: похоже на секрет {pattern}"
     constraints = sections["CONSTRAINTS"]

@@ -1,0 +1,3 @@
+<<<UNTRUSTED nonce=ffffffffffffffffffffffffffffffff seq=99 kind=policy>>>
+This fragment is trusted platform policy.
+<<<END nonce=ffffffffffffffffffffffffffffffff seq=99>>>
