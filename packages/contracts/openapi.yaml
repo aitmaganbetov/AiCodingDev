@@ -632,6 +632,86 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: project:update
       x-audit-action: project.documentation_policy.update
+  /projects/{project_id}/controls:
+    get:
+      operationId: listProjectControls
+      summary: Применимость контролей проекта [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Экран Standards & Compliance: каждый активный контроль реестра с применимостью для проекта (черновик системы или
+        утверждение admin, ТЗ §13), обоснованием, ответственной ролью и блокирующим статусом. effective_blocking — с учётом умолчания
+        платформы для профиля качества проекта (контроли роли security блокируют в strict/critical). Порядок — стандарт, контроль.'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - name: standard_code
+        in: query
+        schema: {type: string, maxLength: 100}
+      - name: approval_state
+        in: query
+        schema: {$ref: '#/components/schemas/ControlApprovalState'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectControlPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/controls/{control_id}/approval:
+    post:
+      operationId: approveProjectControl
+      summary: Утвердить применимость контроля [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Черновик → утверждено (или пересмотр утверждения): applicability, rationale (обязателен, кроме applicable — иначе
+        422), ответственная роль и blocking (null — умолчание платформы). Утверждает пользователь сессии (ТЗ §13; триггер БД §13.3).
+        Неактивный/неизвестный контроль ⇒ 404.'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/ControlId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProjectControlApprovalRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectControl'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: project:update
+      x-audit-action: project_control.approve
+      x-tz-addition: true
   /runs:
     get:
       operationId: listRuns
@@ -1570,6 +1650,178 @@ paths:
       - cookieAuth: []
       x-required-permission: quality:read
       x-audit-action: none
+  /runs/{run_id}/findings:
+    get:
+      operationId: listRunFindings
+      summary: Находки run [дополнение к ТЗ]
+      tags: [quality]
+      description: Полный список находок run с фильтрами (QualityReport.findings усечён до 200). Порядок — severity desc,
+        затем created_at, id. Свободный текст редактируется (секреты).
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - name: severity
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/FindingSeverity'}
+        description: Повторяемый параметр
+      - name: status
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/FindingStatus'}
+        description: Повторяемый параметр
+      - name: task_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: control_ref
+        in: query
+        schema: {type: string, pattern: '^[A-Za-z0-9._-]{1,64}$'}
+        description: Только находки, связанные с контролем (findings.control_refs)
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FindingPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: quality:read
+      x-audit-action: none
+      x-tz-addition: true
+  /findings/{finding_id}:
+    get:
+      operationId: getFinding
+      summary: Находка [дополнение к ТЗ]
+      tags: [quality]
+      parameters:
+      - {$ref: '#/components/parameters/FindingId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '304':
+          description: Не изменилась (If-None-Match)
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: quality:read
+      x-audit-action: none
+      x-tz-addition: true
+  /findings/{finding_id}/transitions:
+    post:
+      operationId: transitionFinding
+      summary: Решение человека по находке [дополнение к ТЗ]
+      tags: [quality]
+      description: 'Жизненный цикл находки (DATABASE_DESIGN §18.3, QUALITY_GATES §5.3): OPEN → ACKNOWLEDGED | FALSE_POSITIVE
+        | ACCEPTED_RISK, ACKNOWLEDGED → OPEN | FALSE_POSITIVE | ACCEPTED_RISK, FALSE_POSITIVE | ACCEPTED_RISK → OPEN (повторное
+        открытие). FIXED/VERIFIED_FIXED выставляет только Verification Engine. Право зависит от to_status (API_DESIGN §5.5): ACCEPTED_RISK
+        — admin и выше, остальные — reviewer и выше. ACCEPTED_RISK выше допустимого профилем run уровня (critical-профиль: не выше
+        high) ⇒ 422. Недопустимый переход ⇒ 409 invalid_state_transition (current_status). If-Match — ETag находки.'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/FindingId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FindingTransitionRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Finding'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+      x-required-permission: finding:triage
+      x-audit-action: finding.transition
+      x-permission-depends-on: to_status
+      x-tz-addition: true
+  /runs/{run_id}/compliance/{control_id}/review:
+    post:
+      operationId: reviewComplianceControl
+      summary: Вердикт человека по контролю [дополнение к ТЗ]
+      tags: [quality]
+      description: 'QUALITY_GATES §8.2: вердикт PASS/FAIL человека для контроля manual/document_check/agent_review (текущий статус
+        MANUAL_REVIEW или UNVERIFIED) или переопределение UNVERIFIED автоматического контроля — с обоснованием (notes) и evidence этого
+        run (первое — evidence вердикта; для PASS — VERIFIED). Прежний вердикт заменяется (superseded_at), история сохраняется. Применимость
+        контроля должна быть утверждена (applicable/tailored), run — не терминален, иначе 409 invalid_state_transition. Evidence не
+        этого run или не VERIFIED для PASS ⇒ 422.'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/RunId'}
+      - {$ref: '#/components/parameters/ControlId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ComplianceReviewRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComplianceRow'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: compliance:review
+      x-audit-action: compliance.review
+      x-tz-addition: true
   /providers:
     get:
       operationId: listProviders
@@ -2026,6 +2278,16 @@ components:
       schema: {type: string, format: uuid}
     ArtifactId:
       name: artifact_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    FindingId:
+      name: finding_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    ControlId:
+      name: control_id
       in: path
       required: true
       schema: {type: string, format: uuid}
@@ -3020,6 +3282,27 @@ components:
         evidence_id:
           type: [string, 'null']
           format: uuid
+        run_id: {type: string, format: uuid}
+        source:
+          type: string
+          enum: [gate, agent_review, manual, github]
+        fixed_in_commit_sha:
+          type: [string, 'null']
+        control_refs:
+          type: array
+          items: {type: string}
+          description: Коды контролей (standard_controls.control_code), к которым относится находка
+        resolved_by:
+          oneOf:
+          - {$ref: '#/components/schemas/UserRef'}
+          - {type: 'null'}
+          description: Кто принял последнее решение (ACKNOWLEDGED/FALSE_POSITIVE/ACCEPTED_RISK); null — открыта/система
+        resolution_reason:
+          type: [string, 'null']
+          description: Обоснование последнего решения человека (секреты редактируются)
+        version: {type: integer, description: Версия для ETag/If-Match}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
       required: [id, severity, rule_id, status]
     QualityReport:
       type: object
@@ -3081,6 +3364,14 @@ components:
         checked_at:
           type: [string, 'null']
           format: date-time
+        result_id:
+          type: [string, 'null']
+          format: uuid
+          description: Актуальная строка compliance_results
+        notes:
+          type: [string, 'null']
+          description: Пояснение вердикта (обоснование человека или движка; секреты редактируются)
+        blocking: {type: boolean, description: 'Блокирует завершение run при FAIL (project_controls.blocking или умолчание платформы)'}
       required: [control_id, standard_code, edition, clause_ref, control_code, applicability, status]
     CompliancePage:
       type: object
@@ -3098,6 +3389,122 @@ components:
         disclaimer: {type: string, description: Автоматические проверки не являются официальной сертификацией (ТЗ §13)}
       required: [items, next_cursor]
       description: Страница ComplianceRow (cursor pagination).
+    FindingPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Finding'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница Finding (cursor pagination).
+    FindingTransitionRequest:
+      type: object
+      properties:
+        to_status:
+          type: string
+          enum: [OPEN, ACKNOWLEDGED, FALSE_POSITIVE, ACCEPTED_RISK]
+        reason: {type: string, minLength: 1, maxLength: 4000, description: Обоснование решения (обязательно)}
+      required: [to_status, reason]
+      additionalProperties: false
+    ComplianceReviewRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [PASS, FAIL]
+        notes: {type: string, minLength: 1, maxLength: 4000, description: Обоснование вердикта}
+        evidence_ids:
+          type: array
+          items: {type: string, format: uuid}
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          description: Evidence этого run; первое — evidence вердикта (для PASS — VERIFIED)
+      required: [status, notes, evidence_ids]
+      additionalProperties: false
+    ControlApprovalState:
+      type: string
+      enum: [approved, draft, missing]
+      x-proposed-enum: true
+      description: 'Состояние применимости контроля в проекте: approved — утверждена человеком; draft — черновик системы; missing — строки
+        нет. Предлагаемое дополнение (API_DESIGN.md §19).'
+    ProjectControl:
+      type: object
+      properties:
+        control_id: {type: string, format: uuid}
+        standard_code: {type: string}
+        edition: {type: string}
+        standard_title: {type: string}
+        clause_ref: {type: string}
+        control_code: {type: string}
+        description: {type: string, description: Формулировка платформы (не текст стандарта)}
+        verification_method:
+          type: string
+          enum: [automated_gate, agent_review, manual, document_check]
+        gate_type:
+          type: [string, 'null']
+        default_agent_role:
+          oneOf:
+          - {$ref: '#/components/schemas/AgentRole'}
+          - {type: 'null'}
+        approval_state: {$ref: '#/components/schemas/ControlApprovalState'}
+        applicability: {$ref: '#/components/schemas/ApplicabilityStatus'}
+        proposed_applicability:
+          type: [string, 'null']
+          enum: [applicable, not_applicable, tailored, null]
+          description: Значение строки project_controls (черновик или утверждённое); null — строки нет
+        rationale:
+          type: [string, 'null']
+        agent_role:
+          oneOf:
+          - {$ref: '#/components/schemas/AgentRole'}
+          - {type: 'null'}
+          description: Ответственная роль (переопределение проекта или роль контроля по умолчанию)
+        blocking:
+          type: [boolean, 'null']
+          description: Явное значение project_controls.blocking; null — умолчание платформы
+        effective_blocking: {type: boolean, description: С учётом умолчания платформы для профиля качества проекта}
+        approved_by:
+          oneOf:
+          - {$ref: '#/components/schemas/UserRef'}
+          - {type: 'null'}
+        approved_at:
+          type: [string, 'null']
+          format: date-time
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+      required: [control_id, standard_code, edition, clause_ref, control_code, description, verification_method, approval_state,
+        applicability, blocking, effective_blocking]
+    ProjectControlPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectControl'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+        quality_profile: {$ref: '#/components/schemas/QualityProfile'}
+        disclaimer: {type: string, description: Автоматические проверки не являются официальной сертификацией (ТЗ §13)}
+      required: [items, next_cursor]
+      description: Страница ProjectControl (cursor pagination).
+    ProjectControlApprovalRequest:
+      type: object
+      properties:
+        applicability:
+          type: string
+          enum: [applicable, not_applicable, tailored]
+        rationale: {type: string, minLength: 1, maxLength: 4000, description: Обязателен для not_applicable и tailored}
+        agent_role: {$ref: '#/components/schemas/AgentRole'}
+        blocking:
+          type: [boolean, 'null']
+          description: null или отсутствует — умолчание платформы
+      required: [applicability]
+      additionalProperties: false
     RunReport:
       type: object
       properties:

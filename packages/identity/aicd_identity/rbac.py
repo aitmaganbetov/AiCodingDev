@@ -59,6 +59,8 @@ PERMISSIONS: Final[dict[str, frozenset[Role]]] = {
     "directive:create": _REVIEWER_UP,
     "directive:confirm": _REVIEWER_UP,
     "approval:decide": _REVIEWER_UP,
+    "finding:triage": _REVIEWER_UP,
+    "compliance:review": _REVIEWER_UP,
     "provider:probe": _ADMIN_UP,
     "provider:settings": _ADMIN_UP,
     "documentation:register": _ADMIN_UP,
@@ -80,6 +82,16 @@ APPROVAL_MIN_ROLE: Final[dict[str, Role]] = {
     "UNRESTRICTED_NETWORK": Role.OWNER,
     "DATA_DELETION": Role.OWNER,
     "LOCAL_EXECUTION_FALLBACK": Role.OWNER,
+}
+
+# API_DESIGN §5.5 — минимальная роль для перехода находки по целевому статусу (`finding:triage`,
+# x-permission-depends-on: to_status): принятие риска — решение admin, разбор (ACK/ложное срабатывание/
+# повторное открытие) — reviewer и выше.
+FINDING_TRANSITION_MIN_ROLE: Final[dict[str, Role]] = {
+    "ACKNOWLEDGED": Role.REVIEWER,
+    "FALSE_POSITIVE": Role.REVIEWER,
+    "OPEN": Role.REVIEWER,
+    "ACCEPTED_RISK": Role.ADMIN,
 }
 
 # Действия, для которых инициатор не может утвердить сам (four-eyes, API_DESIGN §5.3, OQ-10/OQ-18).
@@ -137,6 +149,12 @@ def can_decide_approval(
     ):
         return False, "four_eyes_violation"
     return True, None
+
+
+def can_transition_finding(role: Role | str, to_status: str) -> bool:
+    """`finding:triage` с учётом целевого статуса (§5.5); неизвестный статус — запрещён."""
+    min_role = FINDING_TRANSITION_MIN_ROLE.get(to_status)
+    return min_role is not None and RANK[Role(role)] >= RANK[min_role]
 
 
 def can_submit_directive(role: Role | str, directive_type: str) -> bool:

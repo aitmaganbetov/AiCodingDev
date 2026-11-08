@@ -7,6 +7,7 @@ from aicd_identity.rbac import (
     Role,
     can_decide_approval,
     can_submit_directive,
+    can_transition_finding,
     effective_role,
     has_permission,
 )
@@ -35,6 +36,8 @@ EXPECTED = {
     "directive:create": {O, A, D, R},
     "directive:confirm": {O, A, D, R},
     "approval:decide": {O, A, D, R},
+    "finding:triage": {O, A, D, R},
+    "compliance:review": {O, A, D, R},
     "provider:probe": {O, A},
     "provider:settings": {O, A},
     "documentation:register": {O, A},
@@ -87,3 +90,21 @@ def test_approval_rules(role: str, action: str, requester: bool, single: bool, e
 def test_directive_rules() -> None:
     assert can_submit_directive(R, "ASK") and not can_submit_directive(R, "CHANGE_REQUEST")
     assert can_submit_directive(D, "STOP") and not can_submit_directive(V, "ASK")
+
+
+@pytest.mark.parametrize(
+    ("role", "to_status", "expected"),
+    [
+        (R, "ACKNOWLEDGED", True),
+        (R, "FALSE_POSITIVE", True),
+        (R, "OPEN", True),
+        (R, "ACCEPTED_RISK", False),
+        (D, "ACCEPTED_RISK", False),
+        (A, "ACCEPTED_RISK", True),
+        (O, "ACCEPTED_RISK", True),
+        (V, "ACKNOWLEDGED", False),
+        (O, "VERIFIED_FIXED", False),  # подтверждение исправления — только Verification Engine
+    ],
+)
+def test_finding_transition_rules(role: str, to_status: str, expected: bool) -> None:
+    assert can_transition_finding(role, to_status) is expected

@@ -2053,6 +2053,8 @@ CREATE INDEX ix_findings_run_open ON findings (workspace_id, run_id, severity) W
 CREATE INDEX ix_findings_task ON findings (workspace_id, task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX ix_findings_gate_execution ON findings (gate_execution_id) WHERE gate_execution_id IS NOT NULL;
 ```
+**Миграция 0010 (OQ-43 (c), (d); QUALITY_GATES §9):** `control_refs text[] NOT NULL DEFAULT '{}'` (коды `standard_controls.control_code`, ≤ 50, `ck_findings_control_refs`; GIN-индекс `ix_findings_control_refs`) — связь находки с контролями, Compliance Engine считает такую находку относящейся к контролю; `version bigint NOT NULL DEFAULT 1` — сильный ETag для `POST /findings/{id}/transitions` (If-Match), увеличивается триггером `trg_findings_bump_version` при каждом `UPDATE` (находки меняют и worker, и api).
+
 Решение по `source_gate_id`: это **определение** gate (`quality_gates.id`), а конкретный запуск — `gate_execution_id`; составной FK `(gate_execution_id, source_gate_id) → gate_executions(id, gate_id)` гарантирует их согласованность. `FALSE_POSITIVE` / `ACCEPTED_RISK` — только человек (`resolved_by` — users), агент не может закрыть находку сам (ТЗ §10 «no self-authorized critical actions»).
 
 ### 12.7 `evidence` (T, verification)
@@ -2196,6 +2198,8 @@ CREATE TABLE project_controls (
 CREATE INDEX ix_project_controls_ws_project ON project_controls (workspace_id, project_id) WHERE approved_by IS NOT NULL;
 ```
 Неутверждённая строка (`approved_by IS NULL`) — черновик; Compliance Engine учитывает только утверждённые.
+
+**Миграция 0010 (QUALITY_GATES §5.3 п.6, §9):** `blocking boolean` — контроль блокирует завершение run при актуальном `compliance_results.status = 'FAIL'`; `NULL` — умолчание платформы `control_default_blocking(quality_profile, agent_role)` (контроли роли `security` блокируют в профилях `strict`/`critical`). Явное значение утверждает человек: триггер `trg_project_controls_approval` охраняет и `blocking`. Guard завершения (`aicd_verification.verdict.run_completion_verdict`) читает `compliance_results`/`project_controls` напрямую (модуль standards — соседний слой).
 
 ### 13.4 `compliance_results` (T, standards)
 
@@ -3020,6 +3024,8 @@ CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USI
 | `sys_login_lookup(email text)` | `aicd_app` | `user_id` и признак активности для аутентификации (глобальная таблица, но функция централизует rate-limited lookup) |
 | `sys_resolve_run_workspace(run_id uuid)` / `sys_resolve_task_workspace(task_id uuid)` | `aicd_app` | `workspace_id` run/задачи, если `app_current_user()` — член; иначе `NULL` (миграция 0003) |
 | `sys_resolve_approval_workspace(approval_id uuid)` | `aicd_app` | `workspace_id` approval, если `app_current_user()` — член; иначе `NULL` (миграция 0005; `GET/POST /approvals/{id}…`) |
+| `sys_resolve_finding_workspace(finding_id uuid)` | `aicd_app` | `workspace_id` находки, если `app_current_user()` — член; иначе `NULL` (миграция 0010; `GET /findings/{id}`, `POST /findings/{id}/transitions`) |
+| `sys_record_compliance_review(run_id, control_id, status, notes, evidence_ids uuid[])` | `aicd_app` | id новой строки `compliance_results` — вердикт человека `PASS`/`FAIL` (QUALITY_GATES §8.2): только `app_current_workspace()`, эффективная роль проекта ≥ `approval_min_role('MANUAL_REVIEW')` (иначе `42501`), применимость утверждена и не `not_applicable`, run не терминален, текущий вердикт `UNVERIFIED`/`MANUAL_REVIEW` (не `automated_gate`)/человека (иначе `55000`), evidence этого run (иначе `23514`); прежняя строка — `superseded_at`, evidence → `evidence_links` (`supports`/`refutes`); `NULL` — не найдено/не член (миграция 0010; у `aicd_app` нет `INSERT` на `compliance_results`) |
 | `sys_recovery_workspaces(limit int)` | `aicd_worker` | workspace с `cli_executions` в `QUEUED/STARTING/RUNNING/EXITED`, `worktrees` в `ACTIVE/LOCKED`, `external_actions` в `EXECUTING`, нетерминальными `runs` — для recovery reconciler (миграция 0005) |
 
 ### 19.6 Обход RLS для обслуживания

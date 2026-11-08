@@ -208,6 +208,24 @@ def test_attestation_does_not_override_automated_gate() -> None:
     ev, human = _evidence(), _evidence(producer="user")
     att = Attestation(LINT.id, "PASS", human.id, OWNER)
     assert _status([LINT], [_gate("LINT", "FAIL", ev)], [ev, human], attestations=[att]) == "FAIL"
+    # Переопределение человеком действует только там, где автоматика вердикта не дала (UNVERIFIED, OQ-43 (d)).
+    assert _status([LINT], [_gate("LINT", "ERROR", None)], [human], attestations=[att]) == "PASS"
+    assert _status([LINT], evidence=[human], attestations=[att]) == "PASS"
+    unverified = _evidence(status="PENDING", producer="user")
+    weak = Attestation(LINT.id, "PASS", unverified.id, OWNER)
+    assert _status([LINT], evidence=[unverified], attestations=[weak]) == "UNVERIFIED"
+    failed = Attestation(LINT.id, "FAIL", unverified.id, OWNER, "падает локально")
+    assert _run([LINT], evidence=[unverified], attestations=[failed])["QM-25010-01"] == ("FAIL", "падает локально")
+
+
+def test_findings_linked_by_control_refs_fail_control() -> None:
+    """findings.control_refs (миграция 0010): находка любого источника относится к контролю по его коду."""
+    ev = _evidence()
+    gate = _gate("SECRETS", "PASS", ev)
+    review = FindingItem(uuid7(), "high", "OPEN", "manual.x", None, None, None, ev.id, ("SEC-27002-01",))
+    assert _status([SECRETS], [gate], [ev], [review]) == "FAIL"
+    assert _status([SECRETS], [gate], [ev], [replace(review, control_refs=("OTHER-01",))]) == "PASS"
+    assert _status([SECRETS], [gate], [ev], [replace(review, severity="medium")]) == "PASS"  # ниже порога
 
 
 # --- трассировка и отчёт --------------------------------------------------------------------------------

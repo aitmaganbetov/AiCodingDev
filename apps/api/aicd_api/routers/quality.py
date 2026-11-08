@@ -22,23 +22,26 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import Response
 
 from aicd_api.deps import Access, app_state, authorize, current_principal
+from aicd_api.idempotency import CommandResult, run_idempotent
 from aicd_api.report_markdown import render_run_report
 from aicd_api.responses import json_response
 from aicd_api.routers import op
 from aicd_api.routers.approvals import APPROVALS, approval_view
 from aicd_api.routers.runs import resolve_resource, run_view, task_summary
 from aicd_identity import api as identity
+from aicd_platform import audit
 from aicd_platform.clock import utcnow
 from aicd_platform.db import transaction
-from aicd_platform.errors import ProblemError
+from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
 from aicd_platform.redaction import redact_text, redact_value
-from aicd_standards.api import DISCLAIMER, compliance_matrix
+from aicd_standards.api import DISCLAIMER, compliance_matrix, record_review
 
 router = APIRouter()
 
@@ -86,6 +89,10 @@ def _opt_text(value: str | None) -> str | None:
 def _artifact_kind(kind: str) -> str:
     kind = _ARTIFACT_KIND_ALIASES.get(kind, kind)
     return kind if kind in _ARTIFACT_KINDS or kind == "raw_cli_log" else "other"
+
+
+def _user_ref(user_id: Any, name: str | None) -> dict[str, Any] | None:
+    return None if user_id is None else {"id": user_id, "display_name": name or ""}
 
 
 # --- evidence ---------------------------------------------------------------------------------------
@@ -222,11 +229,24 @@ async def get_evidence(
 # --- quality ----------------------------------------------------------------------------------------
 
 
-def _finding_view(r: dict[str, Any]) -> dict[str, Any]:
+FINDING_SELECT = (
+    "SELECT f.id, f.run_id, f.task_id, f.gate_execution_id, f.source, f.severity::text AS severity, f.rule_id,"
+    " f.title, f.cwe_id, f.file_path, f.line, f.status::text AS status, f.evidence_id, f.fixed_in_commit_sha,"
+    " f.control_refs, f.resolved_by, u.display_name AS resolver_name, f.resolution_reason, f.version,"
+    " f.created_at, f.updated_at FROM findings f LEFT JOIN users u ON u.id = f.resolved_by"
+)
+# Ранг severity для сортировки «сначала критичные» (и ключ keyset-курсора `GET /runs/{id}/findings`).
+SEVERITY_ORDER = "array_position(ARRAY['critical','high','medium','low','info'], f.severity::text)"
+
+
+def finding_view(r: dict[str, Any]) -> dict[str, Any]:
+    """`Finding`: свободный текст (правило, заголовок, путь, причина решения) — с редактированием секретов."""
     return {
         "id": r["id"],
+        "run_id": r["run_id"],
         "task_id": r["task_id"],
         "gate_execution_id": r["gate_execution_id"],
+        "source": r["source"],
         "severity": r["severity"],
         "rule_id": redact_text(r["rule_id"]),
         "title": redact_text(r["title"]),
@@ -235,6 +255,13 @@ def _finding_view(r: dict[str, Any]) -> dict[str, Any]:
         "line": r["line"],
         "status": r["status"],
         "evidence_id": r["evidence_id"],
+        "fixed_in_commit_sha": r["fixed_in_commit_sha"],
+        "control_refs": list(r["control_refs"] or []),
+        "resolved_by": _user_ref(r["resolved_by"], r["resolver_name"]),
+        "resolution_reason": _opt_text(r["resolution_reason"]),
+        "version": r["version"],
+        "created_at": r["created_at"],
+        "updated_at": r["updated_at"],
     }
 
 
@@ -257,16 +284,12 @@ def _gate_view(r: dict[str, Any]) -> dict[str, Any]:
 
 async def _findings(conn: AsyncConnection, run_id: uuid.UUID, limit: int | None) -> list[dict[str, Any]]:
     """Находки run: severity desc, затем по времени (детерминированно)."""
-    sql = (
-        "SELECT f.id, f.task_id, f.gate_execution_id, f.severity::text AS severity, f.rule_id, f.title, f.cwe_id,"
-        " f.file_path, f.line, f.status::text AS status, f.evidence_id FROM findings f WHERE f.run_id = :r"
-        " ORDER BY array_position(ARRAY['critical','high','medium','low','info'], f.severity::text), f.created_at, f.id"
-    )
+    sql = FINDING_SELECT + " WHERE f.run_id = :r ORDER BY " + SEVERITY_ORDER + ", f.created_at, f.id"
     params: dict[str, Any] = {"r": run_id}
     if limit is not None:
         sql += " LIMIT :lim"
         params["lim"] = limit
-    return [_finding_view(dict(r)) for r in (await conn.execute(text(sql), params)).mappings().all()]
+    return [finding_view(dict(r)) for r in (await conn.execute(text(sql), params)).mappings().all()]
 
 
 async def quality_report(conn: AsyncConnection, run_id: uuid.UUID) -> dict[str, Any]:
@@ -350,15 +373,21 @@ _COMPLIANCE_FROM = (
 )
 
 
+_COMPLIANCE_SELECT = (
+    "SELECT cr.id, cr.control_id, s.code AS standard_code, s.edition, c.clause_ref, c.control_code,"
+    " c.verification_method, c.default_gate_type, pc.applicability, pc.approved_by,"
+    " coalesce(pc.agent_role, c.default_agent_role)::text AS agent_role, cr.status::text AS status,"
+    " cr.gate_execution_id, cr.evidence_id, cr.reviewed_by, u.display_name AS reviewer_name, cr.checked_at,"
+    " cr.notes, coalesce(pc.blocking, control_default_blocking(r.quality_profile::text,"
+    " coalesce(pc.agent_role, c.default_agent_role)::text)) AS blocking"
+)
+
+
 def _applicability(value: str | None, approved_by: Any) -> str:
     """project_controls → ApplicabilityStatus: не утверждённая человеком применимость — PENDING_REVIEW."""
     if value is None or approved_by is None:
         return "PENDING_REVIEW"
     return _APPLICABILITY.get(value, "PENDING_REVIEW")
-
-
-def _user_ref(user_id: Any, name: str | None) -> dict[str, Any] | None:
-    return None if user_id is None else {"id": user_id, "display_name": name or ""}
 
 
 def _compliance_row(r: dict[str, Any]) -> dict[str, Any]:
@@ -377,6 +406,9 @@ def _compliance_row(r: dict[str, Any]) -> dict[str, Any]:
         "evidence_id": r["evidence_id"],
         "reviewed_by": _user_ref(r["reviewed_by"], r["reviewer_name"]),
         "checked_at": r["checked_at"],
+        "result_id": r["id"],
+        "notes": _opt_text(r["notes"]),
+        "blocking": bool(r["blocking"]),
     }
 
 
@@ -422,10 +454,7 @@ async def get_run_compliance(
         clauses.append("(s.code, c.control_code, cr.id) > (:kc, :kcc, :kid)")
         params.update(kc=str(code), kcc=str(control), kid=uuid.UUID(str(rid)))
     sql = (
-        "SELECT cr.id, cr.control_id, s.code AS standard_code, s.edition, c.clause_ref, c.control_code,"
-        " c.verification_method, c.default_gate_type, pc.applicability, pc.approved_by,"
-        " coalesce(pc.agent_role, c.default_agent_role)::text AS agent_role, cr.status::text AS status,"
-        " cr.gate_execution_id, cr.evidence_id, cr.reviewed_by, u.display_name AS reviewer_name, cr.checked_at"
+        _COMPLIANCE_SELECT
         + _COMPLIANCE_FROM
         + " WHERE "
         + " AND ".join(clauses)
@@ -449,6 +478,83 @@ async def get_run_compliance(
             "disclaimer": DISCLAIMER,
         }
     )
+
+
+class ComplianceReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["PASS", "FAIL"]
+    notes: Annotated[str, Field(min_length=1, max_length=4000)]
+    evidence_ids: Annotated[list[uuid.UUID], Field(min_length=1, max_length=20)]
+
+
+async def compliance_row(conn: AsyncConnection, result_id: uuid.UUID) -> dict[str, Any]:
+    rows = (
+        (await conn.execute(text(_COMPLIANCE_SELECT + _COMPLIANCE_FROM + " WHERE cr.id = :id"), {"id": result_id}))
+        .mappings()
+        .all()
+    )
+    if not rows:
+        raise ProblemError("not_found")
+    return _compliance_row(dict(rows[0]))
+
+
+@router.post(
+    "/runs/{run_id}/compliance/{control_id}/review",
+    tags=["quality"],
+    **op("reviewComplianceControl", "compliance:review"),
+)
+async def review_compliance_control(
+    request: Request,
+    run_id: Annotated[uuid.UUID, Path()],
+    control_id: Annotated[uuid.UUID, Path()],
+    body: ComplianceReviewRequest,
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    """Вердикт человека по контролю (QUALITY_GATES §8.2, OQ-43 (d)): PASS/FAIL с обоснованием и evidence run.
+    Роль, применимость и состояние вердикта проверяет SECURITY DEFINER функция (миграция 0010)."""
+    access = await resolve_resource(request, principal, "sys_resolve_run_workspace", run_id)
+    await authorize(request, access, "compliance:review")
+
+    async def command(conn: AsyncConnection) -> CommandResult:
+        if len(set(body.evidence_ids)) != len(body.evidence_ids):
+            raise ProblemError(
+                "validation_error", errors=[FieldError("/evidence_ids", "unique", "evidence повторяется")]
+            )
+        previous = (
+            await conn.execute(
+                text(
+                    "SELECT status::text FROM compliance_results"
+                    " WHERE run_id = :r AND control_id = :c AND superseded_at IS NULL"
+                ),
+                {"r": run_id, "c": control_id},
+            )
+        ).scalar_one_or_none()
+        result_id = await record_review(
+            conn, run_id=run_id, control_id=control_id, status=body.status, notes=body.notes,
+            evidence_ids=list(body.evidence_ids),
+        )  # fmt: skip
+        row = await compliance_row(conn, result_id)
+        await audit.record(
+            conn,
+            action="compliance.review",
+            resource_type="compliance_result",
+            resource_id=result_id,
+            actor_type="user",
+            actor_id=principal.user_id,
+            workspace_id=access.workspace_id,
+            metadata={
+                "run_id": str(run_id),
+                "control_id": str(control_id),
+                "control_code": row["control_code"],
+                "from": previous,
+                "to": body.status,
+                "evidence_ids": [str(e) for e in body.evidence_ids],
+            },
+        )
+        return CommandResult(200, row)
+
+    return await run_idempotent(request, access.db(), body.model_dump(), command)
 
 
 # --- report -----------------------------------------------------------------------------------------

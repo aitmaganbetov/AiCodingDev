@@ -10,7 +10,10 @@ AC-11/AC-14.
 * `evaluate_completion` — run `COMPLETED` только если каждый обязательный gate профиля имеет
   выполнение, все актуальные обязательные выполнения PASS/NOT_APPLICABLE на финальном commit своей
   задачи, есть хотя бы один PASS, нет открытых блокирующих findings (severity ≥ порога профиля;
-  ACCEPTED_RISK выше допустимого профилем уровня тоже блокирует) и нет PENDING approvals.
+  ACCEPTED_RISK выше допустимого профилем уровня тоже блокирует), нет PENDING approvals и нет блокирующих
+  контролей с актуальным вердиктом `FAIL` (§5.3 п.6: `project_controls.blocking`, NULL — умолчание
+  платформы `control_default_blocking`, миграция 0010). Модуль standards — соседний слой и не
+  импортируется: вердикты контролей читаются из `compliance_results` напрямую.
 
 `run_completion_verdict(conn, run_id, store=…)` загружает данные run и применяет правила; оркестратор
 вызывает его в блоке VERIFYING → COMPLETED (engine.tick). DB-guard `trg_runs_completion_guard` (§18.4)
@@ -164,6 +167,7 @@ def evaluate_completion(
     pending_approvals: int = 0,
     reread: Mapping[uuid.UUID, str | None] | None = None,
     profile_definition: Mapping[str, Any] | None = None,
+    blocking_failed_controls: Iterable[str] = (),
 ) -> CompletionVerdict:
     reasons: list[str] = []
     finals = final_commits(gates)
@@ -189,6 +193,8 @@ def evaluate_completion(
             reasons.append(f"{f.severity} finding {f.rule_id} cannot be accepted as risk in profile {profile}")
     if pending_approvals:
         reasons.append(f"{pending_approvals} approval(s) still PENDING")
+    for code in sorted(set(blocking_failed_controls)):
+        reasons.append(f"blocking control {code} is FAIL")
     return CompletionVerdict(not reasons, tuple(reasons), len(gates))
 
 
@@ -203,6 +209,7 @@ class _Loaded:
     gates: list[GateRecord] = field(default_factory=list)
     findings: list[FindingRecord] = field(default_factory=list)
     pending: int = 0
+    failed_controls: list[str] = field(default_factory=list)
 
 
 async def _load(conn: AsyncConnection, run_id: uuid.UUID) -> _Loaded | None:
@@ -309,6 +316,25 @@ async def _load(conn: AsyncConnection, run_id: uuid.UUID) -> _Loaded | None:
             )
         ).scalar_one()
     )
+    # §5.3 п.6: актуальный вердикт FAIL контроля, блокирующего в проекте (явно или по умолчанию платформы).
+    data.failed_controls = [
+        str(code)
+        for (code,) in (
+            await conn.execute(
+                text(
+                    "SELECT c.control_code FROM compliance_results cr"
+                    " JOIN runs r ON r.workspace_id = cr.workspace_id AND r.id = cr.run_id"
+                    " JOIN standard_controls c ON c.id = cr.control_id"
+                    " LEFT JOIN project_controls pc ON pc.project_id = r.project_id AND pc.control_id = cr.control_id"
+                    " WHERE cr.run_id = :r AND cr.superseded_at IS NULL AND cr.status = 'FAIL'"
+                    " AND coalesce(pc.blocking, control_default_blocking(r.quality_profile::text,"
+                    " coalesce(pc.agent_role, c.default_agent_role)::text))"
+                    " ORDER BY c.control_code"
+                ),
+                {"r": run_id},
+            )
+        ).all()
+    ]
     return data
 
 
@@ -347,4 +373,5 @@ async def run_completion_verdict(
         pending_approvals=data.pending,
         reread=reread,
         profile_definition=data.definition,
+        blocking_failed_controls=data.failed_controls,
     )

@@ -117,6 +117,7 @@ class FindingItem:
     gate_type: str | None  # тип gate-источника (None — ревью/ручная/GitHub)
     gate_execution_id: uuid.UUID | None
     evidence_id: uuid.UUID | None
+    control_refs: tuple[str, ...] = ()  # findings.control_refs (миграция 0010)
 
 
 @dataclass(frozen=True)

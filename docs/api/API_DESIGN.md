@@ -54,25 +54,25 @@ flowchart LR
 
 Принцип адресации: **плоские канонические URI для ресурсов с собственным UUID** (`/runs/{run_id}`, `/tasks/{task_id}`, `/evidence/{evidence_id}`) и вложенность только для подчинённых коллекций. Это совпадает с таблицей ТЗ §8 и позволяет определять tenant по самому ресурсу (§6).
 
-### 2.1 Каталог операций (55 = 37 из ТЗ §8 + 18 дополнений)
+### 2.1 Каталог операций (61 = 37 из ТЗ §8 + 24 дополнения)
 
 | Группа | Операции |
 |---|---|
 | Auth **(доп.)** | `POST /auth/login`, `POST /auth/logout`, `GET /auth/session` |
 | Health **(доп.)** | `GET /health/live`, `GET /health/ready` (без аутентификации) |
 | Workspaces | `GET/POST /workspaces`; **(доп.)** `GET/POST /workspaces/{workspace_id}/members`, `PATCH/DELETE /workspaces/{workspace_id}/members/{user_id}` |
-| Projects | `GET/POST /projects`, `GET/PATCH /projects/{project_id}`, `POST /projects/{project_id}/repositories`, **(доп.)** `GET /projects/{project_id}/repositories`, `GET /projects/{project_id}/technologies`, `GET/PATCH /projects/{project_id}/documentation-policy` |
+| Projects | `GET/POST /projects`, `GET/PATCH /projects/{project_id}`, `POST /projects/{project_id}/repositories`, **(доп.)** `GET /projects/{project_id}/repositories`, `GET /projects/{project_id}/technologies`, `GET/PATCH /projects/{project_id}/documentation-policy`, `GET /projects/{project_id}/controls`, `POST /projects/{project_id}/controls/{control_id}/approval` |
 | Runs | **(доп.)** `GET /runs`; `POST /runs`, `GET /runs/{run_id}`, `GET /runs/{run_id}/tasks`, `POST /runs/{run_id}/pause|resume|cancel`, `GET /runs/{run_id}/events` (SSE), `GET /runs/{run_id}/activity` |
 | Chat/Directives | `GET /runs/{run_id}/chat`, `POST /runs/{run_id}/chat/messages`, `POST /runs/{run_id}/directives`, `GET /runs/{run_id}/directives/{directive_id}`; **(доп.)** `GET /runs/{run_id}/directives`, `POST .../directives/{directive_id}/confirm`, `POST .../directives/{directive_id}/cancel` |
 | Tasks | `GET /tasks/{task_id}`, `GET /tasks/{task_id}/messages`, `GET /tasks/{task_id}/evidence`; **(доп.)** `GET /tasks/{task_id}/attempts` |
 | Evidence **(доп.)** | `GET /evidence/{evidence_id}`, `GET /artifacts/{artifact_id}/download` |
-| Quality | `GET /runs/{run_id}/quality`, `GET /runs/{run_id}/compliance`, `GET /runs/{run_id}/report` |
+| Quality | `GET /runs/{run_id}/quality`, `GET /runs/{run_id}/compliance`, `GET /runs/{run_id}/report`; **(доп., Phase 7, OQ-43 (d))** `GET /runs/{run_id}/findings`, `GET /findings/{finding_id}`, `POST /findings/{finding_id}/transitions`, `POST /runs/{run_id}/compliance/{control_id}/review` |
 | Providers | `GET /providers`, `POST /providers/{provider_id}/probe`, `PATCH /providers/{provider_id}/settings` |
 | Approvals | `GET /approvals`, `POST /approvals/{approval_id}/decision`; **(доп.)** `GET /approvals/{approval_id}` |
 | Documentation | `GET/POST /documentation/sources`, `POST /documentation/sources/{source_id}/refresh` |
 | Audit | `GET /audit-events` |
 
-Обоснование дополнений: auth — без них невозможна cookie-сессия (ADR-0009); members — RBAC требует управления ролями (AC-12); `GET /runs`, `GET .../repositories`, `GET .../directives`, `GET /tasks/{id}/attempts`, `GET /approvals/{id}`, `GET /evidence/{id}` — экраны Dashboard/Run Graph/Task Detail/Evidence (ТЗ §11) без них не строятся; `confirm`/`cancel` директивы — шаг «confirm» из ТЗ §8.2 не имеет эндпоинта в таблице; artifacts download — evidence ссылается на artifact (AC-14); health — эксплуатация (ТЗ §16).
+Обоснование дополнений: auth — без них невозможна cookie-сессия (ADR-0009); members — RBAC требует управления ролями (AC-12); `GET /runs`, `GET .../repositories`, `GET .../directives`, `GET /tasks/{id}/attempts`, `GET /approvals/{id}`, `GET /evidence/{id}` — экраны Dashboard/Run Graph/Task Detail/Evidence (ТЗ §11) без них не строятся; `confirm`/`cancel` директивы — шаг «confirm» из ТЗ §8.2 не имеет эндпоинта в таблице; artifacts download — evidence ссылается на artifact (AC-14); health — эксплуатация (ТЗ §16); findings/transitions, review контроля и применимость контролей проекта — экраны Quality/Standards & Compliance Phase 7: жизненный цикл находок и вердикт человека по контролю (QUALITY_GATES §5.3, §8.2) и утверждение применимости admin (ТЗ §13) без них невыполнимы (OQ-43 (d)).
 
 ## 3. Аутентификация и CSRF (ADR-0009)
 
@@ -128,6 +128,8 @@ flowchart LR
 | `directive:create` | ✔ все типы | ✔ все типы | ✔ все типы | ✔ только `ASK`, `REVIEW`, `APPROVE`/`REJECT`² | — |
 | `directive:confirm` | ✔ | ✔ | ✔ свои | ✔ свои | — |
 | `approval:decide` | см. §5.3 | см. §5.3 | см. §5.3 | см. §5.3 | — |
+| `finding:triage` | ✔ | ✔ | ✔ без `ACCEPTED_RISK` | ✔ без `ACCEPTED_RISK` | — |
+| `compliance:review` | ✔ | ✔ | ✔ | ✔ | — |
 | `provider:probe`, `provider:settings` | ✔ | ✔ | — | — | — |
 | `documentation:register` | ✔ | ✔ | — | — | — |
 | `documentation:refresh` | ✔ | ✔ | ✔ | — | — |
@@ -164,7 +166,11 @@ flowchart LR
 | `GET /tasks/{id}`, `/attempts`, `/messages` | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /tasks/{id}/evidence`, `GET /evidence/{id}` | evidence:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /artifacts/{id}/download` | artifact:download (+`download_raw` для `raw_cli_log`) | ✔ | ✔ | ✔ (не raw) | ✔ (не raw) | ✔ (не raw) |
-| `GET /runs/{id}/quality|compliance|report` | quality:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /runs/{id}/quality|compliance|report`, `GET /runs/{id}/findings`, `GET /findings/{id}` | quality:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST /findings/{id}/transitions` | finding:triage (§5.5) | ✔ | ✔ | ✔ кроме `ACCEPTED_RISK` | ✔ кроме `ACCEPTED_RISK` | — |
+| `POST /runs/{id}/compliance/{control_id}/review` | compliance:review | ✔ | ✔ | ✔ | ✔ | — |
+| `GET /projects/{id}/controls` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST /projects/{id}/controls/{control_id}/approval` | project:update | ✔ | ✔ | — | — | — |
 | `GET /providers` | provider:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /providers/{id}/probe`, `PATCH .../settings` | provider:probe / settings | ✔ | ✔ | — | — | — |
 | `GET /approvals`, `GET /approvals/{id}` | approval:read | ✔ | ✔ | ✔ | ✔ | ✔ |
@@ -200,6 +206,18 @@ flowchart LR
 | `APPROVE`, `REJECT` | ✔ если §5.3 разрешает | ✔ если §5.3 разрешает | `approval` |
 
 Недопустимое сочетание типа и цели ⇒ `422 validation_error` (pointer `/target/type`). Политика проекта может дополнительно запретить тип (`403 policy_denied`).
+
+### 5.5 Решения по находкам (`finding:triage`, `x-permission-depends-on: to_status`) и вердикт по контролю
+
+| `to_status` | Минимальная роль | Условия |
+|---|---|---|
+| `ACKNOWLEDGED`, `FALSE_POSITIVE` | `reviewer` | из `OPEN` (`FALSE_POSITIVE` — также из `ACKNOWLEDGED`) |
+| `OPEN` (повторное открытие) | `reviewer` | из `FALSE_POSITIVE`/`ACCEPTED_RISK`; решение (`resolved_by`) снимается |
+| `ACCEPTED_RISK` | `admin` | из `OPEN`/`ACKNOWLEDGED`; не выше допустимого профилем run уровня (`critical`-профиль: `critical` нельзя) ⇒ иначе `422` |
+
+Причина (`reason`) обязательна для любого перехода; `FIXED`/`VERIFIED_FIXED` выставляет только Verification Engine (QUALITY_GATES §5.3). Переход вне FSM ⇒ `409 invalid_state_transition` (`current_status`). Решение записывает пользователь сессии (`resolved_by`, триггер БД 0008), ETag находки — `findings.version` (миграция 0010), `If-Match` обязателен. Отказ по роли аудируется (`authz.denied`, `permission = finding:triage:<to_status>`).
+
+`compliance:review` (reviewer+; роль проверяется и в БД — `sys_record_compliance_review`, ≥ `approval_min_role('MANUAL_REVIEW')`): вердикт `PASS`/`FAIL` с обоснованием и evidence этого run для контроля `manual`/`document_check`/`agent_review` в `MANUAL_REVIEW`/`UNVERIFIED` или переопределение `UNVERIFIED` автоматического контроля. Контроль, вердикт которого выставил gate (`PASS`/`FAIL`), `NOT_APPLICABLE`, неутверждённая применимость или терминальный run ⇒ `409 invalid_state_transition`; evidence не этого run / не `VERIFIED` для `PASS` ⇒ `422`. Применимость и `blocking` контроля утверждает `admin` (`project:update`, ТЗ §13).
 
 ## 6. Ошибки: RFC 7807 `application/problem+json`
 
@@ -251,7 +269,7 @@ flowchart LR
 
 ## 8. Idempotency-Key
 
-- **Обязателен** на всех POST-командах: `/workspaces`, `/workspaces/{id}/members`, `/projects`, `/projects/{id}/repositories`, `/runs`, `/runs/{id}/pause|resume|cancel`, `/runs/{id}/chat/messages`, `/runs/{id}/directives`, `.../directives/{id}/confirm|cancel`, `/providers/{id}/probe`, `/approvals/{id}/decision`, `/documentation/sources`, `/documentation/sources/{id}/refresh`. Не требуется: `/auth/login`, `/auth/logout`, все `GET`, `PATCH` (защищены `If-Match`), `DELETE` (идемпотентен по семантике + `If-Match`).
+- **Обязателен** на всех POST-командах: `/workspaces`, `/workspaces/{id}/members`, `/projects`, `/projects/{id}/repositories`, `/runs`, `/runs/{id}/pause|resume|cancel`, `/runs/{id}/chat/messages`, `/runs/{id}/directives`, `.../directives/{id}/confirm|cancel`, `/providers/{id}/probe`, `/approvals/{id}/decision`, `/documentation/sources`, `/documentation/sources/{id}/refresh`, `/findings/{id}/transitions`, `/runs/{id}/compliance/{control_id}/review`, `/projects/{id}/controls/{control_id}/approval`. Не требуется: `/auth/login`, `/auth/logout`, все `GET`, `PATCH` (защищены `If-Match`), `DELETE` (идемпотентен по семантике + `If-Match`).
 - Формат: 8–255 символов `[A-Za-z0-9._:-]`; рекомендуется UUIDv4/v7, генерируемый клиентом на «намерение пользователя» (одна кнопка — один ключ, переиспользуется при повторах после сетевой ошибки).
 - **Scope и хранение:** таблица `idempotency_keys`, `UNIQUE (workspace_id, user_id, key)` — для `POST /workspaces` `workspace_id IS NULL`, поэтому ограничение объявляется `UNIQUE NULLS NOT DISTINCT` (PostgreSQL ≥ 15). `request_hash` = SHA-256 от `method + path-template + resolved path params + canonical JSON тела (RFC 8785) + If-Match`. Хранение **24 ч** (`expires_at`), очистка retention-джобом.
 - **Алгоритм:**
@@ -266,9 +284,9 @@ flowchart LR
 
 ## 9. Оптимистичная конкурентность: ETag / If-Match / version
 
-- Ресурсы с версией отдают **сильный** `ETag: "v<version>"`: `Project` (`projects.version` — см. §19), `DocumentationPolicy` и `ProviderSettings` (`settings_version`), `Run`, `Task`, `Directive`, `Approval`, `Member`.
+- Ресурсы с версией отдают **сильный** `ETag: "v<version>"`: `Project` (`projects.version` — см. §19), `DocumentationPolicy` и `ProviderSettings` (`settings_version`), `Run`, `Task`, `Directive`, `Approval`, `Member`, `Finding` (`findings.version`, миграция 0010).
 - `PATCH` и `DELETE` **требуют** `If-Match` (нет ⇒ `428 precondition_required`, не совпал ⇒ `412 precondition_failed` с актуальным `ETag`).
-- `POST /approvals/{id}/decision`, `.../directives/{id}/confirm|cancel` также требуют `If-Match` — решение принимается по той версии, которую видел человек.
+- `POST /approvals/{id}/decision`, `.../directives/{id}/confirm|cancel`, `POST /findings/{id}/transitions` также требуют `If-Match` — решение принимается по той версии, которую видел человек.
 - `POST /runs/{id}/pause|resume|cancel` — `If-Match` необязателен (команда «остановить всё» должна работать и из устаревшего UI); если передан и не совпал — `412`.
 - Директивы используют поле тела `expected_run_version` (ТЗ §8.2) вместо заголовка: несовпадение ⇒ `409 version_mismatch` с `current_version`. `runs.version` инкрементируется при каждом переходе статуса run и изменении плана (`plan_version`), но не при переходах отдельных задач, чтобы не делать директивы непрактичными во время выполнения.
 - `GET` одиночных ресурсов поддерживает `If-None-Match` ⇒ `304`.
@@ -426,6 +444,9 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 | `chat.message.create` | chat/messages | `chat_message` |
 | `directive.submit`, `directive.confirm`, `directive.cancel` | directives | `user_directive` |
 | `approval.decide` | decision | `approval` |
+| `finding.transition` | findings/transitions (metadata `from`/`to`/`severity`) | `finding` |
+| `compliance.review` | compliance review (metadata `control_code`, `from`/`to`, `evidence_ids`) | `compliance_result` |
+| `project_control.approve` | controls approval (metadata `project_id`, `control_code`, `from`/`to`) | `project_control` |
 | `provider.probe_requested`, `provider.settings.update` | providers | `cli_provider` |
 | `documentation_source.register`, `documentation_source.refresh_requested` | documentation | `documentation_source` |
 | `artifact.download` | artifacts | `artifact` |
@@ -473,6 +494,7 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 | `project_status` | `ACTIVE`, `ARCHIVED` | `projects.status` |
 | `compatibility_status` | `SUPPORTED`, `UNTESTED`, `UNSUPPORTED` | compatibility matrix CLI |
 | `applicability_status` | `APPLICABLE`, `NOT_APPLICABLE`, `PENDING_REVIEW` | `project_controls.applicability` |
+| `control_approval_state` | `approved`, `draft`, `missing` | `ProjectControl.approval_state` (утверждено человеком / черновик системы / строки нет) |
 | `approval_policy` (run) | `risk_based`, `always`, `critical_only` | `RunCreateRequest.approval_policy` (в ТЗ §8.1 только пример `risk_based`) |
 | `routing.strategy` | `adaptive`, `fixed` | `RunCreateRequest.routing` |
 

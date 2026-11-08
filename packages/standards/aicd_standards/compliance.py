@@ -15,7 +15,9 @@
 * `agent_review`: анализ агента максимум `MANUAL_REVIEW` до подтверждения человеком;
 * `manual`: `MANUAL_REVIEW`, пока человек не записал вердикт; `document_check`: по gate своего типа,
   если он выполнялся, иначе `MANUAL_REVIEW`; вердикт человека (`Attestation`) учитывается для
-  `manual`/`document_check`/`agent_review`, но не перекрывает автоматический gate.
+  `manual`/`document_check`/`agent_review`, но не перекрывает автоматический gate: для `automated_gate`
+  он заменяет только `UNVERIFIED` (переопределение с обоснованием и evidence, OQ-43 (d));
+* находка относится к контролю и по `findings.control_refs` (код контроля, миграция 0010).
 `PASS` и `FAIL` всегда опираются на evidence (CHECK §13.4); без evidence вердикт не выносится.
 """
 
@@ -220,7 +222,13 @@ def _decide(control: Control, pc: ProjectControl | None, inp: EvaluationInput) -
         )
     if method == "document_check" and not _gates_of(control, inp.gates):
         return _Outcome("MANUAL_REVIEW", "Проверка документа не выполнялась автоматически — нужен вердикт человека.")
-    return _from_gates(control, rule, inp)
+    outcome = _from_gates(control, rule, inp)
+    if outcome.status == "UNVERIFIED" and method == "automated_gate":
+        # Автоматическая проверка не дала вердикта — учитывается переопределение человеком (с evidence).
+        attested = _from_attestation(inp.attestations.get(control.id), inp.evidence)
+        if attested is not None:
+            return attested
+    return outcome
 
 
 def _from_attestation(att: Attestation | None, evidence: Mapping[uuid.UUID, EvidenceItem]) -> _Outcome | None:
@@ -248,7 +256,7 @@ def _blocking_findings(control: Control, rule: ControlRule, inp: EvaluationInput
         if f.status not in OPEN_FINDING_STATUSES or severity_rank(f.severity) < threshold:
             continue
         related = (f.cwe_id in rule.cwe_ids) if rule.cwe_ids else (f.gate_type == control.default_gate_type)
-        if related:
+        if related or control.control_code in f.control_refs:
             result.append(f)
     return sorted(result, key=lambda f: (-severity_rank(f.severity), str(f.id)))
 

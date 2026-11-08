@@ -310,6 +310,6 @@ flowchart LR
 | `gate_executions.commit_sha`, `error_code` (`TOOL_UNAVAILABLE`, `TIMEOUT`, `INFRA`, `SHA_MISMATCH`, `REPORT_UNPARSABLE`, `EMPTY_SUITE`), `attempt_no`, `profile_version` | вердикт и идемпотентность |
 | Перечисление `project_controls.applicability`: `applicable`, `not_applicable`, `undecided` | ТЗ §7.2 без значений |
 | Перечисление `standard_controls.verification_method`: `automated_gate`, `agent_review`, `manual`, `document_check` | ТЗ §13 |
-| Колонки `standard_controls.check_ref`, `responsible_role`, `default_severity`; `project_controls.blocking`, `approved_at` | трассировка контроль → роль → check |
-| `findings.control_refs text[]` | связь findings ↔ контролей |
+| Колонки `standard_controls.check_ref`, `responsible_role`, `default_severity`; `project_controls.blocking`, `approved_at` | трассировка контроль → роль → check; `project_controls.blocking` (NULL — умолчание платформы: `security` в `strict`/`critical`) — **принято, миграция 0010** |
+| `findings.control_refs text[]` | связь findings ↔ контролей — **принято, миграция 0010** |
 | Artifact kinds `gate_log`, `applicability_report`, `sbom`, `signature` | словарь artifacts |

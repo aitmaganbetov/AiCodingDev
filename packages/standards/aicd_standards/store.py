@@ -15,8 +15,10 @@ import uuid
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.ids import uuid7
 from aicd_standards.applicability import ApplicabilityProposal, StackFacts, propose
 from aicd_standards.compliance import ComplianceReport, ControlVerdict, EvaluationInput, evaluate
@@ -115,15 +117,20 @@ async def approve_project_control(
     applicability: str,
     rationale: str | None,
     agent_role: str | None = None,
+    blocking: bool | None = None,
 ) -> None:
-    """Утверждение применимости человеком (RBAC admin проверяет API; БД требует `app.user_id = user_id`)."""
+    """Утверждение применимости человеком (RBAC admin проверяет API; БД требует `app.user_id = user_id`).
+
+    `blocking` — блокирующий контроль (QUALITY_GATES §5.3 п.6); None — умолчание платформы
+    (`control_default_blocking`, миграция 0010). Утверждение — полное решение: прежнее явное значение
+    заменяется переданным."""
     await conn.execute(
         text(
             "INSERT INTO project_controls (workspace_id, project_id, control_id, applicability, rationale, agent_role,"
-            " approved_by, approved_at) VALUES (:ws, :p, :c, :a, :r, :role, :u, now())"
+            " blocking, approved_by, approved_at) VALUES (:ws, :p, :c, :a, :r, :role, :b, :u, now())"
             " ON CONFLICT ON CONSTRAINT pk_project_controls DO UPDATE"
             " SET applicability = EXCLUDED.applicability, rationale = EXCLUDED.rationale,"
-            " agent_role = coalesce(EXCLUDED.agent_role, project_controls.agent_role),"
+            " agent_role = coalesce(EXCLUDED.agent_role, project_controls.agent_role), blocking = EXCLUDED.blocking,"
             " approved_by = EXCLUDED.approved_by, approved_at = EXCLUDED.approved_at"
         ),
         {
@@ -133,9 +140,112 @@ async def approve_project_control(
             "a": applicability,
             "r": rationale,
             "role": agent_role,
+            "b": blocking,
             "u": user_id,
         },
     )
+
+
+_PROJECT_CONTROLS_SQL = (
+    "SELECT c.id AS control_id, s.code AS standard_code, s.edition, s.title AS standard_title, c.clause_ref,"
+    " c.control_code, c.description, c.verification_method, c.default_gate_type, c.default_agent_role::text"
+    " AS default_agent_role, pc.applicability, pc.rationale, pc.agent_role::text AS agent_role, pc.blocking,"
+    " control_default_blocking(:profile, coalesce(pc.agent_role, c.default_agent_role)::text) AS default_blocking,"
+    " pc.approved_by, u.display_name AS approver_name, pc.approved_at, pc.updated_at,"
+    " CASE WHEN pc.control_id IS NULL THEN 'missing' WHEN pc.approved_by IS NULL THEN 'draft' ELSE 'approved' END"
+    " AS approval_state"
+    " FROM standard_controls c JOIN standards s ON s.id = c.standard_id"
+    " LEFT JOIN project_controls pc ON pc.project_id = :p AND pc.control_id = c.id"
+    " LEFT JOIN users u ON u.id = pc.approved_by"
+    " WHERE c.active AND s.active"
+)
+
+
+async def project_quality_profile(conn: AsyncConnection, project_id: uuid.UUID) -> str:
+    """Профиль качества проекта по умолчанию (project_settings; без строки — strict, как DEFAULT схемы)."""
+    profile = (
+        await conn.execute(
+            text("SELECT quality_profile::text FROM project_settings WHERE project_id = :p"), {"p": project_id}
+        )
+    ).scalar_one_or_none()
+    return str(profile or "strict")
+
+
+async def list_project_controls(
+    conn: AsyncConnection,
+    project_id: uuid.UUID,
+    *,
+    profile: str,
+    standard_code: str | None = None,
+    approval_state: str | None = None,
+    control_id: uuid.UUID | None = None,
+    after: tuple[str, str, uuid.UUID] | None = None,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Активные контроли реестра с применимостью для проекта (экран Standards & Compliance): состояние
+    утверждения (approved/draft/missing), блокирующий статус (явный и умолчание платформы для `profile`)."""
+    sql = _PROJECT_CONTROLS_SQL
+    params: dict[str, Any] = {"p": project_id, "profile": profile, "lim": limit}
+    if standard_code:
+        sql += " AND s.code = :std"
+        params["std"] = standard_code
+    if control_id is not None:
+        sql += " AND c.id = :cid"
+        params["cid"] = control_id
+    if approval_state == "missing":
+        sql += " AND pc.control_id IS NULL"
+    elif approval_state == "draft":
+        sql += " AND pc.control_id IS NOT NULL AND pc.approved_by IS NULL"
+    elif approval_state == "approved":
+        sql += " AND pc.approved_by IS NOT NULL"
+    if after is not None:
+        sql += " AND (s.code, c.control_code, c.id) > (:ks, :kc, :kid)"
+        params.update(ks=after[0], kc=after[1], kid=after[2])
+    sql += " ORDER BY s.code, c.control_code, c.id LIMIT :lim"
+    return [dict(r) for r in (await conn.execute(text(sql), params)).mappings().all()]
+
+
+# SQLSTATE `sys_record_compliance_review` (миграция 0010) → ошибка API (API_DESIGN §6).
+_REVIEW_ERRORS: dict[str, tuple[str, str | None]] = {
+    "42501": ("forbidden", None),
+    "55000": ("invalid_state_transition", "Вердикт по контролю сейчас не принимается"),
+    "22023": ("validation_error", "Неверные аргументы вердикта"),
+    "23514": ("validation_error", "Evidence должно принадлежать run; для PASS — VERIFIED"),
+    "23505": ("conflict", "Вердикт по контролю записывается параллельно"),
+}
+
+
+async def record_review(
+    conn: AsyncConnection,
+    *,
+    run_id: uuid.UUID,
+    control_id: uuid.UUID,
+    status: str,
+    notes: str,
+    evidence_ids: list[uuid.UUID],
+) -> uuid.UUID:
+    """Вердикт человека по контролю (QUALITY_GATES §8.2) через SECURITY DEFINER `sys_record_compliance_review`:
+    роль ≥ reviewer, контроль утверждён применимым, текущий вердикт открыт для человека; прежняя строка
+    получает `superseded_at`, evidence связывается с новым вердиктом. Возвращает id новой строки."""
+    try:
+        async with conn.begin_nested():
+            result_id: uuid.UUID | None = (
+                await conn.execute(
+                    text("SELECT sys_record_compliance_review(:r, :c, :s, :n, CAST(:e AS uuid[]))"),
+                    {"r": run_id, "c": control_id, "s": status, "n": notes, "e": [str(e) for e in evidence_ids]},
+                )
+            ).scalar_one()
+    except DBAPIError as exc:
+        sqlstate = getattr(exc.orig, "sqlstate", None) or ""
+        mapped = _REVIEW_ERRORS.get(sqlstate)
+        if mapped is None:
+            raise
+        code, detail = mapped
+        errors = [FieldError("/evidence_ids", "invalid", detail or "")] if sqlstate == "23514" else []
+        raise ProblemError(code, detail=detail, errors=errors) from exc
+    if result_id is None:
+        raise ProblemError("not_found")
+    return result_id
 
 
 async def load_run_input(
@@ -186,12 +296,12 @@ async def load_run_input(
         ).all()
     }
     findings = [
-        FindingItem(*r)
+        FindingItem(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], tuple(r[8] or ()))
         for r in (
             await conn.execute(
                 text(
                     "SELECT f.id, f.severity, f.status, f.rule_id, f.cwe_id, coalesce(g.gate_type, q.gate_type),"
-                    " f.gate_execution_id, f.evidence_id"
+                    " f.gate_execution_id, f.evidence_id, f.control_refs"
                     " FROM findings f LEFT JOIN gate_executions g ON g.id = f.gate_execution_id"
                     " LEFT JOIN quality_gates q ON q.id = f.source_gate_id WHERE f.run_id = :r"
                 ),

@@ -189,6 +189,13 @@ def test_pending_approvals_block_completion() -> None:
     assert not ok and "PENDING" in reasons[0]
 
 
+def test_failed_blocking_controls_block_completion() -> None:
+    """§5.3 п.6: FAIL блокирующего контроля (список собирает `_load` по project_controls.blocking)."""
+    ok, reasons = completion([gate("scope")], blocking_failed_controls=["SEC-27002-01", "SEC-27002-01"])
+    assert not ok and reasons == ("blocking control SEC-27002-01 is FAIL",)
+    assert completion([gate("scope")], blocking_failed_controls=[])[0]
+
+
 # --- P6-12: сценарии ложного прохождения (ни один не даёт PASS / COMPLETED) --------------------------
 
 

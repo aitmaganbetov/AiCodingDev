@@ -10,9 +10,12 @@ from aicd_standards.store import (
     approve_project_control,
     compliance_matrix,
     evaluate_run,
+    list_project_controls,
     load_controls,
     load_project_controls,
+    project_quality_profile,
     propose_project_controls,
+    record_review,
 )
 
 __all__ = [
@@ -29,10 +32,13 @@ __all__ = [
     "compliance_matrix",
     "evaluate",
     "evaluate_run",
+    "list_project_controls",
     "load_controls",
     "load_project_controls",
+    "project_quality_profile",
     "propose",
     "propose_project_controls",
+    "record_review",
     "relevant_for_mode",
     "stack_tags",
 ]
