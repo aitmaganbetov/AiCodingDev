@@ -15,11 +15,12 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-SourceKind = Literal["exact", "dependency", "task_relevance", "recency", "docs"]
+SourceKind = Literal["map", "exact", "dependency", "task_relevance", "recency", "docs"]
 Section = Literal["code", "symbols_graph", "tests", "repo_map", "docs"]
 StalePolicy = Literal["exclude", "mark"]
 
-KIND_RANK: dict[str, int] = {"exact": 0, "dependency": 1, "task_relevance": 2, "recency": 3, "docs": 4}
+# `map` — сжатая карта репозитория (repo_map): мала и нужна всегда, поэтому идёт раньше ранжируемых классов.
+KIND_RANK: dict[str, int] = {"map": -1, "exact": 0, "dependency": 1, "task_relevance": 2, "recency": 3, "docs": 4}
 
 
 @dataclass(frozen=True)
