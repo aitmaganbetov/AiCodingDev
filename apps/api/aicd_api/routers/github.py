@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -45,7 +46,7 @@ from aicd_code_intelligence.index.jobs import enqueue_indexing_job
 from aicd_identity import api as identity
 from aicd_integrations_github import api as gh
 from aicd_orchestration import github_flow
-from aicd_platform import audit
+from aicd_platform import audit, metrics
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
@@ -365,6 +366,16 @@ async def attach_github_repository(
 # --- Вебхук ---------------------------------------------------------------------------------------------
 
 
+_SIGNATURE_FORMAT = re.compile(r"^sha256=[0-9a-fA-F]{64}$")
+
+
+def _signature_failure(header: str | None) -> str:
+    """Причина отказа подписи для метки метрики (без значений заголовка)."""
+    if not header:
+        return "missing"
+    return "mismatch" if _SIGNATURE_FORMAT.fullmatch(header.strip()) else "malformed"
+
+
 @router.post(WEBHOOK_PATH, status_code=202, **op("receiveGitHubWebhook", "public"))
 async def receive_webhook(request: Request) -> Response:
     state = app_state(request)
@@ -384,7 +395,10 @@ async def receive_webhook(request: Request) -> Response:
         raise ProblemError("malformed_request", detail="Некорректные заголовки доставки GitHub") from exc
     digest = gh.webhooks.payload_sha256(body)
     # Подпись проверяется по сырому телу ДО разбора JSON (SC-GH-01).
-    if not gh.webhooks.signature_valid(body, request.headers.get("x-hub-signature-256"), secrets):
+    signature = request.headers.get("x-hub-signature-256")
+    if not gh.webhooks.signature_valid(body, signature, secrets):
+        # Метрика SC-OBS-02 (алерт AicdWebhookSignatureInvalid) — до записи в БД: сбой записи не скрывает атаку.
+        metrics.WEBHOOK_SIGNATURE_INVALID.labels(_signature_failure(signature)).inc()
         async with transaction(state.engine, DbContext()) as conn:
             await gh.store.receive_delivery(
                 conn, delivery_guid=guid, event=event, action=None, installation_id=None, signature_valid=False,

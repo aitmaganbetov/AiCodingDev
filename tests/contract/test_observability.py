@@ -102,7 +102,13 @@ def test_every_alert_has_metadata_and_tested_alerts_exist() -> None:
     }
     assert tested <= names
     # ТЗ §16 / FR-OBS-04: auth failures, stuck leases, high error rates, storage capacity покрыты тестами promtool.
-    assert {"AicdLoginFailuresSpike", "AicdStuckLeases", "AicdApiHighErrorRate", "AicdArtifactStorageLow"} <= tested
+    assert {
+        "AicdLoginFailuresSpike",
+        "AicdStuckLeases",
+        "AicdApiHighErrorRate",
+        "AicdArtifactStorageLow",
+        "AicdWebhookSignatureInvalid",
+    } <= tested
 
 
 def test_dashboards_are_valid_provisioning_json() -> None:

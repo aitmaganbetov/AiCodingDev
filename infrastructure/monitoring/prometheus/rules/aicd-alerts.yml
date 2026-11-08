@@ -21,6 +21,13 @@ groups:
         annotations:
           summary: "Много обращений к чужим workspace/проектам: {{ $value | printf \"%.1f\" }}/мин"
           description: "Перебор идентификаторов чужих ресурсов (AC-12, SC-OBS-02 tenant_denied)."
+      - alert: AicdWebhookSignatureInvalid
+        expr: sum(increase(aicd_webhook_signature_invalid_total[10m])) > 5
+        for: 5m
+        labels: {severity: warning, area: security}
+        annotations:
+          summary: "Вебхуки GitHub с неверной подписью: {{ $value | printf \"%.0f\" }} за 10 минут"
+          description: "Подделка доставок или устаревший webhook secret после ротации (SC-GH-01, SC-OBS-02). Проверьте github_webhook_deliveries (REJECTED) и секреты."
       - alert: AicdCsrfFailuresSpike
         expr: sum(rate(aicd_auth_failures_total{reason="csrf_failed"}[5m])) * 60 > 10
         for: 10m

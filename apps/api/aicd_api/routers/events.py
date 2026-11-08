@@ -235,8 +235,8 @@ async def _stream(
 ) -> AsyncIterator[str]:
     state = app_state(request)
     cfg = CONFIG
-    metrics.SSE_CONNECTIONS.inc()
-    metrics.SSE_CONNECTIONS_OPENED.inc()
+    metrics.SSE_CONNECTIONS.labels("run").inc()
+    metrics.SSE_CONNECTIONS_OPENED.labels("run").inc()
     subscription = state.redis.pubsub()
     pubsub: PubSub | None = subscription
     try:
@@ -284,7 +284,7 @@ async def _stream(
                     run_id, max(last, await _shielded(_max_seq(request, access, run_id))), utcnow()
                 )
     finally:
-        metrics.SSE_CONNECTIONS.dec()
+        metrics.SSE_CONNECTIONS.labels("run").dec()
         with anyio.CancelScope(shield=True):
             with contextlib.suppress(Exception):
                 await subscription.aclose()  # type: ignore[no-untyped-call]
@@ -433,6 +433,8 @@ async def _stream_workspace(
     event_id, между соединениями — клиентом (контракт streamWorkspaceEvents)."""
     state = app_state(request)
     cfg = CONFIG
+    metrics.SSE_CONNECTIONS.labels("workspace").inc()
+    metrics.SSE_CONNECTIONS_OPENED.labels("workspace").inc()
     subscription = state.redis.pubsub()
     pubsub: PubSub | None = subscription
     try:
@@ -489,6 +491,7 @@ async def _stream_workspace(
                 last_sent = now
                 yield sse.workspace_heartbeat_frame(access.workspace_id, utcnow())
     finally:
+        metrics.SSE_CONNECTIONS.labels("workspace").dec()
         with anyio.CancelScope(shield=True):
             with contextlib.suppress(Exception):
                 await subscription.aclose()  # type: ignore[no-untyped-call]

@@ -92,10 +92,24 @@ AUTHZ_DENIED = Counter(
     ["reason"],
     namespace=NAMESPACE,
 )
-SSE_CONNECTIONS = Gauge("sse_connections", "Открытые SSE-потоки run (процесс API)", namespace=NAMESPACE)
-SSE_CONNECTIONS_OPENED = Counter(
-    "sse_connections_opened_total", "Открытые SSE-потоки (накопительно)", namespace=NAMESPACE
+SSE_STREAMS = frozenset({"run", "workspace"})
+SSE_CONNECTIONS = Gauge(
+    "sse_connections",
+    "Открытые SSE-потоки процесса API по виду потока (run, workspace)",
+    ["stream"],
+    namespace=NAMESPACE,
 )
+SSE_CONNECTIONS_OPENED = Counter(
+    "sse_connections_opened_total", "Открытые SSE-потоки по виду потока (накопительно)", ["stream"], namespace=NAMESPACE
+)
+WEBHOOK_SIGNATURE_INVALID = Counter(
+    "webhook_signature_invalid_total",
+    "Отклонённые доставки вебхука GitHub с неверной подписью (SC-OBS-02): missing — нет заголовка,"
+    " malformed — не sha256=<hex64>, mismatch — подпись не совпала ни с одним активным секретом",
+    ["reason"],
+    namespace=NAMESPACE,
+)
+WEBHOOK_SIGNATURE_REASONS = frozenset({"missing", "malformed", "mismatch"})
 ARTIFACT_STORAGE_FREE = Gauge(
     "artifact_storage_free_bytes", "Свободное место FS-хранилища артефактов", namespace=NAMESPACE
 )

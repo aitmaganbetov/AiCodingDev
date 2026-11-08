@@ -34,6 +34,30 @@ tests:
         alertname: AicdLoginFailuresSpike
         exp_alerts: []
 
+  # Неверные подписи вебхука GitHub: 2 в минуту → алерт; единичный сбой — нет.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_webhook_signature_invalid_total{reason="mismatch", job="aicd-api", instance="api:8000"}'
+        values: '0+2x30'
+      - series: 'aicd_webhook_signature_invalid_total{reason="missing", job="aicd-api", instance="api:8000"}'
+        values: '0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AicdWebhookSignatureInvalid
+        exp_alerts:
+          - exp_labels: {severity: warning, area: security}
+            exp_annotations:
+              summary: "Вебхуки GitHub с неверной подписью: 20 за 10 минут"
+              description: "Подделка доставок или устаревший webhook secret после ротации (SC-GH-01, SC-OBS-02). Проверьте github_webhook_deliveries (REJECTED) и секреты."
+  - interval: 1m
+    input_series:
+      - series: 'aicd_webhook_signature_invalid_total{reason="mismatch", job="aicd-api", instance="api:8000"}'
+        values: '0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 19m
+        alertname: AicdWebhookSignatureInvalid
+        exp_alerts: []
+
   # Stuck lease: истёкшая аренда задачи держится 10 минут → алерт с resource_type.
   - interval: 1m
     input_series:

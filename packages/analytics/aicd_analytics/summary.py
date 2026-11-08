@@ -1,11 +1,10 @@
 # ruff: noqa: S608 — SQL собирается только из констант модуля (фильтры/тела представлений); значения — bind-параметры.
 """Сводка Analytics workspace за окно времени (P8-07, FR-OBS-05, FR-CI-08).
 
-Отклонение от DATABASE_DESIGN §17.2 / MODULE_BOUNDARIES §2 п.6: read-only представления `v_*` модулей-источников
-требуют миграции, а миграции в этой волне не создаются (OPEN_QUESTIONS OQ-46). Поэтому запросы ниже — тела
-будущих представлений; каждый помечен именем представления и модулем-владельцем таблиц. При появлении
-представлений меняется только `FROM`. Все запросы — в RLS-контексте workspace (`aicd_app`), фильтр
-`workspace_id = app_current_workspace()` дублирует RLS явно (defence in depth и использование индексов).
+Источник данных — только read-only представления `v_*` модулей-источников (DATABASE_DESIGN §17.2,
+MODULE_BOUNDARIES §2 п.6; миграция 0013, `security_invoker`): таблиц других модулей модуль не читает.
+Все запросы — в RLS-контексте workspace (`aicd_app`), фильтр `workspace_id = app_current_workspace()`
+дублирует RLS явно (defence in depth и использование индексов).
 
 Определения метрик (ТЗ §16):
 * run success rate — доля `COMPLETED` среди завершённых run окна (создание run в окне);
@@ -47,7 +46,6 @@ QUALITY_FAILURES = (
     "POLICY_DENIED",
 )
 RUN_TERMINAL = ("COMPLETED", "FAILED", "CANCELLED")
-ACTIVITY_RESULT = "agent.result_processed"  # = aicd_orchestration.agent_io.ACTIVITY_RESULT
 USEFULNESS_PACK_LIMIT = 2000  # верхняя граница пакетов для оценки полезности за запрос
 MAX_DAILY_POINTS = 400
 
@@ -75,8 +73,8 @@ def _stats(row: Mapping[str, Any] | None) -> dict[str, float | None]:
     return {"p50": _num(row.get("p50")), "p90": _num(row.get("p90")), "avg": _num(row.get("avg"))}
 
 
-# Фильтр проекта: run → project. `:project` NULL ⇒ все проекты workspace.
-_RUN_SCOPE = "r.workspace_id = app_current_workspace() AND (CAST(:project AS uuid) IS NULL OR r.project_id = :project)"
+# Фильтр workspace и проекта (у каждого представления есть workspace_id и project_id). `:project` NULL ⇒ все проекты.
+_SCOPE = "v.workspace_id = app_current_workspace() AND (CAST(:project AS uuid) IS NULL OR v.project_id = :project)"
 
 
 async def _all(conn: AsyncConnection, sql: str, params: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
@@ -94,11 +92,9 @@ async def _one(conn: AsyncConnection, sql: str, params: Mapping[str, Any]) -> Ma
 async def runs_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
     rows = await _all(
         conn,
-        "SELECT r.mode, r.status, count(*) AS n,"
-        " avg(EXTRACT(EPOCH FROM r.finished_at - COALESCE(r.started_at, r.created_at)))"
-        "   FILTER (WHERE r.finished_at IS NOT NULL) AS avg_duration"
-        f" FROM runs r WHERE {_RUN_SCOPE} AND r.created_at >= :from_ts AND r.created_at < :to_ts"
-        " GROUP BY r.mode, r.status",
+        "SELECT v.mode, v.status, count(*) AS n, avg(v.duration_seconds) AS avg_duration"
+        f" FROM v_run_outcomes v WHERE {_SCOPE} AND v.created_at >= :from_ts AND v.created_at < :to_ts"
+        " GROUP BY v.mode, v.status",
         w.params(),
     )
     by_status: dict[str, int] = {}
@@ -119,9 +115,9 @@ async def runs_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
         conn,
         "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY d) AS p50,"
         " percentile_cont(0.9) WITHIN GROUP (ORDER BY d) AS p90, avg(d) AS avg FROM ("
-        " SELECT EXTRACT(EPOCH FROM r.finished_at - COALESCE(r.started_at, r.created_at)) AS d FROM runs r"
-        f" WHERE {_RUN_SCOPE} AND r.created_at >= :from_ts AND r.created_at < :to_ts"
-        " AND r.finished_at IS NOT NULL) s",
+        " SELECT v.duration_seconds AS d FROM v_run_outcomes v"
+        f" WHERE {_SCOPE} AND v.created_at >= :from_ts AND v.created_at < :to_ts"
+        " AND v.finished_at IS NOT NULL) s",
         w.params(),
     )
     finished = sum(by_status.get(s, 0) for s in RUN_TERMINAL)
@@ -150,11 +146,11 @@ async def runs_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
 async def daily_section(conn: AsyncConnection, w: Window) -> list[dict[str, Any]]:
     rows = await _all(
         conn,
-        "SELECT to_char(date_trunc('day', r.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day, count(*) AS created,"
-        " count(*) FILTER (WHERE r.status = 'COMPLETED') AS completed,"
-        " count(*) FILTER (WHERE r.status = 'FAILED') AS failed,"
-        " count(*) FILTER (WHERE r.status = 'CANCELLED') AS cancelled"
-        f" FROM runs r WHERE {_RUN_SCOPE} AND r.created_at >= :from_ts AND r.created_at < :to_ts"
+        "SELECT to_char(date_trunc('day', v.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day, count(*) AS created,"
+        " count(*) FILTER (WHERE v.status = 'COMPLETED') AS completed,"
+        " count(*) FILTER (WHERE v.status = 'FAILED') AS failed,"
+        " count(*) FILTER (WHERE v.status = 'CANCELLED') AS cancelled"
+        f" FROM v_run_outcomes v WHERE {_SCOPE} AND v.created_at >= :from_ts AND v.created_at < :to_ts"
         " GROUP BY 1 ORDER BY 1 LIMIT :n",
         {**w.params(), "n": MAX_DAILY_POINTS},
     )
@@ -177,15 +173,13 @@ async def tasks_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
     params = {**w.params(), "failures": list(QUALITY_FAILURES)}
     roles = await _all(
         conn,
-        "SELECT t.agent_role AS role, count(*) AS attempts,"
-        " count(*) FILTER (WHERE a.status = 'SUCCEEDED') AS succeeded,"
-        " count(*) FILTER (WHERE a.status = 'FAILED' AND a.failure_category = ANY(:failures)) AS quality_failed,"
-        " count(*) FILTER (WHERE a.status = 'FAILED') AS failed,"
-        " count(*) FILTER (WHERE a.attempt_no > 1) AS retries"
-        " FROM task_attempts a JOIN tasks t ON t.id = a.task_id AND t.workspace_id = a.workspace_id"
-        " JOIN runs r ON r.id = t.run_id AND r.workspace_id = t.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND a.started_at >= :from_ts AND a.started_at < :to_ts"
-        " GROUP BY t.agent_role ORDER BY t.agent_role",
+        "SELECT v.agent_role AS role, count(*) AS attempts,"
+        " count(*) FILTER (WHERE v.status = 'SUCCEEDED') AS succeeded,"
+        " count(*) FILTER (WHERE v.status = 'FAILED' AND v.failure_category = ANY(:failures)) AS quality_failed,"
+        " count(*) FILTER (WHERE v.status = 'FAILED') AS failed,"
+        " count(*) FILTER (WHERE v.attempt_no > 1) AS retries"
+        f" FROM v_attempt_outcomes v WHERE {_SCOPE} AND v.started_at >= :from_ts AND v.started_at < :to_ts"
+        " GROUP BY v.agent_role ORDER BY v.agent_role",
         params,
     )
     by_role = [
@@ -205,9 +199,8 @@ async def tasks_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
         conn,
         "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY d) AS p50,"
         " percentile_cont(0.9) WITHIN GROUP (ORDER BY d) AS p90, avg(d) AS avg, count(*) AS n FROM ("
-        " SELECT EXTRACT(EPOCH FROM t.finished_at - t.created_at) AS d FROM tasks t"
-        " JOIN runs r ON r.id = t.run_id AND r.workspace_id = t.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND t.finished_at IS NOT NULL AND t.finished_at >= :from_ts AND t.finished_at < :to_ts) s",
+        " SELECT v.latency_seconds AS d FROM v_task_latency v"
+        f" WHERE {_SCOPE} AND v.finished_at IS NOT NULL AND v.finished_at >= :from_ts AND v.finished_at < :to_ts) s",
         w.params(),
     )
     return {
@@ -228,16 +221,15 @@ async def tasks_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
 async def gates_section(conn: AsyncConnection, w: Window) -> list[dict[str, Any]]:
     rows = await _all(
         conn,
-        "SELECT g.gate_type, count(*) AS total,"
-        " count(*) FILTER (WHERE g.status = 'PASS') AS passed,"
-        " count(*) FILTER (WHERE g.status = 'FAIL') AS failed,"
-        " count(*) FILTER (WHERE g.status = 'ERROR') AS errored,"
-        " count(*) FILTER (WHERE g.status IN ('SKIPPED','NOT_APPLICABLE')) AS skipped,"
-        " avg(EXTRACT(EPOCH FROM g.finished_at - g.started_at)) FILTER (WHERE g.started_at IS NOT NULL) AS avg_d"
-        " FROM gate_executions g JOIN runs r ON r.id = g.run_id AND r.workspace_id = g.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND g.superseded_at IS NULL AND g.finished_at IS NOT NULL"
-        " AND g.finished_at >= :from_ts AND g.finished_at < :to_ts"
-        " GROUP BY g.gate_type ORDER BY g.gate_type",
+        "SELECT v.gate_type, count(*) AS total,"
+        " count(*) FILTER (WHERE v.status = 'PASS') AS passed,"
+        " count(*) FILTER (WHERE v.status = 'FAIL') AS failed,"
+        " count(*) FILTER (WHERE v.status = 'ERROR') AS errored,"
+        " count(*) FILTER (WHERE v.status IN ('SKIPPED','NOT_APPLICABLE')) AS skipped,"
+        " avg(v.duration_seconds) AS avg_d"
+        f" FROM v_gate_outcomes v WHERE {_SCOPE} AND v.finished_at IS NOT NULL"
+        " AND v.finished_at >= :from_ts AND v.finished_at < :to_ts"
+        " GROUP BY v.gate_type ORDER BY v.gate_type",
         w.params(),
     )
     out = []
@@ -263,58 +255,37 @@ async def gates_section(conn: AsyncConnection, w: Window) -> list[dict[str, Any]
 
 
 async def providers_section(conn: AsyncConnection, w: Window) -> list[dict[str, Any]]:
-    scope = (
-        " FROM cli_executions ce JOIN cli_installations i ON i.id = ce.installation_id"
-        " JOIN cli_providers p ON p.id = i.provider_id"
-        " JOIN task_attempts a ON a.id = ce.task_attempt_id AND a.workspace_id = ce.workspace_id"
-        " JOIN tasks t ON t.id = a.task_id AND t.workspace_id = a.workspace_id"
-        " JOIN runs r ON r.id = t.run_id AND r.workspace_id = t.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND ce.created_at >= :from_ts AND ce.created_at < :to_ts"
-    )
+    scope = f" FROM v_cli_usage v WHERE {_SCOPE} AND v.created_at >= :from_ts AND v.created_at < :to_ts"
     rows = await _all(
         conn,
-        "SELECT p.code AS provider, count(*) AS executions,"
-        " count(*) FILTER (WHERE ce.status = 'COLLECTED') AS collected,"
-        " count(*) FILTER (WHERE ce.status IN ('TIMED_OUT','CRASHED')) AS errors,"
-        " count(*) FILTER (WHERE ce.status = 'RATE_LIMITED') AS rate_limited,"
-        " count(*) FILTER (WHERE ce.status = 'AUTH_REQUIRED') AS auth_required,"
-        " count(*) FILTER (WHERE ce.status = 'CANCELLED') AS cancelled,"
-        " count(*) FILTER (WHERE ce.finished_at IS NULL) AS in_progress,"
-        " avg(EXTRACT(EPOCH FROM ce.finished_at - ce.started_at))"
-        "   FILTER (WHERE ce.finished_at IS NOT NULL AND ce.started_at IS NOT NULL) AS avg_d"
-        f"{scope} GROUP BY p.code ORDER BY p.code",
+        "SELECT v.provider, count(*) AS executions,"
+        " count(*) FILTER (WHERE v.status = 'COLLECTED') AS collected,"
+        " count(*) FILTER (WHERE v.status IN ('TIMED_OUT','CRASHED')) AS errors,"
+        " count(*) FILTER (WHERE v.status = 'RATE_LIMITED') AS rate_limited,"
+        " count(*) FILTER (WHERE v.status = 'AUTH_REQUIRED') AS auth_required,"
+        " count(*) FILTER (WHERE v.status = 'CANCELLED') AS cancelled,"
+        " count(*) FILTER (WHERE v.finished_at IS NULL) AS in_progress,"
+        " avg(v.duration_seconds) AS avg_d,"
+        " COALESCE(sum(v.tokens_reported), 0) AS tokens_reported,"
+        " COALESCE(sum(v.tokens_not_exposed), 0) AS tokens_not_exposed,"
+        " sum(v.tokens_total) AS tokens_total"
+        f"{scope} GROUP BY v.provider ORDER BY v.provider",
         w.params(),
     )
     failures = await _all(
         conn,
-        f"SELECT p.code AS provider, ce.failure_category AS category, count(*) AS n{scope}"
-        " AND ce.failure_category IS NOT NULL GROUP BY p.code, ce.failure_category",
-        w.params(),
-    )
-    tokens = await _all(
-        conn,
-        "SELECT p.code AS provider, count(*) FILTER (WHERE um.source = 'cli_reported') AS reported,"
-        " count(*) FILTER (WHERE um.source = 'not_exposed_by_cli') AS not_exposed,"
-        " sum(um.metric_value) FILTER (WHERE um.source = 'cli_reported') AS total"
-        " FROM usage_metrics um JOIN cli_executions ce ON ce.id = um.execution_id AND ce.workspace_id = um.workspace_id"
-        " JOIN cli_installations i ON i.id = ce.installation_id JOIN cli_providers p ON p.id = i.provider_id"
-        " JOIN task_attempts a ON a.id = ce.task_attempt_id AND a.workspace_id = ce.workspace_id"
-        " JOIN tasks t ON t.id = a.task_id AND t.workspace_id = a.workspace_id"
-        " JOIN runs r ON r.id = t.run_id AND r.workspace_id = t.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND um.metric_name = 'tokens.total'"
-        " AND ce.created_at >= :from_ts AND ce.created_at < :to_ts GROUP BY p.code",
+        f"SELECT v.provider, v.failure_category AS category, count(*) AS n{scope}"
+        " AND v.failure_category IS NOT NULL GROUP BY v.provider, v.failure_category",
         w.params(),
     )
     by_failure: dict[str, dict[str, int]] = {}
     for f in failures:
         by_failure.setdefault(str(f["provider"]), {})[str(f["category"])] = int(f["n"])
-    token_rows = {str(t["provider"]): t for t in tokens}
     out = []
     for r in rows:
         provider = str(r["provider"])
-        tok = token_rows.get(provider)
-        reported = int(tok["reported"]) if tok else 0
-        not_exposed = int(tok["not_exposed"]) if tok else 0
+        reported = int(r["tokens_reported"])
+        not_exposed = int(r["tokens_not_exposed"])
         source = "cli_reported" if reported and not not_exposed else "mixed" if reported else "not_exposed_by_cli"
         out.append(
             {
@@ -331,7 +302,7 @@ async def providers_section(conn: AsyncConnection, w: Window) -> list[dict[str, 
                 "failures_by_category": dict(sorted(by_failure.get(provider, {}).items())),
                 # Токены — только достоверно сообщённые CLI (ТЗ §9, §16): иначе null («unknown» в UI).
                 "tokens": {
-                    "total": int(tok["total"]) if tok and tok["total"] is not None else None,
+                    "total": int(r["tokens_total"]) if r["tokens_total"] is not None else None,
                     "source": source,
                     "executions_reported": reported,
                 },
@@ -344,27 +315,24 @@ async def providers_section(conn: AsyncConnection, w: Window) -> list[dict[str, 
 
 
 async def collaboration_section(conn: AsyncConnection, w: Window) -> tuple[dict[str, Any], dict[str, Any]]:
-    scope = (
-        " FROM agent_messages m JOIN runs r ON r.id = m.run_id AND r.workspace_id = m.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND m.created_at >= :from_ts AND m.created_at < :to_ts"
-    )
+    scope = f" FROM v_review_loops v WHERE {_SCOPE} AND v.created_at >= :from_ts AND v.created_at < :to_ts"
     by_type_rows = await _all(
-        conn, f"SELECT m.message_type AS t, count(*) AS n{scope} GROUP BY m.message_type", w.params()
+        conn, f"SELECT v.message_type AS t, count(*) AS n{scope} GROUP BY v.message_type", w.params()
     )
     by_type = {str(r["t"]): int(r["n"]) for r in by_type_rows}
     loops = await _one(
         conn,
         "SELECT count(*) AS chains, COALESCE(max(fixes), 0) AS max_fixes, avg(fixes) AS avg_fixes,"
         " count(*) FILTER (WHERE fixes > 0) AS with_fixes FROM ("
-        " SELECT m.correlation_id, count(*) FILTER (WHERE m.message_type = 'FIX_REQUEST') AS fixes"
-        f"{scope} GROUP BY m.correlation_id HAVING bool_or(m.message_type = 'REVIEW_REQUEST')) s",
+        " SELECT v.correlation_id, count(*) FILTER (WHERE v.message_type = 'FIX_REQUEST') AS fixes"
+        f"{scope} GROUP BY v.correlation_id HAVING bool_or(v.message_type = 'REVIEW_REQUEST')) s",
         w.params(),
     )
     exhausted = await _one(
         conn,
-        "SELECT count(*) AS n FROM tasks t JOIN runs r ON r.id = t.run_id AND r.workspace_id = t.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND t.blocked_reason = 'REVIEW_LOOP_EXHAUSTED'"
-        " AND t.updated_at >= :from_ts AND t.updated_at < :to_ts",
+        "SELECT count(*) AS n FROM v_task_latency v"
+        f" WHERE {_SCOPE} AND v.blocked_reason = 'REVIEW_LOOP_EXHAUSTED'"
+        " AND v.updated_at >= :from_ts AND v.updated_at < :to_ts",
         w.params(),
     )
     loops = loops or {}
@@ -385,17 +353,13 @@ async def collaboration_section(conn: AsyncConnection, w: Window) -> tuple[dict[
 
 
 async def approvals_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
-    scope = (
-        " FROM approvals ap JOIN runs r ON r.id = ap.run_id AND r.workspace_id = ap.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND ap.requested_at >= :from_ts AND ap.requested_at < :to_ts"
-    )
-    counts = await _all(conn, f"SELECT ap.status, count(*) AS n{scope} GROUP BY ap.status", w.params())
+    scope = f" FROM v_approval_wait v WHERE {_SCOPE} AND v.requested_at >= :from_ts AND v.requested_at < :to_ts"
+    counts = await _all(conn, f"SELECT v.status, count(*) AS n{scope} GROUP BY v.status", w.params())
     wait = await _one(
         conn,
         "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY d) AS p50,"
         " percentile_cont(0.9) WITHIN GROUP (ORDER BY d) AS p90, avg(d) AS avg FROM ("
-        f" SELECT EXTRACT(EPOCH FROM ap.decided_at - ap.requested_at) AS d{scope}"
-        " AND ap.status IN ('APPROVED','REJECTED') AND ap.decided_at IS NOT NULL) s",
+        f" SELECT v.wait_seconds AS d{scope} AND v.wait_seconds IS NOT NULL) s",
         w.params(),
     )
     by_status = {str(r["status"]): int(r["n"]) for r in counts}
@@ -411,32 +375,19 @@ async def approvals_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
 
 
 async def context_section(conn: AsyncConnection, w: Window) -> dict[str, Any]:
-    scope = (
-        " FROM context_packs cp JOIN task_attempts a ON a.id = cp.task_attempt_id AND a.workspace_id = cp.workspace_id"
-        " JOIN tasks t ON t.id = a.task_id AND t.workspace_id = a.workspace_id"
-        " JOIN runs r ON r.id = t.run_id AND r.workspace_id = t.workspace_id"
-        f" WHERE {_RUN_SCOPE} AND cp.created_at >= :from_ts AND cp.created_at < :to_ts"
-    )
+    scope = f" FROM v_context_usefulness v WHERE {_SCOPE} AND v.created_at >= :from_ts AND v.created_at < :to_ts"
     sizes = await _one(
         conn,
-        "SELECT count(*) AS packs, avg(cp.size_bytes) AS avg_size, max(cp.size_bytes) AS max_size,"
-        " COALESCE(sum(jsonb_array_length(COALESCE(cp.manifest->'fragments', '[]'::jsonb))), 0) AS fragments,"
-        " COALESCE(sum((SELECT count(*) FROM jsonb_array_elements(COALESCE(cp.manifest->'fragments', '[]'::jsonb)) f"
-        "   WHERE f->>'stale' = 'true')), 0) AS stale"
+        "SELECT count(*) AS packs, avg(v.size_bytes) AS avg_size, max(v.size_bytes) AS max_size,"
+        " COALESCE(sum(v.fragments), 0) AS fragments, COALESCE(sum(v.stale_fragments), 0) AS stale"
         f"{scope}",
         w.params(),
     )
     rows = await _all(
         conn,
-        "SELECT ARRAY(SELECT DISTINCT f->>'path' FROM jsonb_array_elements(COALESCE(cp.manifest->'fragments',"
-        "   '[]'::jsonb)) f WHERE f->>'path' IS NOT NULL) AS paths,"
-        " ARRAY(SELECT DISTINCT fl FROM agent_activity_events e,"
-        "   jsonb_array_elements(COALESCE(e.payload->'claims', '[]'::jsonb)) c,"
-        "   jsonb_array_elements_text(COALESCE(c->'files', '[]'::jsonb)) fl"
-        "   WHERE e.workspace_id = cp.workspace_id AND e.task_id = a.task_id AND e.event_type = :ev"
-        "   AND e.payload->>'task_attempt_id' = CAST(a.id AS text)) AS claimed"
-        f"{scope} AND a.status = 'SUCCEEDED' ORDER BY cp.created_at DESC LIMIT :lim",
-        {**w.params(), "ev": ACTIVITY_RESULT, "lim": USEFULNESS_PACK_LIMIT},
+        "SELECT v.fragment_paths AS paths, v.claimed_files AS claimed"
+        f"{scope} AND v.attempt_status = 'SUCCEEDED' ORDER BY v.created_at DESC LIMIT :lim",
+        {**w.params(), "lim": USEFULNESS_PACK_LIMIT},
     )
     referenced = total = evaluated = 0
     for row in rows:

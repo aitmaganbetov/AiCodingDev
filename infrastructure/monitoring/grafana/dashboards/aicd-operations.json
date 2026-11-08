@@ -183,18 +183,18 @@
             "type": "prometheus",
             "uid": "aicd-prometheus"
           },
-          "expr": "sum(aicd_sse_connections)",
+          "expr": "sum by (stream) (aicd_sse_connections)",
           "refId": "A",
-          "legendFormat": "открыто"
+          "legendFormat": "открыто: {{stream}}"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "aicd-prometheus"
           },
-          "expr": "sum(rate(aicd_sse_connections_opened_total[5m])) * 60",
+          "expr": "sum by (stream) (rate(aicd_sse_connections_opened_total[5m])) * 60",
           "refId": "B",
-          "legendFormat": "подключений/мин"
+          "legendFormat": "подключений/мин: {{stream}}"
         }
       ],
       "fieldConfig": {
@@ -217,7 +217,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Безопасность: отказы",
-      "description": "В минуту: неудачные входы, недействительные сессии, CSRF; отказы прав и обращения к чужим workspace.",
+      "description": "В минуту: неудачные входы, недействительные сессии, CSRF; отказы прав и обращения к чужим workspace; неверные подписи вебхуков GitHub.",
       "datasource": {
         "type": "prometheus",
         "uid": "aicd-prometheus"
@@ -246,6 +246,15 @@
           "expr": "sum by (reason) (rate(aicd_authz_denied_total[5m])) * 60",
           "refId": "B",
           "legendFormat": "authz {{reason}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (reason) (rate(aicd_webhook_signature_invalid_total[5m])) * 60",
+          "refId": "C",
+          "legendFormat": "вебхук GitHub {{reason}}"
         }
       ],
       "fieldConfig": {

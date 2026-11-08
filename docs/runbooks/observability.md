@@ -1,6 +1,6 @@
 # Наблюдаемость: метрики, трассы, дашборды, алерты (P8-06, P8-08)
 
-**Требования:** ТЗ §16 (метрики, алерты), FR-OBS-02..04, SC-OBS-02, SC-OBS-03. Экран Analytics (FR-OBS-05) — `GET /analytics/summary`, см. [API_DESIGN §15b](../api/API_DESIGN.md).
+**Требования:** ТЗ §16 (метрики, алерты), FR-OBS-02..04, SC-OBS-02, SC-OBS-03. Экран Analytics (FR-OBS-05) — `GET /analytics/summary` по представлениям `v_*` (миграция 0013), см. [API_DESIGN §15b](../api/API_DESIGN.md).
 
 ## 1. Запуск профиля observability
 
@@ -40,7 +40,7 @@ Prometheus находит воркеры по DNS-именам сервисов 
 | approval wait time | `aicd_approval_wait_seconds{action_type}` | worker-outbox (`approval.decided.wait_seconds`) |
 | CLI token usage (если достоверно) | `aicd_cli_tokens_total{provider}` — только `source=cli_reported` | worker-exec |
 
-Дополнительно: HTTP (`aicd_http_requests_total{method,route,status}`, `aicd_http_request_duration_seconds`), безопасность (`aicd_auth_failures_total{reason}`, `aicd_authz_denied_total{reason}` (permission, tenant)), SSE (`aicd_sse_connections`), stuck leases (`aicd_worker_leases_expired{resource_type}`), хранилище (`aicd_artifact_storage_free_bytes/size_bytes`, `aicd_database_size_bytes`), Dramatiq (`aicd_worker_messages_total{actor,outcome}`, `aicd_queue_dead_letters`).
+Дополнительно: HTTP (`aicd_http_requests_total{method,route,status}`, `aicd_http_request_duration_seconds`), безопасность (`aicd_auth_failures_total{reason}`, `aicd_authz_denied_total{reason}` (permission, tenant)), SSE (`aicd_sse_connections{stream}`, stream: run, workspace), вебхуки GitHub (`aicd_webhook_signature_invalid_total{reason}`: missing, malformed, mismatch), stuck leases (`aicd_worker_leases_expired{resource_type}`), хранилище (`aicd_artifact_storage_free_bytes/size_bytes`, `aicd_database_size_bytes`), Dramatiq (`aicd_worker_messages_total{actor,outcome}`, `aicd_queue_dead_letters`).
 
 **Гигиена (SC-OBS-03):** метки — только из ограниченных множеств (статусы FSM, типы событий, провайдер, шаблон маршрута); неизвестное значение → `other`. Идентификаторы run/task/user/workspace, e-mail, пути, тексты ошибок в метки не попадают. Доменные счётчики считаются по **зафиксированным** outbox-событиям: откаченная транзакция не учитывается; at-least-once доставка может дать редкий двойной счёт.
 
@@ -55,6 +55,7 @@ Prometheus находит воркеры по DNS-именам сервисов 
 | Алерт | Условие (кратко) | Действие оператора |
 |---|---|---|
 | AicdLoginFailuresSpike | > 10 неудачных входов/мин 5 мин | audit `auth.login_failed`, блокировки, источник IP в access-логах reverse-proxy |
+| AicdWebhookSignatureInvalid | > 5 доставок вебхука GitHub с неверной подписью за 10 мин | `github_webhook_deliveries` (REJECTED), ротация webhook secret (действуют текущий и предыдущий) |
 | AicdTenantDeniedSpike, AicdCsrfFailuresSpike | всплеск обращений к чужим workspace / отказов CSRF | проверить клиента/сессию, при атаке — ограничить на reverse-proxy |
 | AicdApiHighErrorRate | > 5% 5xx 10 мин | логи api по `request_id`, `/health/ready` |
 | AicdCliErrorRate, AicdProviderUnavailable | > 50% исполнений CLI падают; нет доступной установки | экран CLI Providers, авторизация CLI оператором (cli-auth), версии |
