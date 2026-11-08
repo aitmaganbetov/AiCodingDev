@@ -13,10 +13,12 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from aicd_cli_adapters.models import ProbeResult
 from aicd_platform import audit, metrics, outbox
+from aicd_platform.errors import ProblemError
 from aicd_platform.ids import uuid7
 from aicd_platform.redaction import redact_text
 
@@ -147,6 +149,7 @@ async def list_providers(conn: AsyncConnection) -> list[dict[str, Any]]:
     installs = (
         (await conn.execute(text(_INSTALLATION_SELECT + " WHERE i.enabled ORDER BY h.hostname, i.id"))).mappings().all()
     )
+    settings = await workspace_settings_by_code(conn)
     result = []
     for p in providers:
         result.append(
@@ -156,7 +159,7 @@ async def list_providers(conn: AsyncConnection) -> list[dict[str, Any]]:
                 "display_name": p["display_name"],
                 "enabled_globally": p["enabled"],
                 "installations": [_installation_view(i) for i in installs if i["provider_id"] == p["id"]],
-                "workspace_settings": dict(DEFAULT_WORKSPACE_SETTINGS),
+                "workspace_settings": settings.get(p["code"], dict(DEFAULT_WORKSPACE_SETTINGS)),
             }
         )
     return result
@@ -333,3 +336,108 @@ async def probe_status(
         "installation": installation,
         "error_category": error_category,
     }
+
+
+# --- Безопасные настройки провайдера в workspace (PATCH /providers/{id}/settings, API_DESIGN §15) --------
+#
+# Хранение — `policies(policy_type='provider_settings', name=<код провайдера>, project_id NULL)` workspace
+# текущего RLS-контекста. Строки неизменяемы (кроме `active`): изменение = деактивация активной версии и новая
+# строка `version + 1` (DATABASE_DESIGN §14.1). `settings_version` = `policies.version` активной строки;
+# 0 — строки нет, действуют значения по умолчанию (`DEFAULT_WORKSPACE_SETTINGS`).
+
+PROVIDER_SETTINGS_POLICY = "provider_settings"
+SETTINGS_FIELDS = ("enabled", "max_parallel_sessions", "default_timeout_seconds", "allowed_roles")
+
+
+def _settings_view(definition: dict[str, Any] | None, version: int) -> dict[str, Any]:
+    view = {k: v for k, v in DEFAULT_WORKSPACE_SETTINGS.items() if k in SETTINGS_FIELDS}
+    for key in SETTINGS_FIELDS:
+        if definition and key in definition:
+            view[key] = definition[key]
+    view["allowed_roles"] = list(view["allowed_roles"])
+    view["settings_version"] = version
+    return view
+
+
+async def workspace_settings_by_code(conn: AsyncConnection) -> dict[str, dict[str, Any]]:
+    """Активные настройки провайдеров workspace текущего RLS-контекста (без контекста — пусто)."""
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT name, version, definition FROM policies WHERE policy_type = :t AND active"
+                " AND project_id IS NULL AND workspace_id = app_current_workspace()"
+            ),
+            {"t": PROVIDER_SETTINGS_POLICY},
+        )
+    ).all()
+    return {r[0]: _settings_view(_as_dict(r[2]), int(r[1])) for r in rows}
+
+
+async def update_workspace_settings(
+    conn: AsyncConnection,
+    *,
+    workspace_id: uuid.UUID,
+    provider_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    expected_version: int,
+    changes: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge-patch настроек провайдера с optimistic locking (If-Match = `settings_version`) и аудитом.
+
+    Неизвестный провайдер — 404; несовпадение версии (в т.ч. гонка двух вставок — уникальный индекс активной
+    версии) — 412 с актуальным ETag. Изменение без отличий — no-op без новой версии.
+    """
+    code = await provider_code(conn, provider_id)
+    if code is None:
+        raise ProblemError("not_found")
+    row = (
+        await conn.execute(
+            text(
+                "SELECT id, version, definition FROM policies WHERE policy_type = :t AND name = :n AND active"
+                " AND project_id IS NULL AND workspace_id = :ws FOR UPDATE"
+            ),
+            {"t": PROVIDER_SETTINGS_POLICY, "n": code, "ws": workspace_id},
+        )
+    ).first()
+    version = int(row[1]) if row else 0
+    if version != expected_version:
+        raise ProblemError("precondition_failed", headers={"ETag": f'"v{version}"'})
+    current = _settings_view(_as_dict(row[2]) if row else None, version)
+    diff = {k: {"from": current[k], "to": v} for k, v in changes.items() if current[k] != v}
+    if not diff:
+        return current
+    definition = {k: current[k] for k in SETTINGS_FIELDS} | dict(changes)
+    try:
+        async with conn.begin_nested():
+            if row is not None:
+                await conn.execute(text("UPDATE policies SET active = false WHERE id = :id"), {"id": row[0]})
+            await conn.execute(
+                text(
+                    "INSERT INTO policies (id, workspace_id, project_id, policy_type, name, version, definition,"
+                    " active, created_by) VALUES (:id, :ws, NULL, :t, :n, :v, CAST(:d AS jsonb), true, :by)"
+                ),
+                {
+                    "id": uuid7(),
+                    "ws": workspace_id,
+                    "t": PROVIDER_SETTINGS_POLICY,
+                    "n": code,
+                    "v": version + 1,
+                    "d": json.dumps(definition),
+                    "by": actor_id,
+                },
+            )
+    except IntegrityError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "23505":
+            raise
+        raise ProblemError("precondition_failed") from exc
+    await audit.record(
+        conn,
+        action="provider.settings.update",
+        resource_type="cli_provider",
+        resource_id=provider_id,
+        actor_type="user",
+        actor_id=actor_id,
+        workspace_id=workspace_id,
+        metadata={"provider": code, "settings_version": version + 1, "changes": diff},
+    )
+    return _settings_view(definition, version + 1)

@@ -35,6 +35,23 @@ class WorkspaceCreateRequest(_Strict):
     slug: Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$")]
 
 
+AgentRole = Literal[
+    "requirements", "architect", "planner", "developer", "reviewer", "security", "qa", "database", "performance",
+    "devops", "maintenance", "documentation",
+]  # fmt: skip
+
+
+class ProviderSettingsUpdateRequest(_Strict):
+    """Безопасные настройки провайдера в workspace (API_DESIGN §15); иные поля (binary_path, env…) ⇒ 422."""
+
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
+
+    enabled: bool | None = None
+    max_parallel_sessions: Annotated[int, Field(ge=0, le=64, strict=True)] | None = None
+    default_timeout_seconds: Annotated[int, Field(ge=60, le=14400, strict=True)] | None = None
+    allowed_roles: list[AgentRole] | None = None
+
+
 class WorkspaceSettingsUpdate(_Strict):
     model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
 

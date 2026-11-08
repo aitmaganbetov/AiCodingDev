@@ -5,7 +5,8 @@
   login и не принимает credentials; лимит 6/час на workspace+провайдера (API_DESIGN §10);
 * `GET /providers/{id}/probes/{probe_request_id}` — статус запроса (`ProbeAccepted.status_url`, OQ-45 (c)).
 
-`PATCH /providers/{id}/settings` (политики `provider_settings`) — не реализован (OQ-45, остаток).
+* `PATCH /providers/{id}/settings` — безопасные настройки workspace (`policies`, policy_type=provider_settings),
+  If-Match = `settings_version`, аудит `provider.settings.update`.
 """
 
 from __future__ import annotations
@@ -26,13 +27,14 @@ from aicd_api.deps import (
     workspace_access,
 )
 from aicd_api.idempotency import CommandResult, run_idempotent
-from aicd_api.responses import json_response
+from aicd_api.responses import etag, json_response, require_if_match
 from aicd_api.routers import op
+from aicd_api.schemas import ProviderSettingsUpdateRequest
 from aicd_cli_adapters import registry
 from aicd_identity import api as identity
 from aicd_platform.clock import utcnow
 from aicd_platform.db import transaction
-from aicd_platform.errors import ProblemError
+from aicd_platform.errors import FieldError, ProblemError
 
 router = APIRouter(tags=["providers"])
 
@@ -104,3 +106,36 @@ async def get_provider_probe(
     if body is None:
         raise ProblemError("not_found")
     return json_response(body)
+
+
+@router.patch("/providers/{provider_id}/settings", **op("updateProviderSettings", "provider:settings"))
+async def update_provider_settings(
+    request: Request,
+    provider_id: Annotated[uuid.UUID, Path()],
+    body: ProviderSettingsUpdateRequest,
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    access = await workspace_access(request, principal, parse_workspace_header(request))
+    await authorize(request, access, "provider:settings")
+    expected = require_if_match(request.headers.get("if-match"))
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise ProblemError("validation_error", errors=[FieldError("/", "min_properties", "нет изменяемых полей")])
+    for key, value in changes.items():
+        if value is None:
+            raise ProblemError("validation_error", errors=[FieldError(f"/{key}", "null", "значение обязательно")])
+    roles = changes.get("allowed_roles")
+    if roles is not None and len(set(roles)) != len(roles):
+        raise ProblemError(
+            "validation_error", errors=[FieldError("/allowed_roles", "unique_items", "роли не должны повторяться")]
+        )
+    async with transaction(app_state(request).engine, access.db()) as conn:
+        view = await registry.update_workspace_settings(
+            conn,
+            workspace_id=access.workspace_id,
+            provider_id=provider_id,
+            actor_id=principal.user_id,
+            expected_version=expected,
+            changes=changes,
+        )
+    return json_response(view, headers={"ETag": etag(view["settings_version"])})
