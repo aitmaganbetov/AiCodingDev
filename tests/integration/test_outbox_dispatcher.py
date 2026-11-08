@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -12,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_platform import outbox
-from aicd_platform.db import DbContext, create_engine, transaction
+from aicd_platform.db import DbContext, transaction
 from aicd_platform.outbox_dispatcher import backoff_seconds, dispatch_batch
 from aicd_platform.sse import envelope
 from tests.support import db as testdb
@@ -20,13 +19,6 @@ from tests.support import orchestration as orch
 from tests.support.events import validate_sse
 
 pytestmark = pytest.mark.db
-
-
-@pytest.fixture(scope="module")
-async def worker_engine(database: testdb.TestDatabase) -> AsyncIterator[AsyncEngine]:
-    engine = create_engine(database.url_for("aicd_worker"), pool_size=8)
-    yield engine
-    await engine.dispose()
 
 
 class Recorder:

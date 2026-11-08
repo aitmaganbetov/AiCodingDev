@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from aicd_orchestration import external_actions as ledger
 from aicd_orchestration.approvals import Approvals
 from aicd_orchestration.external_actions import Outcome
-from aicd_platform.db import DbContext, create_engine, transaction
+from aicd_platform.db import DbContext, transaction
 from tests.support import db as testdb
 from tests.support.orchestration import Tenant, connect_admin, drive_run, new_run, new_task, seed_tenant
 
@@ -33,13 +33,6 @@ class World:
 def admin(database: testdb.TestDatabase) -> Iterator[psycopg.Connection]:
     with connect_admin(database) as conn:
         yield conn
-
-
-@pytest.fixture(scope="module")
-async def worker_engine(database: testdb.TestDatabase) -> AsyncIterator[AsyncEngine]:
-    engine = create_engine(database.url_for("aicd_worker"))
-    yield engine
-    await engine.dispose()
 
 
 @pytest.fixture

@@ -23,7 +23,7 @@ from aicd_api.main import API_PREFIX, create_app
 from aicd_api.routers import events
 from aicd_platform import outbox, sse
 from aicd_platform.config import Settings
-from aicd_platform.db import DbContext, create_engine, transaction
+from aicd_platform.db import DbContext, transaction
 from aicd_platform.outbox_dispatcher import dispatch_batch
 from tests.conftest import REDIS_URL, UserSession, login
 from tests.support import db as testdb
@@ -61,13 +61,6 @@ async def server(settings: Settings) -> AsyncIterator[str]:
     yield f"http://127.0.0.1:{port}{API_PREFIX}"
     srv.should_exit = True
     await asyncio.wait_for(task, 10)
-
-
-@pytest.fixture(scope="module")
-async def worker_engine(database: testdb.TestDatabase) -> AsyncIterator[AsyncEngine]:
-    engine = create_engine(database.url_for("aicd_worker"))
-    yield engine
-    await engine.dispose()
 
 
 @pytest.fixture(scope="module")

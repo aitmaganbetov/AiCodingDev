@@ -89,6 +89,14 @@ async def app_engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
     await engine.dispose()
 
 
+@pytest.fixture(scope="session")
+async def worker_engine(database: testdb.TestDatabase) -> AsyncIterator[AsyncEngine]:
+    """Движок под ролью БД воркеров (aicd_worker)."""
+    engine = create_engine(database.url_for("aicd_worker"), pool_size=8)
+    yield engine
+    await engine.dispose()
+
+
 def make_client(app: FastAPI, ip: str = "203.0.113.10") -> httpx.AsyncClient:
     transport = httpx.ASGITransport(app=app, client=(ip, 51000))
     return httpx.AsyncClient(transport=transport, base_url="https://testserver")

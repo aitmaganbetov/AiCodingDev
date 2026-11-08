@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import uuid
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_orchestration.recovery import RecoveryReport
 from aicd_platform import outbox
-from aicd_platform.db import DbContext, create_engine, transaction
+from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 from aicd_worker import handlers, maintenance, runtime
 from aicd_worker.broker import EXEC_QUEUE, ORCHESTRATOR_QUEUE, build_broker, register_actors
@@ -54,13 +53,6 @@ class FakeOrchestrator:
 
     async def execute_task(self, task_id: uuid.UUID, ws: uuid.UUID) -> None:
         self.calls.append(("execute_task", task_id))
-
-
-@pytest.fixture(scope="module")
-async def worker_engine(database: testdb.TestDatabase) -> AsyncIterator[AsyncEngine]:
-    engine = create_engine(database.url_for("aicd_worker"), pool_size=8)
-    yield engine
-    await engine.dispose()
 
 
 def _runtime(engine: AsyncEngine, fake: FakeOrchestrator, dispatched: list[dict[str, Any]]) -> runtime.Runtime:

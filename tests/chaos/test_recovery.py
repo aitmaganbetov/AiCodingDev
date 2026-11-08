@@ -28,6 +28,7 @@ from sqlalchemy import text
 
 from aicd_orchestration.recovery import Reconciler, reap
 from aicd_orchestration.worktrees import WorktreeManager
+from aicd_platform import leases
 from aicd_platform.artifacts import FileSystemArtifactStore
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
@@ -155,6 +156,13 @@ async def test_worker_killed_while_cli_running_is_recovered(world: Slice, databa
         assert admin.execute(
             "SELECT count(*) FROM worker_leases WHERE resource_id = %s AND released_at IS NULL", (execution["task_id"],)
         ).fetchone() == (0,)
+        # «Зомби»-воркер со старым fencing token больше не может записать результат (DATA_FLOW §5).
+        old_token = admin.execute(
+            "SELECT fencing_token FROM task_attempts WHERE id = %s", (execution["attempt_id"],)
+        ).fetchone()
+        assert old_token is not None
+        async with transaction(world.worker, DbContext(workspace_id=uuid.UUID(world.ws), actor_type="system")) as conn:
+            assert not await leases.is_current(conn, "task", execution["task_id"], int(old_token[0]))  # type: ignore[arg-type]
         worktrees = admin.execute("SELECT status FROM worktrees WHERE run_id = %s", (uuid.UUID(run_id),)).fetchall()
         assert worktrees == [("REMOVED",)] and report.removed_worktrees
         assert not any((world.tmp / "wt").iterdir()), "каталог осиротевшего worktree удалён"

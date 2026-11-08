@@ -7,6 +7,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 2 * * *"  # nightly: полный прогон, включая chaos suite (P3-16)
 
 permissions:
   contents: read
@@ -42,8 +44,14 @@ jobs:
         with:
           version: "0.11.32"
       - run: uv sync --frozen
+      - name: redis-server для chaos-теста рестарта Redis (tests/chaos)
+        # Только бинарник: автозапуск службы запрещён (порт 6379 занят сервисным контейнером Redis).
+        run: |
+          printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d >/dev/null
+          sudo chmod +x /usr/sbin/policy-rc.d
+          sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
       - name: Lint (ruff)
-        run: uv run ruff check . && uv run ruff format --check packages apps/api apps/cli tests scripts
+        run: uv run ruff check . && uv run ruff format --check packages apps tests scripts
       - name: Typecheck (mypy --strict)
         run: uv run mypy
       - name: Module boundaries (import-linter)
@@ -54,7 +62,7 @@ jobs:
         run: uv run python scripts/gen_contract_models.py --check
       - name: Traceability (требования → задачи)
         run: uv run python scripts/traceability.py --report traceability.md
-      - name: Tests (unit, contract, migrations, RLS, integration, security)
+      - name: Tests (unit, contract, migrations, RLS, integration, security, e2e, chaos)
         run: uv run pytest --cov --cov-report=xml --cov-report=term -q
       - name: Migration dry-run (offline SQL)
         run: |

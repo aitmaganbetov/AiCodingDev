@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_orchestration import directives
 from aicd_platform.config import Settings
-from aicd_platform.db import DbContext, create_engine, transaction
+from aicd_platform.db import DbContext, transaction
 from tests.conftest import UserSession
 from tests.support import db as testdb
 from tests.support.contract import validate_response
@@ -40,13 +40,6 @@ def recorder() -> HookRecorder:
 async def oapp(settings: Settings, recorder: HookRecorder) -> AsyncIterator[FastAPI]:
     async for application in orch_app(settings, recorder):
         yield application
-
-
-@pytest.fixture(scope="module")
-async def worker_engine(database: testdb.TestDatabase) -> AsyncIterator[AsyncEngine]:
-    engine = create_engine(database.url_for("aicd_worker"))
-    yield engine
-    await engine.dispose()
 
 
 @pytest.fixture
