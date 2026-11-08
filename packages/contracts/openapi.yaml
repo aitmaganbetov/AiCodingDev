@@ -2176,6 +2176,12 @@ components:
       enum: [TASK_ASSIGN, HANDOFF, QUESTION, ANSWER, REVIEW_REQUEST, FINDING, FIX_REQUEST, EVIDENCE_SUBMITTED, DECISION_PROPOSAL, DECISION_RECORDED,
         BLOCKED, TASK_COMPLETED]
       description: Каноническое перечисление (docs/README.md §3).
+    AcpParticipant:
+      type: string
+      enum: [requirements, architect, planner, developer, reviewer, security, qa, database, performance, devops, maintenance, documentation,
+        orchestrator, user]
+      x-proposed-enum: true
+      description: 'Участник ACP: agent_role ∪ псевдороли orchestrator и user (AGENT_COMMUNICATION_PROTOCOL.md §1, §11 acp_participant); требует утверждения.'
     DirectiveType:
       type: string
       enum: [ASK, NEW_TASK, CHANGE_REQUEST, STOP, PAUSE, RESUME, REVIEW, APPROVE, REJECT]
@@ -2852,19 +2858,31 @@ components:
         task_id:
           type: [string, 'null']
           format: uuid
+        task_attempt_id:
+          type: [string, 'null']
+          format: uuid
+          description: Попытка-отправитель (конверт ACP §2); null для orchestrator/user
         from:
           type: object
           properties:
-            role: {$ref: '#/components/schemas/AgentRole'}
+            role: {$ref: '#/components/schemas/AcpParticipant'}
             provider:
               oneOf:
               - {$ref: '#/components/schemas/CliProvider'}
               - {type: 'null'}
+            user_id:
+              type: [string, 'null']
+              format: uuid
+              description: Только при role = user (ACP §2)
           required: [role]
         to:
           type: object
           properties:
-            role: {$ref: '#/components/schemas/AgentRole'}
+            role: {$ref: '#/components/schemas/AcpParticipant'}
+            task_id:
+              type: [string, 'null']
+              format: uuid
+              description: Конкретная задача-получатель (inbox, ACP §7)
           required: [role]
         type: {$ref: '#/components/schemas/AcpMessageType'}
         correlation_id:

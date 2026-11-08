@@ -503,6 +503,16 @@ class Orchestrator:
         run: dict[str, Any],
     ) -> None:
         verification: VerificationOutcome | None = None
+        async with transaction(self.engine, self._ctx(ws)) as conn:
+            current = await _task_row(conn, task_id)
+            if current is not None and current["status"] == "BLOCKED" and await leases.is_current(
+                conn, "task", task_id, lease.fencing_token
+            ):
+                # Задачу заблокировали во время исполнения (исчерпан лимит review/fix циклов, ACP §6): попытка
+                # закрывается без перехода к проверке, решение — за человеком (approval MANUAL_REVIEW).
+                await _finish_attempt_row(conn, attempt_id, "CANCELLED", None)
+                await leases.release(conn, lease)
+                return
         if outcome.status == "completed" and outcome.head_commit_sha:
             async with transaction(self.engine, self._ctx(ws)) as conn:
                 if not await leases.is_current(conn, "task", task_id, lease.fencing_token):

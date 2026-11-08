@@ -32,6 +32,7 @@ from typing import Any, Final
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from aicd_collaboration import chat
 from aicd_identity.rbac import Role, can_submit_directive
 from aicd_orchestration import checkpoints, fsm, runs, store
 from aicd_orchestration.agents.prompt import fence_untrusted as fence_untrusted  # реэкспорт (P3-13 API)
@@ -355,22 +356,26 @@ class Directives:
 
         thread_id = await self._all_agents_thread(conn, workspace_id, run_id)
         message_id = uuid7()
-        await conn.execute(
-            text(
-                "INSERT INTO chat_messages (id, workspace_id, run_id, thread_id, sender_type, sender_id, body,"
-                " message_kind, mentions) VALUES (:id, :ws, :run, :th, 'user', :uid, :body, 'directive',"
-                " CAST(:mentions AS agent_role_t[]))"
-            ),
-            {
-                "id": message_id,
-                "ws": workspace_id,
-                "run": run_id,
-                "th": thread_id,
-                "uid": actor_id,
-                "body": redact_text(message),
-                "mentions": [target.role] if target.role else [],
-            },
-        )
+        body = redact_text(message)
+        mentions = [target.role] if target.role else []
+        created_at = (
+            await conn.execute(
+                text(
+                    "INSERT INTO chat_messages (id, workspace_id, run_id, thread_id, sender_type, sender_id, body,"
+                    " message_kind, mentions) VALUES (:id, :ws, :run, :th, 'user', :uid, :body, 'directive',"
+                    " CAST(:mentions AS agent_role_t[])) RETURNING created_at"
+                ),
+                {
+                    "id": message_id,
+                    "ws": workspace_id,
+                    "run": run_id,
+                    "th": thread_id,
+                    "uid": actor_id,
+                    "body": body,
+                    "mentions": mentions,
+                },
+            )
+        ).scalar_one()
         directive_id = uuid7()
         # Цель approval в БД выражается target_type='run' + approval_id (CHECK §9.6 не знает 'approval').
         stored_type = "run" if target.type == "approval" else target.type
@@ -402,12 +407,21 @@ class Directives:
             aggregate_id=message_id,
             workspace_id=workspace_id,
             run_id=run_id,
-            payload={
-                "message_id": str(message_id),
-                "thread_id": str(thread_id),
-                "kind": "directive",
-                "directive_id": str(directive_id),
-            },
+            # Форма SSE chat_message (EVENT_SCHEMAS §4.2: DIRECTIVE в тред RUN).
+            payload=chat.event_payload(
+                chat_message_id=message_id,
+                thread_id=thread_id,
+                scope="all_agents",
+                message_kind="DIRECTIVE",
+                sender_type="user",
+                sender_id=actor_id,
+                body=body,
+                created_at=created_at,
+                task_id=target_task_id,
+                target_role=target.role,
+                mentions=mentions,
+                directive_id=directive_id,
+            ),
         )
         d = await _load(conn, directive_id, lock=True)
         if d is None:  # pragma: no cover — нарушение инварианта
