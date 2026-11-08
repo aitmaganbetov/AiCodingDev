@@ -142,7 +142,10 @@ def _doc_transitions() -> set[tuple[str, str, str]]:
     section = DOC.read_text().split("### 18.3", 1)[1].split("### 18.4", 1)[0]
     rows: set[tuple[str, str, str]] = set()
     for line in section.splitlines():
-        m = re.match(r"^\| (run|task|execution|directive|approval|external_action) \| `([A-Z_a-z]+)` \| (.+) \|$", line)
+        m = re.match(
+            r"^\| (run|task|execution|directive|approval|external_action|indexing_job) \| `([A-Z_a-z]+)` \| (.+) \|$",
+            line,
+        )
         if m:
             targets = re.sub(r"\([^)]*\)", "", m.group(3))  # пояснения в скобках — не переходы
             for to in re.findall(r"`([A-Z_]+)`", targets):
@@ -152,7 +155,15 @@ def _doc_transitions() -> set[tuple[str, str, str]]:
 
 def test_allowed_transitions_match_design(admin: psycopg.Connection) -> None:
     expected = _doc_transitions()
-    assert {e for e, _, _ in expected} == {"run", "task", "execution", "directive", "approval", "external_action"}
+    assert {e for e, _, _ in expected} == {
+        "run",
+        "task",
+        "execution",
+        "directive",
+        "approval",
+        "external_action",
+        "indexing_job",
+    }
     actual = {tuple(r) for r in admin.execute("SELECT entity, from_status, to_status FROM allowed_transitions")}
     assert actual == expected
 

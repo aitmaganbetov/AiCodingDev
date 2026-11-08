@@ -2715,7 +2715,7 @@ END $$;
 CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
   FOR EACH ROW EXECUTE FUNCTION trg_fn_check_transition('run');
 -- аналогично: tasks('task'), cli_executions('execution'), user_directives('directive'),
--- approvals('approval'), external_actions('external_action').
+-- approvals('approval'), external_actions('external_action'), indexing_jobs('indexing_job').
 ```
 
 Начальное содержимое `allowed_transitions` (из ТЗ §6 и Directive/Approval/Ledger FSM; сверено с DATA_FLOW.md §3 — **эта таблица является консолидированным нормативным списком переходов**; в коде источник — `transitions.py`, CI сравнивает множества). `__new__` — допустимое начальное состояние при `INSERT`.
@@ -2761,8 +2761,11 @@ CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
 | external_action | `EXECUTING` | `CONFIRMED`, `FAILED` (только после сверки с внешней системой) |
 | external_action | `FAILED` | `EXECUTING` (повтор после reconciliation, `attempt_count + 1`) |
 | external_action | `CONFIRMED` | `COMPENSATED` |
+| indexing_job | `__new__` | `QUEUED` |
+| indexing_job | `QUEUED` | `RUNNING`, `CANCELLED`, `FAILED` |
+| indexing_job | `RUNNING` | `SUCCEEDED`, `FAILED`, `CANCELLED`, `QUEUED` (повтор после потери аренды, `attempt_count + 1`) |
 
-Терминальные состояния (нет исходящих строк): run `COMPLETED/FAILED/CANCELLED`; task `SUCCEEDED/FAILED/CANCELLED`; execution `COLLECTED/TIMED_OUT/CANCELLED/CRASHED/AUTH_REQUIRED/RATE_LIMITED`; directive `COMPLETED/REJECTED/CANCELLED/FAILED`; approval — все, кроме `PENDING`; external_action `COMPENSATED`. Дополнительно `trg_runs_resume_guard`: выход из `PAUSED`/`BLOCKED` в нетерминальное состояние допустим только в `resume_status` (или `PAUSED` из `BLOCKED`).
+Терминальные состояния (нет исходящих строк): run `COMPLETED/FAILED/CANCELLED`; task `SUCCEEDED/FAILED/CANCELLED`; execution `COLLECTED/TIMED_OUT/CANCELLED/CRASHED/AUTH_REQUIRED/RATE_LIMITED`; directive `COMPLETED/REJECTED/CANCELLED/FAILED`; approval — все, кроме `PENDING`; external_action `COMPENSATED`; indexing_job `SUCCEEDED/FAILED/CANCELLED` (строки indexing_job — миграция 0007, P5-01; в §10.9 FSM не задан). Дополнительно `trg_runs_resume_guard`: выход из `PAUSED`/`BLOCKED` в нетерминальное состояние допустим только в `resume_status` (или `PAUSED` из `BLOCKED`).
 
 ### 18.4 `COMPLETED` только при успешных обязательных gates и выполненной approval policy (ТЗ §6, §14, AC-11)
 

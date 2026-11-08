@@ -10,6 +10,7 @@ import psycopg
 import pytest
 
 import aicd_cli_adapters
+import aicd_code_intelligence
 import aicd_collaboration
 import aicd_identity
 import aicd_orchestration
@@ -26,6 +27,7 @@ MODULES = {
     "orchestration": aicd_orchestration,
     "verification": aicd_verification,
     "collaboration": aicd_collaboration,
+    "code_intelligence": aicd_code_intelligence,
 }
 ROOT = Path(__file__).resolve().parents[2]
 

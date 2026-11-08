@@ -46,7 +46,27 @@ def run_git(repo: Path, *args: str, timeout: float = 60.0) -> str:
     return _run(repo, *args, timeout=timeout)
 
 
-def _run(repo: Path, *args: str, timeout: float = 10.0) -> str:
+def run_git_bytes(
+    repo: Path, *args: str, stdin: bytes | None = None, timeout: float = 60.0, max_output_bytes: int | None = None
+) -> bytes:
+    """Как `run_git`, но stdin/stdout — байты (содержимое blob через `cat-file --batch`, P5-02).
+
+    Фильтры (`smudge`/`textconv`) не применяются: `cat-file` без `--filters` отдаёт blob как есть.
+    `max_output_bytes` — защита памяти: больший вывод считается ошибкой.
+    """
+    argv, env = _argv_env(repo, args)
+    proc = subprocess.run(  # noqa: S603 — argv-массив, без shell
+        argv, input=stdin, capture_output=True, timeout=timeout, env=env, check=False
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or b"").decode("utf-8", "replace").strip()[-500:]
+        raise GitRepositoryError(f"git {args[0] if args else ''} завершился с ошибкой", detail=detail)
+    if max_output_bytes is not None and len(proc.stdout) > max_output_bytes:
+        raise GitRepositoryError(f"git {args[0] if args else ''}: превышен лимит вывода")
+    return proc.stdout
+
+
+def _argv_env(repo: Path, args: tuple[str, ...]) -> tuple[list[str], dict[str, str]]:
     env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
     env.update(
         {
@@ -71,6 +91,11 @@ def _run(repo: Path, *args: str, timeout: float = 10.0) -> str:
         str(repo),
         *args,
     ]
+    return argv, env
+
+
+def _run(repo: Path, *args: str, timeout: float = 10.0) -> str:
+    argv, env = _argv_env(repo, args)
     proc = subprocess.run(  # noqa: S603 — argv-массив, без shell
         argv, capture_output=True, text=True, timeout=timeout, env=env, check=False
     )
