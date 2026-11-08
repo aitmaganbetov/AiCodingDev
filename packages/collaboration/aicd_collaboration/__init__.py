@@ -1,6 +1,8 @@
-"""Модуль collaboration (MODULE_BOUNDARIES §3): Live Agent Chat, позже — ACP-брокер и лента активности.
+"""Модуль collaboration (MODULE_BOUNDARIES §3): ACP-брокер, доставка, Live Agent Chat и лента активности.
 
-В Phase 3 — только схема потоков и сообщений чата (миграция 0003); логика появится в Phase 4.
+ACP 1.0 (P4-04/P4-05) — подпакет `aicd_collaboration.acp`. Таблицы — миграции 0003 (чат) и 0006 (ACP).
 """
 
-OWNED_TABLES = frozenset({"chat_threads", "chat_messages"})
+OWNED_TABLES = frozenset(
+    {"agent_messages", "message_deliveries", "agent_activity_events", "chat_threads", "chat_messages"}
+)

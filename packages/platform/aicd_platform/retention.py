@@ -9,12 +9,17 @@ Job выполняется **только** под ролью `aicd_maintenance`
      аудите) → `maint_drop_partition` (DETACH + DROP); `outbox_events` — drop, только если 0 неопубликованных;
   4. непартиционированные таблицы — пакетное удаление (`run_event_log` после терминального статуса run,
      `processed_events`, `idempotency_keys`, `user_sessions`, `provider_health`) с паузами;
-  5. `maint_end` — `maintenance.session_finished` с итогами.
-Каждое необратимое действие (drop партиции, удаление пакетов) аудируется в той же транзакции.
+  5. архив run (§20.2–20.3): терминальный run старше `agent_messages_days` → один NDJSON.gz
+     (`chat_threads`, `chat_messages`, `agent_messages`, `message_deliveries`, `user_directives`, `directive_*`)
+     → строка `artifacts(kind='archive')` → удаление детальных строк: `chat_messages` (кроме сообщений поручений —
+     у них `body` заменяется ссылкой на архив), пустые `chat_threads`, `agent_messages` (+ `message_deliveries`
+     каскадом), кроме сообщений, на которые ссылаются сохраняемые строки (`agent_decisions`,
+     `directive_acknowledgements`, оставшиеся `chat_messages`, ответы из других run) и их цепочек `reply_to`;
+  6. `maint_end` — `maintenance.session_finished` с итогами.
+Каждое необратимое действие (drop партиции, удаление пакетов, архив run) аудируется в той же транзакции.
 
 Сроки — из Settings (`retention_*`, значения по умолчанию §20.3); глобальная активная политика
 `policies(policy_type='retention', workspace_id IS NULL)` переопределяет их ключами `RetentionPeriods`.
-`agent_messages` (архив run) появится в Phase 4 вместе с таблицей; до этого job отмечает её пропущенной.
 """
 
 from __future__ import annotations
@@ -112,6 +117,16 @@ class ArchivedPartition:
     rows: int
 
 
+@dataclass(frozen=True)
+class ArchivedRun:
+    workspace_id: uuid.UUID
+    run_id: uuid.UUID
+    storage_ref: str
+    sha256: str
+    size_bytes: int
+    rows: dict[str, int]
+
+
 @dataclass
 class RetentionReport:
     session_id: uuid.UUID
@@ -124,6 +139,7 @@ class RetentionReport:
     partitions_dropped: list[str] = field(default_factory=list)
     partitions_skipped: dict[str, str] = field(default_factory=dict)
     archives: list[ArchivedPartition] = field(default_factory=list)
+    runs_archived: list[ArchivedRun] = field(default_factory=list)
     rows_deleted: dict[str, int] = field(default_factory=dict)
     skipped_tables: dict[str, str] = field(default_factory=dict)
     outbox_unpublished_stale: int = 0
@@ -137,6 +153,7 @@ class RetentionReport:
             "partitions_dropped": list(self.partitions_dropped),
             "partitions_skipped": [{"partition": p, "reason": r} for p, r in self.partitions_skipped.items()],
             "rows_deleted": [{"table": t, "rows": n} for t, n in self.rows_deleted.items()],
+            "runs_archived": len(self.runs_archived),
             "skipped_tables": sorted(self.skipped_tables),
             "outbox_unpublished_stale": self.outbox_unpublished_stale,
             "warnings": self.warnings[:20],
@@ -416,6 +433,198 @@ async def _delete_in_batches(
         report.rows_deleted[table] = total
 
 
+# Архив run (§20.2): таблица → запрос строк run (детерминированный порядок). Параметры :ws, :run.
+RUN_ARCHIVE_EXPORTS: tuple[tuple[str, str], ...] = (
+    (
+        "chat_threads",
+        "SELECT to_jsonb(t)::text FROM chat_threads t WHERE t.workspace_id = :ws AND t.run_id = :run"
+        " ORDER BY t.created_at, t.id",
+    ),
+    (
+        "chat_messages",
+        "SELECT (to_jsonb(t) - 'search_vector')::text FROM chat_messages t"
+        " WHERE t.workspace_id = :ws AND t.run_id = :run ORDER BY t.created_at, t.id",
+    ),
+    (
+        "agent_messages",
+        "SELECT to_jsonb(t)::text FROM agent_messages t WHERE t.workspace_id = :ws AND t.run_id = :run"
+        " ORDER BY t.created_at, t.id",
+    ),
+    (
+        "message_deliveries",
+        "SELECT to_jsonb(d)::text FROM message_deliveries d JOIN agent_messages m"
+        " ON m.workspace_id = d.workspace_id AND m.id = d.message_id"
+        " WHERE m.workspace_id = :ws AND m.run_id = :run ORDER BY d.message_id, d.consumer_id",
+    ),
+    (
+        "user_directives",
+        "SELECT to_jsonb(t)::text FROM user_directives t WHERE t.workspace_id = :ws AND t.run_id = :run"
+        " ORDER BY t.created_at, t.id",
+    ),
+    (
+        "directive_impacts",
+        "SELECT to_jsonb(t)::text FROM directive_impacts t WHERE t.workspace_id = :ws AND t.run_id = :run"
+        " ORDER BY t.directive_id, t.task_id",
+    ),
+    (
+        "directive_acknowledgements",
+        "SELECT to_jsonb(a)::text FROM directive_acknowledgements a JOIN user_directives d"
+        " ON d.workspace_id = a.workspace_id AND d.id = a.directive_id"
+        " WHERE d.workspace_id = :ws AND d.run_id = :run ORDER BY a.created_at, a.id",
+    ),
+)
+
+_RUN_ARCHIVE_CANDIDATES = text(
+    "SELECT r.workspace_id, r.id, r.project_id FROM runs r"
+    " WHERE r.status = ANY(:terminal) AND r.finished_at < :cutoff"
+    " AND NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.workspace_id = r.workspace_id AND a.run_id = r.id"
+    "                 AND a.kind = 'archive')"
+    " AND (EXISTS (SELECT 1 FROM agent_messages m WHERE m.workspace_id = r.workspace_id AND m.run_id = r.id)"
+    "   OR EXISTS (SELECT 1 FROM chat_threads t WHERE t.workspace_id = r.workspace_id AND t.run_id = r.id))"
+    " ORDER BY r.finished_at, r.id LIMIT :n"
+)
+
+# Сообщения поручений остаются как трасса (user_directives → chat_messages RESTRICT): body → ссылка на архив.
+_RUN_ARCHIVE_REDACT_DIRECTIVE_CHAT = text(
+    "UPDATE chat_messages m SET body = :marker WHERE m.workspace_id = :ws AND m.run_id = :run"
+    " AND EXISTS (SELECT 1 FROM user_directives d WHERE d.workspace_id = m.workspace_id AND d.chat_message_id = m.id)"
+)
+_RUN_ARCHIVE_DELETE_CHAT = text(
+    "DELETE FROM chat_messages m WHERE m.workspace_id = :ws AND m.run_id = :run"
+    " AND NOT EXISTS (SELECT 1 FROM user_directives d WHERE d.workspace_id = m.workspace_id"
+    "                 AND d.chat_message_id = m.id)"
+)
+_RUN_ARCHIVE_DELETE_THREADS = text(
+    "DELETE FROM chat_threads t WHERE t.workspace_id = :ws AND t.run_id = :run"
+    " AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.workspace_id = t.workspace_id AND m.thread_id = t.id)"
+)
+# agent_messages: сохраняются сообщения, на которые ссылаются сохраняемые строки (FK RESTRICT), и вся их
+# цепочка reply_to; остальные удаляются одним оператором (ссылки reply_to внутри удаляемого набора допустимы).
+_RUN_ARCHIVE_DELETE_MESSAGES = text(
+    "WITH RECURSIVE keep(id, reply_to_id) AS ("
+    "  SELECT m.id, m.reply_to_id FROM agent_messages m WHERE m.workspace_id = :ws AND m.run_id = :run AND ("
+    "    EXISTS (SELECT 1 FROM agent_decisions x WHERE x.workspace_id = m.workspace_id AND x.acp_message_id = m.id)"
+    "    OR EXISTS (SELECT 1 FROM directive_acknowledgements x"
+    "               WHERE x.workspace_id = m.workspace_id AND x.acp_message_id = m.id)"
+    "    OR EXISTS (SELECT 1 FROM chat_messages x WHERE x.workspace_id = m.workspace_id AND x.acp_message_id = m.id)"
+    "    OR EXISTS (SELECT 1 FROM agent_messages x WHERE x.workspace_id = m.workspace_id AND x.reply_to_id = m.id"
+    "               AND x.run_id <> m.run_id))"
+    "  UNION"
+    "  SELECT p.id, p.reply_to_id FROM agent_messages p JOIN keep k ON p.workspace_id = :ws AND p.id = k.reply_to_id"
+    ")"
+    " DELETE FROM agent_messages m WHERE m.workspace_id = :ws AND m.run_id = :run"
+    " AND m.id NOT IN (SELECT k.id FROM keep k)"
+)
+
+
+async def _export_run(
+    conn: AsyncConnection, workspace_id: uuid.UUID, run_id: uuid.UUID, sink: ArchiveSink
+) -> ArchivedRun:
+    """NDJSON.gz пакета run: строка = {"table": …, "row": …}; детерминированно (mtime=0)."""
+    params = {"ws": workspace_id, "run": run_id}
+    counts: dict[str, int] = {}
+    fd, tmp_name = tempfile.mkstemp(prefix=".aicd-export-", suffix=".ndjson.gz")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz:
+            for table, query in RUN_ARCHIVE_EXPORTS:
+                counts[table] = 0
+                result = await conn.stream(text(query), params)
+                async for (doc,) in result:
+                    gz.write(f'{{"table":"{table}","row":{doc}}}\n'.encode())
+                    counts[table] += 1
+        sha, size = await asyncio.to_thread(_sha256_and_size, tmp)
+        key = f"{workspace_id}/runs/{run_id}.ndjson.gz"
+        ref = await asyncio.to_thread(sink.put_file, key, tmp, sha)
+    finally:
+        await asyncio.to_thread(tmp.unlink, missing_ok=True)
+    return ArchivedRun(workspace_id, run_id, ref, sha, size, counts)
+
+
+async def _archive_runs(
+    conn: AsyncConnection,
+    report: RetentionReport,
+    settings: Settings,
+    periods: RetentionPeriods,
+    now: datetime,
+    sink: ArchiveSink,
+) -> None:
+    """Архив run (§20.2–20.3). Маркер «run заархивирован» — строка artifacts(kind='archive', run_id)."""
+    for table in ("agent_messages", "chat_messages"):
+        if not await _table_exists(conn, table):
+            report.skipped_tables[table] = "таблица ещё не создана"
+            return
+    cutoff = now - timedelta(days=periods.agent_messages_days)
+    deleted = dict.fromkeys(("chat_messages", "chat_threads", "agent_messages"), 0)
+    while True:
+        candidates = (
+            await conn.execute(
+                _RUN_ARCHIVE_CANDIDATES,
+                {"terminal": list(TERMINAL_RUN_STATUSES), "cutoff": cutoff, "n": settings.retention_batch_size},
+            )
+        ).all()
+        await conn.commit()
+        for workspace_id, run_id, project_id in candidates:
+            archived = await _export_run(conn, workspace_id, run_id, sink)
+            await conn.rollback()  # закрыть читающую транзакцию: архив уже в хранилище
+            params = {"ws": workspace_id, "run": run_id}
+            redacted = (
+                await conn.execute(
+                    _RUN_ARCHIVE_REDACT_DIRECTIVE_CHAT, {**params, "marker": f"[архив run: {archived.storage_ref}]"}
+                )
+            ).rowcount
+            removed = {
+                "chat_messages": (await conn.execute(_RUN_ARCHIVE_DELETE_CHAT, params)).rowcount,
+                "chat_threads": (await conn.execute(_RUN_ARCHIVE_DELETE_THREADS, params)).rowcount,
+                "agent_messages": (await conn.execute(_RUN_ARCHIVE_DELETE_MESSAGES, params)).rowcount,
+            }
+            await conn.execute(
+                text(
+                    "INSERT INTO artifacts (id, workspace_id, project_id, run_id, kind, storage_ref, sha256,"
+                    " size_bytes, mime_type, retention_class) VALUES (:id, :ws, :project, :run, 'archive', :ref,"
+                    " :sha, :size, 'application/gzip', 'archive')"
+                ),
+                {
+                    "id": uuid7(),
+                    "ws": workspace_id,
+                    "project": project_id,
+                    "run": run_id,
+                    "ref": archived.storage_ref,
+                    "sha": archived.sha256,
+                    "size": archived.size_bytes,
+                },
+            )
+            await audit.record(
+                conn,
+                action="maintenance.run_archived",
+                resource_type="maintenance",
+                resource_id=report.session_id,
+                actor_type="system",
+                actor_id=None,
+                workspace_id=None,
+                metadata={
+                    "workspace_id": str(workspace_id),
+                    "run_id": str(run_id),
+                    "archive_ref": archived.storage_ref,
+                    "sha256": archived.sha256,
+                    "rows_archived": archived.rows,
+                    "rows_deleted": removed,
+                    "chat_bodies_replaced": redacted,
+                    "cutoff": cutoff.isoformat(),
+                },
+            )
+            await conn.commit()
+            for table, count in removed.items():
+                deleted[table] += count
+            report.runs_archived.append(archived)
+        if len(candidates) < settings.retention_batch_size:
+            break
+        if settings.retention_batch_pause_seconds:
+            await asyncio.sleep(settings.retention_batch_pause_seconds)
+    for table, count in deleted.items():
+        report.rows_deleted[table] = report.rows_deleted.get(table, 0) + count
+
+
 async def run_retention(
     engine: AsyncEngine,
     settings: Settings,
@@ -447,12 +656,7 @@ async def run_retention(
             await _drop_expired_partitions(conn, report, periods, now, sink)
             await _delete_in_batches(conn, report, settings, periods, now)
 
-            # Архив run (agent_messages, message_deliveries, chat_*) — Phase 4 (§20.2).
-            report.skipped_tables["agent_messages"] = (
-                "архив run не реализован до Phase 4"
-                if await _table_exists(conn, "agent_messages")
-                else "таблица ещё не создана (Phase 4)"
-            )
+            await _archive_runs(conn, report, settings, periods, now, sink)
             report.outbox_unpublished_stale = int(
                 (
                     await conn.execute(

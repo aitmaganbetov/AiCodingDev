@@ -19,7 +19,7 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from aicd_orchestration import checkpoints, directives, plans, retry, store
+from aicd_orchestration import checkpoints, directives, plans, retry, routing_service, store
 from aicd_orchestration.dag import PlannedTask, critical_path_lengths
 from aicd_orchestration.planner import template_plan
 from aicd_platform import context, leases
@@ -77,12 +77,6 @@ class VerifierPort(Protocol):
     ) -> VerificationOutcome: ...
 
 
-class ProviderUnavailableError(Exception):
-    def __init__(self, reason: str = "PROVIDER_UNAVAILABLE") -> None:
-        super().__init__(reason)
-        self.reason = reason
-
-
 @dataclass(frozen=True)
 class TaskExecution:
     """Итог исполнения задачи CLI: нормализованный результат + где искать изменения."""
@@ -97,8 +91,6 @@ class TaskExecution:
 
 
 class TaskExecutorPort(Protocol):
-    async def select_provider(self, *, workspace_id: uuid.UUID, allowed: list[str], role: str) -> str: ...
-
     async def execute(
         self,
         *,
@@ -106,6 +98,7 @@ class TaskExecutorPort(Protocol):
         run: dict[str, Any],
         attempt_id: uuid.UUID,
         provider: str,
+        installation_id: uuid.UUID,
         register_cancel: Callable[[Callable[[str], Awaitable[None]]], None],
     ) -> TaskExecution: ...
 
@@ -185,6 +178,47 @@ class Orchestrator:
         if approved:
             await self.tick(run_id, ws)
 
+    async def on_task_approval_decided(self, approval_id: uuid.UUID, ws: uuid.UUID) -> None:
+        """Решение по approval уровня задачи из маршрутизации (ROUTING_POLICY §5, P4-08).
+
+        * SELF_REVIEW_FALLBACK одобрен → задача снова READY; Router выберет провайдера-автора (маркировка self_review);
+        * MANUAL_REVIEW одобрен → ревью выполнено человеком: задача SUCCEEDED (маркировка human_review);
+          отклонён → задача FAILED (REVIEW_REJECTED).
+        Идемпотентно: действует только на задачу в ожидаемом состоянии BLOCKED.
+        """
+        async with transaction(self.engine, self._ctx(ws)) as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT a.action_type, a.status, a.task_id, t.status AS task_status, t.blocked_reason"
+                            " FROM approvals a JOIN tasks t ON t.id = a.task_id WHERE a.id = :a FOR UPDATE OF t"
+                        ),
+                        {"a": approval_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row is None or row["task_status"] != "BLOCKED":
+                return
+            action, status, task_id = row["action_type"], row["status"], row["task_id"]
+            if (
+                action == "SELF_REVIEW_FALLBACK"
+                and status == "APPROVED"
+                and row["blocked_reason"] == "APPROVAL_REQUIRED"
+            ):
+                await store.transition_task(conn, task_id, "READY", reason="self_review_approved")
+            elif action == "MANUAL_REVIEW" and row["blocked_reason"] == "MANUAL_REVIEW":
+                if status == "APPROVED":
+                    await store.transition_task(conn, task_id, "SUCCEEDED", reason="manual_review_approved")
+                elif status == "REJECTED":
+                    await store.transition_task(conn, task_id, "FAILED", reason="REVIEW_REJECTED")
+            else:
+                return
+            run_id = (await conn.execute(text("SELECT run_id FROM tasks WHERE id = :t"), {"t": task_id})).scalar_one()
+        await self.tick(run_id, ws)
+
     async def on_run_paused_or_cancelled(self, run_id: uuid.UUID, ws: uuid.UUID, status: str) -> None:
         """Safe point: работающие исполнения run останавливаются штатно (DATA_FLOW §6.2)."""
         async with transaction(self.engine, self._ctx(ws)) as conn:
@@ -225,6 +259,27 @@ class Orchestrator:
                 await store.transition_task(conn, task_id, "READY", reason="run_resumed")
         await self.tick(run_id, ws)
 
+    async def _request_task_approval(
+        self, conn: AsyncConnection, task: dict[str, Any], run: dict[str, Any], action: str, decision: Any
+    ) -> None:
+        if await _approved(conn, task["id"], action, statuses=("PENDING", "APPROVED")):
+            return  # уже запрошено (повторный роутинг той же задачи)
+        await self.approvals.request(
+            conn,
+            workspace_id=run["workspace_id"],
+            project_id=run["project_id"],
+            run_id=run["id"],
+            task_id=task["id"],
+            action_type=action,
+            risk_level=task["risk_level"],
+            subject={
+                "task_id": str(task["id"]),
+                "reason": decision.reason,
+                "review_independence": decision.review_independence,
+            },
+            requested_by_type="system",
+        )
+
     async def _checkpoint(self, conn: AsyncConnection, run_id: uuid.UUID, reason: checkpoints.Reason) -> None:
         if self.artifacts is not None:
             await checkpoints.create(conn, run_id=run_id, artifacts=self.artifacts, reason=reason)
@@ -234,6 +289,20 @@ class Orchestrator:
         """Продвигает DAG: PENDING→READY, RETRY_WAIT→READY, завершение/блокировка run. Возвращает READY."""
         async with transaction(self.engine, self._ctx(ws)) as conn:
             run = await _run_row(conn, run_id, lock=True)
+            if run is not None and run["status"] == "BLOCKED":
+                # Run блокируется только сводно по задачам (tasks_blocked); когда заблокированных задач не осталось
+                # (провайдер вернулся, approval решён), run возобновляется сам (ROUTING_POLICY §4.1).
+                still_blocked = (
+                    await conn.execute(
+                        text(
+                            "SELECT 1 FROM tasks WHERE run_id = :r AND status = 'BLOCKED' AND superseded_at IS NULL LIMIT 1"
+                        ),
+                        {"r": run_id},
+                    )
+                ).first()
+                if still_blocked is None:
+                    await store.transition_run(conn, run_id, "RUNNING", reason="tasks_unblocked")
+                    run = await _run_row(conn, run_id)
             if run is None or run["status"] != "RUNNING":
                 return []
             # Задачи, отменённые на safe point по поручению, выходят из текущего плана (иначе run не завершится).
@@ -321,17 +390,31 @@ class Orchestrator:
             await _run_row(conn, task["run_id"], lock=True)
             if task_id not in await _dispatchable(conn, run):
                 return
-            allowed = list(run["policy_snapshot"].get("routing", {}).get("allowed_providers", ["codex", "claude"]))
-            try:
-                provider = await self.executor.select_provider(
-                    workspace_id=ws, allowed=allowed, role=task["agent_role"]
-                )
-            except ProviderUnavailableError as exc:
-                # Оба CLI недоступны ⇒ BLOCKED без обхода лимитов (ТЗ §5, AC-16).
+            # Router (ROUTING_POLICY §4–§5): фильтры, независимость ревью, скоринг; решение — в routing_decisions.
+            decision = await routing_service.select(conn, task=task, run=run, now=utcnow())
+            if decision.outcome == "WAIT":
+                return  # все подходящие установки заняты — задача остаётся READY до освобождения слота
+            if decision.outcome == "BLOCKED":
+                # Нет допустимого провайдера ⇒ BLOCKED без обхода лимитов (ТЗ §5, AC-16); MANUAL_REVIEW — approval.
                 await store.transition_task(
-                    conn, task_id, "BLOCKED", reason="no_provider", extra={"blocked_reason": exc.reason}
+                    conn, task_id, "BLOCKED", reason="routing", extra={"blocked_reason": decision.blocked_reason}
                 )
+                if decision.needs_approval == "MANUAL_REVIEW":
+                    await self._request_task_approval(conn, task, run, "MANUAL_REVIEW", decision)
                 return
+            if decision.needs_approval == "SELF_REVIEW_FALLBACK" and not await _approved(
+                conn, task_id, "SELF_REVIEW_FALLBACK"
+            ):
+                # Самопроверка только после явного одобрения человеком; маркировка self_review (ТЗ §4).
+                await store.transition_task(
+                    conn, task_id, "BLOCKED", reason="routing", extra={"blocked_reason": "APPROVAL_REQUIRED"}
+                )
+                await self._request_task_approval(conn, task, run, "SELF_REVIEW_FALLBACK", decision)
+                return
+            if decision.selected is None:  # pragma: no cover — SELECTED/FALLBACK всегда несут выбор
+                raise RuntimeError("router: решение без выбранной установки")
+            provider = decision.selected.provider
+            installation_id = decision.selected.installation_id
             lease = await leases.acquire(
                 conn,
                 resource_type="task",
@@ -380,6 +463,7 @@ class Orchestrator:
                 run=dict(run),
                 attempt_id=attempt_id,
                 provider=provider,
+                installation_id=installation_id,
                 register_cancel=lambda hook: self._cancel_hooks.__setitem__(task_id, hook),
             )
         except Exception as exc:
@@ -626,6 +710,18 @@ async def _dispatchable(conn: AsyncConnection, run: dict[str, Any]) -> list[uuid
         (r for r in rows if r["status"] == "READY"), key=lambda r: (-priority[r["task_key"]], r["created_at"], r["id"])
     )
     return [r["id"] for r in ready[: max(limit - active, 0)]]
+
+
+async def _approved(
+    conn: AsyncConnection, task_id: uuid.UUID, action: str, *, statuses: tuple[str, ...] = ("APPROVED",)
+) -> bool:
+    found = (
+        await conn.execute(
+            text("SELECT 1 FROM approvals WHERE task_id = :t AND action_type = :a AND status = ANY(:s) LIMIT 1"),
+            {"t": task_id, "a": action, "s": list(statuses)},
+        )
+    ).first()
+    return found is not None
 
 
 async def fail_attempt(

@@ -35,7 +35,7 @@ from aicd_platform.ids import uuid7
 from aicd_security.local_runner import LocalProcessRunner
 from tests.support import db as testdb
 from tests.support import orchestration as orch
-from tests.support.phase3 import Slice, create_run, drive, install_cli, world
+from tests.support.phase3 import Slice, create_run, drive, install_both, install_cli, world
 
 __all__ = ["world"]  # фикстура pytest
 
@@ -94,7 +94,7 @@ def _alive(pid_ref: str) -> bool:
 
 
 async def test_worker_killed_while_cli_running_is_recovered(world: Slice, database: testdb.TestDatabase) -> None:
-    await install_cli(world.worker)
+    await install_both(world.worker)
     run_id = await create_run(world)
     worker = _spawn_worker(world, database, run_id, scenario="timeout")  # CLI «думает» час
     store = FileSystemArtifactStore(world.tmp / "artifacts")

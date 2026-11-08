@@ -271,7 +271,7 @@ CREATE DOMAIN sse_event_type_persisted_t AS text CHECK (VALUE IN
 | `worker_hosts.kind` | `api`, `orchestrator`, `outbox`, `exec`, `verify`, `index` |
 | `cli_sessions.status` | `ACTIVE`, `IDLE`, `CLOSED`, `INVALID` |
 | `usage_metrics.source` | `cli_reported`, `platform_measured`, `not_exposed_by_cli` |
-| `agent_messages.sender_role` | `agent_role` ∪ `orchestrator` |
+| `agent_messages.sender_role` | `agent_role` ∪ `orchestrator`, `user` (миграция 0006, ACP §1/§4.2) |
 | `agent_messages.recipient_role` | `agent_role` ∪ `orchestrator`, `user` |
 | `agent_decisions.decision_type` | `architecture`, `plan`, `routing`, `review_verdict`, `risk_acceptance`, `scope_change`, `other` |
 | `agent_decisions.decided_by_type`, `*.actor_type` | `user`, `agent`, `system` (+ `github` для audit) |
@@ -889,6 +889,7 @@ CREATE TABLE agent_profiles (
 );
 -- trg_agent_profiles_global_policy: policy_profile_id должен ссылаться на policies с workspace_id IS NULL.
 ```
+**Реализация (миграция 0006):** таблица создана без seed — содержимое профилей версионируется файлами и синхронизируется отдельно (P4-02); способ заполнения (seed-миграция или синхронизация `aicd`-командой под `aicd_migrator`) — открытый вопрос. `aicd_app`/`aicd_worker` — только `SELECT`. Владелец в коде — `aicd_orchestration` (модуль `agent_runtime` пока не выделен).
 
 ### 7.6 `agent_assignments` (T, orchestration)
 Назначение профиля и провайдера задаче. Колонка `review_independence` фиксирует, было ли ревью действительно независимым (ТЗ §4: «нельзя ложно маркировать самопроверку как независимую»).
@@ -1195,6 +1196,8 @@ CREATE INDEX ix_agent_messages_task_time ON agent_messages (workspace_id, task_i
 CREATE INDEX ix_agent_messages_reply_to ON agent_messages (reply_to_id) WHERE reply_to_id IS NOT NULL;
 -- trg_agent_messages_append_only: BEFORE UPDATE OR DELETE → trg_fn_append_only() (кроме роли aicd_maintenance, §20).
 ```
+**Реализация (миграция 0006) — отличия от листинга:** (1) отправитель `user` (ACP §1, §4.2: `QUESTION`/`ANSWER` из Live Agent Chat) — `sender_role` допускает `'user'`, добавлена `sender_user_id uuid` (FK `users`), вместо `ck_agent_messages_sender_provider` — `ck_agent_messages_sender` (агент → `sender_provider`, `user` → `sender_user_id`, `orchestrator` → ни того, ни другого); (2) поля конверта ACP §2 / дополнения ACP §11: `task_attempt_id` (составной FK `task_attempts`, только при `task_id` и отправителе-агенте, `ck_agent_messages_attempt`) и `recipient_task_id` (`to.task_id`, составной FK `tasks(workspace_id, run_id, id)` — получатель из того же run; индекс `ix_agent_messages_inbox`); (3) `correlation_id NOT NULL` (ACP 1.0 требует значение), индекс по нему без предиката; (4) append-only: `UPDATE` запрещён всем, `DELETE` — только `aicd_maintenance` в сессии обслуживания (архив run, §20.4; функция `trg_fn_append_only_except_maintenance`).
+
 Ограничение `≤ 32768` байт на `payload::text` — защитный рубеж БД; брокер ACP проверяет размер **всего** сериализованного конверта до вставки (ТЗ §10). Крупные данные — только `artifact` refs в payload.
 
 ### 9.2 `message_deliveries` (T, collaboration)
@@ -1219,6 +1222,7 @@ CREATE TABLE message_deliveries (
 CREATE INDEX ix_message_deliveries_pending ON message_deliveries (consumer_id, last_delivered_at)
   WHERE acked_at IS NULL AND dead_lettered_at IS NULL;
 ```
+**Реализация (миграция 0006):** добавлена `next_attempt_at timestamptz` (backoff ретраев, ACP §7/§11); `ix_message_deliveries_pending` — по `(consumer_id, next_attempt_at)`; дополнительно `ix_message_deliveries_ws_message (workspace_id, message_id)`. Права: `aicd_worker` — `SELECT/INSERT/UPDATE`, `aicd_app` — `SELECT`.
 
 ### 9.3 `agent_decisions` (T, orchestration)
 Зафиксированные решения (`DECISION_RECORDED`, вердикты ревью, принятие риска) с обоснованием и ссылками на evidence (ТЗ §7.2, §10).
@@ -1457,6 +1461,7 @@ CREATE INDEX ix_activity_task_time ON agent_activity_events (workspace_id, task_
 CREATE INDEX ix_activity_execution ON agent_activity_events (execution_id, occurred_at) WHERE execution_id IS NOT NULL;
 -- Партиции: agent_activity_events_yYYYYmMM, создаются заранее на 3 месяца вперёд (§20.3).
 ```
+**Реализация (миграция 0006):** DDL без изменений; `trg_agent_activity_events_append_only` (`trg_fn_append_only`) — строки неизменяемы для всех ролей, retention только DETACH + DROP партиции (`maint_drop_partition` с архивом). Права: `aicd_worker` — `SELECT/INSERT`, `aicd_app` — `SELECT`. Отложенные FK 0003 (`fk_agent_assignments_profile`, `fk_agent_decisions_message`, `fk_chat_messages_acp`, `fk_directive_ack_message`) добавлены этой же миграцией вместе с индексами ссылающихся колонок `acp_message_id`.
 Выдержки вывода CLI попадают в `payload` только после редактирования секретов и усечения (ТЗ §8.3, §16); полный raw log — защищённый artifact.
 
 ---
@@ -3065,7 +3070,9 @@ CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USI
 - **Архив:** NDJSON.gz (детерминированный, `mtime=0`) партиции через родителя по диапазону ключа → `FileSystemArchiveSink` (`retention_archive_root`, по умолчанию `<artifact_fs_root>/archive`): `archive/global/<table>/<YYYY-MM>.ndjson.gz`, атомарная запись и сверка sha256; только затем drop. **Отличие:** sha256 фиксируется в `audit_events`, строка `artifacts(kind='archive')` не создаётся (у `artifacts` обязателен `workspace_id`, а глобальная партиция аудита содержит несколько workspace); S3-приёмник — открытый вопрос.
 - **Пакетное удаление** (`DELETE … WHERE ctid = ANY(ARRAY(SELECT ctid … LIMIT n))`, `retention_batch_size` = 5000, пауза `retention_batch_pause_seconds`): `run_event_log` терминальных run с `finished_at` старше срока (триггер append-only пропускает только `DELETE` от `aicd_maintenance` в сессии обслуживания; `audit_events` построчно неизменяем всегда), `processed_events`, `idempotency_keys` (истёкшие), `user_sessions`, `provider_health`. Дополнительно job считает неопубликованные outbox-события старше 15 мин (предупреждение).
 - **Сроки:** `Settings.retention_*` (значения §20.3); активная **глобальная** политика `policies(policy_type='retention', workspace_id IS NULL)` переопределяет их ключами `run_event_log_days`, `agent_activity_days`, `agent_messages_days`, `audit_days` (≥ 30), `outbox_published_months`, `processed_events_days`, `user_sessions_days`, `provider_health_days`; некорректные значения пропускаются с предупреждением. Политики уровня workspace в v1 не применяются (партиции глобальные).
-- **Не реализовано до Phase 4:** `agent_activity_events` (функции уже знают таблицу, job пропускает её, пока таблицы нет) и архив run (`agent_messages`, `message_deliveries`, `chat_*`, `directive_*`); `code_index_snapshots`, `documentation_snapshots`, `artifacts` по `retention_class`, `usage_metrics`, `github_webhook_deliveries` — в фазах, где появляются их потребители.
+- **`agent_activity_events` (миграция 0006):** партиции создаются вперёд, истёкшие — архив NDJSON.gz (`archive/global/agent_activity_events/<YYYY-MM>.ndjson.gz`) → `maint_drop_partition`.
+- **Архив run (миграция 0006):** терминальный run с `finished_at` старше `agent_messages_days` без строки `artifacts(kind='archive', run_id)` (она же маркер идемпотентности) → один NDJSON.gz (`archive/<workspace_id>/runs/<run_id>.ndjson.gz`, строка = `{"table", "row"}`: `chat_threads`, `chat_messages` без `search_vector`, `agent_messages`, `message_deliveries`, `user_directives`, `directive_impacts`, `directive_acknowledgements`) → в одной транзакции: `chat_messages` поручений — `body` = `[архив run: <ref>]`, прочие `chat_messages` удаляются, пустые `chat_threads` удаляются, `agent_messages` удаляются (`message_deliveries` — каскадом), кроме сообщений, на которые ссылаются сохраняемые строки (`agent_decisions`, `directive_acknowledgements`, оставшиеся `chat_messages`, ответы из других run) и их цепочек `reply_to`; строка `artifacts(kind='archive', retention_class='archive')`; аудит `maintenance.run_archived` (sha256, число строк). **Отличия от §20.2–20.3:** `user_directives`/`directive_*` только архивируются, не удаляются; удаление — одним оператором на run, а не пакетами по 5–10 тыс. (объём run ограничен); `retrieval_*` — Phase 5. Права `aicd_maintenance`: `DELETE` на `agent_messages`, `chat_messages`, `chat_threads`, `UPDATE (body)` на `chat_messages`, `INSERT` на `artifacts`.
+- **Не реализовано:** `code_index_snapshots`, `documentation_snapshots`, `artifacts` по `retention_class`, `usage_metrics`, `github_webhook_deliveries` — в фазах, где появляются их потребители.
 
 ---
 

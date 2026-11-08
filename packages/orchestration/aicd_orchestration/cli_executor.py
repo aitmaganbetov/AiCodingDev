@@ -1,15 +1,13 @@
-"""Исполнение задачи через CLI Gateway (P3-06/P3-07; маршрутизация Phase 3 — минимальная, Router — P4-07).
+"""Исполнение задачи через CLI Gateway (P3-06/P3-07).
 
-Выбор установки: провайдер из allowed_providers политики run, установка включена, совместимость не
-UNSUPPORTED, последний health не UNAVAILABLE/RATE_LIMITED, есть свободный слот. Если подходящих нет —
-`ProviderUnavailableError` (AUTH_REQUIRED, если установки есть, но не авторизованы) ⇒ задача BLOCKED.
+Установку выбирает Router (`routing_service`, P4-07) до захвата аренды; исполнитель получает готовый выбор.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -20,7 +18,7 @@ from aicd_cli_adapters.gateway import ExecutionGateway
 from aicd_cli_adapters.models import ExecutionRequest
 from aicd_cli_adapters.subprocess_adapter import SubprocessCLIAdapter
 from aicd_orchestration import worktrees as wt
-from aicd_orchestration.engine import ProviderUnavailableError, TaskExecution
+from aicd_orchestration.engine import TaskExecution
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 from aicd_security.paths import resolve_ref
@@ -41,43 +39,6 @@ class CliTaskExecutor:
     adapter_factory: AdapterFactory
     worker_host_id: uuid.UUID | None = None
     default_timeout_seconds: int = 1800
-    _chosen: dict[str, uuid.UUID] = field(default_factory=dict)
-
-    async def select_provider(self, *, workspace_id: uuid.UUID, allowed: list[str], role: str) -> str:
-        async with transaction(self.engine, DbContext(workspace_id=workspace_id, actor_type="system")) as conn:
-            rows = (
-                (
-                    await conn.execute(
-                        text(
-                            "SELECT i.id, p.code, i.auth_status, i.max_concurrency, sys_active_executions(i.id) AS active,"
-                            " (SELECT h.availability FROM provider_health h WHERE h.installation_id = i.id"
-                            "   ORDER BY h.observed_at DESC LIMIT 1) AS availability"
-                            " FROM cli_installations i JOIN cli_providers p ON p.id = i.provider_id"
-                            " WHERE i.enabled AND p.enabled AND i.compatibility <> 'unsupported' AND p.code = ANY(:allowed)"
-                            " ORDER BY p.code, i.id"
-                        ),
-                        {"allowed": allowed},
-                    )
-                )
-                .mappings()
-                .all()
-            )
-        if not rows:
-            raise ProviderUnavailableError("PROVIDER_UNAVAILABLE")
-        authed = [r for r in rows if r["auth_status"] == "AUTHENTICATED"]
-        if not authed:
-            raise ProviderUnavailableError("AUTH_REQUIRED")
-        usable = [
-            r
-            for r in authed
-            if r["availability"] not in ("UNAVAILABLE", "RATE_LIMITED") and r["active"] < r["max_concurrency"]
-        ]
-        if not usable:
-            raise ProviderUnavailableError("PROVIDER_UNAVAILABLE")
-        # Phase 3: наименее загруженная установка; скоринг по роли/качеству — Router P4-07.
-        best = min(usable, key=lambda r: (r["active"] / r["max_concurrency"], r["code"]))
-        self._chosen[best["code"]] = best["id"]
-        return str(best["code"])
 
     async def execute(
         self,
@@ -86,10 +47,10 @@ class CliTaskExecutor:
         run: dict[str, Any],
         attempt_id: uuid.UUID,
         provider: str,
+        installation_id: uuid.UUID,
         register_cancel: Callable[[Callable[[str], Awaitable[None]]], None],
     ) -> TaskExecution:
         ws: uuid.UUID = run["workspace_id"]
-        installation_id = self._chosen[provider]
         async with transaction(self.engine, DbContext(workspace_id=ws, actor_type="system")) as conn:
             ref = (
                 await conn.execute(

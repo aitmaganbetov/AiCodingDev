@@ -18,7 +18,7 @@ from aicd_orchestration.approvals import Approvals
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 from tests.support.contract import validate_response
-from tests.support.phase3 import Slice, create_run, drive, install_cli, world
+from tests.support.phase3 import Slice, create_run, drive, install_both, install_cli, world
 
 __all__ = ["world"]  # фикстура pytest
 
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.db
 
 
 async def test_develop_run_completes_with_verified_evidence(world: Slice) -> None:
-    await install_cli(world.worker)
+    await install_both(world.worker)
     run_id = await create_run(world)
     assert await drive(world, run_id) == "COMPLETED"
     r = await world.user.client.get(f"/api/v1/runs/{run_id}")
@@ -123,7 +123,7 @@ async def test_no_usable_cli_blocks_without_workaround(world: Slice, auth: str |
 async def test_plan_approval_required_and_decided_by_member(
     app: FastAPI, app_engine: AsyncEngine, world: Slice
 ) -> None:
-    await install_cli(world.worker)
+    await install_both(world.worker)
     run_id = await create_run(world, approval_policy="always")
     orch = world.orchestrator()
     ws, rid = uuid7().__class__(world.ws), uuid7().__class__(run_id)

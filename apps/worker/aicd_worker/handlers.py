@@ -85,6 +85,9 @@ async def _route(rt: Runtime, event: dict[str, Any], event_id: uuid.UUID, run_id
             approved, plan_version = decision
             await orch.on_plan_approval_decided(run_id, ws, approved=approved, plan_version=plan_version)
             return "on_plan_approval_decided"
+        approval_id = _uuid(event.get("aggregate_id"))
+        if approval_id is not None:  # approvals уровня задачи (MANUAL_REVIEW / SELF_REVIEW_FALLBACK)
+            await orch.on_task_approval_decided(approval_id, ws)
     if etype == "run.state_changed":
         to_status = payload.get("to_status", payload.get("to"))
         from_status = payload.get("from_status", payload.get("from"))

@@ -41,6 +41,9 @@ class FakeOrchestrator:
     ) -> None:
         self.calls.append(("on_plan_approval_decided", run_id, approved, plan_version))
 
+    async def on_task_approval_decided(self, approval_id: uuid.UUID, ws: uuid.UUID) -> None:
+        self.calls.append(("on_task_approval_decided", approval_id))
+
     async def on_run_paused_or_cancelled(self, run_id: uuid.UUID, ws: uuid.UUID, status: str) -> None:
         self.calls.append(("on_run_paused_or_cancelled", run_id, status))
 

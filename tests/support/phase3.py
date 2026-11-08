@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 from collections.abc import AsyncIterator
@@ -83,7 +84,22 @@ class Slice:
         return build_orchestrator(self.worker, self.tmp, self.settings.repository_roots, self.scenario["name"])
 
 
-async def install_cli(worker: AsyncEngine, *, auth_status: str = "AUTHENTICATED") -> None:
+# Возможности, которые probe Fake CLI сообщает о себе (CLI_ADAPTER_CONTRACT §13.1) — проходят фильтр H5 Router.
+FAKE_CAPABILITIES = {
+    "noninteractive_mode": True,
+    "machine_readable_output": "jsonl_stream",
+    "sandbox_modes": ["workspace_write"],
+    "resume_session": False,
+    "token_usage_exposed": True,
+    "auth_status_command": True,
+    "cancel_signal_safe": True,
+    "tool_events_exposed": True,
+}
+
+
+async def install_cli(
+    worker: AsyncEngine, *, auth_status: str = "AUTHENTICATED", provider: str = "codex", isolate: bool = True
+) -> None:
     async with transaction(worker, DbContext(actor_type="system")) as conn:
         host = (
             await conn.execute(
@@ -91,15 +107,22 @@ async def install_cli(worker: AsyncEngine, *, auth_status: str = "AUTHENTICATED"
                 {"id": uuid7(), "h": f"e2e-{secrets.token_hex(4)}"},
             )
         ).scalar_one()
-        await conn.execute(
-            text("UPDATE cli_installations SET enabled = false WHERE enabled")
-        )  # изоляция от других тестов
+        if isolate:  # изоляция от других тестов: только установки этого теста
+            await conn.execute(text("UPDATE cli_installations SET enabled = false WHERE enabled"))
         await conn.execute(
             text(
-                "INSERT INTO cli_installations (id, provider_id, host_id, binary_path, auth_status, max_concurrency)"
-                " SELECT :id, id, :h, '/usr/bin/python3', :auth, 2 FROM cli_providers WHERE code = 'codex'"
+                "INSERT INTO cli_installations (id, provider_id, host_id, binary_path, auth_status, max_concurrency,"
+                " compatibility, capabilities)"
+                " SELECT :id, id, :h, '/usr/bin/python3', :auth, 2, 'supported', CAST(:caps AS jsonb)"
+                " FROM cli_providers WHERE code = :provider"
             ),
-            {"id": uuid7(), "h": host, "auth": auth_status},
+            {
+                "id": uuid7(),
+                "h": host,
+                "auth": auth_status,
+                "caps": json.dumps(FAKE_CAPABILITIES),
+                "provider": provider,
+            },
         )
 
 
@@ -145,3 +168,9 @@ async def drive(s: Slice, run_id: str) -> str:
     rid = uuid7().__class__(run_id)
     await orch.on_run_created(rid, ws)
     return await orch.drive(rid, ws, fast_forward_backoff=True)
+
+
+async def install_both(worker: AsyncEngine) -> None:
+    """Codex и Claude: независимое ревью L3+ возможно (ROUTING_POLICY §5)."""
+    await install_cli(worker, provider="codex")
+    await install_cli(worker, provider="claude", isolate=False)

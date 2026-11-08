@@ -86,6 +86,48 @@ def _exists(admin: psycopg.Connection, relname: str) -> bool:
     return admin.execute("SELECT to_regclass(%s) IS NOT NULL", (f"aicd.{relname}",)).fetchone() == (True,)
 
 
+def _seed_run_chat(admin: psycopg.Connection, ws: uuid.UUID, owner: uuid.UUID, run: uuid.UUID) -> dict[str, uuid.UUID]:
+    """Пакет run для архива: m1 ← m2 (reply_to, на m2 ссылается agent_decisions), m3 (+доставка, +чат),
+    обычное сообщение чата и сообщение поручения (user_directives)."""
+    ids = {k: uuid7() for k in ("m1", "m2", "m3", "thread", "plain_chat", "acp_chat", "directive_chat")}
+    for key, reply in (("m1", None), ("m2", ids["m1"]), ("m3", None)):
+        admin.execute(
+            "INSERT INTO agent_messages (id, workspace_id, run_id, sender_role, sender_provider, recipient_role,"
+            " message_type, correlation_id, reply_to_id, payload)"
+            " VALUES (%s, %s, %s, 'developer', 'codex', 'orchestrator', 'HANDOFF', %s, %s, '{\"k\": 1}')",
+            (ids[key], ws, run, ids["m1"], reply),
+        )
+    admin.execute(
+        "INSERT INTO message_deliveries (workspace_id, message_id, consumer_id) VALUES (%s, %s, 'chat.projector')",
+        (ws, ids["m3"]),
+    )
+    admin.execute(
+        "INSERT INTO agent_decisions (id, workspace_id, run_id, decision_type, rationale, acp_message_id,"
+        " decided_by_type) VALUES (%s, %s, %s, 'plan', 'r', %s, 'system')",
+        (uuid7(), ws, run, ids["m2"]),
+    )
+    admin.execute(
+        "INSERT INTO chat_threads (id, workspace_id, run_id, scope) VALUES (%s, %s, %s, 'all_agents')",
+        (ids["thread"], ws, run),
+    )
+    for key, kind, sender, acp in (
+        ("plain_chat", "text", "system", None),
+        ("acp_chat", "acp_message", "system", ids["m3"]),
+        ("directive_chat", "directive", "user", None),
+    ):
+        admin.execute(
+            "INSERT INTO chat_messages (id, workspace_id, run_id, thread_id, sender_type, sender_id, body,"
+            " message_kind, acp_message_id) VALUES (%s, %s, %s, %s, %s, %s, 'секретный план', %s, %s)",
+            (ids[key], ws, run, ids["thread"], sender, owner if sender == "user" else None, kind, acp),
+        )
+    admin.execute(
+        "INSERT INTO user_directives (id, workspace_id, run_id, chat_message_id, target_type, directive_type,"
+        " submitted_by) VALUES (%s, %s, %s, %s, 'run', 'ASK', %s)",
+        (uuid7(), ws, run, ids["directive_chat"], owner),
+    )
+    return ids
+
+
 @pytest.mark.db
 async def test_retention_job_on_seeded_db(
     database: testdb.TestDatabase, settings: Settings, maintenance_engine: AsyncEngine, tmp_path: Path
@@ -118,6 +160,16 @@ async def test_retention_job_on_seeded_db(
                 " created_at, published_at) VALUES (%s, %s, 'run', %s, 'run.retention_test', '{}', %s, %s)",
                 (uuid7(), tenant.workspace_id, uuid7(), _ts(month), _ts(month) if published else None),
             )
+        # Старая партиция ленты активности (архив → drop) и пакет ACP/чата терминального run (архив run).
+        admin.execute("SELECT maint_ensure_monthly_partitions('agent_activity_events', %s, 0)", (AUDIT_MONTH,))
+        for i in range(2):
+            admin.execute(
+                "INSERT INTO agent_activity_events (id, workspace_id, run_id, event_type, occurred_at)"
+                " VALUES (%s, %s, %s, 'task.state_changed', %s)",
+                (uuid7(), tenant.workspace_id, old_run, _ts(AUDIT_MONTH, 10 + i)),
+            )
+        acp = _seed_run_chat(admin, tenant.workspace_id, tenant.owner_id, old_run)
+        active_acp = _seed_run_chat(admin, tenant.workspace_id, tenant.owner_id, active_run)
         consumer = f"retention.test.{uuid7().hex[-8:]}"
         old_event, fresh_event = uuid7(), uuid7()
         admin.execute(
@@ -128,7 +180,7 @@ async def test_retention_job_on_seeded_db(
         admin.execute(
             "INSERT INTO policies (id, workspace_id, policy_type, name, version, definition)"
             " VALUES (%s, NULL, 'retention', 'default', 1, %s)",
-            (policy_id, json.dumps({"run_event_log_days": 45, "bogus_key": 1})),
+            (policy_id, json.dumps({"run_event_log_days": 45, "agent_messages_days": 45, "bogus_key": 1})),
         )
 
     job_settings = settings.model_copy(
@@ -158,7 +210,8 @@ async def test_retention_job_on_seeded_db(
     assert report.partitions_skipped.get(pending_part) == "skipped_unpublished"
     assert report.partitions_ahead["audit_events"] >= 2 and report.partitions_ahead["outbox_events"] >= 2
     assert report.outbox_unpublished_stale >= 1
-    assert "agent_activity_events" in report.skipped_tables and "agent_messages" in report.skipped_tables
+    assert not {"agent_activity_events", "agent_messages", "chat_messages"} & set(report.skipped_tables)
+    assert report.partitions_ahead["agent_activity_events"] >= 2
     assert report.rows_deleted["run_event_log"] >= 3
     assert report.rows_deleted["processed_events"] >= 1
 
@@ -170,7 +223,45 @@ async def test_retention_job_on_seeded_db(
     docs = [json.loads(line) for line in gzip.decompress(path.read_bytes()).splitlines()]
     assert [d["action"] for d in docs] == ["test.old_event"] * 3
 
+    # Партиция активности архивирована (2 события) и удалена.
+    activity_part = f"agent_activity_events_y{AUDIT_MONTH:%Y}m{AUDIT_MONTH:%m}"
+    (activity_archive,) = [a for a in report.archives if a.partition == activity_part]
+    assert activity_archive.rows == 2 and activity_part in report.partitions_dropped
+
+    # Архив run: один NDJSON.gz пакета ACP/чата/поручений, строка artifacts(kind='archive').
+    (run_archive,) = [r for r in report.runs_archived if r.run_id == old_run]
+    assert active_run not in {r.run_id for r in report.runs_archived}
+    assert run_archive.storage_ref == f"file://archive/{tenant.workspace_id}/runs/{old_run}.ndjson.gz"
+    run_path = tmp_path / "archive" / str(tenant.workspace_id) / "runs" / f"{old_run}.ndjson.gz"
+    assert hashlib.sha256(run_path.read_bytes()).hexdigest() == run_archive.sha256
+    lines = [json.loads(line) for line in gzip.decompress(run_path.read_bytes()).splitlines()]
+    archived_tables = [d["table"] for d in lines]
+    assert archived_tables.count("agent_messages") == 3 and archived_tables.count("chat_messages") == 3
+    assert archived_tables.count("message_deliveries") == 1 and archived_tables.count("user_directives") == 1
+    assert all("search_vector" not in d["row"] for d in lines if d["table"] == "chat_messages")
+    assert report.rows_deleted["agent_messages"] >= 1 and report.rows_deleted["chat_messages"] >= 2
+
     with connect_admin(database) as admin:
+        assert not _exists(admin, activity_part)
+        left_messages = {
+            r[0] for r in admin.execute("SELECT id FROM agent_messages WHERE run_id = %s", (old_run,)).fetchall()
+        }
+        # m2 нужен agent_decisions, m1 — его цепочке reply_to; m3 удалён вместе с доставкой.
+        assert left_messages == {acp["m1"], acp["m2"]}
+        assert admin.execute(
+            "SELECT count(*) FROM message_deliveries WHERE message_id = %s", (acp["m3"],)
+        ).fetchone() == (0,)
+        chat_left = admin.execute("SELECT id, body FROM chat_messages WHERE run_id = %s", (old_run,)).fetchall()
+        assert chat_left == [(acp["directive_chat"], f"[архив run: {run_archive.storage_ref}]")]
+        assert admin.execute("SELECT count(*) FROM chat_threads WHERE run_id = %s", (old_run,)).fetchone() == (1,)
+        assert admin.execute(
+            "SELECT sha256, retention_class FROM artifacts WHERE run_id = %s AND kind = 'archive'", (old_run,)
+        ).fetchone() == (run_archive.sha256, "archive")
+        # Активный run не тронут.
+        assert admin.execute("SELECT count(*) FROM agent_messages WHERE run_id = %s", (active_run,)).fetchone() == (3,)
+        assert active_acp["m3"] in {
+            r[0] for r in admin.execute("SELECT id FROM agent_messages WHERE run_id = %s", (active_run,))
+        }
         assert not _exists(admin, audit_part) and not _exists(admin, published_part)
         counts: dict[uuid.UUID, int] = dict(
             admin.execute(
@@ -191,6 +282,9 @@ async def test_retention_job_on_seeded_db(
     dropped = {m["partition"]: m for a, m in rows if a == "maintenance.partition_dropped"}
     assert dropped[audit_part]["sha256"] == archived.sha256
     assert published_part in dropped
+    archived_runs = {m["run_id"]: m for a, m in rows if a == "maintenance.run_archived"}
+    assert archived_runs[str(old_run)]["sha256"] == run_archive.sha256
+    assert archived_runs[str(old_run)]["chat_bodies_replaced"] == 1
     deleted_tables = {m["table"] for a, m in rows if a == "maintenance.rows_deleted"}
     assert {"run_event_log", "processed_events"} <= deleted_tables
     finished = next(m for a, m in rows if a == "maintenance.session_finished")
@@ -212,5 +306,5 @@ async def test_retention_is_idempotent(
     first = await run_retention(maintenance_engine, job_settings, reason="first")
     second = await run_retention(maintenance_engine, job_settings, reason="second")
     assert second.partitions_created == dict.fromkeys(second.partitions_created, 0)
-    assert second.partitions_dropped == [] and first.session_id != second.session_id
+    assert second.partitions_dropped == [] and second.runs_archived == [] and first.session_id != second.session_id
     assert isinstance(second.session_id, uuid.UUID)

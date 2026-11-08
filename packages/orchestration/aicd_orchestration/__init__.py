@@ -9,6 +9,7 @@ OWNED_TABLES = frozenset(
         "tasks",
         "task_dependencies",
         "task_attempts",
+        "agent_profiles",
         "agent_assignments",
         "routing_decisions",
         "agent_decisions",
