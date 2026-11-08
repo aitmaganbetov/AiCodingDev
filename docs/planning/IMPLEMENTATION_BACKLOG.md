@@ -368,6 +368,10 @@
 
 В той же миграции: `sys_resolve_approval_workspace` (approvals API больше не перебирает workspace пользователя) и `sys_recovery_workspaces` для recovery reconciler (P3-12).
 
+### После решений владельца (2026-11-08)
+
+Решения OQ-35…OQ-51 записаны; закрыты: воркеры в compose, предрелизная проверка TLS/HSTS (TH-46), архив партиций в S3 (P3-18), PHPStan (P6-03), каталог событий (OQ-49), конвейер `cli.output`, `allow_untested_cli_versions` в политике run, env gate в контейнерах (semgrep офлайн). Итоговая проверка ведущего (HEAD c3fd590): `uv run pytest` → **2939 passed, 0 failed, 2 skipped** (opt-in реальный GitHub, офлайн-БД Trivy); ruff, ruff format (541), mypy (448), import-linter, запрет AI SDK, модели контрактов — OK.
+
 ### Phase 9 — итоговая проверка ведущего (2026-11-08)
 
 После завершения всех агентов, на чистом дереве (HEAD a1457ce): `uv run pytest` → **2883 passed, 0 failed, 4 skipped** (PHPStan ×2, opt-in реальный GitHub, офлайн-БД Trivy); ruff, ruff format (535 файлов), mypy (442), import-linter (4 kept), запрет AI SDK, `gen_contract_models --check` — OK. `scripts/run_acceptance.py` → **AC PASS 16/16** на Fake CLI (python 355/355, web live, web mocked); реальные CLI для AC-01/03/04/16 — BLOCKED (P2-01). `pytest -m security` → 1750 passed, 1 skipped; `scripts/security_gate.py --junit` → 65 угроз, 0 нарушений; с `--require-decisions` (релизный режим) — 3 нарушения до решения владельца по OQ-48. `scripts/coverage_report.py --run` → core **93,21 %** line (orchestration 92,11; collaboration 95,08; cli_adapters 94,53; verification 94,87; security 89,99; identity 93,65), порог 85 % выполнен по каждому пакету. Web: `check:api`, `typecheck`, `lint`, `test` → 159 passed, `build` — OK. DR drill (агент эксплуатации, после миграции 0016) → PASS 11/11, RPO 7,9 с, RTO 11,2 с.
