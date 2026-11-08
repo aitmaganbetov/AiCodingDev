@@ -98,19 +98,19 @@
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P4-01 | Миграции: agent_profiles, agent_assignments, routing_decisions, agent_messages, message_deliveries, chat_threads, chat_messages, agent_activity_events | FR-AGENT-01, FR-ACP-01 | P3-01 | P0 | Migration + RLS + CHECK 32 KiB | TODO |
-| P4-02 | 12 профилей ролей + шаблоны инструкций v1 + версионирование + seed | FR-AGENT-01, FR-AGENT-02 | P4-01 | P0 | Snapshot-тесты шаблонов; ревью человеком | TODO |
-| P4-03 | Сборка промпта с fencing недоверенных данных; контракт файла результата `.aicd/result.json`; парсер claims/ACP | FR-ACP-06, NFR-SEC-03 | P4-02, P2-03 | P0 | Prompt-injection corpus не меняет policy-блок | TODO |
-| P4-04 | ACP: 12 payload-схем, брокер (schema → size → ACL → policy → correlation → loop limits → persist+outbox) | FR-ACP-01, FR-ACP-02, FR-ACP-03 | P4-01, P3-03 | P0 | Contract + negative тесты по каждому типу | TODO |
-| P4-05 | Доставка ACP: deliveries, retries, DLQ, проекция в чат и activity | FR-ACP-05, FR-CHAT-02 | P4-04 | P0 | Дубль доставки → один эффект | TODO |
-| P4-06 | Классификатор сложности L1–L5 + риск-скоринг | FR-ROUTE-01 | P4-02 | P0 | Табличные unit-тесты | TODO |
-| P4-07 | Router: hard filters, scoring, tie-break, `routing_decisions`, policy snapshot | FR-ROUTE-02, FR-ROUTE-03, FR-ROUTE-05, FR-CLI-08 | P4-06, P2-12 | P0 | Оба недоступны → BLOCKED (AC-16) | TODO |
-| P4-08 | Независимое ревью и fallback-политики (`MANUAL_REVIEW`, `SELF_REVIEW_FALLBACK`) | FR-ROUTE-04, FR-AGENT-03 | P4-07, P3-10 | P0 | Самопроверка никогда не маркируется independent | TODO |
-| P4-09 | Шаблоны пайплайнов 11 режимов для planner | FR-ORCH-05 | P4-02 | P0 | Для каждого режима — тест генерации валидного DAG | TODO |
-| P4-10 | Review/fix loops и лимиты | FR-ACP-04 | P4-05 | P0 | 4-й цикл → BLOCKED REVIEW_LOOP_EXHAUSTED | TODO |
-| P4-11 | Метрика истории качества (verified completion rate, сглаживание) | FR-ROUTE-02 | P4-07, P3-14 | P1 | Unit-тесты формулы | TODO |
-| P4-12 | API: `GET /tasks/{id}`, `/tasks/{id}/messages`, `/tasks/{id}/attempts`, `/runs/{id}/chat`, `POST /runs/{id}/chat/messages` | FR-API-01, FR-CHAT-01 | P4-05 | P0 | Schemathesis + RBAC | TODO |
-| P4-13 | Handoff-тесты (Fake) + real-CLI smoke: Codex developer → Claude reviewer (AC-03, AC-04) | AC-03, AC-04, AC-05 | P4-08, P2-13 | P0 | Evidence opt-in прогона | TODO |
+| P4-01 | Миграции: agent_profiles, agent_assignments, routing_decisions, agent_messages, message_deliveries, chat_threads, chat_messages, agent_activity_events | FR-AGENT-01, FR-ACP-01 | P3-01 | P0 | Migration + RLS + CHECK 32 KiB | DONE |
+| P4-02 | 12 профилей ролей + шаблоны инструкций v1 + версионирование + seed | FR-AGENT-01, FR-AGENT-02 | P4-01 | P0 | Snapshot-тесты шаблонов; ревью человеком | IN_REVIEW |
+| P4-03 | Сборка промпта с fencing недоверенных данных; контракт файла результата `.aicd/result.json`; парсер claims/ACP | FR-ACP-06, NFR-SEC-03 | P4-02, P2-03 | P0 | Prompt-injection corpus не меняет policy-блок | DONE |
+| P4-04 | ACP: 12 payload-схем, брокер (schema → size → ACL → policy → correlation → loop limits → persist+outbox) | FR-ACP-01, FR-ACP-02, FR-ACP-03 | P4-01, P3-03 | P0 | Contract + negative тесты по каждому типу | DONE |
+| P4-05 | Доставка ACP: deliveries, retries, DLQ, проекция в чат и activity | FR-ACP-05, FR-CHAT-02 | P4-04 | P0 | Дубль доставки → один эффект | DONE |
+| P4-06 | Классификатор сложности L1–L5 + риск-скоринг | FR-ROUTE-01 | P4-02 | P0 | Табличные unit-тесты | DONE |
+| P4-07 | Router: hard filters, scoring, tie-break, `routing_decisions`, policy snapshot | FR-ROUTE-02, FR-ROUTE-03, FR-ROUTE-05, FR-CLI-08 | P4-06, P2-12 | P0 | Оба недоступны → BLOCKED (AC-16) | DONE |
+| P4-08 | Независимое ревью и fallback-политики (`MANUAL_REVIEW`, `SELF_REVIEW_FALLBACK`) | FR-ROUTE-04, FR-AGENT-03 | P4-07, P3-10 | P0 | Самопроверка никогда не маркируется independent | DONE |
+| P4-09 | Шаблоны пайплайнов 11 режимов для planner | FR-ORCH-05 | P4-02 | P0 | Для каждого режима — тест генерации валидного DAG | DONE |
+| P4-10 | Review/fix loops и лимиты | FR-ACP-04 | P4-05 | P0 | 4-й цикл → BLOCKED REVIEW_LOOP_EXHAUSTED | DONE |
+| P4-11 | Метрика истории качества (verified completion rate, сглаживание) | FR-ROUTE-02 | P4-07, P3-14 | P1 | Unit-тесты формулы | DONE |
+| P4-12 | API: `GET /tasks/{id}`, `/tasks/{id}/messages`, `/tasks/{id}/attempts`, `/runs/{id}/chat`, `POST /runs/{id}/chat/messages` | FR-API-01, FR-CHAT-01 | P4-05 | P0 | Schemathesis + RBAC | DONE |
+| P4-13 | Handoff-тесты (Fake) + real-CLI smoke: Codex developer → Claude reviewer (AC-03, AC-04) | AC-03, AC-04, AC-05 | P4-08, P2-13 | P0 | Evidence opt-in прогона | BLOCKED |
 
 ## Phase 5 — Code Intelligence
 
@@ -276,6 +276,26 @@
 | P3-17 | DONE | `tests/e2e/test_phase3_slice.py`, `tests/support/phase3.py` | 7 passed: COMPLETED с VERIFIED evidence; FAILED (gate/CLI); BLOCKED `PROVIDER_UNAVAILABLE`/`AUTH_REQUIRED` без обхода; AWAITING_APPROVAL → решение → COMPLETED |
 
 Исправления, найденные сквозными тестами: повтор задачи падал на существующей ветке worktree; run не переходил в BLOCKED, пока оставались PENDING-потомки заблокированной задачи; verifier не создавал staging-каталог.
+
+### Phase 4 — Multi-Agent System (2026-11-08)
+
+Окружение проверки: PostgreSQL 17, Redis 7, RustFS (S3), Docker; агенты — процессы Fake CLI (реальные CLI недоступны). Итог: `uv run pytest` → **1601 passed, 0 skipped**; ruff, mypy --strict (228 файлов), import-linter (4 контракта), deny-gate, сверка моделей контрактов, трассировка — без замечаний; web: typecheck/lint, `pnpm test` 42 passed, `pnpm e2e` 9 passed, `check:api` — схема соответствует контракту.
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P4-01 | DONE | `infrastructure/migrations/versions/0006_agents_acp_chat.py`, `aicd_platform/retention.py` | `tests/migrations/test_agents_acp_migration.py` → 15 passed: up/down/up, offline SQL, RLS по каждой новой таблице, CHECK 32 KiB, append-only, отложенные FK 0003; retention архивирует run и партиции активности |
+| P4-02 | IN_REVIEW | `aicd_orchestration/agents/{profiles.py,templates/**}`, `aicd db sync-agent-profiles` | `tests/unit/test_agent_profiles.py` → 54 passed (golden sha256, обязательные секции, запрещённое содержимое, ACP-раздел = матрица §4.2, подмена шаблона обнаруживается); `test_agent_profiles_sync.py` → 3 passed (только под ролью migrator). **Критерий «ревью человеком» шаблонов не выполнен** — нужен просмотр владельцем |
+| P4-03 | DONE | `agents/{prompt,result,contracts}.py`, `tests/fixtures/prompt_injection/*` | 97 passed: 26 образцов инъекций в каждом недоверенном поле — блок policy и блоки 2/5 не меняются, fence не разрывается; `.aicd/result.json`: размер, глубина, дубли ключей, подмена `from`, побег путей; claims всегда `verified=false` |
+| P4-04 | DONE | `aicd_collaboration/acp/**` | 577 passed (контракт + negative по каждому из 12 типов, полная матрица роль × тип, порядок шагов конвейера, корреляция, лимиты) + `test_acp_broker.py` 12 passed на БД |
+| P4-05 | DONE | `acp/{delivery,projection}.py`, `apps/worker/aicd_worker/handlers.py` | Дубль/конкурентная доставка → одна строка чата; retry/backoff/DLQ/replay; воркер проецирует `agent.message` в чат и ленту активности (`test_review_loops.py`) |
+| P4-06 | DONE | `aicd_orchestration/classification.py` | `tests/unit/test_routing.py`: правила F1–F6, риск-баллы, override не ниже минимума режима/пользователя, Hypothesis: уровень не ниже входов |
+| P4-07 | DONE | `router.py`, `routing_service.py`, `engine.py` | 59 unit (фильтры H1–H8 с причинами, оценка, stickiness, tie-break, WAIT при занятости); решения пишутся в `routing_decisions`; оба недоступны → BLOCKED `AUTH_REQUIRED`/`PROVIDER_UNAVAILABLE` (AC-16) |
+| P4-08 | DONE | `router.py`, `engine.py` (`on_task_approval_decided`) | `tests/e2e/test_routing_review.py` → 3 passed: ревью L3+ — другой провайдер; strict → MANUAL_REVIEW → решение человека; basic → SELF_REVIEW_FALLBACK только после одобрения, маркировка `self_review`; Hypothesis: самопроверка никогда не `independent` |
+| P4-09 | DONE | `pipelines.py`, `planner.py` | `tests/unit/test_pipelines.py` → 70 passed: каждый режим × L1–L5 даёт валидный DAG, L3+ с проверкой, approvals L4/L5 |
+| P4-10 | DONE | `review_flow.py`, `review_loops.py`, `acp/pipeline.py` | fix-цикл — новые задачи (origin_task_id) в новой версии плана; счётчик — у исходной реализации (fix-задачи его не обнуляют); 4-й цикл → BLOCKED `REVIEW_LOOP_EXHAUSTED` + approval MANUAL_REVIEW → решение человека (`test_review_flow.py`, `test_review_loops.py`, unit) |
+| P4-11 | DONE | `quality.py` | Unit: затухание 30 дней, окно 90 дней, Beta(2,2), исключённые категории |
+| P4-12 | DONE | `apps/api/aicd_api/routers/{chat,runs}.py` | `test_chat_api.py`, `test_task_messages_api.py` → 11 passed: контракт, RBAC, 404 чужим, идемпотентность, пагинация, Schemathesis без 5xx |
+| P4-13 | BLOCKED | `tests/e2e/test_agent_handoff.py`, `tests/integration/test_agent_io.py`, Fake-сценарии агентов | Часть на Fake — passed: developer → независимый reviewer (замечания) → fix тем же исполнителем → повторное ревью другим провайдером (одобрено) → COMPLETED с evidence (AC-03/04/05 на Fake). **Opt-in прогон с реальными Codex/Claude CLI — после P2-01** |
 
 ### P3-18 — Retention/архивирование (2026-11-08)
 
