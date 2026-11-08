@@ -117,6 +117,9 @@ async def update_provider_settings(
 ) -> Response:
     access = await workspace_access(request, principal, parse_workspace_header(request))
     await authorize(request, access, "provider:settings")
+    async with transaction(app_state(request).engine, access.db()) as conn:
+        if await registry.provider_code(conn, provider_id) is None:
+            raise ProblemError("not_found")
     expected = require_if_match(request.headers.get("if-match"))
     changes = body.model_dump(exclude_unset=True)
     if not changes:
