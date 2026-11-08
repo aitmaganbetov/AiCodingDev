@@ -32,6 +32,7 @@ from aicd_platform import context, leases
 from aicd_platform.artifacts import ArtifactStore
 from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
+from aicd_verification.verdict import run_completion_verdict
 
 log = logging.getLogger("aicd.orchestrator")
 
@@ -561,7 +562,18 @@ class Orchestrator:
                 return []
             if statuses and all(s == "SUCCEEDED" for s in statuses):
                 await store.transition_run(conn, run_id, "VERIFYING", reason="all_tasks_succeeded")
-                # v0: run-level gates = сумма task gates; guard БД проверяет PASS/approvals (§18.4).
+                # Guard завершения (P6-09, QUALITY_GATES §5.3): обязательные gates PASS на финальном commit с
+                # полным evidence, нет открытых блокирующих findings; guard БД (§18.4) — второй рубеж.
+                verdict = await run_completion_verdict(conn, run_id, store=self.artifacts)
+                if not verdict.ok:
+                    await store.transition_run(
+                        conn,
+                        run_id,
+                        "FAILED",
+                        reason="completion_guard_rejected",
+                        extra={"failure_category": "GATE_FAILED", "failure_message": verdict.summary()[:2000]},
+                    )
+                    return []
                 await store.transition_run(conn, run_id, "COMPLETED", reason="required_gates_passed")
                 return []
             # PENDING с выполненными зависимостями уже переведены в READY выше; оставшиеся PENDING ждут

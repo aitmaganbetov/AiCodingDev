@@ -12,6 +12,12 @@ v0 (P3-14) покрывает:
 
 Отсутствие инструмента в verification-образе даёт ERROR (никогда PASS; SKIPPED ≠ PASS).
 Модуль чистый, кроме `collect_repo_facts` (git по объектам коммита, без исполнения кода репозитория).
+
+Phase 6 (P6-02/P6-03): здесь — базовые типы (`GateSpec`, `GateContext`, `Verdict`, `Applicability`,
+`RepoFacts`, `StackInfo`) и ядро v0 (`CORE_PROVIDER`). Остальные gates живут в отдельных модулях и
+подключаются через реестр `aicd_verification.registry` (кортеж провайдеров `GateProvider`); полный
+словарь `GATE_SPECS` по-прежнему доступен как `aicd_verification.gates.GATE_SPECS` (ленивая ссылка на
+реестр) — см. docstring `registry.py`.
 """
 
 from __future__ import annotations
@@ -22,10 +28,13 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from aicd_platform import redaction
 from aicd_security.git import GitRepositoryError, run_git
+
+if TYPE_CHECKING:
+    from aicd_verification.findings import Finding
 
 GateStatus = Literal["PASS", "FAIL", "ERROR", "SKIPPED", "NOT_APPLICABLE"]
 ErrorCode = Literal[
@@ -38,6 +47,10 @@ ErrorCode = Literal[
     "WORKTREE_DIRTY",
     "NO_BASE_COMMIT",
     "UNSUPPORTED_GATE",
+    "APPROVAL_REQUIRED",
+    "THRESHOLD",
+    "EVIDENCE_REJECTED",
+    "STALE_EVIDENCE",
 ]
 
 SCANNER_SOURCE = (Path(__file__).with_name("scope_scan.py")).read_text(encoding="utf-8")
@@ -122,6 +135,8 @@ class RepoFacts:
     files: frozenset[str]
     root_texts: Mapping[str, str] = field(default_factory=dict)  # pyproject.toml, ruff.toml, package.json …
     changes: tuple[DiffEntry, ...] = ()
+    # Тексты выбранных изменённых файлов (миграции для анализа деструктивных операций, P6-05).
+    changed_texts: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def changed_paths(self) -> tuple[str, ...]:
@@ -151,7 +166,24 @@ def parse_raw_diff(raw: str) -> list[DiffEntry]:
     return entries
 
 
-ROOT_CONFIGS = ("pyproject.toml", "ruff.toml", ".ruff.toml", "package.json")
+ROOT_CONFIGS = (
+    "pyproject.toml",
+    "ruff.toml",
+    ".ruff.toml",
+    "package.json",
+    "setup.cfg",
+    "mypy.ini",
+    ".mypy.ini",
+    "composer.json",
+    "alembic.ini",
+)
+MAX_CHANGED_TEXTS = 200
+
+
+def _want_changed_text(path: str) -> bool:
+    from aicd_verification.migrations import is_migration_path  # локально: migrations импортирует gates
+
+    return is_migration_path(path)
 
 
 def collect_repo_facts(repo: Path, commit_sha: str, base_sha: str | None) -> RepoFacts:
@@ -190,7 +222,19 @@ def collect_repo_facts(repo: Path, commit_sha: str, base_sha: str | None) -> Rep
                     target = None
                 entry = DiffEntry(entry.path, entry.status, entry.old_mode, entry.new_mode, entry.new_blob, target)
             changes.append(entry)
-    return RepoFacts(files=files, root_texts=texts, changes=tuple(changes))
+    changed_texts: dict[str, str] = {}
+    for entry in changes:
+        if len(changed_texts) >= MAX_CHANGED_TEXTS:
+            break
+        if entry.status == "D" or entry.new_mode not in ("100644", "100755") or not _want_changed_text(entry.path):
+            continue
+        try:
+            size = int(run_git(repo, "cat-file", "-s", entry.new_blob))
+            if size <= MAX_ROOT_FILE_BYTES:
+                changed_texts[entry.path] = run_git(repo, "cat-file", "blob", entry.new_blob)
+        except (GitRepositoryError, ValueError):
+            continue
+    return RepoFacts(files=files, root_texts=texts, changes=tuple(changes), changed_texts=changed_texts)
 
 
 def write_scope_input(repo: Path, commit_sha: str, base_sha: str, facts: RepoFacts, target_dir: Path) -> None:
@@ -227,6 +271,34 @@ class Applicability:
     applicable: bool
     reason: str
     markers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class StackInfo:
+    """Стек проекта из `project_technologies` (Phase 5, P5-07): пары (ecosystem, name) в нижнем регистре.
+
+    Дополняет маркеры репозитория: например, `npm:vitest`, `python:mypy`, `lang:typescript`.
+    Пустой стек (индексация ещё не прошла) — применимость решают только факты commit."""
+
+    technologies: frozenset[tuple[str, str]] = frozenset()
+
+    @classmethod
+    def from_rows(cls, rows: Any) -> StackInfo:
+        pairs = set()
+        for row in rows:
+            eco, name = row["ecosystem"], row["name"]
+            if isinstance(eco, str) and isinstance(name, str):
+                pairs.add((eco.lower(), name.lower()))
+        return cls(frozenset(pairs))
+
+    def has(self, ecosystem: str, name: str) -> bool:
+        return (ecosystem.lower(), name.lower()) in self.technologies
+
+    def has_lang(self, name: str) -> bool:
+        return self.has("lang", name)
+
+
+EMPTY_STACK = StackInfo()
 
 
 _TEST_FILE_RE = re.compile(r"(^|/)(test_[^/]*\.py|[^/]*_test\.py)$")
@@ -272,8 +344,10 @@ def changed_python_files(facts: RepoFacts) -> tuple[str, ...]:
     )
 
 
-def detect_applicability(facts: RepoFacts) -> dict[str, Applicability]:
-    """Детерминированный детектор: имя gate v0 → применимость с перечнем проверенных маркеров."""
+def detect_applicability(facts: RepoFacts, stack: StackInfo = EMPTY_STACK) -> dict[str, Applicability]:
+    """Детерминированный детектор ядра v0: имя gate → применимость с перечнем проверенных маркеров.
+    Полный детектор (все провайдеры) — `aicd_verification.registry.detect_all`."""
+    del stack  # ядро v0 решает только по файлам commit
     result: dict[str, Applicability] = {"scope": Applicability(True, "SCOPE is always applicable", ("diff",))}
     has_py = _has_python(facts)
     ruff_ok, ruff_markers = _ruff_configured(facts)
@@ -318,6 +392,11 @@ class Verdict:
     status: GateStatus
     error_code: ErrorCode | None = None
     message: str = ""
+    findings: tuple[Finding, ...] = ()
+    tests: Mapping[str, int] | None = None  # разобранный отчёт тестов: passed/failed/skipped/errors
+    coverage_percent: float | None = None
+    # Предмет approval (например, DESTRUCTIVE_MIGRATION): движок не даёт PASS до APPROVED.
+    approval: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -327,6 +406,11 @@ class GateContext:
     workdir: str
     input_dir: str
     changed_python: tuple[str, ...] = ()
+    profile: str = "strict"
+    config: Mapping[str, Any] = field(default_factory=dict)  # quality_gates.config
+    facts: RepoFacts | None = None
+    changed_files: tuple[str, ...] = ()
+    nonce: str = ""  # одноразовая метка прогона (маркер отчёта драйвера; подложенный вывод не совпадёт)
 
 
 @dataclass(frozen=True)
@@ -342,6 +426,19 @@ class GateSpec:
     interpret: Callable[[int, str], Verdict]
     needs_scope_input: bool = False
     executes_repository: bool = True  # исполняет/читает рабочее дерево (нужен чистый worktree на commit)
+    # --- Phase 6 (все поля необязательны; позиционная форма v0 сохраняется) ---
+    image_key: str | None = None  # ключ таблицы образов (images.py); None → по `tool`
+    # Полная интерпретация с контекстом (профиль, config); при наличии заменяет `interpret`.
+    evaluate: Callable[[int, str, GateContext], Verdict] | None = None
+    probe_for: Callable[[GateContext], tuple[str, ...]] | None = None  # probe, зависящий от репозитория
+    container_user: str | None = None  # uid:gid в контейнере (по умолчанию — ContainerSpec.user)
+    needs_input_dir: bool = False  # смонтировать staging (CONTAINER_INPUT_DIR) не только для SCOPE
+
+    def run_evaluate(self, code: int, output: str, ctx: GateContext) -> Verdict:
+        return self.evaluate(code, output, ctx) if self.evaluate is not None else self.interpret(code, output)
+
+    def probe(self, ctx: GateContext) -> tuple[str, ...]:
+        return self.probe_for(ctx) if self.probe_for is not None else self.probe_argv
 
 
 def _simple_exit(code: int, _output: str) -> Verdict:
@@ -365,6 +462,64 @@ def interpret_scope(code: int, output: str) -> Verdict:
     if code == 1 and total > 0:
         return Verdict("FAIL", message=f"{total} scope violation(s)")
     return Verdict("ERROR", "REPORT_UNPARSABLE", f"exit code {code} contradicts report ({total} violations)")
+
+
+def evaluate_scope(code: int, output: str, _ctx: GateContext) -> Verdict:
+    from aicd_verification.findings import make_finding
+
+    verdict = interpret_scope(code, output)
+    if verdict.status != "FAIL":
+        return verdict
+    try:
+        report = json.loads(output.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return verdict
+    findings = tuple(
+        make_finding(
+            "scope",
+            str(v.get("rule")),
+            str(v.get("severity")),
+            f"scope violation: {v.get('rule')}",
+            file_path=v.get("path") if isinstance(v.get("path"), str) else None,
+            line=v.get("line") if isinstance(v.get("line"), int) else None,
+            snippet=f"{v.get('rule')}@{v.get('path')}:{v.get('line')}",
+        )
+        for v in (report.get("violations", []) if isinstance(report, dict) else [])
+        if isinstance(v, dict)
+    )
+    return Verdict(verdict.status, verdict.error_code, verdict.message, findings=findings)
+
+
+MAX_SKIPPED_SHARE = 0.2
+
+
+def apply_test_policy(verdict: Verdict, gate: str, tests: Mapping[str, int] | None, profile: str) -> Verdict:
+    """Общие правила тестовых gates (QUALITY_GATES §5.1): все тесты пропущены → FAIL (EMPTY_SUITE);
+    доля skipped > 20% → finding high и FAIL в strict/critical (в basic — только finding)."""
+    if tests is None or verdict.status != "PASS":
+        return verdict
+    from aicd_verification.findings import make_finding
+
+    passed, skipped = tests.get("passed", 0), tests.get("skipped", 0)
+    if passed == 0:
+        return Verdict("FAIL", "EMPTY_SUITE", "no test passed (all skipped or none ran)", tests=tests)
+    if skipped / (passed + skipped) > MAX_SKIPPED_SHARE:
+        finding = make_finding(
+            gate, "aicd/skipped-tests-share", "high", f"{skipped} of {passed + skipped} tests skipped (> 20%)"
+        )
+        status: GateStatus = "FAIL" if profile in ("strict", "critical") else "PASS"
+        return Verdict(status, None, finding.title, findings=(finding,), tests=tests)
+    return Verdict(verdict.status, verdict.error_code, verdict.message, verdict.findings, tests)
+
+
+def evaluate_pytest(code: int, output: str, ctx: GateContext) -> Verdict:
+    verdict = interpret_pytest(code, output)
+    counts = pytest_counts(output)
+    tests = {k: counts.get(k, 0) for k in ("passed", "failed", "skipped", "errors")} if counts else None
+    if code == 0 and counts and counts.get("passed", 0) == 0 and counts.get("skipped", 0) > 0:
+        return Verdict("FAIL", "EMPTY_SUITE", "all collected tests were skipped", tests=tests)
+    verdict = Verdict(verdict.status, verdict.error_code, verdict.message, tests=tests)
+    return apply_test_policy(verdict, "pytest-unit", tests, ctx.profile)
 
 
 _PYTEST_COUNT_RE = re.compile(r"(\d+) (passed|failed|errors?|skipped|xfailed|xpassed|deselected)\b")
@@ -419,7 +574,29 @@ def _scope_display(ctx: GateContext) -> tuple[str, ...]:
 
 
 def _ruff_lint_argv(_ctx: GateContext) -> tuple[str, ...]:
-    return ("ruff", "check", "--no-cache", ".")
+    return ("ruff", "check", "--no-cache", "--output-format=concise", ".")
+
+
+_RUFF_LINE_RE = re.compile(r"^(?P<path>[^:\n]+):(?P<line>\d+):(?P<col>\d+): (?P<rule>[A-Z]+[0-9]*) (?P<msg>.*)$")
+
+
+def evaluate_ruff_lint(code: int, output: str, _ctx: GateContext) -> Verdict:
+    from aicd_verification.findings import make_finding
+
+    findings = tuple(
+        make_finding("ruff-lint", m["rule"], "high", m["msg"], file_path=m["path"], line=int(m["line"]))
+        for m in (_RUFF_LINE_RE.match(line) for line in output.splitlines())
+        if m
+    )
+    if code == 0:
+        if findings:
+            return Verdict("FAIL", message="exit 0 but report lists violations", findings=findings)
+        return Verdict("PASS")
+    if code == 1:
+        if not findings and "Found" not in output:
+            return Verdict("ERROR", "REPORT_UNPARSABLE", "exit 1 without violations in the report")
+        return Verdict("FAIL", message=f"{len(findings)} ruff violation(s)", findings=findings)
+    return Verdict("ERROR", "INFRA", f"tool error (exit {code})")
 
 
 def _ruff_format_argv(ctx: GateContext) -> tuple[str, ...]:
@@ -434,7 +611,7 @@ def _npm_argv(_ctx: GateContext) -> tuple[str, ...]:
     return ("npm", "test", "--no-update-notifier")
 
 
-GATE_SPECS: dict[str, GateSpec] = {
+CORE_GATE_SPECS: dict[str, GateSpec] = {
     spec.name: spec
     for spec in (
         GateSpec(
@@ -449,6 +626,7 @@ GATE_SPECS: dict[str, GateSpec] = {
             interpret_scope,
             needs_scope_input=True,
             executes_repository=False,
+            evaluate=evaluate_scope,
         ),
         GateSpec(
             "ruff-lint",
@@ -460,6 +638,7 @@ GATE_SPECS: dict[str, GateSpec] = {
             _ruff_lint_argv,
             _ruff_lint_argv,
             _simple_exit,
+            evaluate=evaluate_ruff_lint,
         ),
         GateSpec(
             "ruff-format",
@@ -482,6 +661,7 @@ GATE_SPECS: dict[str, GateSpec] = {
             _pytest_argv,
             _pytest_argv,
             interpret_pytest,
+            evaluate=evaluate_pytest,
         ),
         GateSpec(
             "npm-unit",
@@ -496,6 +676,59 @@ GATE_SPECS: dict[str, GateSpec] = {
         ),
     )
 }
+
+# --- Провайдеры gates (точка расширения реестра) ----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GateProvider:
+    """Вклад модуля в реестр gates: определения + детектор применимости + seed-описание.
+
+    * `specs` — `GateSpec` с уникальными `name` (совпадают с `quality_gates.name`);
+    * `detect(facts, stack)` — применимость **только своих** gates (`Applicability` с причиной и
+      маркерами: NOT_APPLICABLE без причины недопустим);
+    * `definitions` — (name, gate_type, timeout_seconds, description) для seed `quality_gates`
+      (обязательность по профилю берётся из `profiles.PROFILE_MATRIX`).
+    """
+
+    name: str
+    specs: tuple[GateSpec, ...]
+    detect: Callable[[RepoFacts, StackInfo], Mapping[str, Applicability]]
+    definitions: tuple[tuple[str, str, int, str], ...] = ()
+
+
+CORE_PROVIDER = GateProvider(
+    "core",
+    tuple(CORE_GATE_SPECS.values()),
+    detect_applicability,
+    (
+        (
+            "scope",
+            "SCOPE",
+            DEFAULT_TIMEOUT_SECONDS,
+            "Изменения только внутри worktree, без .git/symlink-побегов и секретов",
+        ),
+        (
+            "ruff-lint",
+            "LINT",
+            DEFAULT_TIMEOUT_SECONDS,
+            "ruff check (Python), если в репозитории есть конфигурация ruff",
+        ),
+        ("ruff-format", "FORMAT", DEFAULT_TIMEOUT_SECONDS, "ruff format --check (Python)"),
+        ("pytest-unit", "UNIT", DEFAULT_TIMEOUT_SECONDS, "pytest, если есть тесты Python"),
+        ("npm-unit", "UNIT", DEFAULT_TIMEOUT_SECONDS, "npm test, если в package.json есть скрипт test"),
+    ),
+)
+
+
+def __getattr__(name: str) -> Any:
+    """`gates.GATE_SPECS` — полный реестр (ленивая ссылка: registry импортирует этот модуль)."""
+    if name == "GATE_SPECS":
+        from aicd_verification.registry import GATE_SPECS
+
+        return GATE_SPECS
+    raise AttributeError(name)
+
 
 # Предлагаемый seed `quality_gates` для глобальных профилей basic/strict/critical v1 (миграция 0003 его
 # не содержит — см. отчёт P3-14). Поля: name, gate_type, required, timeout_seconds.

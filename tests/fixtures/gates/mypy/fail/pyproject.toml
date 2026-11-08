@@ -1,0 +1,7 @@
+[project]
+name = "fx"
+version = "0"
+
+[tool.mypy]
+strict = true
+files = ["pkg"]
