@@ -4,9 +4,19 @@
 роли `tasks.agent_role`, шаблон инструкций `<role>@<version>`, поля задачи и раздел `inbox`. Промпт
 сохраняется artifact-ом `kind='context_pack'` (`is_sensitive=true`: может содержать код клиента; отдельного
 вида `prompt` в CHECK `artifacts.kind` нет), его sha256 и манифест — в `agent_activity_events`
-(`agent.prompt_assembled`), ссылка — в `ExecutionRequest.input.context_pack` (`context_pack_id` = id
-artifact-а: таблицы `context_packs` ещё нет). Адаптер пишет текст рядом с `task.json` как `prompt.md`
-(плейсхолдер `{prompt_text_file}`).
+(`agent.prompt_assembled`). Адаптер пишет текст рядом с `task.json` как `prompt.md` (плейсхолдер
+`{prompt_text_file}`); каталог промпта монтируется в runner **только для чтения** (`subprocess_adapter`,
+`Mount(prompt_dir, layout.prompt_mount, read_only=True)`).
+
+**Context Pack (P5-11).** Разделы `repo_map`/`code`/`symbols_graph`/`tests`/`docs` собирает Code Intelligence
+(`aicd_code_intelligence.context.retrieval`, P5-06) и передаёт в `build_prompt` как недоверенные фрагменты
+(`pack_fragments`: путь, строки, commit, `stale`). Pack сохраняется строкой `context_packs` попытки (artifact —
+JSON фрагментов, кэш по `content_hash + source_commit + policy_version`), в `context_packs.manifest` — также
+sha256 и id artifact-а промпта (AGENT_ROLES §3.3 п.5). `ExecutionRequest.input.context_pack` ссылается на эту
+строку: `context_pack_id` = `context_packs.id`, `artifact_ref`/`sha256` — artifact pack. Без снимка индекса
+строки `context_packs` нет (FK `snapshot_id NOT NULL`) — поле `context_pack` не передаётся, предупреждение
+пишется в событие `agent.prompt_assembled` (`context_pack.warnings`). Метрики размера (байты, число
+фрагментов по разделам, omitted, cache hit) — в том же событии и в manifest.
 
 **Правило inbox (упрощение ACP §7).** В inbox попадают все *принятые брокером* сообщения этого run, адресованные
 задаче (`recipient_task_id` = задача) или роли задачи без конкретной задачи (`recipient_role` = роль,
@@ -50,6 +60,7 @@ from typing import Any, Final, Literal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from aicd_code_intelligence.context.ranking import Fragment
 from aicd_collaboration.acp import CONSUMER_ACP_HANDLER, Accepted, AcpBroker, Rejected, Sender
 from aicd_collaboration.acp.broker import ACTIVITY_REJECTED, insert_activity
 from aicd_collaboration.acp.sql import SqlFacts
@@ -188,8 +199,51 @@ def task_input(task: Mapping[str, Any], run: Mapping[str, Any]) -> TaskInput:
     )
 
 
-def assemble_prompt(task: Mapping[str, Any], run: Mapping[str, Any], inbox: Sequence[InboxMessage]) -> AssembledPrompt:
-    return build_prompt(profile(str(task["agent_role"])), task_input(task, run), [m.fragment() for m in inbox])
+def task_text(task: Mapping[str, Any], run: Mapping[str, Any]) -> str:
+    """Текст задачи для retrieval: title, objective, instructions, acceptance criteria."""
+    parts = [
+        str(task.get("title") or ""),
+        str(run.get("objective") or ""),
+        str(task.get("instructions") or ""),
+        *(str(c) for c in task.get("acceptance_criteria") or ()),
+    ]
+    return "\n".join(p for p in parts if p)
+
+
+def inbox_seed_texts(inbox: Sequence[InboxMessage]) -> tuple[str, ...]:
+    """Payload сообщений inbox (FIX_REQUEST, REVIEW_REQUEST…) — семена retrieval: пути и идентификаторы."""
+    return tuple(json.dumps(m.payload, ensure_ascii=False)[:20_000] for m in inbox)
+
+
+def pack_fragments(fragments: Sequence[Fragment], *, base_commit: str | None) -> list[UntrustedFragment]:
+    """Фрагменты Context Pack → недоверенные фрагменты промпта (ранг внутри раздела — порядок pack)."""
+    out: list[UntrustedFragment] = []
+    total = len(fragments)
+    for idx, frag in enumerate(fragments):
+        lines = f":{frag.start_line}-{frag.end_line}" if frag.start_line is not None else ""
+        out.append(
+            UntrustedFragment(
+                kind=frag.section,
+                content=frag.text,
+                ref=frag.source_ref or (f"{frag.path}{lines}" if not frag.path.startswith("<") else None),
+                path=None if frag.path.startswith("<") else frag.path,
+                commit=frag.commit_sha,
+                stale=base_commit is not None and frag.commit_sha != base_commit,
+                rank=total - idx,
+            )
+        )
+    return out
+
+
+def assemble_prompt(
+    task: Mapping[str, Any],
+    run: Mapping[str, Any],
+    inbox: Sequence[InboxMessage],
+    context: Sequence[UntrustedFragment] = (),
+) -> AssembledPrompt:
+    return build_prompt(
+        profile(str(task["agent_role"])), task_input(task, run), [*[m.fragment() for m in inbox], *context]
+    )
 
 
 @dataclass(frozen=True)
@@ -255,6 +309,8 @@ class AgentIoSummary:
     prompt_sha256: str
     prompt_artifact_id: uuid.UUID | None
     inbox_message_ids: tuple[uuid.UUID, ...] = ()
+    context_pack_id: uuid.UUID | None = None  # строка `context_packs` попытки (нет снимка индекса — None)
+    context_pack: Mapping[str, Any] = field(default_factory=dict)  # метрики pack для события agent.prompt_assembled
     # parsed — итог разобран; missing — файла нет; invalid — итог отклонён целиком (OUTPUT_PARSE_ERROR);
     # unavailable — каталога вывода нет (повтор доставки исполнения); skipped — CLI не завершился успешно;
     # error — сбой обработки на стороне платформы.
@@ -280,6 +336,7 @@ class AgentIoSummary:
             "prompt_sha256": self.prompt_sha256,
             "prompt_artifact_id": str(self.prompt_artifact_id) if self.prompt_artifact_id else None,
             "inbox_message_ids": [str(i) for i in self.inbox_message_ids],
+            "context_pack_id": str(self.context_pack_id) if self.context_pack_id else None,
             "result_status": self.result_status,
             "result_error": self.result_error,
             "result_sha256": self.result_sha256,
@@ -399,6 +456,7 @@ async def record_prompt(
     *,
     artifact_id: uuid.UUID | None,
     inbox: Sequence[InboxMessage],
+    context_pack: Mapping[str, Any] | None = None,
 ) -> None:
     manifest = dict(prompt.manifest)
     payload = {
@@ -407,6 +465,8 @@ async def record_prompt(
         **manifest,
         "inbox_message_ids": [str(m.id) for m in inbox],
     }
+    if context_pack is not None:
+        payload["context_pack"] = dict(context_pack)
     await insert_activity(
         conn,
         workspace_id=ctx.workspace_id,
