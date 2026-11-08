@@ -16,8 +16,10 @@ artifact-а: таблицы `context_packs` ещё нет). Адаптер пи�
 таблицей `context_packs`). Всё содержимое inbox — **недоверенные данные**: только внутри ограждений UNTRUSTED.
 
 **Результат ← CLI.** Итог читается из отдельного каталога вывода исполнения (не из worktree): адаптер
-направляет `.aicd/` и `output/` в cwd CLI в каталог `<корень worktree>/.aicd-io/<execution_id>/` (контейнер —
-rw bind-монтирования поверх, в т.ч. read-only worktree ролей с `write_scope=none`; локально — symlink).
+направляет `.aicd/` (и `output` → `.aicd/output`) в cwd CLI во временный каталог исполнения `aicd-io-*`: read-only
+worktree (контейнер, роли с `write_scope=none`) — единственным rw bind-монтированием `.aicd`, иначе каталог
+`.aicd` создаётся в worktree и после выхода процесса переносится в каталог исполнения; удаляется он после
+разбора итога (`release_agent_io`).
 Так ролям только для чтения есть куда писать итог, а итог пишущих ролей не смешивается с изменениями кода;
 `.aicd/` и `output/` дополнительно исключаются из коммита/diff задачи (`worktrees`). Итог разбирается
 `agents.result.load_agent_result`; `declared_outputs` сохраняются artifact-ами проекта, ссылки `output/<путь>`
@@ -63,7 +65,8 @@ from aicd_orchestration.agents.result import (
     Claim,
     ParsedAgentResult,
     ResultParseError,
-    load_agent_result,
+    parse_agent_result,
+    read_result_file,
 )
 from aicd_platform.artifacts import ArtifactStore
 from aicd_platform.db import DbContext, transaction
@@ -328,6 +331,11 @@ def message_id_for(execution_id: uuid.UUID, index: int) -> uuid.UUID:
     return uuid.UUID(bytes=bytes(raw))
 
 
+def output_root(io_dir: Path) -> Path:
+    """Корень путей `output/…` итога: отчёты лежат в `<io>/.aicd/output/` (в worktree `output` → `.aicd/output`)."""
+    return io_dir / PurePosixPath(RESULT_PATH).parts[0]
+
+
 def _read_output(root: Path, rel: str) -> bytes:
     target = root.joinpath(*PurePosixPath(rel).parts)
     fd = os.open(target, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
@@ -447,7 +455,8 @@ class ResultProcessor:
         if not os.path.lexists(io_dir.joinpath(*PurePosixPath(RESULT_PATH).parts)):
             return None, "missing", "файл результата отсутствует"
         try:
-            return load_agent_result(io_dir, sender_role=role), "parsed", None
+            data = read_result_file(io_dir, RESULT_PATH)
+            return parse_agent_result(data, sender_role=role, output_root=output_root(io_dir)), "parsed", None
         except ResultParseError as exc:
             return None, "invalid", f"{exc.code}: {exc.reason}"
 
@@ -483,7 +492,7 @@ class ResultProcessor:
         warnings: list[str] = []
         for out in parsed.declared_outputs:
             try:
-                data = await asyncio.to_thread(_read_output, io_dir, out.path)
+                data = await asyncio.to_thread(_read_output, output_root(io_dir), out.path)
             except (OSError, ValueError):
                 warnings.append(f"output_not_stored:{out.path}"[:300])
                 continue

@@ -92,7 +92,8 @@ class _Execution:
     done: asyncio.Event = field(default_factory=asyncio.Event)
     started_or_done: asyncio.Event = field(default_factory=asyncio.Event)
     io_dir: Path | None = None
-    io_links: list[Path] = field(default_factory=list)  # символические ссылки/точки монтирования в worktree
+    io_mode: Literal["mount", "move"] = "move"
+    io_links: list[Path] = field(default_factory=list)  # пути ввода-вывода агента, созданные в worktree
 
 
 class SubprocessCLIAdapter:
@@ -161,42 +162,61 @@ class SubprocessCLIAdapter:
         del request
         return {}
 
-    def _wire_agent_io(self, ex: _Execution, cwd: Path) -> tuple[Mount, ...]:
-        """Отдельный каталог вывода на исполнение (вне worktree): `.aicd/` и `output/` в cwd CLI ведут в него.
+    def _wire_agent_io(self, ex: _Execution, cwd: Path, *, read_only: bool) -> tuple[Mount, ...]:
+        """Каталог вывода исполнения вне worktree: итог агента — `<io>/.aicd/result.json`, отчёты — `<io>/.aicd/output/`.
 
-        В контейнере — rw bind-монтирования поверх (возможно read-only) worktree; локально — symlink. Пути,
-        уже существующие в worktree (отслеживаются репозиторием), не подменяются.
+        Агент пишет по относительным путям `.aicd/…` и `output/…` (cwd CLI = worktree); `output` в worktree —
+        относительная symlink на `.aicd/output`. Каталог `.aicd`:
+
+        * worktree смонтирован read-only (контейнер, роль с `write_scope=none`) — единственное rw
+          bind-монтирование `<io>/.aicd` поверх точки монтирования (политика контейнера допускает одно rw);
+        * иначе (rw worktree, локальный запуск) — обычный каталог в worktree, после выхода процесса переносится
+          в `<io>/.aicd` (`_unwire_agent_io`); в коммит задачи он не попадает в любом случае (worktrees).
+
+        Каталог временный, как каталог промпта (системный tmp или `agent_io_root`); удаляет его
+        `release_agent_io`. Пути `.aicd`/`output`, уже существующие в worktree (из репозитория), не подменяются.
         """
-        root = self._agent_io_root or cwd.parent / ".aicd-io"
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        io_dir = root / str(ex.request.execution_id)
-        io_dir.mkdir(mode=0o700)
+        if self._agent_io_root is not None:
+            self._agent_io_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        io_dir = Path(tempfile.mkdtemp(prefix="aicd-io-", dir=self._agent_io_root))
         ex.io_dir = io_dir
-        mounts: list[Mount] = []
-        for name in AGENT_IO_DIRS:
-            target = io_dir / name
-            target.mkdir(mode=0o700)
-            link = cwd / name
-            if os.path.lexists(link):
-                continue
-            if self._container is None:
-                link.symlink_to(target, target_is_directory=True)
-            else:
-                os.chmod(io_dir, 0o755)  # noqa: S103 — каталог исполнения; запись — только в подкаталоги
-                os.chmod(target, 0o777)  # noqa: S103 — пишет uid runner-контейнера
-                link.mkdir()  # точка монтирования (worktree может быть смонтирован read-only)
-                mounts.append(Mount(target, f"{self._profile.cwd}/{name}", read_only=False))
-            ex.io_links.append(link)
-        return tuple(mounts)
+        aicd, output = cwd / AGENT_IO_DIRS[0], cwd / AGENT_IO_DIRS[1]
+        if os.path.lexists(aicd):
+            return ()
+        container = self._container is not None
+        mode = 0o777 if container else 0o700  # в контейнере пишет uid runner, не владелец каталога
+        mounts: tuple[Mount, ...] = ()
+        if container and read_only:
+            source = io_dir / AGENT_IO_DIRS[0]
+            (source / "output").mkdir(parents=True)
+            os.chmod(io_dir, 0o755)  # noqa: S103 — каталог исполнения; запись — только в смонтированный подкаталог
+            for d in (source, source / "output"):
+                os.chmod(d, mode)
+            aicd.mkdir()  # точка монтирования внутри read-only worktree
+            mounts = (Mount(source, f"{self._profile.cwd}/{AGENT_IO_DIRS[0]}", read_only=False),)
+            ex.io_mode = "mount"
+        else:
+            (aicd / "output").mkdir(parents=True)
+            for d in (aicd, aicd / "output"):
+                os.chmod(d, mode)
+            ex.io_mode = "move"
+        if not os.path.lexists(output):
+            output.symlink_to(f"{AGENT_IO_DIRS[0]}/output", target_is_directory=True)
+            ex.io_links.append(output)
+        ex.io_links.append(aicd)
+        return mounts
 
     @staticmethod
     def _unwire_agent_io(ex: _Execution) -> None:
+        """Убрать из worktree symlink `output` и `.aicd` (точку монтирования или перенести каталог в `<io>`)."""
         for link in ex.io_links:
             with contextlib.suppress(OSError):
                 if link.is_symlink():
                     link.unlink()
-                elif link.is_dir():
-                    link.rmdir()  # только пустая точка монтирования
+                elif link.is_dir() and ex.io_mode == "mount":
+                    link.rmdir()  # пустая точка монтирования
+                elif link.is_dir() and ex.io_dir is not None:
+                    shutil.move(link, ex.io_dir / link.name)
         ex.io_links.clear()
 
     # --- probe / auth: реализуют конкретные адаптеры --------------------------------------
@@ -306,9 +326,9 @@ class SubprocessCLIAdapter:
                     self._prompt_texts.pop(req.execution_id, "") or req.input.objective, encoding="utf-8"
                 )
                 os.chmod(text_file, 0o444 if self._container else 0o400)
-                io_mounts = self._wire_agent_io(ex, cwd) if self._agent_io else ()
                 # При расхождении профиля команды и запроса действует более строгое ограничение (SC-CLI-07).
                 read_only = self._profile.write_scope == "none" or req.permissions.write_scope == "none"
+                io_mounts = self._wire_agent_io(ex, cwd, read_only=read_only) if self._agent_io else ()
                 mounts: tuple[Mount, ...] = ()
                 request_values = self._request_placeholders(req)
                 if self._container is None:

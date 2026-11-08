@@ -19,7 +19,9 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from aicd_orchestration import checkpoints, directives, plans, retry, routing_service, store
+from aicd_orchestration import checkpoints, directives, plans, retry, review_flow, routing_service, store
+from aicd_orchestration.agent_io import AgentIoSummary
+from aicd_orchestration.agents.profiles import profile as role_profile
 from aicd_orchestration.classification import Signals, classify
 from aicd_orchestration.dag import PlannedTask, critical_path_lengths
 from aicd_orchestration.planner import template_plan
@@ -89,6 +91,7 @@ class TaskExecution:
     worktree_path: Any
     head_commit_sha: str | None
     execution_id: uuid.UUID
+    agent_io: AgentIoSummary | None = None  # итог ввода-вывода агента (промпт, result.json, ACP), P4-03/P4-04
 
 
 class TaskExecutorPort(Protocol):
@@ -320,6 +323,16 @@ class Orchestrator:
                             "SELECT t.id FROM tasks t WHERE t.run_id = :r AND t.superseded_at IS NULL AND t.status = 'PENDING'"
                             " AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks p ON p.id = d.depends_on_task_id"
                             "   WHERE d.task_id = t.id AND p.status <> 'SUCCEEDED')"
+                            # зависимость завершена, только когда завершены и её производные по origin_task_id
+                            # (fix/повторное ревью цикла) — кроме самой задачи t и её собственных предков
+                            " AND NOT EXISTS (WITH RECURSIVE der(id) AS ("
+                            "   SELECT c.id FROM task_dependencies d JOIN tasks c ON c.origin_task_id = d.depends_on_task_id"
+                            "   WHERE d.task_id = t.id"
+                            "   UNION SELECT c.id FROM tasks c JOIN der ON c.origin_task_id = der.id)"
+                            "   SELECT 1 FROM der JOIN tasks x ON x.id = der.id"
+                            "   WHERE x.status <> 'SUCCEEDED' AND x.superseded_at IS NULL AND x.id <> t.id"
+                            "   AND x.origin_task_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM task_dependencies dd"
+                            "     WHERE dd.task_id = x.id AND dd.depends_on_task_id = t.id))"
                         ),
                         {"r": run_id},
                     )
@@ -515,7 +528,9 @@ class Orchestrator:
                 await _finish_attempt_row(conn, attempt_id, "CANCELLED", None)
                 await leases.release(conn, lease)
                 return
-        if outcome.status == "completed" and outcome.head_commit_sha:
+        rejected_category = _agent_result_failure(outcome)
+        read_only = role_profile(current["agent_role"]).permissions.write_scope == "none" if current else False
+        if outcome.status == "completed" and rejected_category is None and outcome.head_commit_sha:
             async with transaction(self.engine, self._ctx(ws)) as conn:
                 if not await leases.is_current(conn, "task", task_id, lease.fencing_token):
                     return  # аренда потеряна: результат «зомби»-воркера не записывается
@@ -536,16 +551,28 @@ class Orchestrator:
             task = await _task_row(conn, task_id)
             if task is None:  # pragma: no cover
                 return
+            analysis_done = (
+                read_only
+                and outcome.status == "completed"
+                and rejected_category is None
+                and not outcome.head_commit_sha
+            )
             if task["status"] == "CANCELLED":
                 await _finish_attempt_row(conn, attempt_id, "CANCELLED", None)
-            elif verification is not None and verification.passed:
-                await store.transition_task(conn, task_id, "SUCCEEDED", reason="gates_passed")
+            elif (verification is not None and verification.passed) or analysis_done:
+                # Роли без права записи (reviewer, security-анализ…) не меняют код: их итог — валидный result.json
+                # и принятые ACP-сообщения; гейты проверяют изменения реализующих задач (QUALITY_GATES).
+                reason = "gates_passed" if verification is not None else "analysis_completed"
+                await store.transition_task(conn, task_id, "SUCCEEDED", reason=reason)
                 await _finish_attempt_row(conn, attempt_id, "SUCCEEDED", None)
+                if outcome.agent_io is not None and outcome.agent_io.review_verdict == "changes_requested":
+                    # Ревью вернуло замечания: fix + повторное ревью — в той же транзакции (ACP §9.2).
+                    await review_flow.open_fix_loop(conn, review_task_id=task_id, fix_request_id=None)
             else:
                 category = (
-                    "GATE_FAILED"
-                    if verification is not None
-                    else outcome.failure_category
+                    rejected_category
+                    or ("GATE_FAILED" if verification is not None else None)
+                    or outcome.failure_category
                     or ("CANCELLED" if outcome.status == "cancelled" else "PROCESS_FAILED")
                 )
                 await self._after_failure(conn, task, attempt_id, category, outcome, spent, run)
@@ -729,6 +756,20 @@ async def _dispatchable(conn: AsyncConnection, run: dict[str, Any]) -> list[uuid
         (r for r in rows if r["status"] == "READY"), key=lambda r: (-priority[r["task_key"]], r["created_at"], r["id"])
     )
     return [r["id"] for r in ready[: max(limit - active, 0)]]
+
+
+def _agent_result_failure(outcome: TaskExecution) -> str | None:
+    """Категория отказа по итогу агента (AGENT_ROLES §3.4, ACP §5); None — итог приемлем или не применим."""
+    io = outcome.agent_io
+    if outcome.status != "completed" or io is None:
+        return None
+    if io.attempt_should_fail:
+        return "POLICY_DENIED"  # ≥ 3 отказов ACL/POLICY в попытке
+    if io.result_status in ("missing", "invalid"):
+        return "OUTPUT_PARSE_ERROR"  # обязательный AgentResult отсутствует или отклонён целиком
+    if io.result_status == "error":
+        return "WORKER_CRASH"  # сбой обработки на стороне платформы — повторяемый
+    return None
 
 
 async def _approved(

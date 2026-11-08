@@ -40,13 +40,6 @@ class AdapterFactory(Protocol):
     ) -> SubprocessCLIAdapter: ...
 
 
-@dataclass(frozen=True)
-class AgentTaskExecution(TaskExecution):
-    """TaskExecution + итог ввода-вывода агента (до появления поля `agent_io` в самом `engine.TaskExecution`)."""
-
-    agent_io: AgentIoSummary | None = None
-
-
 @dataclass
 class CliTaskExecutor:
     engine: AsyncEngine
@@ -68,7 +61,7 @@ class CliTaskExecutor:
         provider: str,
         installation_id: uuid.UUID,
         register_cancel: Callable[[Callable[[str], Awaitable[None]]], None],
-    ) -> AgentTaskExecution:
+    ) -> TaskExecution:
         ws: uuid.UUID = run["workspace_id"]
         role = str(task["agent_role"])
         async with transaction(self.engine, DbContext(workspace_id=ws, actor_type="system")) as conn:
@@ -198,7 +191,7 @@ class CliTaskExecutor:
             )
         finally:
             adapter.release_agent_io(request.execution_id)
-        return AgentTaskExecution(
+        return TaskExecution(
             status=result.status,
             failure_category=result.error.code if result.error else None,
             retry_after=result.error.retry_after_seconds if result.error else None,

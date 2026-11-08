@@ -4,7 +4,8 @@
 раньше, чем появятся fix-задачи). Завершённые задачи неизменяемы (SUCCEEDED терминален), поэтому цикл
 моделируется новыми задачами текущей версии плана с `origin_task_id`:
 
-    impl ──► review ──► impl.fixN ──► review.rN ──► (то, что зависело от review)
+    impl ──► review ──► impl.fixN ──► review.rN        (новая plan_version)
+    задачи, зависевшие от review, ждут и review.rN — производную review по origin_task_id
 
 Счётчик циклов — `tasks.review_loop_count` исходной задачи-реализации; его увеличивает брокер ACP при
 принятии FIX_REQUEST, он же при превышении лимита блокирует цикл (`ReviewLoopEscalator`). Здесь лимит
@@ -22,9 +23,12 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from aicd_orchestration.agents.profiles import profile
+from aicd_orchestration.dag import AGENT_ROLES
 from aicd_platform.ids import uuid7
 
-WRITING_ROLES = frozenset({"developer", "maintenance", "performance", "documentation", "qa", "database", "devops"})
+# Роли, меняющие код (профиль: write_scope ≠ none) — авторы проверяемого изменения.
+WRITING_ROLES = frozenset(r for r in AGENT_ROLES if profile(r).permissions.write_scope != "none")
 _SUFFIX = re.compile(r"\.(fix|r)\d+$")
 
 
@@ -91,13 +95,21 @@ async def open_fix_loop(
     fix_key, rereview_key = f"{_base(impl['task_key'])}.fix{iteration}", f"{_base(review['task_key'])}.r{iteration}"
     existing = (
         await conn.execute(
-            text("SELECT id, task_key FROM tasks WHERE run_id = :r AND plan_version = :pv AND task_key = ANY(:k)"),
-            {"r": review["run_id"], "pv": review["plan_version"], "k": [fix_key, rereview_key]},
+            text("SELECT id, task_key FROM tasks WHERE run_id = :r AND task_key = ANY(:k)"),
+            {"r": review["run_id"], "k": [fix_key, rereview_key]},
         )
     ).all()
     if existing:  # идемпотентность (повторная обработка того же вердикта)
         by_key = {k: i for i, k in existing}
         return FixLoop(by_key[fix_key], by_key[rereview_key], iteration) if len(by_key) == 2 else None
+    # Утверждённая версия плана неизменяема (триггер БД): цикл — дополнение плана новой plan_version, которую
+    # оркестратор утверждает сам (автоматический шаг утверждённого плана, ACP §9.2, а не human-level replan).
+    run = (
+        (await conn.execute(text("SELECT plan_version FROM runs WHERE id = :r FOR UPDATE"), {"r": review["run_id"]}))
+        .mappings()
+        .one()
+    )
+    plan_version = int(run["plan_version"]) + 1
     fix_id, rereview_id = uuid7(), uuid7()
     reference = f" (FIX_REQUEST {fix_request_id})" if fix_request_id else ""
     for task_id, key, source, origin, title, instructions in (
@@ -131,7 +143,7 @@ async def open_fix_loop(
                 "id": task_id,
                 "ws": source["workspace_id"],
                 "run": source["run_id"],
-                "pv": review["plan_version"],
+                "pv": plan_version,
                 "key": key,
                 "origin": origin,
                 "role": source["agent_role"],
@@ -145,19 +157,18 @@ async def open_fix_loop(
                 "mrl": source["max_review_loops"],
             },
         )
-    edges = [(fix_id, review_task_id), (rereview_id, fix_id)]
-    dependents = (
-        await conn.execute(
-            text("SELECT task_id FROM task_dependencies WHERE depends_on_task_id = :r"), {"r": review_task_id}
-        )
-    ).scalars()
-    edges += [(dep, rereview_id) for dep in dependents if dep not in (fix_id, rereview_id)]
-    for child, parent in edges:
+    # Задачи, зависевшие от ревью, рёбер не получают (их версия плана неизменяема): планировщик считает
+    # зависимость незавершённой, пока не завершены её производные по origin_task_id (повторное ревью).
+    for child, parent in ((fix_id, review_task_id), (rereview_id, fix_id)):
         await conn.execute(
             text(
                 "INSERT INTO task_dependencies (workspace_id, run_id, task_id, depends_on_task_id)"
-                " VALUES (:ws, :run, :t, :d) ON CONFLICT DO NOTHING"
+                " VALUES (:ws, :run, :t, :d)"
             ),
             {"ws": review["workspace_id"], "run": review["run_id"], "t": child, "d": parent},
         )
+    await conn.execute(
+        text("UPDATE runs SET plan_version = :pv, approved_plan_version = :pv, version = version + 1 WHERE id = :r"),
+        {"pv": plan_version, "r": review["run_id"]},
+    )
     return FixLoop(fix_id, rereview_id, iteration)

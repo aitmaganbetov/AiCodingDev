@@ -68,3 +68,71 @@ async def test_network_is_unavailable_in_runner(tmp_path: Path, docker_runner: D
     async for _ in proc.output():
         pass
     assert await proc.wait() != 0
+
+
+async def test_read_only_role_writes_result_to_output_dir_in_container(
+    tmp_path: Path, docker_runner: DockerSandboxRunner
+) -> None:
+    """Phase 4: worktree роли write_scope=none смонтирован read-only; итог — в rw каталог вывода исполнения."""
+    wid = uuid7()
+    worktree = tmp_path / str(wid)
+    worktree.mkdir()
+    adapter = FakeCLIExecutor(
+        scenario="agent",
+        runner=docker_runner,
+        artifact_sink=MemorySink(),
+        worktree_path=worktree_resolver(tmp_path),
+        env_source={"PATH": "/usr/local/bin:/usr/bin:/bin"},
+        container=fake_container_layout(IMAGE),
+        agent_io=True,
+        agent_io_root=tmp_path / "io",
+    )
+    base = make_request(worktree_id=wid)
+    data = base.model_dump(mode="json", exclude_unset=True)
+    data["agent_role"] = "reviewer"
+    data["permissions"]["write_scope"] = "none"
+    data["input"]["instruction_template_version"] = "reviewer@1.0.0"
+    request = type(base).model_validate(data)
+    adapter.stage_prompt(request.execution_id, "промпт роли\n")
+    handle = await adapter.execute(request)
+    _ = [e async for e in adapter.stream_events(handle.execution_id)]
+    result = await adapter.collect_result(handle.execution_id)
+    assert result.status == "completed", result.error
+    io_dir = adapter.agent_io_dir(request.execution_id)
+    assert io_dir is not None and (io_dir / ".aicd" / "result.json").is_file()
+    assert (io_dir / ".aicd" / "output" / "review.md").is_file()
+    assert sorted(p.name for p in worktree.iterdir()) == [], "точки монтирования убраны, worktree не тронут"
+    adapter.release_agent_io(request.execution_id)
+
+
+async def test_writing_role_result_moved_out_of_worktree_in_container(
+    tmp_path: Path, docker_runner: DockerSandboxRunner
+) -> None:
+    """Phase 4: rw worktree — `.aicd/` пишется в worktree (второе rw-монтирование запрещено) и выносится после."""
+    wid = uuid7()
+    worktree = tmp_path / str(wid)
+    worktree.mkdir()
+    os.chown(worktree, 10001, 10001)
+    adapter = FakeCLIExecutor(
+        scenario="agent",
+        runner=docker_runner,
+        artifact_sink=MemorySink(),
+        worktree_path=worktree_resolver(tmp_path),
+        env_source={"PATH": "/usr/local/bin:/usr/bin:/bin"},
+        container=fake_container_layout(IMAGE),
+        agent_io=True,
+        agent_io_root=tmp_path / "io",
+    )
+    base = make_request(worktree_id=wid)
+    data = base.model_dump(mode="json", exclude_unset=True)
+    data["input"]["instruction_template_version"] = "developer@1.0.0"
+    request = type(base).model_validate(data)
+    handle = await adapter.execute(request)
+    _ = [e async for e in adapter.stream_events(handle.execution_id)]
+    result = await adapter.collect_result(handle.execution_id)
+    assert result.status == "completed", result.error
+    io_dir = adapter.agent_io_dir(request.execution_id)
+    assert io_dir is not None and (io_dir / ".aicd" / "result.json").is_file()
+    assert (io_dir / ".aicd" / "output" / "changes.diff").is_file()
+    assert sorted(p.name for p in worktree.iterdir()) == ["FAKE_CHANGE.md"]
+    adapter.release_agent_io(request.execution_id)

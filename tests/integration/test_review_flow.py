@@ -75,7 +75,15 @@ async def test_fix_loop_creates_tasks_rewires_dependents_and_is_idempotent(
         )
     assert rows["main.fix1"] == ("developer", t["main"], "PENDING")
     assert rows["review.r1"] == ("reviewer", t["review"], "PENDING")
-    assert {("main.fix1", "review"), ("review.r1", "main.fix1"), ("docs", "review.r1")} <= deps
+    assert {("main.fix1", "review"), ("review.r1", "main.fix1")} <= deps
+    assert ("docs", "review.r1") not in deps, "версия плана задачи docs неизменяема — ожидание через origin"
+    with orch.connect_admin(database) as conn:
+        pv = conn.execute(
+            "SELECT r.plan_version, r.approved_plan_version, t.plan_version FROM runs r JOIN tasks t"
+            " ON t.run_id = r.id AND t.task_key = 'main.fix1' WHERE r.id = %s",
+            (run,),
+        ).fetchone()
+    assert pv is not None and pv[0] == pv[1] == pv[2], "цикл — новая утверждённая версия плана"
     # Второй цикл: проверяемая реализация — fix-задача, но счётчик и ключи — от исходной цепочки.
     _set_loops(database, t["main"], 2)
     second = await _open(worker_engine, tenant, loop.rereview_task_id)

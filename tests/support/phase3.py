@@ -87,7 +87,7 @@ class Slice:
     worker: AsyncEngine
     tmp: Path
     settings: Settings
-    scenario: dict[str, str]
+    scenario: dict[str, ScenarioSpec]
 
     def orchestrator(self) -> Orchestrator:
         return build_orchestrator(self.worker, self.tmp, self.settings.repository_roots, self.scenario["name"])
@@ -156,7 +156,7 @@ async def world(
     )
     assert r.status_code == 201, r.text
     worker = create_engine(database.url_for("aicd_worker"))
-    yield Slice(user, ws["id"], project["id"], worker, tmp_path, settings, {"name": "success_diff"})
+    yield Slice(user, ws["id"], project["id"], worker, tmp_path, settings, {"name": "agent"})
     await worker.dispose()
 
 

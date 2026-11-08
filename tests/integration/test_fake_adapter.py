@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from aicd_cli_adapters.fake.adapter import FakeCLIExecutor
+from aicd_cli_adapters.fake.adapter import FakeCLIExecutor, ScenarioSpec
 from aicd_cli_adapters.gateway import worktree_resolver
 from aicd_cli_adapters.models import ExecutionResult
 from aicd_platform.ids import uuid7
@@ -20,7 +21,7 @@ from tests.support.contract import ROOT
 SCHEMAS = ROOT / "packages" / "contracts" / "schemas" / "cli" / "1.0"
 
 
-def _setup(tmp_path: Path, scenario: str, **kw: object) -> tuple[FakeCLIExecutor, MemorySink, uuid.UUID]:
+def _setup(tmp_path: Path, scenario: ScenarioSpec, **kw: object) -> tuple[FakeCLIExecutor, MemorySink, uuid.UUID]:
     wid = uuid7()
     (tmp_path / str(wid)).mkdir()
     sink = MemorySink()
@@ -42,8 +43,6 @@ async def _run(adapter: FakeCLIExecutor, request: object) -> tuple[ExecutionResu
 
 
 def _validate_against_schema(result: ExecutionResult) -> None:
-    import json
-
     from jsonschema import Draft202012Validator, FormatChecker
 
     from aicd_cli_adapters.models import result_json
@@ -183,3 +182,27 @@ async def test_probe_and_auth_match_contract(tmp_path: Path) -> None:
     assert probe.compatibility == "UNTESTED" and probe.capabilities.noninteractive_mode
     auth = await adapter.check_auth(installation_id=uuid7())
     assert auth.auth_status == "AUTH_REQUIRED"
+
+
+async def test_agent_io_dir_outside_worktree_and_prompt_text(tmp_path: Path) -> None:
+    """Phase 4: `.aicd/`, `output/` ведут в каталог вывода исполнения; промпт роли — файл `{prompt_text_file}`."""
+    io_root = tmp_path / "io"
+    adapter, _, wid = _setup(tmp_path, {"reviewer": "agent_review_approve"}, agent_io=True, agent_io_root=io_root)
+    base = make_request(worktree_id=wid)
+    data = base.model_dump(mode="json", exclude_unset=True)
+    data["agent_role"] = "reviewer"
+    data["permissions"]["write_scope"] = "none"
+    data["input"]["instruction_template_version"] = "reviewer@1.0.0"
+    request = type(base).model_validate(data)
+    adapter.stage_prompt(request.execution_id, "base_commit: " + "c" * 40 + "\n")
+    result, _ = await _run(adapter, request)
+    assert result.status == "completed", result.error
+    worktree = tmp_path / str(wid)
+    assert not (worktree / ".aicd").exists() and not (worktree / "output").exists(), "worktree не тронут"
+    io_dir = adapter.agent_io_dir(request.execution_id)
+    assert io_dir is not None and io_dir.parent == io_root
+    doc = json.loads((io_dir / ".aicd" / "result.json").read_text())
+    assert doc["acp_messages"][-1]["payload"]["review_verdict"] == "approved"
+    assert (io_dir / ".aicd" / "output" / "review.md").is_file()
+    adapter.release_agent_io(request.execution_id)
+    assert not io_dir.exists() and adapter.agent_io_dir(request.execution_id) is None

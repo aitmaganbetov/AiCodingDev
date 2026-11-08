@@ -171,7 +171,7 @@ async def test_worker_killed_while_cli_running_is_recovered(world: Slice, databa
         ], "checkpoint при запуске утверждённого плана (DATA_FLOW §7)"
 
     # 3. Новый воркер доводит run до конца: повтор после LEASE_LOST, затем независимое ревью.
-    world.scenario["name"] = "success_diff"
+    world.scenario["name"] = "agent"
     assert await drive(world, run_id) == "COMPLETED"
     async with transaction(world.worker, DbContext(workspace_id=uuid.UUID(world.ws), actor_type="system")) as conn:
         attempts = (
