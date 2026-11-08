@@ -84,3 +84,4 @@
 | 2026-11-08 | Phase 5 | Отчёт Phase 4 принят, старт Phase 5 (Code Intelligence); P4-13 real-CLI и человеческое ревью шаблонов (P4-02) — ожидают; OQ-35…OQ-39 ожидают решения | Владелец продукта |
 | 2026-11-08 | Phase 6 | Отчёт Phase 5 принят, старт Phase 6 (Quality, Security & Standards); P5-08 (LSP) отложен; OQ-35…OQ-41 ожидают решения | Владелец продукта |
 | 2026-11-08 | Phase 7 | Отчёт Phase 6 принят, старт Phase 7 (Mission Control & Live Agent Chat); PHPStan/офлайн-БД/prepare-шаг — по OQ-43; OQ-35…OQ-43 ожидают решения | Владелец продукта |
+| 2026-11-08 | Phase 8 | Отчёт Phase 7 принят, старт Phase 8 (GitHub Integrations & Analytics); пробелы API из OQ-45 (c)–(f) — в Phase 8; OQ-44/OQ-45 ожидают решения | Владелец продукта (сообщение в сессии: «Да») |
