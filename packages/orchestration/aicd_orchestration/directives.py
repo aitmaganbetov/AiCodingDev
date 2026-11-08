@@ -421,6 +421,7 @@ class Directives:
                 target_role=target.role,
                 mentions=mentions,
                 directive_id=directive_id,
+                approval_id=target.approval_id,
             ),
         )
         d = await _load(conn, directive_id, lock=True)
