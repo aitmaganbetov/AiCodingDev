@@ -31,7 +31,7 @@ export AICD_BACKUP_STATUS_FILE=/srv/aicd-backup/status/status.json  # для м�
 
 Примечание к `pg-dump`: роль `aicd_maintenance` (DATABASE_DESIGN §19.6) сейчас **не может** выполнить `pg_dump` — у неё нет
 `SELECT` на помесячные партиции `outbox_events_*`/`agent_activity_events_*` (создаются `maint_ensure_monthly_partitions`
-без GRANT) и на `worker_lease_fencing_seq` (вывод DR drill). До миграции, выдающей эти права (решение владельца, OQ),
+без GRANT) и на `worker_lease_fencing_seq` (вывод DR drill). До миграции, выдающей эти права (решение владельца, OPEN_QUESTIONS OQ-51 (a)),
 логический дамп выполняется суперпользователем через `--pg-container`. Физический бэкап и WAL от этого не зависят.
 
 Все файлы в репозитории шифруются AES-256-GCM (потоково, защита от подмены/усечения/перестановки записей и подмены

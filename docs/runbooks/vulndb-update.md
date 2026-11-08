@@ -50,4 +50,4 @@ uv run python -m scripts.vulndb.update --db-root /var/lib/aicd/vulndb --approval
   ответственным раз в сутки (политика владельца).
 * Неудача — `"result": "failure"` в `audit.jsonl` и код 1; gates продолжают работать на прежней БД, пока она свежая.
 * Связь с approvals платформы (тип `VULN_DB_UPDATE` в `approvals`) — требует миграции перечисления; пока одобрение — файл
-  (решение владельца, OPEN_QUESTIONS OQ-43).
+  (решение владельца, OPEN_QUESTIONS OQ-51 (b)).

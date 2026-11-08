@@ -1,0 +1,3885 @@
+{
+  "report": "AiCodingDev acceptance AC-01…AC-16 (P9-01)",
+  "generated_at": "2026-11-08T18:09:30.243114Z",
+  "commit_sha": "80a10ff1d27f20d08b07be7e93548cb2fa31452d",
+  "branch": "ccr-69fbf9a8-p2650i",
+  "working_tree": {
+    "dirty": true,
+    "changed_paths": 44,
+    "diff_vs_head_sha256": "7e5b50748170739296cfc3b595222ebb99415db936312fae5f7b1f12487d3528"
+  },
+  "environment": {
+    "python": "3.13.18",
+    "platform": "Linux-6.18.44-fc-v310-x86_64-with-glibc2.39",
+    "fake_cli": true,
+    "real_cli": "BLOCKED"
+  },
+  "matrix": "tests/acceptance/matrix.yaml",
+  "matrix_sha256": "19aec5c9ebba0fe71247fb31a5093db13b7518994a14db13f9913842e6bdc1cb",
+  "runs": {
+    "python": {
+      "command": "/home/user/AiCodingDev/.venv/bin/python3 -m pytest -m acceptance -p no:cacheprovider -q -rs -o junit_family=xunit1 --junitxml=/home/user/AiCodingDev/reports/acceptance/junit/python.xml",
+      "cwd": ".",
+      "exit_code": 1,
+      "started_at": "2026-11-08T18:00:34.876215Z",
+      "duration_seconds": 290.2,
+      "log": "reports/acceptance/logs/python.log"
+    },
+    "live": {
+      "command": "pnpm exec playwright test -c playwright.live.config.ts --trace off --reporter=list,junit",
+      "cwd": "apps/web",
+      "exit_code": 0,
+      "started_at": "2026-11-08T18:05:25.106239Z",
+      "duration_seconds": 99.4,
+      "log": "reports/acceptance/logs/web-live.log"
+    },
+    "mocked": {
+      "command": "pnpm exec playwright test -c playwright.mocked.config.ts --trace off --reporter=list,junit",
+      "cwd": "apps/web",
+      "exit_code": 0,
+      "started_at": "2026-11-08T18:07:04.484731Z",
+      "duration_seconds": 145.7,
+      "log": "reports/acceptance/logs/web-mocked.log"
+    }
+  },
+  "junit": {
+    "python": {
+      "path": "reports/acceptance/junit/python.xml",
+      "sha256": "b1dbe7b53e5eb0bb61c2f843735a7286590133e244d6a0ebc6bd587f56a99af2"
+    },
+    "live": {
+      "path": "reports/acceptance/junit/web-live.xml",
+      "sha256": "aa513f77ba1981971df0f61e255aa70791a59d36d516ade10ec3992e4d75a44b"
+    },
+    "mocked": {
+      "path": "reports/acceptance/junit/web-mocked.xml",
+      "sha256": "37a34a7e77f9d6fb45d03b12e407520ad8de92e684509a162ae5129b314196e5"
+    }
+  },
+  "counts": {
+    "python": {
+      "total": 355,
+      "passed": 354,
+      "failed": 1,
+      "skipped": 0
+    },
+    "live": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "mocked": {
+      "total": 60,
+      "passed": 60,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "summary": {
+    "criteria": 16,
+    "pass": 15,
+    "fail": 1,
+    "incomplete": 0,
+    "real_cli_blocked": 4,
+    "all_mandatory_pass": false
+  },
+  "real_cli_blocked_reason": "Opt-in прогон с реальными CLI невозможен: P2-01 (spike probe Codex/Claude CLI), P2-05/P2-06 (адаптеры реальных CLI) и P2-13 (opt-in набор) — BLOCKED: нет машины с установленными и авторизованными официальными Codex CLI и Claude Code CLI (решение владельца, IMPLEMENTATION_BACKLOG §Phase 2; OQ-01, OQ-03). Тестов real-CLI в репозитории нет.",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "title": "Подключение локального репозитория, создание проекта, запуск DEVELOP",
+      "status": "PASS",
+      "real_cli": "BLOCKED",
+      "clauses": [
+        {
+          "text": "Локальный Git-репозиторий из allowlist привязывается к проекту (201); путь вне allowlist отклоняется",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
+                  "status": "PASSED",
+                  "time": 4.77
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_api_projects.py::test_attach_local_repository",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_api_projects.py::test_attach_local_repository",
+                  "status": "PASSED",
+                  "time": 0.8
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[traversal]",
+                  "status": "PASSED",
+                  "time": 0.57
+                },
+                {
+                  "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[outside]",
+                  "status": "PASSED",
+                  "time": 0.56
+                },
+                {
+                  "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[symlink]",
+                  "status": "PASSED",
+                  "time": 0.46
+                },
+                {
+                  "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[not_git]",
+                  "status": "PASSED",
+                  "time": 0.52
+                },
+                {
+                  "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[nested]",
+                  "status": "PASSED",
+                  "time": 0.62
+                },
+                {
+                  "id": "tests/integration/test_api_projects.py::test_attach_rejects_unsafe_paths[github]",
+                  "status": "PASSED",
+                  "time": 0.47
+                }
+              ]
+            },
+            {
+              "ref": "live:smoke.spec.ts::live smoke",
+              "suite": "live",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "smoke.spec.ts::live smoke: login → workspace → projects → create project → logout",
+                  "status": "PASSED",
+                  "time": 4.18
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "POST /runs mode=DEVELOP → 201, status=CREATED",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
+                  "status": "PASSED",
+                  "time": 4.77
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_runs_api.py::test_create_run_is_idempotent_and_key_reuse_with_other_body_is_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_runs_api.py::test_create_run_is_idempotent_and_key_reuse_with_other_body_is_rejected",
+                  "status": "PASSED",
+                  "time": 0.74
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "run переходит в DISCOVERY, событие run.state_changed получено по SSE",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac01_develop_run.py::test_ac01_attach_local_repo_create_project_start_develop_run",
+                  "status": "PASSED",
+                  "time": 4.77
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence",
+                  "status": "PASSED",
+                  "time": 5.02
+                }
+              ]
+            },
+            {
+              "ref": "live:mission-control.spec.ts::AC-05",
+              "suite": "live",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into Live Agent Chat; graph statuses progress live",
+                  "status": "PASSED",
+                  "time": 12.45
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "То же с реальными CLI (RC)",
+          "kind": "real_cli",
+          "status": "BLOCKED",
+          "reason": "Opt-in прогон с реальными CLI невозможен: P2-01 (spike probe Codex/Claude CLI), P2-05/P2-06 (адаптеры реальных CLI) и P2-13 (opt-in набор) — BLOCKED: нет машины с установленными и авторизованными официальными Codex CLI и Claude Code CLI (решение владельца, IMPLEMENTATION_BACKLOG §Phase 2; OQ-01, OQ-03). Тестов real-CLI в репозитории нет.",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "AC-02",
+      "title": "Определение стека, индексация по commit, DAG без циклов",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "code_index_snapshots для (repository, base_commit_sha) = READY",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
+                  "status": "PASSED",
+                  "time": 5.91
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "project_technologies заполнены (стек определён)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
+                  "status": "PASSED",
+                  "time": 5.91
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "План проходит валидацию ацикличности",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
+                  "status": "PASSED",
+                  "time": 5.91
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_orchestration_core.py::test_acyclic_plans_validate_and_respect_edges",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_acyclic_plans_validate_and_respect_edges",
+                  "status": "PASSED",
+                  "time": 0.86
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "План с циклом отклоняется PLAN_CYCLE_DETECTED",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase5_acceptance.py::test_ac02_attach_index_stack_and_context_pack",
+                  "status": "PASSED",
+                  "time": 5.91
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_orchestration_core.py::test_any_back_edge_is_detected_with_cycle_path",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_any_back_edge_is_detected_with_cycle_path",
+                  "status": "PASSED",
+                  "time": 0.67
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_orchestration_core.py::test_plan_rejections",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_plan_rejections[tasks0-PLAN_EMPTY]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_plan_rejections[tasks1-PLAN_UNKNOWN_ROLE]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_plan_rejections[tasks2-PLAN_BAD_COMPLEXITY]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_plan_rejections[tasks3-PLAN_CYCLE_DETECTED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_plan_rejections[tasks4-PLAN_UNKNOWN_DEPENDENCY]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_plan_rejections[tasks5-PLAN_DUPLICATE_KEY]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_plan_rejections[tasks6-PLAN_MISSING_VERIFICATION]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-03",
+      "title": "Router назначает доступный официальный CLI без AI API",
+      "status": "PASS",
+      "real_cli": "BLOCKED",
+      "clauses": [
+        {
+          "text": "routing_decisions содержит выбранный провайдер ∈ {codex, claude} с score_breakdown",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac03_router_selects_official_cli_and_platform_has_no_ai_api_egress",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac03_router_selects_official_cli_and_platform_has_no_ai_api_egress",
+                  "status": "PASSED",
+                  "time": 2.33
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_routing_review.py::test_review_goes_to_the_other_provider_and_decisions_are_recorded",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_routing_review.py::test_review_goes_to_the_other_provider_and_decisions_are_recorded",
+                  "status": "PASSED",
+                  "time": 2.91
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_routing.py::test_quality_drives_selection_and_breakdown_is_complete",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_routing.py::test_quality_drives_selection_and_breakdown_is_complete",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Сетевой трафик платформы к AI API отсутствует (egress-лог процесса платформы; runner — только allowlist egress-proxy)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac03_router_selects_official_cli_and_platform_has_no_ai_api_egress",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac03_router_selects_official_cli_and_platform_has_no_ai_api_egress",
+                  "status": "PASSED",
+                  "time": 2.33
+                }
+              ]
+            },
+            {
+              "ref": "tests/security/test_sandbox.py::test_egress_proxy_enforces_allowlist",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/security/test_sandbox.py::test_egress_proxy_enforces_allowlist",
+                  "status": "PASSED",
+                  "time": 1.75
+                }
+              ]
+            },
+            {
+              "ref": "tests/security/test_sandbox.py::test_no_direct_egress_on_internal_network",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/security/test_sandbox.py::test_no_direct_egress_on_internal_network",
+                  "status": "PASSED",
+                  "time": 0.88
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "В зависимостях нет AI SDK (deny-gate, import-linter)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/unit/test_ci_gates.py::test_current_dependencies_pass_gate",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_ci_gates.py::test_current_dependencies_pass_gate",
+                  "status": "PASSED",
+                  "time": 0.03
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_ci_gates.py::test_gate_detects_forbidden_sdks",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_ci_gates.py::test_gate_detects_forbidden_sdks",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            },
+            {
+              "ref": "tests/contract/test_architecture.py::test_import_contracts",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/contract/test_architecture.py::test_import_contracts",
+                  "status": "PASSED",
+                  "time": 0.27
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Назначение установленного и авторизованного реального CLI; egress runner → эндпоинты провайдера (RC)",
+          "kind": "real_cli",
+          "status": "BLOCKED",
+          "reason": "Opt-in прогон с реальными CLI невозможен: P2-01 (spike probe Codex/Claude CLI), P2-05/P2-06 (адаптеры реальных CLI) и P2-13 (opt-in набор) — BLOCKED: нет машины с установленными и авторизованными официальными Codex CLI и Claude Code CLI (решение владельца, IMPLEMENTATION_BACKLOG §Phase 2; OQ-01, OQ-03). Тестов real-CLI в репозитории нет.",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "AC-04",
+      "title": "Codex реализует в отдельном worktree; Claude — независимое ревью",
+      "status": "PASS",
+      "real_cli": "BLOCKED",
+      "clauses": [
+        {
+          "text": "Изменения только в worktree задачи (исходная ветка и рабочая копия не тронуты)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac04_codex_implements_claude_reviews.py::test_ac04_codex_implements_in_task_worktree_and_claude_reviews_independently",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac04_codex_implements_claude_reviews.py::test_ac04_codex_implements_in_task_worktree_and_claude_reviews_independently",
+                  "status": "PASSED",
+                  "time": 2.94
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_worktrees.py::test_create_diff_commit_remove",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_worktrees.py::test_create_diff_commit_remove",
+                  "status": "PASSED",
+                  "time": 0.09
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_worktrees.py::test_paths_outside_root_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_worktrees.py::test_paths_outside_root_rejected",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Developer-задача исполнена Codex, reviewer-задача назначена Claude, независимость = independent",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac04_codex_implements_claude_reviews.py::test_ac04_codex_implements_in_task_worktree_and_claude_reviews_independently",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac04_codex_implements_claude_reviews.py::test_ac04_codex_implements_in_task_worktree_and_claude_reviews_independently",
+                  "status": "PASSED",
+                  "time": 2.94
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_agent_handoff.py::test_develop_review_fix_rereview_handoff",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_agent_handoff.py::test_develop_review_fix_rereview_handoff",
+                  "status": "PASSED",
+                  "time": 5.77
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_routing.py::test_reviewer_gets_non_author_provider",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_routing.py::test_reviewer_gets_non_author_provider",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Claude недоступен → policy fallback, independent=false (human_review / self_review только после approval)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_routing_review.py::test_single_provider_strict_requires_manual_review",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_routing_review.py::test_single_provider_strict_requires_manual_review",
+                  "status": "PASSED",
+                  "time": 2.01
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_routing_review.py::test_basic_profile_self_review_only_after_explicit_approval",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_routing_review.py::test_basic_profile_self_review_only_after_explicit_approval",
+                  "status": "PASSED",
+                  "time": 3.01
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_routing.py::test_independence_fallbacks",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_routing.py::test_independence_fallbacks[basic-None-FALLBACK-self_review-None-SELF_REVIEW_FALLBACK]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_routing.py::test_independence_fallbacks[strict-None-BLOCKED-human_review-MANUAL_REVIEW-MANUAL_REVIEW]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_routing.py::test_independence_fallbacks[critical-None-BLOCKED-not_required-PROVIDER_UNAVAILABLE-None]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_routing.py::test_independence_fallbacks[critical-SELF_REVIEW_FALLBACK-BLOCKED-not_required-PROVIDER_UNAVAILABLE-None]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_routing.py::test_independence_fallbacks[strict-SELF_REVIEW_FALLBACK-FALLBACK-self_review-None-SELF_REVIEW_FALLBACK]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_routing.py::test_self_review_is_never_marked_independent",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_routing.py::test_self_review_is_never_marked_independent",
+                  "status": "PASSED",
+                  "time": 0.12
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Codex developer → Claude reviewer на реальных CLI (P4-13 RC)",
+          "kind": "real_cli",
+          "status": "BLOCKED",
+          "reason": "Opt-in прогон с реальными CLI невозможен: P2-01 (spike probe Codex/Claude CLI), P2-05/P2-06 (адаптеры реальных CLI) и P2-13 (opt-in набор) — BLOCKED: нет машины с установленными и авторизованными официальными Codex CLI и Claude Code CLI (решение владельца, IMPLEMENTATION_BACKLOG §Phase 2; OQ-01, OQ-03). Тестов real-CLI в репозитории нет.",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "id": "AC-05",
+      "title": "Межагентные сообщения видны в Live Agent Chat без скрытого CoT",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "Все agent_messages run отображаются (потоки All Agents / Role / Task)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
+                  "status": "PASSED",
+                  "time": 8.09
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_chat_api.py::test_feed_streams_filters_search_and_pagination",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_chat_api.py::test_feed_streams_filters_search_and_pagination",
+                  "status": "PASSED",
+                  "time": 1.49
+                }
+              ]
+            },
+            {
+              "ref": "live:mission-control.spec.ts::AC-05",
+              "suite": "live",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into Live Agent Chat; graph statuses progress live",
+                  "status": "PASSED",
+                  "time": 12.45
+                }
+              ]
+            },
+            {
+              "ref": "mocked:chat.spec.ts::AC-05",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "chat.spec.ts::AC-05: live chat shows inter-agent messages and handoffs streaming in, with streams, filters, search and mentions",
+                  "status": "PASSED",
+                  "time": 5.8
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "С типом, отправителем, временем, статусом (статус = принято брокером; отклонённые — в активности)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
+                  "status": "PASSED",
+                  "time": 8.09
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_review_loops.py::test_worker_projects_accepted_acp_message_into_chat_and_activity",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_review_loops.py::test_worker_projects_accepted_acp_message_into_chat_and_activity",
+                  "status": "PASSED",
+                  "time": 0.2
+                }
+              ]
+            },
+            {
+              "ref": "live:mission-control.spec.ts::AC-05",
+              "suite": "live",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into Live Agent Chat; graph statuses progress live",
+                  "status": "PASSED",
+                  "time": 12.45
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Нет полей скрытых рассуждений — только ACP payload, нормализованные события CLI и артефакты",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac05_live_chat_completeness.py::test_ac05_every_agent_message_is_visible_in_live_chat_without_hidden_reasoning",
+                  "status": "PASSED",
+                  "time": 8.09
+                }
+              ]
+            },
+            {
+              "ref": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0442\\u0430\\u0439\\u043c-\\u0430\\u0443\\u0442 < 30 \\u0441]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u043f\\u0440\\u043e\\u0432\\u0430\\u0439\\u0434\\u0435\\u0440 \\u0432\\u043d\\u0435 {codex, claude}]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0434\\u043e\\u0441\\u0442\\u0443\\u043f \\u043a production]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0447\\u0443\\u0436\\u0430\\u044f \\u0432\\u0435\\u0440\\u0441\\u0438\\u044f \\u043a\\u043e\\u043d\\u0442\\u0440\\u0430\\u043a\\u0442\\u0430]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[id \\u043d\\u0435 UUID]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[exit_code \\u0441\\u0442\\u0440\\u043e\\u043a\\u043e\\u0439]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f0]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[seq < 1_0]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0442\\u0438\\u043f \\u0441\\u043e\\u0431\\u044b\\u0442\\u0438\\u044f \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f (\\u043d\\u0435\\u0442 CoT)]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[installed \\u043d\\u0435 boolean]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f1]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u043d\\u0435\\u0438\\u0437\\u0432\\u0435\\u0441\\u0442\\u043d\\u044b\\u0439 \\u0442\\u0438\\u043f SSE]",
+                  "status": "PASSED",
+                  "time": 0.06
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[seq < 1_1]",
+                  "status": "PASSED",
+                  "time": 0.07
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0447\\u0443\\u0436\\u0430\\u044f \\u0432\\u0435\\u0440\\u0441\\u0438\\u044f \\u0441\\u0445\\u0435\\u043c\\u044b]",
+                  "status": "PASSED",
+                  "time": 0.06
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 run \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f]",
+                  "status": "PASSED",
+                  "time": 0.06
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[TASK_ASSIGN]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[HANDOFF]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[QUESTION]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[ANSWER]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[REVIEW_REQUEST]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[FINDING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[FIX_REQUEST]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[EVIDENCE_SUBMITTED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[DECISION_PROPOSAL]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[DECISION_RECORDED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[BLOCKED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_additional_payload_property_rejected[TASK_COMPLETED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-06",
+      "title": "CHANGE_REQUEST во время выполнения",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "202 → IMPACT_ANALYSIS_PENDING → directive.impact_ready",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
+                  "status": "PASSED",
+                  "time": 1.74
+                }
+              ]
+            },
+            {
+              "ref": "live:mission-control.spec.ts::AC-06",
+              "suite": "live",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; CHANGE_REQUEST impact preview → confirm → replan (new plan version) → acknowledged by agents → completed",
+                  "status": "PASSED",
+                  "time": 19.42
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Подтверждение, если критично (four-eyes)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_directives.py::test_critical_directive_requires_admin_approval_with_four_eyes",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directives.py::test_critical_directive_requires_admin_approval_with_four_eyes",
+                  "status": "PASSED",
+                  "time": 1.71
+                }
+              ]
+            },
+            {
+              "ref": "mocked:chat.spec.ts::AC-06",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "chat.spec.ts::AC-06: CHANGE_REQUEST with impact preview → confirmation → delivered / acknowledged / completed",
+                  "status": "PASSED",
+                  "time": 6.41
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Checkpoint создан → новая plan_version → DISPATCHED → ACKNOWLEDGED",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
+                  "status": "PASSED",
+                  "time": 1.74
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_directive_delivery.py::test_change_request_delivered_acknowledged_and_completed_on_fake_cli",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directive_delivery.py::test_change_request_delivered_acknowledged_and_completed_on_fake_cli",
+                  "status": "PASSED",
+                  "time": 3.22
+                }
+              ]
+            },
+            {
+              "ref": "live:mission-control.spec.ts::AC-06",
+              "suite": "live",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; CHANGE_REQUEST impact preview → confirm → replan (new plan version) → acknowledged by agents → completed",
+                  "status": "PASSED",
+                  "time": 19.42
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Работающий CLI-процесс не изменён незаметно (безопасная точка)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_directives.py::test_running_task_gets_safe_point_not_silent_change",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directives.py::test_running_task_gets_safe_point_not_silent_change",
+                  "status": "PASSED",
+                  "time": 1.03
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_directive_delivery.py::test_exec_stops_running_task_for_directive_applied_elsewhere",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directive_delivery.py::test_exec_stops_running_task_for_directive_applied_elsewhere",
+                  "status": "PASSED",
+                  "time": 1.15
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Неверная expected_run_version → 412",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directives.py::test_ac06_change_request_checkpoint_replan_dispatch",
+                  "status": "PASSED",
+                  "time": 1.74
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_directives.py::test_rbac_version_mismatch_and_idempotency",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directives.py::test_rbac_version_mismatch_and_idempotency",
+                  "status": "PASSED",
+                  "time": 2.95
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-07",
+      "title": "Ошибка/таймаут CLI",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "Fake TIMEOUT → task_attempts.failure_category=TIMEOUT",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
+                  "status": "PASSED",
+                  "time": 5.47
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_gateway.py::test_timeout_recorded",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_gateway.py::test_timeout_recorded",
+                  "status": "PASSED",
+                  "time": 1.24
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Задача RETRY_WAIT до исчерпания max_attempts, затем FAILED; попыток ≤ бюджета",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
+                  "status": "PASSED",
+                  "time": 5.47
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_phase3_slice.py::test_cli_failure_exhausts_retry_budget",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase3_slice.py::test_cli_failure_exhausts_retry_budget",
+                  "status": "PASSED",
+                  "time": 1.94
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_orchestration_core.py::test_retry_decisions",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_retry_decisions[TIMEOUT-1-0-retry]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_retry_decisions[TIMEOUT-3-0-fail]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_retry_decisions[TIMEOUT-1-7190-fail]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_retry_decisions[RATE_LIMITED-3-0-retry]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_retry_decisions[AUTH_REQUIRED-1-0-block]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_retry_decisions[SANDBOX_DENIED-1-0-fail]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_orchestration_core.py::test_retry_decisions[UNSUPPORTED_VERSION-1-0-fail]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Run не COMPLETED",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac07_cli_timeout_retry_budget.py::test_ac07_cli_timeout_records_category_respects_retry_budget_and_never_completes",
+                  "status": "PASSED",
+                  "time": 5.47
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_phase3_slice.py::test_cli_failure_exhausts_retry_budget",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase3_slice.py::test_cli_failure_exhausts_retry_budget",
+                  "status": "PASSED",
+                  "time": 1.94
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-08",
+      "title": "Разрыв соединения UI без дублей",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "Переподключение с Last-Event-ID → все события seq > N ровно один раз, по порядку",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_sse.py::test_replay_reconnect_and_live_exactly_once",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_sse.py::test_replay_reconnect_and_live_exactly_once",
+                  "status": "PASSED",
+                  "time": 0.83
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_outbox_dispatcher.py::test_concurrent_dispatchers_keep_per_run_seq_monotonic",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_outbox_dispatcher.py::test_concurrent_dispatchers_keep_per_run_seq_monotonic",
+                  "status": "PASSED",
+                  "time": 9.14
+                }
+              ]
+            },
+            {
+              "ref": "live:mission-control.spec.ts::AC-08",
+              "suite": "live",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-08: server-side SSE drop mid-run — the UI resumes with Last-Event-ID, every event exactly once and without gaps",
+                  "status": "PASSED",
+                  "time": 27.03
+                }
+              ]
+            },
+            {
+              "ref": "mocked:sse.spec.ts::network drop",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "sse.spec.ts::network drop (offline → online): stream pauses, resumes with Last-Event-ID, every event exactly once, no gaps",
+                  "status": "PASSED",
+                  "time": 1.54
+                }
+              ]
+            },
+            {
+              "ref": "mocked:sse.spec.ts::connection cut mid-frame",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "sse.spec.ts::connection cut mid-frame while online: reconnect without duplicates or gaps (no offline event)",
+                  "status": "PASSED",
+                  "time": 0.92
+                }
+              ]
+            },
+            {
+              "ref": "mocked:run.spec.ts::run view: SSE events are shown",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "run.spec.ts::run view: SSE events are shown; reconnect after a dropped connection uses Last-Event-ID, no duplicates, no gaps",
+                  "status": "PASSED",
+                  "time": 5.18
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "UI после восстановления показывает тот же run",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "live:mission-control.spec.ts::AC-08",
+              "suite": "live",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "mission-control.spec.ts::AC-08: server-side SSE drop mid-run — the UI resumes with Last-Event-ID, every event exactly once and without gaps",
+                  "status": "PASSED",
+                  "time": 27.03
+                }
+              ]
+            },
+            {
+              "ref": "mocked:run.spec.ts::run view: 410 replay_window_exceeded",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "run.spec.ts::run view: 410 replay_window_exceeded → state reread, feed continues from last_seq",
+                  "status": "PASSED",
+                  "time": 2.72
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-09",
+      "title": "Авария worker без повторного merge/опасной миграции",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "external_actions в CONFIRMED не повторяется после краха/повторной доставки",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_external_actions.py::test_execute_once_never_repeats_confirmed",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_external_actions.py::test_execute_once_never_repeats_confirmed",
+                  "status": "PASSED",
+                  "time": 0.09
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_github_workflow.py::test_merge_rejected_when_head_moved_and_crash_after_merge",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_github_workflow.py::test_merge_rejected_when_head_moved_and_crash_after_merge",
+                  "status": "PASSED",
+                  "time": 1.92
+                }
+              ]
+            },
+            {
+              "ref": "tests/chaos/test_github_recovery.py::test_worker_killed_after_merge_is_reconciled",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/chaos/test_github_recovery.py::test_worker_killed_after_merge_is_reconciled",
+                  "status": "PASSED",
+                  "time": 2.47
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "EXECUTING сверяется с внешней системой (probe) перед любым повтором",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_external_actions.py::test_crash_during_executing_is_reconciled_by_probe",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_external_actions.py::test_crash_during_executing_is_reconciled_by_probe",
+                  "status": "PASSED",
+                  "time": 0.06
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_external_actions.py::test_failure_is_recorded_and_retry_probes_first",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_external_actions.py::test_failure_is_recorded_and_retry_probes_first",
+                  "status": "PASSED",
+                  "time": 0.08
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_external_actions.py::test_stale_token_cannot_confirm_or_take_over",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_external_actions.py::test_stale_token_cannot_confirm_or_take_over",
+                  "status": "PASSED",
+                  "time": 0.04
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_github_workflow.py::test_crash_between_pr_created_and_confirmed_creates_one_pr",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_github_workflow.py::test_crash_between_pr_created_and_confirmed_creates_one_pr[crash]",
+                  "status": "PASSED",
+                  "time": 0.94
+                },
+                {
+                  "id": "tests/integration/test_github_workflow.py::test_crash_between_pr_created_and_confirmed_creates_one_pr[exception]",
+                  "status": "PASSED",
+                  "time": 0.79
+                }
+              ]
+            },
+            {
+              "ref": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[after_pr_create]",
+                  "status": "PASSED",
+                  "time": 1.97
+                },
+                {
+                  "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[after_push]",
+                  "status": "PASSED",
+                  "time": 1.87
+                },
+                {
+                  "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[after_review]",
+                  "status": "PASSED",
+                  "time": 1.88
+                },
+                {
+                  "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[after_status]",
+                  "status": "PASSED",
+                  "time": 1.87
+                },
+                {
+                  "id": "tests/chaos/test_github_recovery.py::test_worker_killed_mid_pr_action_is_reconciled_without_redelivery[before_pr_create]",
+                  "status": "PASSED",
+                  "time": 1.98
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Worker убит (SIGKILL) → незавершённые задачи продолжены, run завершается без дублей",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/chaos/test_recovery.py::test_worker_killed_while_cli_running_is_recovered",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/chaos/test_recovery.py::test_worker_killed_while_cli_running_is_recovered",
+                  "status": "PASSED",
+                  "time": 9.01
+                }
+              ]
+            },
+            {
+              "ref": "tests/chaos/test_recovery.py::test_reaper_defers_when_execution_cannot_be_confirmed_dead",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/chaos/test_recovery.py::test_reaper_defers_when_execution_cannot_be_confirmed_dead",
+                  "status": "PASSED",
+                  "time": 1.16
+                }
+              ]
+            },
+            {
+              "ref": "tests/chaos/test_worker_kills.py::test_worker_killed_mid_step_is_recovered_without_duplicates",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/chaos/test_worker_kills.py::test_worker_killed_mid_step_is_recovered_without_duplicates[lease-RUNNING]",
+                  "status": "PASSED",
+                  "time": 6.91
+                },
+                {
+                  "id": "tests/chaos/test_worker_kills.py::test_worker_killed_mid_step_is_recovered_without_duplicates[gate-VERIFYING]",
+                  "status": "PASSED",
+                  "time": 6.86
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Опасная (деструктивная) миграция не исполняется без approval и не повторяется (ledger migration_apply)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[migration_apply]",
+                  "status": "PASSED",
+                  "time": 0.29
+                },
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[pr_merge]",
+                  "status": "PASSED",
+                  "time": 0.17
+                },
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[production_deploy]",
+                  "status": "PASSED",
+                  "time": 0.17
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_false_pass_prevention.py::test_destructive_migration_requires_approval",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_false_pass_prevention.py::test_destructive_migration_requires_approval",
+                  "status": "PASSED",
+                  "time": 6.82
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-10",
+      "title": "Docs OFF и SMART",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "OFF → нет обращений к внешним источникам, контекст из локального индекса",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_phase5_acceptance.py::test_ac10_off_uses_local_index_only",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase5_acceptance.py::test_ac10_off_uses_local_index_only",
+                  "status": "PASSED",
+                  "time": 9.42
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_phase5_acceptance.py::test_ac10_repeated_docs_request_fails_attempt",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase5_acceptance.py::test_ac10_repeated_docs_request_fails_attempt",
+                  "status": "PASSED",
+                  "time": 2.25
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-False-NONE]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-False-PENDING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-False-APPROVED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-False-REJECTED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-False-EXPIRED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-False-CANCELLED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-True-NONE]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-True-PENDING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-True-APPROVED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-True-REJECTED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-True-EXPIRED]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[False-True-CANCELLED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-False-NONE]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-False-PENDING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-False-APPROVED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-False-REJECTED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-False-EXPIRED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-False-CANCELLED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-True-NONE]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-True-PENDING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-True-APPROVED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-True-REJECTED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-True-EXPIRED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_off_never_downloads_nor_asks[True-True-CANCELLED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "SMART и источник не в кэше → approval DOCS_DOWNLOAD, загрузка не начинается до APPROVED",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_phase5_acceptance.py::test_ac10_smart_downloads_only_after_approval",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase5_acceptance.py::test_ac10_smart_downloads_only_after_approval",
+                  "status": "PASSED",
+                  "time": 9.34
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_phase5_acceptance.py::test_ac10_smart_rejected_completes_without_docs",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase5_acceptance.py::test_ac10_smart_rejected_completes_without_docs",
+                  "status": "PASSED",
+                  "time": 8.49
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_docs_policy.py::test_smart_never_downloads_without_approved",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_smart_never_downloads_without_approved[NONE]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_smart_never_downloads_without_approved[PENDING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_smart_never_downloads_without_approved[REJECTED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_smart_never_downloads_without_approved[EXPIRED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_docs_policy.py::test_smart_never_downloads_without_approved[CANCELLED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-11",
+      "title": "Ошибочные тесты блокируют COMPLETED; exit 0 ≠ verified",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "CLI exit_code=0, обязательный gate FAIL → задача не SUCCEEDED, run не COMPLETED",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_phase3_slice.py::test_secret_in_change_fails_gate_and_run_never_completes",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase3_slice.py::test_secret_in_change_fails_gate_and_run_never_completes",
+                  "status": "PASSED",
+                  "time": 4.03
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_false_pass_prevention.py::test_gate_on_different_commit_and_open_finding_block_completion",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_false_pass_prevention.py::test_gate_on_different_commit_and_open_finding_block_completion",
+                  "status": "PASSED",
+                  "time": 1.72
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_completion_guard.py::test_open_critical_finding_blocks_completion",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_completion_guard.py::test_open_critical_finding_blocks_completion",
+                  "status": "PASSED",
+                  "time": 3.04
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Evidence claims агента UNVERIFIED (claims ≠ evidence)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_fake_adapter.py::test_success_claims_are_unverified",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_fake_adapter.py::test_success_claims_are_unverified",
+                  "status": "PASSED",
+                  "time": 0.07
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_agent_result.py::test_valid_result_claims_unverified_and_candidates",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_agent_result.py::test_valid_result_claims_unverified_and_candidates",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_verdict_rules.py::test_incomplete_evidence",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change0-not VERIFIED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change1-producer is agent]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change2-commit differs]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change3-no commit_sha]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change4-no command]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change5-no exit code]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change6-timestamps]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change7-finished before]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change8-runner/tool versions]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change9-container image]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_incomplete_evidence[change10-no sha256]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "SKIPPED/ERROR обязательного gate не дают PASS",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/unit/test_verdict_rules.py::test_non_pass_statuses_never_count",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_non_pass_statuses_never_count[FAIL]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_non_pass_statuses_never_count[ERROR]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_non_pass_statuses_never_count[SKIPPED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_non_pass_statuses_never_count[PENDING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_non_pass_statuses_never_count[RUNNING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_verdict_rules.py::test_fp_required_skipped",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_verdict_rules.py::test_fp_required_skipped",
+                  "status": "PASSED",
+                  "time": 0.41
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_verification_engine.py::test_required_tool_missing_is_error_not_pass",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_verification_engine.py::test_required_tool_missing_is_error_not_pass",
+                  "status": "PASSED",
+                  "time": 0.37
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_false_pass_prevention.py::test_tool_missing_writes_error_code_and_blocks_completion",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_false_pass_prevention.py::test_tool_missing_writes_error_code_and_blocks_completion",
+                  "status": "PASSED",
+                  "time": 0.51
+                }
+              ]
+            },
+            {
+              "ref": "mocked:quality.spec.ts::quality: SKIPPED/ERROR are not PASS",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "quality.spec.ts::quality: SKIPPED/ERROR are not PASS; gate results arrive via SSE, reconnect with Last-Event-ID without duplicates (AC-08, AC-11)",
+                  "status": "PASSED",
+                  "time": 7.34
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-12",
+      "title": "Пользователь без прав",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "Не член workspace B → 404 на чтение ресурсов B (без утечки существования)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+                  "status": "PASSED",
+                  "time": 1.88
+                }
+              ]
+            },
+            {
+              "ref": "tests/security/test_cross_tenant_api.py::test_foreign_workspace_is_invisible",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/security/test_cross_tenant_api.py::test_foreign_workspace_is_invisible",
+                  "status": "PASSED",
+                  "time": 1.15
+                }
+              ]
+            },
+            {
+              "ref": "tests/security/test_cross_tenant_api.py::test_unknown_resource_and_foreign_resource_look_identical",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/security/test_cross_tenant_api.py::test_unknown_resource_and_foreign_resource_look_identical",
+                  "status": "PASSED",
+                  "time": 1.17
+                }
+              ]
+            },
+            {
+              "ref": "tests/security/test_rls.py::test_context_sees_only_own_workspace",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[workspaces-aicd_app]",
+                  "status": "PASSED",
+                  "time": 0.08
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[workspaces-aicd_worker]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[workspace_members-aicd_app]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[workspace_members-aicd_worker]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[projects-aicd_app]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[projects-aicd_worker]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[project_settings-aicd_app]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[project_settings-aicd_worker]",
+                  "status": "PASSED",
+                  "time": 0.03
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[repositories-aicd_app]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[repositories-aicd_worker]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[artifacts-aicd_app]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[artifacts-aicd_worker]",
+                  "status": "PASSED",
+                  "time": 0.03
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[audit_events-aicd_app]",
+                  "status": "PASSED",
+                  "time": 0.03
+                },
+                {
+                  "id": "tests/security/test_rls.py::test_context_sees_only_own_workspace[audit_events-aicd_worker]",
+                  "status": "PASSED",
+                  "time": 0.02
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Не член / viewer не может отправить поручение (404 / 403)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+                  "status": "PASSED",
+                  "time": 1.88
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_directives.py::test_rbac_version_mismatch_and_idempotency",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_directives.py::test_rbac_version_mismatch_and_idempotency",
+                  "status": "PASSED",
+                  "time": 2.95
+                }
+              ]
+            },
+            {
+              "ref": "mocked:chat.spec.ts::chat permissions",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "chat.spec.ts::chat permissions: viewer reads only; reviewer gets the restricted command set",
+                  "status": "PASSED",
+                  "time": 2.34
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Не член / viewer не может утвердить критическое действие (404 / 403)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+                  "status": "PASSED",
+                  "time": 1.88
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[MANUAL_REVIEW-allowed0]",
+                  "status": "PASSED",
+                  "time": 2.89
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[DOCS_DOWNLOAD-allowed1]",
+                  "status": "PASSED",
+                  "time": 2.66
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[MERGE-allowed2]",
+                  "status": "PASSED",
+                  "time": 2.51
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[CRITICAL_DIRECTIVE-allowed3]",
+                  "status": "PASSED",
+                  "time": 2.39
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[PRODUCTION_DEPLOY-allowed4]",
+                  "status": "PASSED",
+                  "time": 2.5
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[SECRET_CHANGE-allowed5]",
+                  "status": "PASSED",
+                  "time": 2.45
+                }
+              ]
+            },
+            {
+              "ref": "mocked:approvals.spec.ts::viewer sees approvals read-only",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "approvals.spec.ts::viewer sees approvals read-only",
+                  "status": "PASSED",
+                  "time": 2.31
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Попытки учитываются (403 → audit authz.denied; 404 → метрика authz_denied_total{tenant})",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+                  "status": "PASSED",
+                  "time": 1.88
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[MANUAL_REVIEW-allowed0]",
+                  "status": "PASSED",
+                  "time": 2.89
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[DOCS_DOWNLOAD-allowed1]",
+                  "status": "PASSED",
+                  "time": 2.66
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[MERGE-allowed2]",
+                  "status": "PASSED",
+                  "time": 2.51
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[CRITICAL_DIRECTIVE-allowed3]",
+                  "status": "PASSED",
+                  "time": 2.39
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[PRODUCTION_DEPLOY-allowed4]",
+                  "status": "PASSED",
+                  "time": 2.5
+                },
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_role_matrix_by_action_type[SECRET_CHANGE-allowed5]",
+                  "status": "PASSED",
+                  "time": 2.45
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "SSE-поток чужого run недоступен",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac12_no_rights.py::test_ac12_non_member_gets_404_and_viewer_gets_403_with_audit",
+                  "status": "PASSED",
+                  "time": 1.88
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_sse.py::test_non_member_gets_404_and_activity",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_sse.py::test_non_member_gets_404_and_activity",
+                  "status": "PASSED",
+                  "time": 1.09
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_sse.py::test_revoked_member_stream_closes",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_sse.py::test_revoked_member_stream_closes",
+                  "status": "PASSED",
+                  "time": 1.53
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-13",
+      "title": "Production deploy / merge / destructive migration без approval невозможны",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "Без APPROVED действие не выполняется, external_actions не переходит в EXECUTING (merge, deploy, деструктивная миграция)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[migration_apply]",
+                  "status": "PASSED",
+                  "time": 0.29
+                },
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[pr_merge]",
+                  "status": "PASSED",
+                  "time": 0.17
+                },
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[production_deploy]",
+                  "status": "PASSED",
+                  "time": 0.17
+                }
+              ]
+            },
+            {
+              "ref": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_rejected_approval_blocks_execution",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_rejected_approval_blocks_execution",
+                  "status": "PASSED",
+                  "time": 0.08
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_external_actions.py::test_ac13_merge_requires_approved_matching_approval",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_external_actions.py::test_ac13_merge_requires_approved_matching_approval",
+                  "status": "PASSED",
+                  "time": 0.11
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_external_actions.py::test_ac13_expired_approval_blocks_execution",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_external_actions.py::test_ac13_expired_approval_blocks_execution",
+                  "status": "PASSED",
+                  "time": 0.07
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_github_workflow.py::test_merge_requires_approval_four_eyes_and_branch_protection",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_github_workflow.py::test_merge_requires_approval_four_eyes_and_branch_protection",
+                  "status": "PASSED",
+                  "time": 1.33
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_phase3_slice.py::test_plan_approval_required_and_decided_by_member",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase3_slice.py::test_plan_approval_required_and_decided_by_member",
+                  "status": "PASSED",
+                  "time": 2.47
+                }
+              ]
+            },
+            {
+              "ref": "mocked:approvals.spec.ts::AC-13: plan approval gates execution",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "approvals.spec.ts::AC-13: plan approval gates execution — run waits in AWAITING_APPROVAL until a human approves; live update via SSE",
+                  "status": "PASSED",
+                  "time": 5.79
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Requester не может утвердить сам (four-eyes; исключение OQ-10 — никогда для PRODUCTION_DEPLOY)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[migration_apply]",
+                  "status": "PASSED",
+                  "time": 0.29
+                },
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[pr_merge]",
+                  "status": "PASSED",
+                  "time": 0.17
+                },
+                {
+                  "id": "tests/acceptance/test_ac13_critical_actions_need_approval.py::test_ac13_critical_action_never_executes_without_approved_four_eyes_approval[production_deploy]",
+                  "status": "PASSED",
+                  "time": 0.17
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_approvals_api.py::test_four_eyes_and_single_member_self_approval",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_approvals_api.py::test_four_eyes_and_single_member_self_approval",
+                  "status": "PASSED",
+                  "time": 1.5
+                }
+              ]
+            },
+            {
+              "ref": "mocked:approvals.spec.ts::AC-13: requester cannot approve own merge",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "approvals.spec.ts::AC-13: requester cannot approve own merge (four-eyes); server four_eyes_violation and reject reason are handled",
+                  "status": "PASSED",
+                  "time": 3.9
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-14",
+      "title": "Состав evidence",
+      "status": "PASS",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "Evidence содержит commit_sha, command, exit_code, started_at, finished_at, environment, artifact с sha256",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase3_slice.py::test_develop_run_completes_with_verified_evidence",
+                  "status": "PASSED",
+                  "time": 5.02
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_verification_engine.py::test_clean_change_scope_pass_with_complete_evidence",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_verification_engine.py::test_clean_change_scope_pass_with_complete_evidence",
+                  "status": "PASSED",
+                  "time": 0.59
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_quality_api.py::test_evidence_fields_links_and_redaction",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_quality_api.py::test_evidence_fields_links_and_redaction",
+                  "status": "PASSED",
+                  "time": 0.66
+                }
+              ]
+            },
+            {
+              "ref": "mocked:quality.spec.ts::quality: reviewer cannot accept risk",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "quality.spec.ts::quality: reviewer cannot accept risk; FIXED is engine-only; task evidence tab; incomplete evidence is flagged; report download",
+                  "status": "PASSED",
+                  "time": 4.5
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "sha256 совпадает с содержимым хранилища (FS и S3)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_verification_engine.py::test_clean_change_scope_pass_with_complete_evidence",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_verification_engine.py::test_clean_change_scope_pass_with_complete_evidence",
+                  "status": "PASSED",
+                  "time": 0.59
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_false_pass_prevention.py::test_artifact_tampering_detected_by_completion_guard",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_false_pass_prevention.py::test_artifact_tampering_detected_by_completion_guard",
+                  "status": "PASSED",
+                  "time": 1.72
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_artifacts_s3.py::test_put_get_presign",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_artifacts_s3.py::test_put_get_presign",
+                  "status": "PASSED",
+                  "time": 0.54
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_artifacts_s3.py::test_integrity_mismatch_detected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_artifacts_s3.py::test_integrity_mismatch_detected",
+                  "status": "PASSED",
+                  "time": 0.02
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-15",
+      "title": "Контракты: schema validation, backward compatibility, negative tests",
+      "status": "FAIL",
+      "real_cli": "NOT_REQUIRED",
+      "clauses": [
+        {
+          "text": "OpenAPI валидна (3.1), реализованные маршруты = контракт",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/contract/test_contracts.py::test_openapi_is_valid_3_1",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/contract/test_contracts.py::test_openapi_is_valid_3_1",
+                  "status": "PASSED",
+                  "time": 0.64
+                }
+              ]
+            },
+            {
+              "ref": "tests/contract/test_contracts.py::test_implemented_routes_match_contract",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/contract/test_contracts.py::test_implemented_routes_match_contract",
+                  "status": "PASSED",
+                  "time": 0.14
+                }
+              ]
+            },
+            {
+              "ref": "tests/contract/test_codegen.py::test_generated_contract_models_are_up_to_date",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/contract/test_codegen.py::test_generated_contract_models_are_up_to_date",
+                  "status": "PASSED",
+                  "time": 3.93
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "oasdiff breaking против базовой версии контракта пуст (или major bump)",
+          "kind": "fake",
+          "status": "FAIL",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac15_contracts.py::test_ac15_oasdiff_no_breaking_changes_against_baseline",
+              "suite": "python",
+              "status": "FAILED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_oasdiff_no_breaking_changes_against_baseline",
+                  "status": "FAILED",
+                  "time": 1.01,
+                  "message": "AssertionError: oasdiff breaking (ERR) против HEAD:\n  1 changes: 1 error, 0 warning, 0 info\n  error\t[response-success-status-removed] at /specs/revision.yaml\n  \tin API POST /integrations/github/installations\n  \t\tremoved the success response with the status `202`\n  \n  \n  \n  \nassert 1 == 0\n[+1 more line; full report in element text]"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Schemathesis без 5xx",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[createRun]",
+                  "status": "PASSED",
+                  "time": 1.52
+                },
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listRuns]",
+                  "status": "PASSED",
+                  "time": 1.03
+                },
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRun]",
+                  "status": "PASSED",
+                  "time": 0.91
+                },
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRunTasks]",
+                  "status": "PASSED",
+                  "time": 1.22
+                },
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[pauseRun]",
+                  "status": "PASSED",
+                  "time": 1.07
+                },
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[resumeRun]",
+                  "status": "PASSED",
+                  "time": 1.01
+                },
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[cancelRun]",
+                  "status": "PASSED",
+                  "time": 1.32
+                },
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getTask]",
+                  "status": "PASSED",
+                  "time": 1.1
+                },
+                {
+                  "id": "tests/integration/test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listTaskAttempts]",
+                  "status": "PASSED",
+                  "time": 0.98
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRunQuality]",
+                  "status": "PASSED",
+                  "time": 0.94
+                },
+                {
+                  "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRunCompliance]",
+                  "status": "PASSED",
+                  "time": 0.76
+                },
+                {
+                  "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getRunReport]",
+                  "status": "PASSED",
+                  "time": 1.21
+                },
+                {
+                  "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listTaskEvidence]",
+                  "status": "PASSED",
+                  "time": 0.72
+                },
+                {
+                  "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getEvidence]",
+                  "status": "PASSED",
+                  "time": 0.42
+                },
+                {
+                  "id": "tests/integration/test_quality_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listRunEvidence]",
+                  "status": "PASSED",
+                  "time": 0.45
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listRunFindings]",
+                  "status": "PASSED",
+                  "time": 3.4
+                },
+                {
+                  "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getFinding]",
+                  "status": "PASSED",
+                  "time": 0.45
+                },
+                {
+                  "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listProjectControls]",
+                  "status": "PASSED",
+                  "time": 0.64
+                },
+                {
+                  "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[transitionFinding]",
+                  "status": "PASSED",
+                  "time": 0.99
+                },
+                {
+                  "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[reviewComplianceControl]",
+                  "status": "PASSED",
+                  "time": 0.82
+                },
+                {
+                  "id": "tests/integration/test_findings_standards_api.py::test_contract_fuzz_never_5xx_and_responses_conform[approveProjectControl]",
+                  "status": "PASSED",
+                  "time": 0.61
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listGitHubInstallations]",
+                  "status": "PASSED",
+                  "time": 3.88
+                },
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[startGitHubInstallation]",
+                  "status": "PASSED",
+                  "time": 3.17
+                },
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[connectGitHubInstallation]",
+                  "status": "PASSED",
+                  "time": 3.08
+                },
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[disconnectGitHubInstallation]",
+                  "status": "PASSED",
+                  "time": 3.51
+                },
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[getGitHubVerification]",
+                  "status": "PASSED",
+                  "time": 2.87
+                },
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[requestPullRequest]",
+                  "status": "PASSED",
+                  "time": 3.43
+                },
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[listPullRequests]",
+                  "status": "PASSED",
+                  "time": 3.81
+                },
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[requestPullRequestMerge]",
+                  "status": "PASSED",
+                  "time": 3.41
+                },
+                {
+                  "id": "tests/integration/test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform[receiveGitHubWebhook]",
+                  "status": "PASSED",
+                  "time": 3.19
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_chat_api.py::test_chat_contract_fuzz_never_5xx",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_chat_api.py::test_chat_contract_fuzz_never_5xx[getRunChat]",
+                  "status": "PASSED",
+                  "time": 1.35
+                },
+                {
+                  "id": "tests/integration/test_chat_api.py::test_chat_contract_fuzz_never_5xx[postChatMessage]",
+                  "status": "PASSED",
+                  "time": 1.38
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_task_messages_api.py::test_task_messages_contract_fuzz_never_5xx",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_task_messages_api.py::test_task_messages_contract_fuzz_never_5xx",
+                  "status": "PASSED",
+                  "time": 1.79
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_oq45_api.py::test_branches_commits_isolation_and_fuzz",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_oq45_api.py::test_branches_commits_isolation_and_fuzz",
+                  "status": "PASSED",
+                  "time": 2.89
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_oq45_api.py::test_provider_settings_rbac_isolation_and_fuzz",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_oq45_api.py::test_provider_settings_rbac_isolation_and_fuzz",
+                  "status": "PASSED",
+                  "time": 3.39
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_analytics_observability.py::test_analytics_contract_fuzz_never_5xx",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_analytics_observability.py::test_analytics_contract_fuzz_never_5xx",
+                  "status": "PASSED",
+                  "time": 2.71
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "ACP / CLI / SSE JSON Schema — позитивные и негативные фикстуры",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/contract/test_contracts.py::test_json_schemas_are_valid",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/common.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/envelope.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/ANSWER.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/BLOCKED.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/DECISION_PROPOSAL.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/DECISION_RECORDED.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/EVIDENCE_SUBMITTED.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/FINDING.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/FIX_REQUEST.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/HANDOFF.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/QUESTION.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/REVIEW_REQUEST.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/TASK_ASSIGN.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[acp/1.0/payloads/TASK_COMPLETED.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[agent/1.0/agent-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[cli/1.0/auth-check-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[cli/1.0/execution-request.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[cli/1.0/execution-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[cli/1.0/normalized-event.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[cli/1.0/probe-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[events/1.0/outbox-envelope.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/contract/test_contracts.py::test_json_schemas_are_valid[events/1.0/sse-event.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.06
+                }
+              ]
+            },
+            {
+              "ref": "tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid[cli/1.0/execution-request.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.11
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid[cli/1.0/execution-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.04
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid[cli/1.0/normalized-event.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.04
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid[cli/1.0/probe-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid[cli/1.0/auth-check-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_positive_fixtures_from_real_producers_are_valid[events/1.0/sse-event.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.13
+                }
+              ]
+            },
+            {
+              "ref": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/execution-request.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.03
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/execution-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.04
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/normalized-event.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.04
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/probe-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[cli/1.0/auth-check-result.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_missing_required_and_unknown_fields_are_rejected[events/1.0/sse-event.schema.json]",
+                  "status": "PASSED",
+                  "time": 0.12
+                }
+              ]
+            },
+            {
+              "ref": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0442\\u0430\\u0439\\u043c-\\u0430\\u0443\\u0442 < 30 \\u0441]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u043f\\u0440\\u043e\\u0432\\u0430\\u0439\\u0434\\u0435\\u0440 \\u0432\\u043d\\u0435 {codex, claude}]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0434\\u043e\\u0441\\u0442\\u0443\\u043f \\u043a production]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0447\\u0443\\u0436\\u0430\\u044f \\u0432\\u0435\\u0440\\u0441\\u0438\\u044f \\u043a\\u043e\\u043d\\u0442\\u0440\\u0430\\u043a\\u0442\\u0430]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[id \\u043d\\u0435 UUID]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[exit_code \\u0441\\u0442\\u0440\\u043e\\u043a\\u043e\\u0439]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f0]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[seq < 1_0]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0442\\u0438\\u043f \\u0441\\u043e\\u0431\\u044b\\u0442\\u0438\\u044f \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f (\\u043d\\u0435\\u0442 CoT)]",
+                  "status": "PASSED",
+                  "time": 0.02
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[installed \\u043d\\u0435 boolean]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f1]",
+                  "status": "PASSED",
+                  "time": 0.01
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u043d\\u0435\\u0438\\u0437\\u0432\\u0435\\u0441\\u0442\\u043d\\u044b\\u0439 \\u0442\\u0438\\u043f SSE]",
+                  "status": "PASSED",
+                  "time": 0.06
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[seq < 1_1]",
+                  "status": "PASSED",
+                  "time": 0.07
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0447\\u0443\\u0436\\u0430\\u044f \\u0432\\u0435\\u0440\\u0441\\u0438\\u044f \\u0441\\u0445\\u0435\\u043c\\u044b]",
+                  "status": "PASSED",
+                  "time": 0.06
+                },
+                {
+                  "id": "tests/acceptance/test_ac15_contracts.py::test_ac15_negative_fixtures_constraint_violations_are_rejected[\\u0441\\u0442\\u0430\\u0442\\u0443\\u0441 run \\u0432\\u043d\\u0435 \\u043f\\u0435\\u0440\\u0435\\u0447\\u0438\\u0441\\u043b\\u0435\\u043d\\u0438\\u044f]",
+                  "status": "PASSED",
+                  "time": 0.06
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[TASK_ASSIGN]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[HANDOFF]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[QUESTION]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[ANSWER]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[REVIEW_REQUEST]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[FINDING]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[FIX_REQUEST]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[EVIDENCE_SUBMITTED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[DECISION_PROPOSAL]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[DECISION_RECORDED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[BLOCKED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_valid_payload_and_envelope_pass[TASK_COMPLETED]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_acp_schema.py::test_negative_payload_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[TASK_ASSIGN-no_task_id]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[TASK_ASSIGN-attempt_no_zero]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[TASK_ASSIGN-bad_template_version]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[TASK_ASSIGN-permission_escalation_field]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[HANDOFF-plan_ready_without_plan_version]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[HANDOFF-empty_artifact_refs]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[HANDOFF-free_form_ref]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[QUESTION-no_blocking]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[QUESTION-unknown_kind]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[QUESTION-too_many_options]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[ANSWER-no_answer]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[ANSWER-empty_answer]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[REVIEW_REQUEST-short_sha]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[REVIEW_REQUEST-path_traversal]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[REVIEW_REQUEST-absolute_path]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[REVIEW_REQUEST-loop_iteration_11]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[FINDING-no_evidence]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[FINDING-bad_severity]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[FINDING-line_zero]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[FIX_REQUEST-no_loop_iteration]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[FIX_REQUEST-no_file_key]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[FIX_REQUEST-traversal_file]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[EVIDENCE_SUBMITTED-empty_items]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[EVIDENCE_SUBMITTED-bad_sha256]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[EVIDENCE_SUBMITTED-verified_claim_field]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[DECISION_PROPOSAL-no_options]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[DECISION_PROPOSAL-bad_option_id]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[DECISION_PROPOSAL-no_requires_human_approval]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[DECISION_RECORDED-decided_by_agent]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[DECISION_RECORDED-user_without_user_id]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[DECISION_RECORDED-bad_outcome]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[BLOCKED-unknown_reason]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[BLOCKED-no_needed_from]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[TASK_COMPLETED-no_claims]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[TASK_COMPLETED-claim_without_evidence_refs]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_payload_rejected[TASK_COMPLETED-self_verified]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[unknown_type-overrides0]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[bad_protocol-overrides1]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[bad_uuid-overrides2]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[extra_field-overrides3]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[missing_correlation-overrides4]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[bad_created_at-overrides5]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[to_unknown_role-overrides6]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[orchestrator_with_provider-overrides7]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[agent_without_provider-overrides8]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[agent_with_user_id-overrides9]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[user_without_user_id-overrides10]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_acp_schema.py::test_negative_envelope_rejected[non_object_payload-overrides11]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_agent_result.py::test_invalid_results_rejected",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc0-\\u0441\\u0445\\u0435\\u043c\\u0435]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc1-\\u0441\\u0445\\u0435\\u043c\\u0435]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc2-\\u0441\\u0445\\u0435\\u043c\\u0435]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc3-\\u0441\\u0445\\u0435\\u043c\\u0435]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc4-\\u0441\\u0445\\u0435\\u043c\\u0435]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc5-\\u0441\\u0445\\u0435\\u043c\\u0435]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc6-\\u043e\\u0431\\u044a\\u044f\\u0432\\u043b\\u0435\\u043d\\u043d\\u043e\\u0433\\u043e \\u0432\\u044b\\u0432\\u043e\\u0434\\u0430]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc7-\\u043e\\u0431\\u044a\\u044f\\u0432\\u043b\\u0435\\u043d\\u043d\\u043e\\u0433\\u043e \\u0432\\u044b\\u0432\\u043e\\u0434\\u0430]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc8-\\u0441\\u0445\\u0435\\u043c\\u0435]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc9-\\u043f\\u043e\\u0432\\u0442\\u043e\\u0440\\u044f\\u044e\\u0442\\u0441\\u044f]",
+                  "status": "PASSED",
+                  "time": 0.0
+                },
+                {
+                  "id": "tests/unit/test_agent_result.py::test_invalid_results_rejected[doc10-\\u0441\\u0445\\u0435\\u043c\\u0435]",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            },
+            {
+              "ref": "tests/integration/test_outbox_dispatcher.py::test_dispatched_messages_match_outbox_envelope_schema",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/integration/test_outbox_dispatcher.py::test_dispatched_messages_match_outbox_envelope_schema",
+                  "status": "PASSED",
+                  "time": 3.0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AC-16",
+      "title": "CLI-авторизация недоступна",
+      "status": "PASS",
+      "real_cli": "BLOCKED",
+      "clauses": [
+        {
+          "text": "Оба провайдера AUTH_REQUIRED (или один, а другой не подходит по policy) → задача BLOCKED(AUTH_REQUIRED / PROVIDER_UNAVAILABLE)",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[both_auth_required-reasons0]",
+                  "status": "PASSED",
+                  "time": 0.93
+                },
+                {
+                  "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[one_auth_required_other_denied_by_policy-reasons1]",
+                  "status": "PASSED",
+                  "time": 0.98
+                }
+              ]
+            },
+            {
+              "ref": "tests/e2e/test_phase3_slice.py::test_no_usable_cli_blocks_without_workaround",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/e2e/test_phase3_slice.py::test_no_usable_cli_blocks_without_workaround[None-PROVIDER_UNAVAILABLE]",
+                  "status": "PASSED",
+                  "time": 0.79
+                },
+                {
+                  "id": "tests/e2e/test_phase3_slice.py::test_no_usable_cli_blocks_without_workaround[AUTH_REQUIRED-AUTH_REQUIRED]",
+                  "status": "PASSED",
+                  "time": 0.9
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_routing.py::test_both_unavailable_blocks_with_right_reason_ac16",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_routing.py::test_both_unavailable_blocks_with_right_reason_ac16",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Причина видна в API и UI",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[both_auth_required-reasons0]",
+                  "status": "PASSED",
+                  "time": 0.93
+                },
+                {
+                  "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[one_auth_required_other_denied_by_policy-reasons1]",
+                  "status": "PASSED",
+                  "time": 0.98
+                }
+              ]
+            },
+            {
+              "ref": "mocked:dashboard.spec.ts::dashboard is the landing page",
+              "suite": "mocked",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "dashboard.spec.ts::dashboard is the landing page: stats, runs needing attention, active and recent runs (light/dark axe)",
+                  "status": "PASSED",
+                  "time": 4.76
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Нет попыток обходной авторизации и обращений к AI API",
+          "kind": "fake",
+          "status": "PASS",
+          "tests": [
+            {
+              "ref": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[both_auth_required-reasons0]",
+                  "status": "PASSED",
+                  "time": 0.93
+                },
+                {
+                  "id": "tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround[one_auth_required_other_denied_by_policy-reasons1]",
+                  "status": "PASSED",
+                  "time": 0.98
+                }
+              ]
+            },
+            {
+              "ref": "tests/unit/test_cli_core.py::test_env_built_from_allowlist_and_api_keys_refused",
+              "suite": "python",
+              "status": "PASSED",
+              "cases": [
+                {
+                  "id": "tests/unit/test_cli_core.py::test_env_built_from_allowlist_and_api_keys_refused",
+                  "status": "PASSED",
+                  "time": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "text": "Реальный CLI без авторизации распознаётся как AUTH_REQUIRED (сигнатуры ошибок, P2-05/P2-06) (RC)",
+          "kind": "real_cli",
+          "status": "BLOCKED",
+          "reason": "Opt-in прогон с реальными CLI невозможен: P2-01 (spike probe Codex/Claude CLI), P2-05/P2-06 (адаптеры реальных CLI) и P2-13 (opt-in набор) — BLOCKED: нет машины с установленными и авторизованными официальными Codex CLI и Claude Code CLI (решение владельца, IMPLEMENTATION_BACKLOG §Phase 2; OQ-01, OQ-03). Тестов real-CLI в репозитории нет.",
+          "tests": []
+        }
+      ]
+    }
+  ]
+}

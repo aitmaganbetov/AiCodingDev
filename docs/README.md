@@ -15,7 +15,8 @@
 | | [SECURITY_ARCHITECTURE.md](architecture/SECURITY_ARCHITECTURE.md) | Зоны доверия, AuthN/AuthZ, RBAC, sandbox, секреты, RLS |
 | | [adr/](architecture/adr/) | Architecture Decision Records (ADR-0001…) |
 | | [data-model.md](architecture/data-model.md), [state-machines.md](architecture/state-machines.md), [permissions-matrix.md](architecture/permissions-matrix.md) | Указатели путей ТЗ §21 на нормативные разделы |
-| `runbooks/` | [README.md](runbooks/README.md) | Эксплуатационные инструкции (local deployment; остальные — P9) |
+| `runbooks/` | [README.md](runbooks/README.md) | Эксплуатационные инструкции: установка, восстановление, бэкапы, CLI auth, инциденты, GitHub App, ротация секретов, обновления, релиз (P9-06) |
+| `release/` | [RELEASE_CHECKLIST.md](release/RELEASE_CHECKLIST.md) | Release checklist v1.0 (ТЗ §23, RG-01…RG-15) со ссылками на доказательства (P9-09, черновик) |
 | `database/` | [DATABASE_DESIGN.md](database/DATABASE_DESIGN.md) | Полная логическая схема PostgreSQL: таблицы, ограничения, индексы, RLS, retention |
 | | [ER_DIAGRAM.md](database/ER_DIAGRAM.md) | ER-диаграммы по доменам (Mermaid), кардинальности, инварианты |
 | `api/` | [API_DESIGN.md](api/API_DESIGN.md) | Правила REST API v1: ошибки, пагинация, idempotency, ETag, SSE, RBAC |

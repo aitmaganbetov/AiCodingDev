@@ -17,5 +17,16 @@ infrastructure/docker/secrets/
 infrastructure/docker/repos/
 *.env
 !.env.example
-# Отчёты CI
-reports/
+# Отчёты CI: сырые выгрузки не коммитятся; итоговые отчёты Phase 9 (evidence) — коммитятся
+reports/*
+!reports/acceptance/
+!reports/coverage/
+!reports/dr/
+!reports/perf/
+!reports/release/
+!reports/security/
+reports/**/logs/
+reports/coverage/coverage.json
+reports/coverage/junit-full.xml
+reports/coverage/pytest-full.log
+reports/security/junit.xml

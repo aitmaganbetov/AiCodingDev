@@ -1,0 +1,26 @@
+{
+  "python": {
+    "command": "/home/user/AiCodingDev/.venv/bin/python3 -m pytest -m acceptance -p no:cacheprovider -q -rs -o junit_family=xunit1 --junitxml=/home/user/AiCodingDev/reports/acceptance/junit/python.xml",
+    "cwd": ".",
+    "exit_code": 1,
+    "started_at": "2026-11-08T18:00:34.876215Z",
+    "duration_seconds": 290.2,
+    "log": "reports/acceptance/logs/python.log"
+  },
+  "live": {
+    "command": "pnpm exec playwright test -c playwright.live.config.ts --trace off --reporter=list,junit",
+    "cwd": "apps/web",
+    "exit_code": 0,
+    "started_at": "2026-11-08T18:05:25.106239Z",
+    "duration_seconds": 99.4,
+    "log": "reports/acceptance/logs/web-live.log"
+  },
+  "mocked": {
+    "command": "pnpm exec playwright test -c playwright.mocked.config.ts --trace off --reporter=list,junit",
+    "cwd": "apps/web",
+    "exit_code": 0,
+    "started_at": "2026-11-08T18:07:04.484731Z",
+    "duration_seconds": 145.7,
+    "log": "reports/acceptance/logs/web-mocked.log"
+  }
+}

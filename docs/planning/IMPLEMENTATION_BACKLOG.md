@@ -187,10 +187,10 @@
 | P9-02 | Security suite ТЗ §20 (SSRF, prompt injection, traversal, command injection, cross-tenant, secret leakage, webhook spoofing) | NFR-SEC-*, NFR-ISO-01 | P1…P8 | P0 | 0 открытых critical | TODO |
 | P9-03 | Chaos/recovery suite полный | NFR-REL-01, NFR-REL-02 | P3-16 | P0 | Зелёный | IN_REVIEW |
 | P9-04 | Performance baseline и предложение SLO | NFR-PERF-01 | P9-01 | P1 | Отчёт с методикой | IN_REVIEW |
-| P9-05 | Backup/restore + DR drill | NFR-REL-03 | P1-02 | P0 | Протокол восстановления | TODO |
-| P9-06 | Runbooks: recovery, backups, CLI auth, incident response | NFR-MAINT-01 | P9-05 | P0 | Ревью оператором | TODO |
+| P9-05 | Backup/restore + DR drill | NFR-REL-03 | P1-02 | P0 | Протокол восстановления | DONE |
+| P9-06 | Runbooks: recovery, backups, CLI auth, incident response | NFR-MAINT-01 | P9-05 | P0 | Ревью оператором | IN_REVIEW |
 | P9-07 | Ревизия threat model, закрытие critical/high | NFR-SEC-04, NFR-SEC-06 | P9-02 | P0 | Release security gate | TODO |
-| P9-08 | Supply chain релиза: SBOM, подпись, provenance | NFR-SEC-05 | P6-07 | P1 | Проверяемая подпись | TODO |
+| P9-08 | Supply chain релиза: SBOM, подпись, provenance | NFR-SEC-05 | P6-07 | P1 | Проверяемая подпись | IN_REVIEW |
 | P9-09 | Release checklist, инструкция установки, README | NFR-MAINT-01 | P9-01…08 | P0 | Утверждение владельцем | TODO |
 | P9-10 | Подтверждение coverage core ≥ 85% и 100% обязательных тестов | FR-QG-06 | P9-01 | P0 | Отчёт покрытия | TODO |
 
@@ -393,6 +393,8 @@
 | P8-06 (доп.) | DONE | `metrics.py` (`aicd_webhook_signature_invalid_total`, `stream` у SSE-метрик), `routers/{github,events}.py`, алерт AicdWebhookSignatureInvalid, дашборд | `tests/integration/test_observability_signals.py`, promtool (новый алерт срабатывает/фон — нет), `test_observability.py` → passed |
 
 ### Phase 9 — P9-03 chaos/recovery, P3-18 завершение, OQ-47 (7), OQ-41 (a), P9-04 (2026-11-08)
+
+Полный прогон (агент chaos/retention/perf, при параллельной работе других агентов): `uv run pytest -q` → **2855 passed, 2 failed, 4 skipped** — оба падения из незавершённой работы других агентов (`test_ac15_oasdiff…`: удалён ответ 202 у `POST /integrations/github/installations`; `test_docs_links`: ссылка runbook на ещё не созданный `vulndb-update.md`, при повторе — passed). ruff/format/mypy по изменённым файлам — без замечаний; lint-imports — 4 kept.
 
 | Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
 |---|---|---|---|
