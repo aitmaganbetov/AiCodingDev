@@ -103,8 +103,15 @@ class Settings(BaseSettings):
     # Пакетное удаление непартиционированных таблиц (§20.2): 5–10 тыс. строк с паузами.
     retention_batch_size: int = Field(default=5000, ge=1, le=10_000)
     retention_batch_pause_seconds: float = Field(default=0.05, ge=0, le=10)
-    # Каталог архива NDJSON.gz (FS); по умолчанию <artifact_fs_root>/archive.
+    # Приёмник архива NDJSON.gz (§20.2): fs | s3; не задан — как artifact_backend.
+    retention_archive_backend: Literal["fs", "s3"] | None = None
+    # Каталог архива (fs); по умолчанию <artifact_fs_root>/archive.
     retention_archive_root: Path | None = None
+    # Bucket архива (s3; по умолчанию artifact_s3_bucket — рекомендуется отдельный bucket с object lock/WORM)
+    # и префикс ключей: `<prefix>/<workspace_id|global>/<table|runs>/<period|run_id>.ndjson.gz`.
+    # Endpoint, регион и ключи доступа — общие с хранилищем артефактов (AICD_ARTIFACT_S3_*).
+    retention_archive_s3_bucket: str | None = None
+    retention_archive_s3_prefix: str = Field(default="archive", pattern=r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 
     log_level: str = "INFO"
     otel_exporter: Literal["none", "console"] = "none"
@@ -203,6 +210,9 @@ class Settings(BaseSettings):
 
     def archive_root(self) -> Path:
         return self.retention_archive_root or self.artifact_fs_root / "archive"
+
+    def archive_backend(self) -> Literal["fs", "s3"]:
+        return self.retention_archive_backend or self.artifact_backend
 
     def require_secret_key(self) -> bytes:
         if self.secret_key is None:

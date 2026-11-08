@@ -35,7 +35,8 @@ RUN --mount=type=secret,id=ca_bundle,required=false \
     fi \
  && groupadd --system --gid 10001 aicd \
  && useradd --system --uid 10001 --gid aicd --home-dir /nonexistent --shell /usr/sbin/nologin aicd \
- && mkdir -p /var/lib/aicd/artifacts && chown aicd:aicd /var/lib/aicd/artifacts
+ && mkdir -p /var/lib/aicd/artifacts /var/lib/aicd/index-export \
+ && chown aicd:aicd /var/lib/aicd/artifacts /var/lib/aicd/index-export
 WORKDIR /app
 COPY --from=build /app /app
 COPY infrastructure/migrations ./infrastructure/migrations

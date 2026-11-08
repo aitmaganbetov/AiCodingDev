@@ -6,6 +6,7 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import secrets
 import uuid
 from collections.abc import AsyncIterator
@@ -22,8 +23,11 @@ from aicd_platform.config import Settings
 from aicd_platform.db import create_engine
 from aicd_platform.ids import uuid7
 from aicd_platform.retention import (
+    ArchiveIntegrityError,
     FileSystemArchiveSink,
     RetentionPeriods,
+    S3ArchiveSink,
+    build_archive_sink,
     partition_cutoff,
     partition_month,
     run_retention,
@@ -35,6 +39,7 @@ from tests.support.orchestration import connect_admin, new_run, seed_tenant, upd
 AUDIT_MONTH = date(2002, 3, 1)
 OUTBOX_PUBLISHED_MONTH = date(2002, 3, 1)
 OUTBOX_PENDING_MONTH = date(2002, 4, 1)
+S3_AUDIT_MONTH = date(2002, 5, 1)
 
 
 def _periods(**overrides: int) -> RetentionPeriods:
@@ -465,3 +470,111 @@ async def test_retention_webhooks_snapshots_and_artifacts(
     assert {"github_webhook_deliveries", "code_index_snapshots", "documentation_snapshots", "artifacts"} <= audited
     assert report.artifact_objects_deleted >= len(gone)
     assert "usage_metrics" not in report.skipped_tables and "code_index_snapshots" not in report.skipped_tables
+
+
+def test_archive_backend_follows_artifact_backend(tmp_path: Path) -> None:
+    fs = Settings(environment="test", artifact_fs_root=tmp_path)
+    assert fs.archive_backend() == "fs"
+    assert isinstance(build_archive_sink(fs), FileSystemArchiveSink)
+    s3_without_keys = Settings(environment="test", artifact_fs_root=tmp_path, retention_archive_backend="s3")
+    with pytest.raises(RuntimeError, match="S3"):
+        build_archive_sink(s3_without_keys)
+    assert Settings(environment="test", artifact_backend="s3", retention_archive_backend="fs").archive_backend() == "fs"
+
+
+@pytest.mark.db
+@pytest.mark.s3
+async def test_retention_s3_archive_and_integrity_mismatch(
+    database: testdb.TestDatabase, settings: Settings, maintenance_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Архив партиции в S3 (§20.2): сверка sha256 до DETACH+DROP; несовпадение ⇒ партиция сохраняется."""
+    endpoint = os.environ.get("AICD_TEST_S3_ENDPOINT")
+    if not endpoint:
+        pytest.skip("AICD_TEST_S3_ENDPOINT не задан")
+    (tmp_path / "s3-access").write_text(os.environ["AICD_TEST_S3_ACCESS_KEY"])
+    (tmp_path / "s3-secret").write_text(os.environ["AICD_TEST_S3_SECRET_KEY"])
+    bucket = f"aicd-archive-{secrets.token_hex(3)}"
+    job_settings = settings.model_copy(
+        update={
+            "retention_archive_backend": "s3",
+            "artifact_s3_endpoint": endpoint,
+            "artifact_s3_access_key_file": str(tmp_path / "s3-access"),
+            "artifact_s3_secret_key_file": str(tmp_path / "s3-secret"),
+            "retention_archive_s3_bucket": bucket,
+            "retention_batch_pause_seconds": 0,
+        }
+    )
+    sink = build_archive_sink(job_settings)
+    assert isinstance(sink, S3ArchiveSink)
+    sink.ensure_bucket()
+    client = sink.client
+    partition = f"audit_events_y{S3_AUDIT_MONTH:%Y}m{S3_AUDIT_MONTH:%m}"
+    object_key = f"archive/global/audit_events/{S3_AUDIT_MONTH:%Y-%m}.ndjson.gz"
+    with connect_admin(database) as admin:
+        admin.execute("SELECT maint_ensure_monthly_partitions('audit_events', %s, 0)", (S3_AUDIT_MONTH,))
+        for i in range(2):
+            admin.execute(
+                "INSERT INTO audit_events (id, actor_type, action, resource_type, created_at)"
+                " VALUES (%s, 'system', 'test.s3_archived_event', 'x', %s)",
+                (uuid7(), _ts(S3_AUDIT_MONTH, 10 + i)),
+            )
+
+    real_put = client.put_object
+
+    def tampered_body(**kwargs: object) -> object:
+        # Тело искажено в пути, ChecksumSHA256 — от экспорта: хранилище обязано отвергнуть загрузку.
+        if kwargs["Key"] == object_key:
+            kwargs = {**kwargs, "Body": b"corrupted archive", "ContentLength": len(b"corrupted archive")}
+        return real_put(**kwargs)
+
+    def overwritten_after_upload(**kwargs: object) -> object:
+        # Загрузка прошла, но объект подменён (сбой носителя/конкурентная запись): ловит только чтение обратно.
+        result = real_put(**kwargs)
+        if kwargs["Key"] == object_key:
+            real_put(Bucket=bucket, Key=object_key, Body=b"overwritten")
+        return result
+
+    try:
+        for corrupt in (tampered_body, overwritten_after_upload):
+            client.put_object = corrupt
+            failed = await run_retention(maintenance_engine, job_settings, sink=sink, reason=f"s3 {corrupt.__name__}")
+            assert failed.outcome == "success", "сбой архива одной партиции не роняет проход"
+            assert failed.partitions_skipped.get(partition) == "archive_integrity_failed", corrupt.__name__
+            assert partition not in failed.partitions_dropped
+            assert any(partition in w and "целостности" in w for w in failed.warnings)
+            with connect_admin(database) as admin:
+                assert _exists(admin, partition), "партиция с неподтверждённым архивом сохранена"
+                assert admin.execute(
+                    "SELECT count(*) FROM audit_events WHERE action = 'test.s3_archived_event'"
+                ).fetchone() == (2,)
+                (meta,) = admin.execute(
+                    "SELECT metadata FROM audit_events WHERE action = 'maintenance.archive_failed'"
+                    " AND resource_id = %s",
+                    (failed.session_id,),
+                ).fetchone() or (None,)
+            assert meta is not None and meta["partition"] == partition and object_key in meta["error"]
+        with pytest.raises(ArchiveIntegrityError):  # файл экспорта не совпадает с sha256 — до загрузки
+            src = tmp_path / "x.ndjson.gz"
+            src.write_bytes(b"x")
+            sink.put_file("global/audit_events/1999-01.ndjson.gz", src, hashlib.sha256(b"y").hexdigest())
+    finally:
+        client.put_object = real_put
+
+    report = await run_retention(maintenance_engine, job_settings, sink=sink, reason="s3 archive")
+    assert report.outcome == "success"
+    assert partition in report.partitions_dropped
+    (archived,) = [a for a in report.archives if a.partition == partition]
+    assert archived.storage_ref == f"s3://{bucket}/{object_key}" and archived.rows == 2
+    obj = client.get_object(Bucket=bucket, Key=object_key)
+    body = obj["Body"].read()
+    assert hashlib.sha256(body).hexdigest() == archived.sha256 == obj["Metadata"]["sha256"]
+    docs = [json.loads(line) for line in gzip.decompress(body).splitlines()]
+    assert [d["action"] for d in docs] == ["test.s3_archived_event"] * 2
+    with connect_admin(database) as admin:
+        assert not _exists(admin, partition)
+        (meta,) = admin.execute(
+            "SELECT metadata FROM audit_events WHERE action = 'maintenance.partition_dropped' AND resource_id = %s"
+            " AND metadata->>'partition' = %s",
+            (report.session_id, partition),
+        ).fetchone() or (None,)
+    assert meta is not None and meta["archive_ref"] == archived.storage_ref and meta["sha256"] == archived.sha256

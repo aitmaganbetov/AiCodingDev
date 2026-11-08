@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -44,6 +45,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from aicd_platform import audit
+from aicd_platform.artifacts import b64_sha256, ensure_s3_bucket, make_s3_client, s3_credentials
 from aicd_platform.clock import utcnow
 from aicd_platform.config import Settings
 from aicd_platform.ids import uuid7
@@ -194,6 +196,22 @@ class ArtifactDeleter(Protocol):
     def delete(self, storage_ref: str) -> bool: ...
 
 
+class ArchiveIntegrityError(OSError):
+    """Архив в хранилище не совпадает с экспортом (sha256) или хранилище отвергло загрузку по контрольной сумме.
+
+    Партиция/run в этом случае не удаляются: job пропускает их с предупреждением и аудитом
+    `maintenance.archive_failed`; следующий проход перезапишет объект (содержимое детерминировано)."""
+
+
+_ARCHIVE_KEY_RE = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
+
+
+def _validate_archive_key(key: str) -> str:
+    if not _ARCHIVE_KEY_RE.fullmatch(key) or ".." in key.split("/"):
+        raise ValueError("некорректный ключ архива")
+    return key
+
+
 class FileSystemArchiveSink:
     """Архив на файловой системе: атомарная запись (tmp + fsync + rename) и сверка sha256."""
 
@@ -201,9 +219,7 @@ class FileSystemArchiveSink:
         self.root = root
 
     def put_file(self, key: str, path: Path, sha256: str) -> str:
-        if not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", key) or ".." in key.split("/"):
-            raise ValueError("некорректный ключ архива")
-        target = self.root / key
+        target = self.root / _validate_archive_key(key)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix=".aicd-archive-", dir=target.parent)
         try:
@@ -212,7 +228,7 @@ class FileSystemArchiveSink:
                 out.flush()
                 os.fsync(out.fileno())
             if _sha256_file(Path(tmp)) != sha256:
-                raise OSError("архив повреждён при записи (sha256 не совпадает)")
+                raise ArchiveIntegrityError("архив повреждён при записи (sha256 не совпадает)")
             os.replace(tmp, target)
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
@@ -223,6 +239,87 @@ class FileSystemArchiveSink:
         finally:
             os.close(dir_fd)
         return f"file://archive/{key}"
+
+
+# Коды ответа S3/MinIO при несовпадении контрольной суммы загружаемого тела.
+_S3_CHECKSUM_ERRORS = frozenset(
+    {"BadDigest", "InvalidDigest", "XAmzContentChecksumMismatch", "XAmzContentSHA256Mismatch"}
+)
+
+
+class S3ArchiveSink:
+    """Архив в S3-совместимом хранилище (§20.2): `s3://<bucket>/<prefix>/<key>`.
+
+    Загрузка с `ChecksumSHA256` (сервер отвергает искажённое тело) и метаданными `sha256`; затем объект читается
+    обратно целиком и sha256 сверяется с экспортом — только после этого job вызывает DETACH + DROP.
+    Перезапись ключа допустима (экспорт детерминирован); для bucket с object lock повторная запись того же
+    содержимого создаёт версию."""
+
+    def __init__(self, client: Any, bucket: str, prefix: str = "archive") -> None:
+        self.client = client
+        self.bucket = bucket
+        self.prefix = _validate_archive_key(prefix)
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> S3ArchiveSink:
+        endpoint, access_key, secret_key = s3_credentials(settings)
+        client = make_s3_client(
+            endpoint_url=endpoint, access_key=access_key, secret_key=secret_key, region=settings.artifact_s3_region
+        )
+        return cls(
+            client,
+            settings.retention_archive_s3_bucket or settings.artifact_s3_bucket,
+            settings.retention_archive_s3_prefix,
+        )
+
+    def ensure_bucket(self) -> None:
+        ensure_s3_bucket(self.client, self.bucket)
+
+    def object_key(self, key: str) -> str:
+        return f"{self.prefix}/{_validate_archive_key(key)}"
+
+    def put_file(self, key: str, path: Path, sha256: str) -> str:
+        from botocore.exceptions import ClientError
+
+        object_key = self.object_key(key)
+        if _sha256_file(path) != sha256:
+            raise ArchiveIntegrityError("файл экспорта изменился до загрузки (sha256 не совпадает)")
+        try:
+            with path.open("rb") as fh:
+                self.client.put_object(
+                    Bucket=self.bucket,
+                    Key=object_key,
+                    Body=fh,
+                    ContentLength=path.stat().st_size,
+                    ContentType="application/gzip",
+                    ChecksumSHA256=b64_sha256(sha256),
+                    Metadata={"sha256": sha256},
+                )
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in _S3_CHECKSUM_ERRORS:
+                raise ArchiveIntegrityError(f"хранилище отвергло архив {object_key}: контрольная сумма") from exc
+            raise
+        stored = self._stored_sha256(object_key)
+        if not hmac.compare_digest(stored, sha256):
+            raise ArchiveIntegrityError(f"архив {object_key} в хранилище не совпадает с экспортом (sha256)")
+        return f"s3://{self.bucket}/{object_key}"
+
+    def _stored_sha256(self, object_key: str) -> str:
+        body = self.client.get_object(Bucket=self.bucket, Key=object_key)["Body"]
+        digest = hashlib.sha256()
+        try:
+            while chunk := body.read(1024 * 1024):
+                digest.update(chunk)
+        finally:
+            body.close()
+        return digest.hexdigest()
+
+
+def build_archive_sink(settings: Settings) -> ArchiveSink:
+    """Приёмник архива по `retention_archive_backend` (не задан — как `artifact_backend`)."""
+    if settings.archive_backend() == "s3":
+        return S3ArchiveSink.from_settings(settings)
+    return FileSystemArchiveSink(settings.archive_root())
 
 
 def _sha256_file(path: Path) -> str:
@@ -380,7 +477,15 @@ async def _drop_expired_partitions(
                 continue
             archived: ArchivedPartition | None = None
             if table in ARCHIVED_BEFORE_DROP:
-                archived = await _export_partition(conn, table, partition, month, sink)
+                try:
+                    archived = await _export_partition(conn, table, partition, month, sink)
+                except ArchiveIntegrityError as exc:
+                    # Архив не подтверждён — партиция сохраняется (без архива удаление запрещено, §20.3).
+                    await conn.rollback()
+                    await _audit_archive_failed(conn, report, {"table": table, "partition": partition}, exc)
+                    report.partitions_skipped[partition] = "archive_integrity_failed"
+                    report.warnings.append(f"{partition}: архив не прошёл проверку целостности, партиция сохранена")
+                    continue
                 await conn.rollback()  # закрыть читающую транзакцию: архив уже в хранилище
                 report.archives.append(archived)
             result = (
@@ -415,6 +520,22 @@ async def _drop_expired_partitions(
                 if result == "skipped_unpublished":
                     report.warnings.append(f"{partition}: есть неопубликованные события, партиция сохранена")
             await conn.commit()
+
+
+async def _audit_archive_failed(
+    conn: AsyncConnection, report: RetentionReport, subject: dict[str, Any], exc: ArchiveIntegrityError
+) -> None:
+    await audit.record(
+        conn,
+        action="maintenance.archive_failed",
+        resource_type="maintenance",
+        resource_id=report.session_id,
+        actor_type="system",
+        actor_id=None,
+        workspace_id=None,
+        metadata={**subject, "error": str(exc)[:500]},
+    )
+    await conn.commit()
 
 
 def _batch_deletes(periods: RetentionPeriods, now: datetime) -> list[tuple[str, str, dict[str, Any]]]:
@@ -612,7 +733,19 @@ async def _archive_runs(
         ).all()
         await conn.commit()
         for workspace_id, run_id, project_id in candidates:
-            archived = await _export_run(conn, workspace_id, run_id, sink)
+            try:
+                archived = await _export_run(conn, workspace_id, run_id, sink)
+            except ArchiveIntegrityError as exc:
+                # Детальные строки run не удаляются; архив run прекращается до следующего прохода
+                # (иначе тот же кандидат выбирался бы снова).
+                await conn.rollback()
+                await _audit_archive_failed(
+                    conn, report, {"workspace_id": str(workspace_id), "run_id": str(run_id)}, exc
+                )
+                report.warnings.append(f"run {run_id}: архив не прошёл проверку целостности, строки сохранены")
+                for table, count in deleted.items():
+                    report.rows_deleted[table] = report.rows_deleted.get(table, 0) + count
+                return
             await conn.rollback()  # закрыть читающую транзакцию: архив уже в хранилище
             params = {"ws": workspace_id, "run": run_id}
             redacted = (
@@ -914,7 +1047,7 @@ async def run_retention(
 ) -> RetentionReport:
     """Один проход retention. `engine` — подключение роли aicd_maintenance (иначе maint_begin откажет)."""
     now = now or utcnow()
-    sink = sink or FileSystemArchiveSink(settings.archive_root())
+    sink = sink or build_archive_sink(settings)
     report = RetentionReport(session_id=uuid7(), started_at=now)
     async with engine.connect() as conn:
         await conn.execute(text("SET lock_timeout = '5s'"))

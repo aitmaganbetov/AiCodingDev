@@ -561,7 +561,7 @@ flowchart TD
 | 4 Policy | run в допустимом статусе (`RUNNING`, `DISCOVERY`, `PLANNED`, `AWAITING_APPROVAL`, `VERIFYING`); все `refs` принадлежат тому же `workspace_id`/project (RLS + явная проверка); причины `BLOCKED` от агента из разрешённого набора; payload не может инициировать защищённое действие (нет такого поля by design); `requires_human_approval` не может быть понижен | `POLICY_DENIED` |
 | 5 Correlation | `reply_to_id` существует, в том же `run_id`, тип пары допустим (ANSWER→QUESTION, FIX_REQUEST/FINDING→REVIEW_REQUEST, DECISION_RECORDED→DECISION_PROPOSAL); `correlation_id` совпадает с корреляцией `reply_to`; нет второго принятого ANSWER на тот же QUESTION; глубина цепочки reply ≤ 20 | `CORRELATION_INVALID` |
 | 6 Limits | review/fix loops (§6); ≤ 50 сообщений от одной попытки; ≤ 5 открытых blocking QUESTION на задачу; ≤ 500 сообщений на run в час (настраивается policy) | `LOOP_LIMIT` / `RATE_LIMITED_MESSAGES` |
-| 7 Persist | `INSERT agent_messages` (+ `message_deliveries` для каждого потребителя) + `INSERT outbox_events(event_type='acp.message_accepted')` в **одной** транзакции; дубликат `message_id` → идемпотентный no-op | — |
+| 7 Persist | `INSERT agent_messages` (+ `message_deliveries` для каждого потребителя) + `INSERT outbox_events(event_type='agent.message')` в **одной** транзакции; дубликат `message_id` → идемпотентный no-op | — |
 
 Отклонённые сообщения не попадают в `agent_messages`; сохраняется факт отклонения (без payload целиком — только хеш и первые 1 KiB санитизированного текста) в `agent_activity_events` и `audit_events`. Отклонение не прерывает задачу автоматически; при `ACL_DENIED`/`POLICY_DENIED` повторяющемся ≥ 3 раз в попытке — attempt завершается `failure_category = POLICY_DENIED`.
 

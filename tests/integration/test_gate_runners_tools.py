@@ -4,20 +4,29 @@
 (`AICD_VERIFICATION_RUNNER=local` запрещён). Инструменты: ruff, mypy, pytest(+pytest-cov) из venv,
 eslint/tsc/node/npm из /opt/node22, Playwright (глобальный пакет `playwright`, тест без браузера).
 Vitest ставится в кэш сессии из npm (`--prefer-offline`); недоступен — тест пропускается с причиной.
-PHPStan в окружении нет (composer не смог скачать phpstan/phpstan: github.com недоступен) — проверяется
-ERROR(TOOL_UNAVAILABLE), фикстурный прогон пропускается с явной причиной.
+PHPStan на хосте нет (composer не смог скачать phpstan/phpstan: github.com недоступен) — без инструмента
+проверяется ERROR(TOOL_UNAVAILABLE); фикстуры pass/fail исполняются в образе gate (ключ `php`, OQ-43 (a)):
+ссылка из `AICD_VERIFICATION_IMAGES["php"]`, иначе локально собранный платформой `aicd/phpstan:<версия>`
+(infrastructure/docker/verification/phpstan.Dockerfile), закреплённый по digest образа в Docker
+(`DockerSandboxRunner(require_image_digest=True)`, сеть none, checkout read-only — как в production).
 """
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
+import httpx
 import pytest
 
+from aicd_security.docker_runner import DockerSandboxRunner
+from aicd_verification.images import ImagePolicyError, default_gate_images, image_key_for
 from aicd_verification.registry import GATE_SPECS
 from tests.support.gates import FixtureRepo, materialize, run_spec
 
@@ -172,10 +181,71 @@ async def test_phpstan_missing_tool_is_not_pass(tmp_path: Path) -> None:
         assert res.verdict is not None and res.verdict.status == "FAIL"
 
 
+DOCKER_SOCK = "/var/run/docker.sock"
+PHPSTAN_DOCKERFILE = Path(__file__).resolve().parents[2] / "infrastructure/docker/verification/phpstan.Dockerfile"
+
+
+def _docker_image_digest_ref(tag: str) -> str | None:
+    """`<repo>:<tag>@sha256:…` локального образа (digest из RepoDigests) или None, если Docker/образ недоступны."""
+    if not Path(DOCKER_SOCK).exists():
+        return None
+    try:
+        with httpx.Client(transport=httpx.HTTPTransport(uds=DOCKER_SOCK), base_url="http://docker", timeout=5) as c:
+            resp = c.get(f"/images/{quote(tag, safe='')}/json")
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    repo = tag.rsplit(":", 1)[0]
+    for ref in resp.json().get("RepoDigests") or []:
+        name, _, digest = str(ref).partition("@")
+        if name == repo and digest.startswith("sha256:"):
+            return f"{tag}@{digest}"
+    return None
+
+
+def phpstan_image() -> tuple[str | None, str]:
+    """Образ gate PHPStan так же, как его получает воркер (ключ `php` поверх таблицы образов), и причина отказа."""
+    key = image_key_for("phpstan", GATE_SPECS["phpstan"].image_key)
+    overrides = json.loads(os.environ.get("AICD_VERIFICATION_IMAGES") or "{}")
+    if key not in overrides:
+        match = re.search(r"releases/download/([0-9][0-9A-Za-z.-]*)/phpstan\.phar", PHPSTAN_DOCKERFILE.read_text())
+        assert match, "версия PHPStan не найдена в phpstan.Dockerfile"
+        tag = f"aicd/phpstan:{match.group(1)}"
+        ref = _docker_image_digest_ref(tag)
+        if ref is None:
+            return None, (
+                f"Docker или образ {tag} недоступны: соберите `docker build -f infrastructure/docker/verification/"
+                f"phpstan.Dockerfile -t {tag} infrastructure/docker/verification` или задайте AICD_VERIFICATION_IMAGES"
+            )
+        overrides = {**overrides, key: ref}
+    try:
+        return default_gate_images(overrides, require_digest=True)[key], ""
+    except ImagePolicyError as exc:
+        return None, f"образ PHPStan не проходит политику образов: {exc}"
+
+
+@pytest.fixture
+def resolved_tmp(tmp_path: Path) -> Path:
+    return tmp_path.resolve()  # allowed_bind_roots сравнивает канонические пути
+
+
+@pytest.mark.docker
 @pytest.mark.parametrize(("case", "status"), [("pass", "PASS"), ("fail", "FAIL")])
-async def test_phpstan_fixtures(tmp_path: Path, case: str, status: str) -> None:
-    if shutil.which("phpstan", path=PATH) is None:
-        pytest.skip("PHPStan недоступен: composer не скачал phpstan/phpstan (github.com закрыт egress), образа нет")
-    repo = _repo(tmp_path, "phpstan", case)  # pragma: no cover
-    res = await run_spec(GATE_SPECS["phpstan"], repo, path=PATH)  # pragma: no cover
-    assert res.verdict is not None and res.verdict.status == status  # pragma: no cover
+async def test_phpstan_fixtures(resolved_tmp: Path, case: str, status: str) -> None:
+    image, reason = phpstan_image()
+    if image is None:
+        pytest.skip(reason)
+    root = resolved_tmp
+    repo = _repo(root, "phpstan", case)
+    runner = DockerSandboxRunner(
+        f"unix://{DOCKER_SOCK}", allowed_bind_roots=[str(root)], require_image_digest=True, timeout_grace_seconds=1
+    )
+    async with runner as r:
+        res = await run_spec(GATE_SPECS["phpstan"], repo, runner=r, image=image)
+    assert res.verdict is not None and res.verdict.status == status, res.stdout[-2000:] + res.stderr[-2000:]
+    if status == "FAIL":
+        assert res.verdict.findings and {f.file_path for f in res.verdict.findings} == {"src/add.php"}
+        assert all(f.line is not None for f in res.verdict.findings)
+    else:
+        assert not res.verdict.findings

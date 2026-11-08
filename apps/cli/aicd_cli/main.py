@@ -43,7 +43,7 @@ from aicd_platform.config import get_settings
 from aicd_platform.db import DbContext, TcpKeepalive, apply_context, create_engine, transaction
 from aicd_platform.errors import ProblemError
 from aicd_platform.ids import uuid7
-from aicd_platform.retention import run_retention
+from aicd_platform.retention import build_archive_sink, run_retention
 from aicd_projects import api as projects
 
 
@@ -119,6 +119,7 @@ async def _retention_pass(args: argparse.Namespace) -> int:
     settings = get_settings()
     try:
         url = settings.require_maintenance_database_url()
+        sink = build_archive_sink(settings)
     except RuntimeError as err:
         print(f"Ошибка: {err}", file=sys.stderr)
         return 2
@@ -126,7 +127,7 @@ async def _retention_pass(args: argparse.Namespace) -> int:
     try:
         store = build_artifact_store(settings)
         deleter = store if isinstance(store, FileSystemArtifactStore | S3ArtifactStore) else None
-        report = await run_retention(engine, settings, artifacts=deleter, reason=args.reason)
+        report = await run_retention(engine, settings, sink=sink, artifacts=deleter, reason=args.reason)
     finally:
         await engine.dispose()
     print(json.dumps({"maintenance_run_id": str(report.session_id), **report.summary()}, ensure_ascii=False))

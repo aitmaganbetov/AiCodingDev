@@ -15,6 +15,8 @@ for name in pg_admin_password pg_migrator_password pg_app_password pg_worker_pas
 done
 [ -f "$dir/migrator_database_url" ] || { umask 077; printf 'postgresql://aicd_migrator:%s@postgres:5432/aicd' "$(cat "$dir/pg_migrator_password")" > "$dir/migrator_database_url"; }
 [ -f "$dir/app_database_url" ] || { umask 077; printf 'postgresql://aicd_app:%s@postgres:5432/aicd' "$(cat "$dir/pg_app_password")" > "$dir/app_database_url"; }
+# Воркеры (worker-*): роль aicd_worker (OQ-46 (3)).
+[ -f "$dir/worker_database_url" ] || { umask 077; printf 'postgresql://aicd_worker:%s@postgres:5432/aicd' "$(cat "$dir/pg_worker_password")" > "$dir/worker_database_url"; }
 [ -f "$dir/app_redis_url" ] || { umask 077; printf 'redis://:%s@redis:6379/0' "$(cat "$dir/redis_password")" > "$dir/app_redis_url"; }
 chmod 0444 "$dir"/*
 echo "Секреты созданы в $dir"

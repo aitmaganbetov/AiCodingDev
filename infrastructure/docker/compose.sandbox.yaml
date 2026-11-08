@@ -7,8 +7,9 @@
 #                     Прямого выхода в интернет и внешнего DNS нет; единственный путь наружу —
 #                     egress-proxy (HTTPS_PROXY=http://egress-proxy:3128) по allowlist.
 #   aicd-egress     — обычная bridge-сеть только для egress-proxy (исходящий трафик к allowlist).
-#   aicd-docker-ctl — internal: true; доступ к docker-socket-proxy только для worker-exec/worker-verify
-#                     (появятся в P2/P3; `api` к этой сети не подключается никогда).
+#   aicd-docker-ctl — internal: true; доступ к docker-socket-proxy только для worker-exec (gates и, после P2-01,
+#                     runner-контейнеры CLI; worker-verify отдельным сервисом не выделен — gates исполняет worker-exec).
+#                     `api` и остальные воркеры к этой сети не подключаются никогда.
 #
 # Имена сетей фиксированы (`name:`), т.к. runner-контейнеры создаются через Docker API, а не compose.
 # Подсеть aicd-sandbox синхронизирована с `acl sandbox_src` в egress-proxy/squid.conf.
@@ -75,7 +76,16 @@ services:
     mem_limit: 128m
     pids_limit: 128
     restart: unless-stopped
-    # Порт на хост не публикуется. worker-exec: AICD_DOCKER_URL=http://docker-socket-proxy:2375
+    # Порт на хост не публикуется. worker-exec: AICD_DOCKER_URL=http://docker-socket-proxy:2375 (compose.yaml).
+
+  # Дополнение сервиса worker-exec из compose.yaml: единственный воркер с путём к Docker API — через прокси выше
+  # (SECURITY_ARCHITECTURE §7.5, B5). Сокет Docker в worker-exec не монтируется; сеть sandbox (runner-контейнеры)
+  # и egress ему не нужны — к ним подключаются только создаваемые им контейнеры.
+  worker-exec:
+    networks:
+      docker-ctl: {}
+    depends_on:
+      docker-socket-proxy: { condition: service_started }
 
 networks:
   sandbox:
