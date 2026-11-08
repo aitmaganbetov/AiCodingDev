@@ -4,9 +4,9 @@
  * по SSE (chat.message). P7-07: панель поручений (DirectivesPanel). Тексты агентов — только текст.
  */
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { chatApi, chatKeys, type ChatFilters } from '../../api/chat';
 import { runKeys, type AgentRole } from '../../api/runs';
 import type { RunEvent } from '../../api/runEvents';
@@ -21,6 +21,7 @@ import { DirectivesPanel } from '../directives/DirectivesPanel';
 import { RunNav } from '../runs/RunNav';
 import { StreamStatus } from '../runs/StreamStatus';
 import { useRunTasks } from '../runs/useRunTasks';
+import { useInPageSearchParams } from '../runs/useInPageSearchParams';
 import { useRunDetail } from '../runs/useRunStatus';
 import { ChatComposer } from './ChatComposer';
 import { ChatFiltersPanel } from './ChatFilters';
@@ -51,16 +52,9 @@ export function ChatPage() {
   const { projectId = '', runId = '' } = useParams();
   const { workspaceId, membership } = useCurrentWorkspace();
   const queryClient = useQueryClient();
-  const [params, setParams] = useSearchParams();
-  // Фильтры живут в URL (ссылкой можно поделиться); локальная копия применяется сразу, пока
-  // навигация роутера (transition) не зафиксировала новый URL, — контролы не «откатываются».
-  const paramsKey = params.toString();
-  const [local, setLocal] = useState(() => ({ seen: paramsKey, filters: filtersFromParams(params) }));
-  let filters = local.filters;
-  if (local.seen !== paramsKey) {
-    filters = filtersFromParams(params);
-    setLocal({ seen: paramsKey, filters });
-  }
+  // Фильтры — в URL (ссылкой можно поделиться), без навигации роутера (фокус остаётся на контроле).
+  const [params, setParams] = useInPageSearchParams();
+  const filters = useMemo(() => filtersFromParams(params), [params]);
   const complete = filtersComplete(filters);
   const { run, isTerminal } = useRunDetail(runId, Boolean(membership));
   const { tasks } = useRunTasks(runId, { all: true, enabled: Boolean(membership) });
@@ -109,13 +103,7 @@ export function ChatPage() {
     [workspaceId, projectId, runId],
   );
 
-  const setFilters = useCallback(
-    (next: ChatFilters) => {
-      setLocal({ seen: paramsKey, filters: next });
-      setParams(paramsFromFilters(next), { replace: true });
-    },
-    [setParams, paramsKey],
-  );
+  const setFilters = useCallback((next: ChatFilters) => setParams(paramsFromFilters(next)), [setParams]);
   const onMention = useCallback((role: AgentRole) => setFilters({ stream: 'role', role }), [setFilters]);
 
   if (!workspaceId || !membership) return <WorkspaceNotFound />;

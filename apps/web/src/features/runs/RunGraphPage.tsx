@@ -5,7 +5,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { runKeys, type TaskSummary } from '../../api/runs';
 import type { RunEvent } from '../../api/runEvents';
 import { useRunEvents } from '../../api/useRunEvents';
@@ -18,6 +18,7 @@ import { enumLabel, executorLabel, providerLabel, roleLabel, TASK_ACTIVE } from 
 import { RunNav } from './RunNav';
 import { StreamStatus } from './StreamStatus';
 import { applyTaskEvents, useRunTasks } from './useRunTasks';
+import { useInPageSearchParams } from './useInPageSearchParams';
 import { useRunDetail } from './useRunStatus';
 
 const TaskGraphCanvas = lazy(() => import('./TaskGraphCanvas'));
@@ -127,7 +128,7 @@ export function RunGraphPage() {
   const { projectId = '', runId = '' } = useParams();
   const { workspaceId, membership } = useCurrentWorkspace();
   const queryClient = useQueryClient();
-  const [params, setParams] = useSearchParams();
+  const [params, setParams] = useInPageSearchParams();
   const view: View = params.get('view') === 'list' ? 'list' : 'graph';
   const { run, isTerminal } = useRunDetail(runId, Boolean(membership));
   const { query, tasks, edges, planVersion } = useRunTasks(runId, { all: true, enabled: Boolean(membership) });
@@ -162,16 +163,12 @@ export function RunGraphPage() {
   );
 
   if (!workspaceId || !membership) return <WorkspaceNotFound />;
-  const setView = (v: View) =>
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (v === 'graph') next.delete('view');
-        else next.set('view', v);
-        return next;
-      },
-      { replace: true },
-    );
+  const setView = (v: View) => {
+    const next = new URLSearchParams(params);
+    if (v === 'graph') next.delete('view');
+    else next.set('view', v);
+    setParams(next);
+  };
 
   return (
     <section aria-labelledby="page-title">

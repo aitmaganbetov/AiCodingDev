@@ -96,6 +96,10 @@ Dev:
 - `eslint` 9.39.5, `@eslint/js` 9.39.5, `typescript-eslint` 8.72.0, `eslint-plugin-jsx-a11y` 6.10.2, `eslint-plugin-react-hooks` 7.1.1, `globals` 16.5.0 — линтинг (eslint 9: jsx-a11y не поддерживает 10).
 - `@types/react` 18.3.31, `@types/react-dom` 18.3.7, `@types/node` 22.20.5 — типы.
 
+Добавлены экранами P7-05..P7-08 (точные версии, выпущены ≥ 2 недель назад, React 18; загружаются лениво — в начальный бандл не входят):
+- `@xyflow/react` 12.12.0 — Run Graph (ADR-0014): DAG задач; холст — отдельный чанк `TaskGraphCanvas` (~187 kB / 62 kB gzip) вместе со стилями. Анимированные рёбра не используются (prefers-reduced-motion, axe ждёт завершения анимаций).
+- `@monaco-editor/react` 4.7.0 + `monaco-editor` 0.57.0 — read-only diff viewer Task Detail (ADR-0014). Monaco берётся из локального пакета (`loader.config({ monaco })` с `monaco-editor/editor/editor.api`), без CDN; editor worker — отдельный файл того же origin (`?worker`, совместимо с CSP `script-src 'self'`). Чанк `MonacoDiff` (~2,7 MB / 713 kB gzip + worker 276 kB) грузится только на вкладке «Изменения».
+
 Не добавлены: `openapi-fetch` — свой клиент закрывает CSRF/idempotency/problem; `@xyflow/react`, Monaco — добавят экраны P7-05/P7-08 (lazy); иконки — свой набор SVG (`components/ui/Icon.tsx`) без зависимости; Radix Toolbar — `Toolbar` на roving tabindex в ~60 строк.
 
 ## Ошибки по контракту

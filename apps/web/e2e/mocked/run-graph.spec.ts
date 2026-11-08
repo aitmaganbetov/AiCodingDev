@@ -75,6 +75,7 @@ test('run graph: accessible list view of the same DAG — keyboard only', async 
   await page.keyboard.press('Enter');
   await expect(listButton).toHaveAttribute('aria-pressed', 'true');
   await expect(page).toHaveURL(/view=list/);
+  await expect(listButton).toBeFocused(); // смена вида не уводит фокус на h1
 
   const table = page.getByRole('table', { name: /Задачи run и их зависимости/ });
   await expect(table.getByRole('row')).toHaveCount(4);

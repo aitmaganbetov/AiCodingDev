@@ -5,7 +5,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { runKeys } from '../../api/runs';
 import type { RunEvent } from '../../api/runEvents';
 import { taskKeys, tasksApi, type Task } from '../../api/tasks';
@@ -17,6 +17,7 @@ import { useCurrentWorkspace } from '../../workspace';
 import { enumLabel, executorLabel, providerLabel, roleLabel, TASK_ACTIVE } from '../runs/labels';
 import { RunNav } from '../runs/RunNav';
 import { StreamStatus } from '../runs/StreamStatus';
+import { useInPageSearchParams } from '../runs/useInPageSearchParams';
 import { useRunDetail } from '../runs/useRunStatus';
 import { DiffViewer } from './DiffViewer';
 import { TaskAttempts, TaskEvents, TaskEvidenceList, TaskGates, TaskMessages } from './TaskSections';
@@ -112,7 +113,7 @@ export function TaskDetailPage() {
   const { projectId = '', runId = '', taskId = '' } = useParams();
   const { workspaceId, membership } = useCurrentWorkspace();
   const queryClient = useQueryClient();
-  const [params, setParams] = useSearchParams();
+  const [params, setParams] = useInPageSearchParams();
   const tabParam = params.get('tab');
   const tab: Tab = (TABS as readonly string[]).includes(tabParam ?? '') ? (tabParam as Tab) : 'overview';
   const enabled = Boolean(membership && taskId);
@@ -161,16 +162,12 @@ export function TaskDetailPage() {
 
   if (!workspaceId || !membership) return <WorkspaceNotFound />;
   const runBase = `/w/${workspaceId}/projects/${projectId}/runs/${runId}`;
-  const setTab = (next: string) =>
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        if (next === 'overview') p.delete('tab');
-        else p.set('tab', next);
-        return p;
-      },
-      { replace: true },
-    );
+  const setTab = (next: string) => {
+    const p = new URLSearchParams(params);
+    if (next === 'overview') p.delete('tab');
+    else p.set('tab', next);
+    setParams(p);
+  };
 
   return (
     <section aria-labelledby="page-title">

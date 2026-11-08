@@ -189,21 +189,23 @@ function seed(api: MockApi, opts: { failTask?: boolean } = {}) {
       },
     };
   });
-  api.route('GET', '/api/v1/artifacts/{id}/download', 'downloadArtifact', ({ id }) => ({
-    status: 302,
-    headers: { Location: `/storage/signed/${id}?sig=e2e`, 'Cache-Control': 'no-store' },
-  }));
   // Журнал run: события 1..2 уже в истории (activity); SSE повторит их — UI не должен задублировать.
   api.addEvent(run, 'task.state_changed', { task_id: task.id, title: task.title, agent_role: 'developer', from_status: 'READY', to_status: 'RUNNING', task_version: 1 });
   api.addEvent(run, 'cli.output', { execution_id: '01900000-0000-7000-d000-0000000000c1', task_id: task.id, provider: 'claude', agent_role: 'developer', cli_seq: 1, cli_event_type: 'output', stream: 'stdout', text: 'npm test: 1 failed' });
   return { ws, project, run, task, url: `/w/${ws.id}/projects/${project.id}/runs/${run.id}/tasks/${task.id}` };
 }
 
-async function serveStorage(page: Page): Promise<string[]> {
+/**
+ * downloadArtifact: контракт объявляет только 302 на подписанный URL, но Playwright не перехватывает
+ * запрос, следующий за редиректом из route.fulfill. Поэтому здесь — режим file-адаптера из описания
+ * операции (потоковая отдача через API); 200 в контракте не объявлен — см. отчёт (API gap).
+ * Маршрут регистрируется после MockApi.install и имеет приоритет.
+ */
+async function serveArtifacts(page: Page): Promise<string[]> {
   const fetched: string[] = [];
-  await page.context().route((u) => u.pathname.startsWith('/storage/signed/'), async (route) => {
+  await page.route('**/api/v1/artifacts/*/download', async (route) => {
     fetched.push(route.request().url());
-    await route.fulfill({ status: 200, contentType: 'text/x-diff; charset=utf-8', body: DIFF });
+    await route.fulfill({ status: 200, contentType: 'text/x-diff; charset=utf-8', headers: { 'Cache-Control': 'no-store' }, body: DIFF });
   });
   return fetched;
 }
@@ -225,6 +227,7 @@ test('task detail: summary, attempts, events/logs with live CLI output, ACP mess
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: 'Попытки' })).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(/tab=attempts/);
+  await expect(page.getByRole('tab', { name: 'Попытки' })).toBeFocused();
   const attempts = page.getByRole('table', { name: 'Попытки выполнения задачи' });
   await expect(attempts.getByRole('row')).toHaveCount(3);
   await expect(attempts.getByRole('row').nth(1)).toContainText('Разработчик · Codex');
@@ -266,10 +269,8 @@ test('task detail: diff viewer (Monaco from the local bundle, lazy) and text vie
   page.on('request', (r) => {
     if (!r.url().startsWith('http://127.0.0.1')) external.push(r.url());
   });
-  const fetched = await serveStorage(page);
+  const fetched = await serveArtifacts(page);
   await login(page, api);
-  page.on('response', (r) => console.log('RESP', r.status(), r.url()));
-  page.on('requestfailed', (r) => console.log('FAIL', r.url(), r.failure()?.errorText));
   await page.goto(`${url}?tab=diff`);
 
   const files = page.getByTestId('diff-files');
@@ -278,7 +279,7 @@ test('task detail: diff viewer (Monaco from the local bundle, lazy) and text vie
   await expect(files.getByRole('button').first()).toContainText('+2 −1');
   await expect(page.getByTestId('monaco-diff').locator('.monaco-diff-editor')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('monaco-diff')).toContainText('toCsv');
-  expect(fetched).toHaveLength(1);
+  expect(fetched).toEqual([expect.stringContaining(`/api/v1/artifacts/${DIFF_ARTIFACT}/download`)]);
 
   await files.getByRole('button', { name: /src\/csv\.ts/ }).click();
   await expect(page.getByTestId('diff-current-file')).toHaveText('src/csv.ts');
