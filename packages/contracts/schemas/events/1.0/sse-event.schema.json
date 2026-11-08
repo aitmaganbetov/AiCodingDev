@@ -877,6 +877,8 @@
                   "PENDING",
                   "DELIVERED",
                   "ACKNOWLEDGED",
+                  "REJECTED",
+                  "EXPIRED",
                   "COMPLETED",
                   "FAILED"
                 ]

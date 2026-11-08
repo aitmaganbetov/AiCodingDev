@@ -74,6 +74,7 @@ from aicd_orchestration.agents.prompt import (
 )
 from aicd_orchestration.agents.result import (
     Claim,
+    DirectiveAck,
     ParsedAgentResult,
     ResultParseError,
     parse_agent_result,
@@ -323,6 +324,8 @@ class AgentIoSummary:
     accepted_message_ids: tuple[uuid.UUID, ...] = ()
     rejected: tuple[RejectedCandidate, ...] = ()
     review_verdict: str | None = None  # из принятого TASK_COMPLETED (reviewer/security)
+    # directive_acks итога: подтверждение/отказ по поручениям раздела directives (EVENT_SCHEMAS §4).
+    directive_acks: tuple[DirectiveAck, ...] = ()
     attempt_should_fail: bool = False  # ≥ 3 отказов ACL/POLICY в попытке ⇒ failure_category POLICY_DENIED (§5)
     warnings: tuple[str, ...] = ()
 
@@ -351,6 +354,10 @@ class AgentIoSummary:
                 for r in self.rejected
             ],
             "review_verdict": self.review_verdict,
+            "directive_acks": [
+                {"directive_id": a.directive_id, "status": a.status, "note": (a.note or "")[:500] or None}
+                for a in self.directive_acks
+            ],
             "attempt_should_fail": self.attempt_should_fail,
             "warnings": list(self.warnings),
         }
@@ -630,6 +637,7 @@ class ResultProcessor:
             accepted_message_ids=tuple(accepted),
             rejected=tuple(sorted(rejected, key=lambda r: r.index)),
             review_verdict=verdict,
+            directive_acks=parsed.directive_acks,
             attempt_should_fail=denials >= 3,
             warnings=tuple(sorted({*parsed.warnings, *warnings})),
         )

@@ -377,7 +377,10 @@ async def test_stop_pending_task_removes_it_from_dag(
     r = await submit(dev, run, body(admin, run, "STOP", {"type": "task", "task_id": str(first)},
                                     requires_impact_preview=False))  # fmt: skip
     view = (await get(dev, run, r.json()["directive_id"])).json()
-    assert view["status"] == "DISPATCHED" and [i["impact_type"] for i in view["impacts"]] == ["TASK_CANCEL"]
+    # STOP — команда: задача ещё не начата и отменена сразу ⇒ цель достигнута, поручение выполнено (без ack агентов).
+    assert view["status"] == "COMPLETED" and [i["impact_type"] for i in view["impacts"]] == ["TASK_CANCEL"]
+    assert view["delivery"] == {"state": "ACKNOWLEDGED", "acknowledgements": []}
+    assert view["completion"]["state"] == "COMPLETED"
     assert view["impacts"][0]["resolution"] == "APPLIED" and cancelled == []
     rows: dict[uuid.UUID, str] = dict(
         admin.execute("SELECT id, status FROM tasks WHERE id = ANY(%s)", ([first, second],)).fetchall()

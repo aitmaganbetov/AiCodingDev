@@ -99,7 +99,7 @@ async def _lock_runs(conn: AsyncConnection, batch: int) -> list[uuid.UUID]:
 
 async def append_run_event(conn: AsyncConnection, event: sse.OutboxRecord) -> int | None:
     """Проекция события в run_event_log; возвращает seq (существующий при повторе) или None."""
-    if event.run_id is None or event.workspace_id is None or event.event_type not in sse.PERSISTED_TYPES:
+    if event.run_id is None or event.workspace_id is None or event.event_type not in sse.PROJECTED_TYPES:
         return None
     await conn.execute(text("SELECT set_config('app.workspace_id', :ws, true)"), {"ws": str(event.workspace_id)})
     existing = (

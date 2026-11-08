@@ -301,7 +301,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
             "required": ["role", "ack_status"],
             "properties": {
               "role": {"$ref": "#/$defs/agent_role"},
-              "ack_status": {"enum": ["PENDING", "DELIVERED", "ACKNOWLEDGED", "COMPLETED", "FAILED"]},
+              "ack_status": {"enum": ["PENDING", "DELIVERED", "ACKNOWLEDGED", "REJECTED", "EXPIRED", "COMPLETED", "FAILED"]},
               "execution_id": {"type": ["string", "null"], "format": "uuid"},
               "at": {"type": ["string", "null"], "format": "date-time"}
             }
@@ -493,15 +493,15 @@ stateDiagram-v2
 | «Принято системой» | `RECEIVED` | директива сохранена, RBAC пройден | `directive.received` |
 | «Анализ влияния готов» | `IMPACT_READY` | все `directive_impacts` записаны | `directive.impact_ready` |
 | «Ожидает подтверждения» | `AWAITING_CONFIRMATION` | нужен confirm/approval | `directive.state_changed` + `approval.requested` |
-| «Отправлено» | `DISPATCHED` | директива включена в inbox (ACP `TASK_ASSIGN`/Context Pack) задач-получателей; `directive_acknowledgements.status = PENDING` | `directive.state_changed` |
-| **«Доставлено»** | ack `DELIVERED` (по получателю) | исполнение CLI, чей Context Pack содержит директиву, перешло в `RUNNING` (событие `started`) | `directive.ack_changed` |
-| **«Принято агентом»** | `ACKNOWLEDGED` (директива) / ack `ACKNOWLEDGED` | структурированный итог исполнения содержит `directive_acks[{directive_id, status:"accepted"}]`, принятый Orchestrator; директива `ACKNOWLEDGED`, когда все обязательные получатели подтвердили | `directive.ack_changed`, `directive.state_changed` |
-| **«Выполнено»** | `COMPLETED` | все задачи, созданные/изменённые директивой, `SUCCEEDED` (т.е. прошли обязательные гейты); для `ASK` — принят `ANSWER`; для `PAUSE`/`RESUME`/`STOP` — run достиг целевого статуса | `directive.state_changed` |
-| «Не выполнено» | `FAILED` / `REJECTED` / `CANCELLED` | с причиной | `directive.state_changed` |
+| «Отправлено» | `DISPATCHED` | строки `directive_acknowledgements` получателей созданы (`PENDING`): задачи замены/новые задачи несут огороженный текст поручения, поручение войдёт в раздел `directives` Context Pack следующей попытки задачи-получателя (отдельного ACP `TASK_ASSIGN` оркестратор не формирует, `acp_message_id = NULL`) | `directive.state_changed` |
+| **«Доставлено»** | ack `DELIVERED` (по получателю) | попытка задачи-получателя стартовала (задача `LEASED → RUNNING`, её Context Pack содержит директиву); получатель уровня run привязывается к первой стартовавшей задаче своей роли; попытка, начатая до dispatch, поручение не получает | `directive.ack_changed` |
+| **«Принято агентом»** | `ACKNOWLEDGED` (директива) / ack `ACKNOWLEDGED` | принятый Orchestrator итог попытки, которой директива доставлена, содержит `directive_acks[{directive_id, status:"accepted"\|"not_applicable"}]`; итог без записи о директиве — неявное `accepted`; `cannot_comply` → ack `REJECTED`, директива `FAILED`; директива `ACKNOWLEDGED`, когда все получатели подтвердили | `directive.ack_changed`, `directive.state_changed` |
+| **«Выполнено»** | `COMPLETED` | все задачи-получатели и их производные по `origin_task_id` (замены, fix-задачи), кроме вытесненных, `SUCCEEDED` (т.е. прошли обязательные гейты); для `ASK`/`REVIEW` — то же для задач-получателей (ответ агента — итог его задачи; связь ACP `ANSWER` с директивой не моделируется); для `PAUSE`/`RESUME`/`STOP` — run/задача достигли целевого статуса | `directive.state_changed` |
+| «Не выполнено» | `FAILED` / `REJECTED` / `CANCELLED` | с причиной (`failure_message`): отказ агента, задача рабочего множества `FAILED`/`CANCELLED`, получатель не получил/не подтвердил директиву (ack `EXPIRED`), run завершён раньше; открытые ack при этом → `EXPIRED` | `directive.state_changed` |
 
 UI обязан показывать «доставлено», «принято агентом» и «выполнено» разными индикаторами (ТЗ §11); `COMPLETED` никогда не выставляется по факту доставки или по заявлению агента.
 
-`directive_acknowledgements.status`: `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `COMPLETED`, `FAILED` (предложенное перечисление, раздел 7).
+`directive_acknowledgements.status` (DATABASE_DESIGN §9.8): `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `REJECTED`, `EXPIRED`. SSE `recipients[].ack_status` использует эти значения; `COMPLETED`/`FAILED` в перечислении схемы сохранены для совместимости и сервером не выдаются («выполнено» — статус директивы, а не ack).
 
 ## 5. Дедупликация
 
@@ -545,7 +545,7 @@ UI обязан показывать «доставлено», «принято 
 | Перечисление `chat_message_kind`: `USER_TEXT`, `DIRECTIVE`, `AGENT_MESSAGE`, `CLI_HIGHLIGHT`, `STATUS`, `APPROVAL`, `DIRECTIVE_STATUS`, `SYSTEM_NOTICE` | ТЗ §7.2 `message_kind` без значений |
 | Перечисление `chat_sender_type`: `user`, `agent`, `system` | ТЗ §7.2 `sender_type` без значений |
 | Колонки `chat_messages`: `workspace_id`, `run_id`, `task_id`, `sender_role`, `target_role`, `provider`, `mentions text[]`, `projection_index`, `search_vector` | фильтры потоков, поиск, дедупликация |
-| Перечисление `directive_ack_status`: `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `COMPLETED`, `FAILED` | различение «доставлено/принято/выполнено» |
+| Перечисление `directive_ack_status`: `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `REJECTED`, `EXPIRED` (как CHECK `directive_acknowledgements.status`) | различение «доставлено/принято»; «выполнено» — статус директивы |
 | Колонки `outbox_events.workspace_id`, `run_id`, `aggregate_version`; `runs.last_event_seq` | RLS, порядок, назначение `seq` |
 | `run_event_log.source_event_id` | идемпотентная проекция |
 | SSE `run.completed` эмитируется для всех терминальных статусов run (`COMPLETED`, `FAILED`, `CANCELLED`) с полем `final_status` | имя типа из ТЗ; UI нужен единый сигнал завершения |

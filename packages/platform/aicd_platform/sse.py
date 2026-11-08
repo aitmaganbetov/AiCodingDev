@@ -37,6 +37,10 @@ PERSISTED_TYPES: frozenset[str] = frozenset(
         "chat.message",
     }
 )
+# Доменные события, проецируемые в SSE под другим типом (EVENT_SCHEMAS §2): изменение ack поручения —
+# SSE `directive.state_changed` с полем `recipients` (статус поручения не меняется).
+PROJECTED_ALIASES: dict[str, str] = {"directive.ack_changed": "directive.state_changed"}
+PROJECTED_TYPES: frozenset[str] = PERSISTED_TYPES | frozenset(PROJECTED_ALIASES)
 TERMINAL_TYPE = "run.completed"
 CLI_OUTPUT_MAX_BYTES = 8192  # ADR-0011 п.5
 CLI_OUTPUT_MAX_CHARS = 4096  # схема cli_output.text maxLength
@@ -89,6 +93,24 @@ _FAILURE = frozenset(
     }
 )
 _APPROVER_ROLES = frozenset({"owner", "admin", "developer", "reviewer"})
+_DIRECTIVE_STATUSES = frozenset(
+    {
+        "RECEIVED",
+        "IMPACT_ANALYSIS_PENDING",
+        "IMPACT_READY",
+        "AWAITING_CONFIRMATION",
+        "CONFIRMED",
+        "CHECKPOINTING",
+        "REPLANNING",
+        "DISPATCHED",
+        "ACKNOWLEDGED",
+        "COMPLETED",
+        "REJECTED",
+        "CANCELLED",
+        "FAILED",
+    }
+)
+_ACK_STATUSES = frozenset({"PENDING", "DELIVERED", "ACKNOWLEDGED", "REJECTED", "EXPIRED"})
 
 # Разрешённые поля payload по типу (additionalProperties: false в схеме).
 _ALLOWED: dict[str, frozenset[str]] = {
@@ -243,10 +265,12 @@ def _truncate_utf8(value: str, max_bytes: int, max_chars: int) -> tuple[str, boo
 
 async def project(conn: AsyncConnection, event: OutboxRecord) -> Projection | None:
     """Payload SSE для outbox-события или None (событие не проецируется в run_event_log)."""
-    if event.run_id is None or event.event_type not in PERSISTED_TYPES:
+    if event.run_id is None or event.event_type not in PROJECTED_TYPES:
         return None
     p = event.payload
     etype = event.event_type
+    if etype in ("directive.state_changed", "directive.ack_changed"):
+        return await _project_directive(conn, event)
     if etype == "run.state_changed":
         to_status = _enum(p.get("to_status", p.get("to")), _RUN_STATUSES)
         if to_status is None:
@@ -273,6 +297,47 @@ async def project(conn: AsyncConnection, event: OutboxRecord) -> Projection | No
         payload["truncated"] = bool(payload.get("truncated")) or cut
     task_id = _uuid_or_none(p.get("task_id"))
     return Projection(etype, payload, uuid.UUID(task_id) if task_id else None)
+
+
+async def _project_directive(conn: AsyncConnection, event: OutboxRecord) -> Projection | None:
+    """`directive.state_changed` / `directive.ack_changed` → SSE `directive.state_changed` (схема directive_state_changed)."""
+    p = event.payload
+    directive_id = _uuid_or_none(p.get("directive_id")) or str(event.aggregate_id)
+    directive_type = p.get("directive_type")
+    if not isinstance(directive_type, str):  # события до добавления поля — тип дочитывается из БД
+        directive_type = (
+            await conn.execute(text("SELECT directive_type FROM user_directives WHERE id = :id"), {"id": directive_id})
+        ).scalar_one_or_none()
+    if event.event_type == "directive.ack_changed":
+        to_status = _enum(p.get("status"), _DIRECTIVE_STATUSES)
+        from_status = to_status
+    else:
+        to_status = _enum(p.get("to_status", p.get("to")), _DIRECTIVE_STATUSES)
+        from_status = _enum(p.get("from_status", p.get("from")), _DIRECTIVE_STATUSES)
+    if to_status is None or not isinstance(directive_type, str):
+        return None
+    payload: dict[str, Any] = {
+        "directive_id": directive_id,
+        "directive_type": directive_type,
+        "from_status": from_status,
+        "to_status": to_status,
+    }
+    if isinstance(p.get("reason"), str):
+        payload["reason"] = _str(p["reason"], 1000)
+    if event.event_type == "directive.ack_changed":
+        ack_status = _enum(p.get("ack_status"), _ACK_STATUSES)
+        if ack_status is None or not isinstance(p.get("recipient_role"), str):
+            return None
+        payload["recipients"] = [
+            {
+                "role": p["recipient_role"],
+                "ack_status": ack_status,
+                "execution_id": _uuid_or_none(p.get("execution_id")),
+                "at": p.get("at") if isinstance(p.get("at"), str) else None,
+            }
+        ]
+    task_id = _uuid_or_none(p.get("recipient_task_id"))
+    return Projection("directive.state_changed", payload, uuid.UUID(task_id) if task_id else None)
 
 
 async def _project_task(conn: AsyncConnection, event: OutboxRecord) -> Projection | None:

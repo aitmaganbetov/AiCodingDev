@@ -31,7 +31,7 @@ from aicd_code_intelligence.context.retrieval import ContextPack, RetrievalReque
 from aicd_code_intelligence.context.snapshot import DEFAULT_ENSURE_TIMEOUT_SECONDS, ensure_snapshot
 from aicd_code_intelligence.context.store import StoredPack, record_retrieval, store_context_pack
 from aicd_collaboration.acp import AcpBroker
-from aicd_orchestration import agent_io
+from aicd_orchestration import agent_io, directives
 from aicd_orchestration import worktrees as wt
 from aicd_orchestration.agent_io import AgentContext, AgentIoSummary, InboxMessage
 from aicd_orchestration.agents.prompt import AssembledPrompt
@@ -136,8 +136,13 @@ class CliTaskExecutor:
                 )
             ).one()
             inbox = await agent_io.load_inbox(conn, run_id=run["id"], task_id=task["id"], role=role)
+            # Поручения, доставляемые этой попыткой (ack DELIVERED на старте): раздел directives с directive_id.
+            directive_context = await directives.prompt_fragments(conn, task["id"])
         pack = await self._context_pack(task=task, run=run, project_id=repo_row.project_id, inbox=inbox)
-        context = agent_io.pack_fragments(pack.fragments, base_commit=run["base_commit_sha"]) if pack else []
+        context = [
+            *directive_context,
+            *(agent_io.pack_fragments(pack.fragments, base_commit=run["base_commit_sha"]) if pack else []),
+        ]
         # Промпт собирается до worktree: ошибка сборки (недопустимые поля задачи) не оставляет мусора.
         prompt = agent_io.assemble_prompt(task, run, inbox, context)
         template_ref = str(prompt.manifest["instruction_template_version"])

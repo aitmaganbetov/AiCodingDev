@@ -71,7 +71,7 @@ class CommandBody(BaseModel):
 
 
 def _ack_status(value: str) -> str:
-    return value if value in ("PENDING", "DELIVERED", "ACKNOWLEDGED") else "FAILED"
+    return value if value in ("PENDING", "DELIVERED", "ACKNOWLEDGED", "REJECTED", "EXPIRED") else "FAILED"
 
 
 def directive_view(d: dict[str, Any]) -> dict[str, Any]:
@@ -105,6 +105,7 @@ def directive_view(d: dict[str, Any]) -> dict[str, Any]:
         "delivery": {
             "state": service.delivery_state(d["status"], [a["status"] for a in acks]),
             "acknowledgements": [{"recipient_role": a["recipient_role"], "status": _ack_status(a["status"]),
+                                  "task_id": a["recipient_task_id"], "delivered_at": a["delivered_at"],
                                   "acknowledged_at": a["acknowledged_at"]} for a in acks],
         },
         "completion": {"state": service.completion_state(d["status"]), "resulting_task_ids": resulting,

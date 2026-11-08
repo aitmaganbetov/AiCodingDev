@@ -125,6 +125,9 @@ class Orchestrator:
     artifacts: ArtifactStore | None = None
     worker_id: str = field(default_factory=lambda: leases.worker_identity("orchestrator"))
     lease_ttl_seconds: int = 120
+    # Период проверки флага остановки исполняющейся попытки (pause/cancel run, поручение): исполнитель живёт
+    # в процессе exec, а команды приходят в API/orchestrator — сигнал передаётся через состояние БД.
+    cancel_poll_seconds: float = 5.0
     # Документация по запросу агента (BLOCKED DOCS_REQUIRED, ACP §9.4): approvals, ledger загрузок, решения ACP.
     docs_approvals: DocsApprovals = field(default_factory=DocsApprovals)
     docs_ledger: DocsLedger = field(default_factory=DocsLedger)
@@ -433,6 +436,8 @@ class Orchestrator:
                 .scalars()
                 .all()
             )
+            # Отмена run завершает отправленные поручения (FAILED, ack EXPIRED) — та же транзакция.
+            await directives.reconcile_run(conn, run_id)
         reason = "pause" if status == "PAUSED" else "run_cancel"
         for task_id in running:
             hook = self._cancel_hooks.get(task_id)
@@ -484,116 +489,125 @@ class Orchestrator:
 
     # ---------- scheduler ----------
     async def tick(self, run_id: uuid.UUID, ws: uuid.UUID) -> list[uuid.UUID]:
-        """Продвигает DAG: PENDING→READY, RETRY_WAIT→READY, завершение/блокировка run. Возвращает READY."""
+        """Продвигает DAG: PENDING→READY, RETRY_WAIT→READY, завершение/блокировка run. Возвращает READY.
+
+        В той же транзакции продвигаются отправленные поручения run (доставка → подтверждение → выполнено),
+        т.к. tick вызывается после каждого перехода задачи/run (события outbox и исполнитель).
+        """
         async with transaction(self.engine, self._ctx(ws)) as conn:
-            run = await _run_row(conn, run_id, lock=True)
-            if run is not None and run["status"] == "BLOCKED":
-                # Run блокируется только сводно по задачам (tasks_blocked); когда заблокированных задач не осталось
-                # (провайдер вернулся, approval решён), run возобновляется сам (ROUTING_POLICY §4.1).
-                still_blocked = (
-                    await conn.execute(
-                        text(
-                            "SELECT 1 FROM tasks WHERE run_id = :r AND status = 'BLOCKED' AND superseded_at IS NULL LIMIT 1"
-                        ),
-                        {"r": run_id},
-                    )
-                ).first()
-                if still_blocked is None:
-                    await store.transition_run(conn, run_id, "RUNNING", reason="tasks_unblocked")
-                    run = await _run_row(conn, run_id)
-            if run is None or run["status"] != "RUNNING":
-                return []
-            # Задачи, отменённые на safe point по поручению, выходят из текущего плана (иначе run не завершится).
-            await directives.finalize_superseded(conn, run_id)
-            ready_now = (
-                (
-                    await conn.execute(
-                        text(
-                            "SELECT t.id FROM tasks t WHERE t.run_id = :r AND t.superseded_at IS NULL AND t.status = 'PENDING'"
-                            " AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks p ON p.id = d.depends_on_task_id"
-                            "   WHERE d.task_id = t.id AND p.status <> 'SUCCEEDED')"
-                            # зависимость завершена, только когда завершены и её производные по origin_task_id
-                            # (fix/повторное ревью цикла) — кроме самой задачи t и её собственных предков
-                            " AND NOT EXISTS (WITH RECURSIVE der(id) AS ("
-                            "   SELECT c.id FROM task_dependencies d JOIN tasks c ON c.origin_task_id = d.depends_on_task_id"
-                            "   WHERE d.task_id = t.id"
-                            "   UNION SELECT c.id FROM tasks c JOIN der ON c.origin_task_id = der.id)"
-                            "   SELECT 1 FROM der JOIN tasks x ON x.id = der.id"
-                            "   WHERE x.status <> 'SUCCEEDED' AND x.superseded_at IS NULL AND x.id <> t.id"
-                            "   AND x.origin_task_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM task_dependencies dd"
-                            "     WHERE dd.task_id = x.id AND dd.depends_on_task_id = t.id))"
-                        ),
-                        {"r": run_id},
-                    )
+            ready = await self._tick(conn, run_id)
+            await directives.reconcile_run(conn, run_id)
+        return ready
+
+    async def _tick(self, conn: AsyncConnection, run_id: uuid.UUID) -> list[uuid.UUID]:
+        run = await _run_row(conn, run_id, lock=True)
+        if run is not None and run["status"] == "BLOCKED":
+            # Run блокируется только сводно по задачам (tasks_blocked); когда заблокированных задач не осталось
+            # (провайдер вернулся, approval решён), run возобновляется сам (ROUTING_POLICY §4.1).
+            still_blocked = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM tasks WHERE run_id = :r AND status = 'BLOCKED' AND superseded_at IS NULL LIMIT 1"
+                    ),
+                    {"r": run_id},
                 )
-                .scalars()
-                .all()
-            )
-            for task_id in ready_now:
-                await store.transition_task(conn, task_id, "READY", reason="dependencies_succeeded")
-            due = (
-                (
-                    await conn.execute(
-                        text(
-                            "SELECT id FROM tasks WHERE run_id = :r AND status = 'RETRY_WAIT' AND next_attempt_at <= now()"
-                        ),
-                        {"r": run_id},
-                    )
+            ).first()
+            if still_blocked is None:
+                await store.transition_run(conn, run_id, "RUNNING", reason="tasks_unblocked")
+                run = await _run_row(conn, run_id)
+        if run is None or run["status"] != "RUNNING":
+            return []
+        # Задачи, отменённые на safe point по поручению, выходят из текущего плана (иначе run не завершится).
+        await directives.finalize_superseded(conn, run_id)
+        ready_now = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT t.id FROM tasks t WHERE t.run_id = :r AND t.superseded_at IS NULL AND t.status = 'PENDING'"
+                        " AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks p ON p.id = d.depends_on_task_id"
+                        "   WHERE d.task_id = t.id AND p.status <> 'SUCCEEDED')"
+                        # зависимость завершена, только когда завершены и её производные по origin_task_id
+                        # (fix/повторное ревью цикла) — кроме самой задачи t и её собственных предков
+                        " AND NOT EXISTS (WITH RECURSIVE der(id) AS ("
+                        "   SELECT c.id FROM task_dependencies d JOIN tasks c ON c.origin_task_id = d.depends_on_task_id"
+                        "   WHERE d.task_id = t.id"
+                        "   UNION SELECT c.id FROM tasks c JOIN der ON c.origin_task_id = der.id)"
+                        "   SELECT 1 FROM der JOIN tasks x ON x.id = der.id"
+                        "   WHERE x.status <> 'SUCCEEDED' AND x.superseded_at IS NULL AND x.id <> t.id"
+                        "   AND x.origin_task_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM task_dependencies dd"
+                        "     WHERE dd.task_id = x.id AND dd.depends_on_task_id = t.id))"
+                    ),
+                    {"r": run_id},
                 )
-                .scalars()
-                .all()
             )
-            for task_id in due:
-                await store.transition_task(conn, task_id, "READY", reason="backoff_elapsed")
-            tasks = await _tasks(conn, run_id)
-            statuses = [t["status"] for t in tasks]
-            failed = [t for t in tasks if t["status"] == "FAILED"]
-            if failed:
-                await _cancel_open_tasks(conn, run_id)
+            .scalars()
+            .all()
+        )
+        for task_id in ready_now:
+            await store.transition_task(conn, task_id, "READY", reason="dependencies_succeeded")
+        due = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT id FROM tasks WHERE run_id = :r AND status = 'RETRY_WAIT' AND next_attempt_at <= now()"
+                    ),
+                    {"r": run_id},
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for task_id in due:
+            await store.transition_task(conn, task_id, "READY", reason="backoff_elapsed")
+        tasks = await _tasks(conn, run_id)
+        statuses = [t["status"] for t in tasks]
+        failed = [t for t in tasks if t["status"] == "FAILED"]
+        if failed:
+            await _cancel_open_tasks(conn, run_id)
+            await store.transition_run(
+                conn,
+                run_id,
+                "FAILED",
+                reason="task_failed",
+                extra={
+                    "failure_category": failed[0]["failure_category"] or "INTERNAL_ERROR",
+                    "failure_message": f"задача {failed[0]['task_key']} завершилась неуспешно",
+                },
+            )
+            return []
+        if statuses and all(s == "SUCCEEDED" for s in statuses):
+            await store.transition_run(conn, run_id, "VERIFYING", reason="all_tasks_succeeded")
+            # Guard завершения (P6-09, QUALITY_GATES §5.3): обязательные gates PASS на финальном commit с
+            # полным evidence, нет открытых блокирующих findings; guard БД (§18.4) — второй рубеж.
+            # Сначала compliance.evaluate(run): вердикты контролей на финальном commit пишутся в
+            # compliance_results, иначе блокирующие контроли (§5.3 п.6) guard'ом не учитываются.
+            await evaluate_compliance(conn, run_id)
+            verdict = await run_completion_verdict(conn, run_id, store=self.artifacts)
+            if not verdict.ok:
                 await store.transition_run(
                     conn,
                     run_id,
                     "FAILED",
-                    reason="task_failed",
-                    extra={
-                        "failure_category": failed[0]["failure_category"] or "INTERNAL_ERROR",
-                        "failure_message": f"задача {failed[0]['task_key']} завершилась неуспешно",
-                    },
+                    reason="completion_guard_rejected",
+                    extra={"failure_category": "GATE_FAILED", "failure_message": verdict.summary()[:2000]},
                 )
                 return []
-            if statuses and all(s == "SUCCEEDED" for s in statuses):
-                await store.transition_run(conn, run_id, "VERIFYING", reason="all_tasks_succeeded")
-                # Guard завершения (P6-09, QUALITY_GATES §5.3): обязательные gates PASS на финальном commit с
-                # полным evidence, нет открытых блокирующих findings; guard БД (§18.4) — второй рубеж.
-                # Сначала compliance.evaluate(run): вердикты контролей на финальном commit пишутся в
-                # compliance_results, иначе блокирующие контроли (§5.3 п.6) guard'ом не учитываются.
-                await evaluate_compliance(conn, run_id)
-                verdict = await run_completion_verdict(conn, run_id, store=self.artifacts)
-                if not verdict.ok:
-                    await store.transition_run(
-                        conn,
-                        run_id,
-                        "FAILED",
-                        reason="completion_guard_rejected",
-                        extra={"failure_category": "GATE_FAILED", "failure_message": verdict.summary()[:2000]},
-                    )
-                    return []
-                await store.transition_run(conn, run_id, "COMPLETED", reason="required_gates_passed")
-                return []
-            # PENDING с выполненными зависимостями уже переведены в READY выше; оставшиеся PENDING ждут
-            # незавершённых предков и сами не продвинутся, если в работе ничего нет (иначе run «висит» в RUNNING).
-            active = {"READY", "LEASED", "RUNNING", "VERIFYING", "RETRY_WAIT"}
-            blocked = [t for t in tasks if t["status"] == "BLOCKED"]
-            if blocked and not any(s in active for s in statuses):
-                await store.transition_run(
-                    conn,
-                    run_id,
-                    "BLOCKED",
-                    reason="tasks_blocked",
-                    extra={"blocked_reason": blocked[0]["blocked_reason"]},
-                )
-                return []
-            return await _dispatchable(conn, run)
+            await store.transition_run(conn, run_id, "COMPLETED", reason="required_gates_passed")
+            return []
+        # PENDING с выполненными зависимостями уже переведены в READY выше; оставшиеся PENDING ждут
+        # незавершённых предков и сами не продвинутся, если в работе ничего нет (иначе run «висит» в RUNNING).
+        active = {"READY", "LEASED", "RUNNING", "VERIFYING", "RETRY_WAIT"}
+        blocked = [t for t in tasks if t["status"] == "BLOCKED"]
+        if blocked and not any(s in active for s in statuses):
+            await store.transition_run(
+                conn,
+                run_id,
+                "BLOCKED",
+                reason="tasks_blocked",
+                extra={"blocked_reason": blocked[0]["blocked_reason"]},
+            )
+            return []
+        return await _dispatchable(conn, run)
 
     # ---------- task execution ----------
     async def execute_task(self, task_id: uuid.UUID, ws: uuid.UUID) -> None:
@@ -677,7 +691,10 @@ class Orchestrator:
                 {"id": attempt_id, "ws": ws, "t": task_id, "n": attempt_no, "p": provider, "tok": lease.fencing_token},
             )
             await store.transition_task(conn, task_id, "RUNNING", reason="execution_started")
+            # Поручения, адресованные задаче, уходят агенту с этой попыткой (EVENT_SCHEMAS §4 «Доставлено»).
+            await directives.mark_delivered(conn, task_id)
         heartbeat = asyncio.create_task(self._heartbeat(lease, ws))
+        watcher = asyncio.create_task(self._watch_cancel(task_id, ws))
         started = utcnow()
         try:
             outcome = await self.executor.execute(
@@ -693,13 +710,30 @@ class Orchestrator:
             outcome = TaskExecution("failed", "WORKER_CRASH", None, provider, None, None, uuid.uuid4())
             del exc
         finally:
-            heartbeat.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat
+            for background in (heartbeat, watcher):
+                background.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await background
             self._cancel_hooks.pop(task_id, None)
         spent = int((utcnow() - started).total_seconds())
         await self._finish_attempt(task_id, ws, lease, attempt_id, outcome, spent, run)
         await self.tick(task["run_id"], ws)
+
+    async def _watch_cancel(self, task_id: uuid.UUID, ws: uuid.UUID) -> None:
+        """Межпроцессный safe point (DATA_FLOW §6.2): pause/cancel run или применённое поручение фиксируются в БД
+        другим процессом (API, orchestrator); исполнитель видит флаг и штатно останавливает свой CLI-процесс."""
+        while True:
+            await asyncio.sleep(self.cancel_poll_seconds)
+            try:
+                async with transaction(self.engine, self._ctx(ws)) as conn:
+                    reason = await directives.task_cancel_reason(conn, task_id)
+            except Exception:
+                log.warning("cancel check failed", exc_info=True, extra={"task_id": str(task_id)})
+                continue
+            hook = self._cancel_hooks.get(task_id)
+            if reason is not None and hook is not None:  # хук появляется, когда процесс CLI подготовлен
+                await hook(reason)
+                return
 
     async def _heartbeat(self, lease: leases.Lease, ws: uuid.UUID) -> None:
         while True:
@@ -766,6 +800,15 @@ class Orchestrator:
             task = await _task_row(conn, task_id)
             if task is None:  # pragma: no cover
                 return
+            if (
+                outcome.status == "completed"
+                and rejected_category is None
+                and io is not None
+                and io.result_status == "parsed"
+                and task["status"] != "CANCELLED"
+            ):
+                # Итог агента принят: доставленные поручения подтверждены/отклонены (EVENT_SCHEMAS §4).
+                await directives.acknowledge(conn, task_id, io.directive_acks, execution_id=outcome.execution_id)
             analysis_done = (
                 read_only
                 and outcome.status == "completed"

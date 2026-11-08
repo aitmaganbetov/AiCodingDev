@@ -2653,9 +2653,14 @@ components:
       description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
     DirectiveAckStatus:
       type: string
-      enum: [PENDING, DELIVERED, ACKNOWLEDGED, FAILED]
+      enum: [PENDING, DELIVERED, ACKNOWLEDGED, REJECTED, EXPIRED, FAILED]
       x-proposed-enum: true
-      description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+      description: >-
+        Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+        Значения — `directive_acknowledgements.status` (DATABASE_DESIGN §9.8): DELIVERED — попытка задачи-получателя
+        стартовала с поручением; ACKNOWLEDGED — итог агента принят (accepted/not_applicable); REJECTED — агент ответил
+        cannot_comply; EXPIRED — получатель не получил/не подтвердил поручение до завершения задачи или run.
+        FAILED сохранено для совместимости и сервером не выдаётся.
     ArtifactKind:
       type: string
       enum: [git_diff, test_report, scan_report, sbom, context_pack, cli_output, raw_cli_log, run_report, other, coverage_report,
@@ -3975,6 +3980,13 @@ components:
       properties:
         recipient_role: {$ref: '#/components/schemas/AgentRole'}
         status: {$ref: '#/components/schemas/DirectiveAckStatus'}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+          description: задача-получатель (null — получатель уровня run, ещё не привязан к задаче)
+        delivered_at:
+          type: [string, 'null']
+          format: date-time
         acknowledged_at:
           type: [string, 'null']
           format: date-time
@@ -4436,15 +4448,42 @@ components:
       description: Payload SSE (sse-event.schema.json#/$defs/directive_impact_ready); итоговое влияние — Directive.impact_status.
     DirectiveStateChangedPayload:
       type: object
+      description: >-
+        Переход Directive FSM либо изменение ack получателя (доменное `directive.ack_changed`: from_status = to_status,
+        поле `recipients`). Нормативная схема — sse-event.schema.json `directive_state_changed`.
       properties:
         directive_id: {type: string, format: uuid}
-        from_status: {$ref: '#/components/schemas/DirectiveStatus'}
+        directive_type: {$ref: '#/components/schemas/DirectiveType'}
+        from_status:
+          oneOf:
+          - {$ref: '#/components/schemas/DirectiveStatus'}
+          - {type: 'null'}
         to_status: {$ref: '#/components/schemas/DirectiveStatus'}
+        reason: {type: string, maxLength: 1000}
+        recipients:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              role: {$ref: '#/components/schemas/AgentRole'}
+              ack_status:
+                type: string
+                enum: [PENDING, DELIVERED, ACKNOWLEDGED, REJECTED, EXPIRED, COMPLETED, FAILED]
+              execution_id:
+                type: [string, 'null']
+                format: uuid
+              at:
+                type: [string, 'null']
+                format: date-time
+            required: [role, ack_status]
         acknowledgement:
+          description: устарело (не выдаётся сервером); используйте `recipients`
           oneOf:
           - {$ref: '#/components/schemas/DirectiveAck'}
           - {type: 'null'}
-      required: [directive_id, from_status, to_status]
+      required: [directive_id, directive_type, from_status, to_status]
     ApprovalRequestedPayload:
       type: object
       properties:

@@ -9,7 +9,8 @@
 Сценарии `agent_*` (Phase 4, ACP §9.2) дополнительно пишут итог AgentResult 1.0 в `.aicd/result.json` и отчёты
 в `output/` (относительно cwd; платформа направляет оба каталога в отдельный каталог вывода исполнения).
 Роль берётся из `instruction_template_version` (task.json), входящие сообщения — из раздела inbox промпта
-(`--prompt-text-file`): строки-JSON с ключом `message_id` внутри ограждений UNTRUSTED.
+(`--prompt-text-file`): строки-JSON с ключом `message_id` внутри ограждений UNTRUSTED; поручения раздела
+directives (строки-JSON с `directive_id`) подтверждаются в `directive_acks` итога (`accepted`).
 """
 
 from __future__ import annotations
@@ -55,6 +56,21 @@ def inbox_of(prompt: str) -> list[dict[str, object]]:
         if isinstance(obj, dict):
             found.append(obj)
     return found
+
+
+def directive_acks(prompt: str) -> dict[str, object]:
+    """`directive_acks` итога: подтверждение поручений раздела directives промпта (строки-JSON с `directive_id`)."""
+    acks: list[dict[str, object]] = []
+    for line in prompt.splitlines():
+        if not line.startswith('{"directive_id"'):
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("directive_id"), str):
+            acks.append({"directive_id": obj["directive_id"], "status": "accepted"})
+    return {"directive_acks": acks[:20]} if acks else {}
 
 
 def write_output(name: str, data: str) -> tuple[str, str]:
@@ -128,6 +144,7 @@ def agent_develop(task: dict[str, object], prompt: str, base: str) -> int:
                 },
             },
         ],
+        **directive_acks(prompt),
     }
     write_result(result)
     return finish("создан FAKE_CHANGE.md", "implementation_completed")
@@ -192,13 +209,14 @@ def agent_review(task: dict[str, object], prompt: str, *, approve: bool) -> int:
             "claims": [{"type": "review_completed", "summary": verdict}],
             "declared_outputs": [{"kind": "review_report", "path": report_ref}],
             "acp_messages": messages,
+            **directive_acks(prompt),
         }
     )
     return finish(f"ревью: {verdict}", "review_completed")
 
 
 def agent_complete(task: dict[str, object], prompt: str, role: str) -> int:
-    del task, prompt
+    del task
     payload: dict[str, object] = {
         "summary": "Задача выполнена",
         "claims": [{"type": "analysis_completed", "evidence_refs": []}],
@@ -212,6 +230,7 @@ def agent_complete(task: dict[str, object], prompt: str, role: str) -> int:
             "summary": "Задача выполнена",
             "claims": [{"type": "analysis_completed"}],
             "acp_messages": [{"to_role": "orchestrator", "type": "TASK_COMPLETED", "payload": payload}],
+            **directive_acks(prompt),
         }
     )
     return finish("задача выполнена", "analysis_completed")
