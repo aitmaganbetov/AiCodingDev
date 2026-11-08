@@ -100,7 +100,9 @@
       "basic": "Базовые проверки.",
       "strict": "Расширенные проверки (по умолчанию).",
       "critical": "Максимальные требования для критичных систем."
-    }
+    },
+    "runsLink": "Запуски",
+    "runsLinkLabel": "Запуски проекта «{{name}}»"
   },
   "enums": {
     "workspace_role": {
@@ -123,6 +125,71 @@
     "project_status": {
       "ACTIVE": "Активен",
       "ARCHIVED": "В архиве"
+    },
+    "run_mode": {
+      "CREATE": "Создание (CREATE)",
+      "DEVELOP": "Разработка (DEVELOP)",
+      "DEBUG": "Отладка (DEBUG)",
+      "AUDIT": "Аудит (AUDIT)",
+      "MODERNIZE": "Модернизация (MODERNIZE)",
+      "SECURITY": "Безопасность (SECURITY)",
+      "OPTIMIZE": "Оптимизация (OPTIMIZE)",
+      "TEST": "Тестирование (TEST)",
+      "MAINTAIN": "Сопровождение (MAINTAIN)",
+      "DOCUMENT": "Документирование (DOCUMENT)",
+      "REVIEW": "Ревью (REVIEW)"
+    },
+    "run_status": {
+      "CREATED": "Создан",
+      "DISCOVERY": "Исследование",
+      "PLANNED": "Спланирован",
+      "AWAITING_APPROVAL": "Ожидает одобрения",
+      "RUNNING": "Выполняется",
+      "VERIFYING": "Проверка",
+      "COMPLETED": "Завершён",
+      "PAUSED": "Приостановлен",
+      "BLOCKED": "Заблокирован",
+      "FAILED": "Ошибка",
+      "CANCELLED": "Отменён"
+    },
+    "task_status": {
+      "PENDING": "Ожидает",
+      "READY": "Готова",
+      "LEASED": "Назначена",
+      "RUNNING": "Выполняется",
+      "VERIFYING": "Проверка",
+      "SUCCEEDED": "Успешно",
+      "BLOCKED": "Заблокирована",
+      "RETRY_WAIT": "Ожидает повтора",
+      "FAILED": "Ошибка",
+      "CANCELLED": "Отменена"
+    },
+    "blocked_reason": {
+      "APPROVAL_REQUIRED": "Требуется одобрение",
+      "PROVIDER_UNAVAILABLE": "Провайдер CLI недоступен",
+      "AUTH_REQUIRED": "Требуется аутентификация провайдера",
+      "DIRECTIVE_REPLAN": "Перепланирование по директиве",
+      "RUN_PAUSED": "Run приостановлен",
+      "DOCS_REQUIRED": "Требуется документация",
+      "MANUAL_REVIEW": "Требуется ручная проверка",
+      "REVIEW_LOOP_EXHAUSTED": "Исчерпан цикл ревью",
+      "DEPENDENCY_FAILED": "Ошибка зависимости"
+    },
+    "agent_role": {
+      "requirements": "Аналитик требований",
+      "architect": "Архитектор",
+      "planner": "Планировщик",
+      "developer": "Разработчик",
+      "reviewer": "Ревьюер",
+      "security": "Безопасность",
+      "qa": "QA",
+      "database": "Базы данных",
+      "performance": "Производительность",
+      "devops": "DevOps",
+      "maintenance": "Сопровождение",
+      "documentation": "Документация",
+      "orchestrator": "Оркестратор",
+      "user": "Пользователь"
     }
   },
   "notFound": {
@@ -161,5 +228,100 @@
     "internal_error": "Внутренняя ошибка сервера. Повторите попытку позже.",
     "provider_unavailable": "Провайдер CLI недоступен.",
     "service_unavailable": "Сервис временно недоступен. Повторите попытку позже."
+  },
+  "runs": {
+    "title": "Запуски · {{project}}",
+    "titleFallback": "Запуски проекта",
+    "listLabel": "Список запусков",
+    "loading": "Загрузка запусков…",
+    "emptyTitle": "Запусков пока нет",
+    "emptyDescription": "Опишите цель и запустите первый run.",
+    "emptyDescriptionReadOnly": "Запускать run могут владелец, администраторы и разработчики.",
+    "backToProjects": "К списку проектов",
+    "backToRuns": "К списку запусков",
+    "open": "Открыть run",
+    "startTitle": "Новый запуск",
+    "mode": "Режим",
+    "objective": "Цель",
+    "objectiveHint": "Что нужно сделать. Не более {{max}} символов.",
+    "start": "Запустить",
+    "starting": "Запуск…",
+    "status": "Статус",
+    "createdAt": "Создан",
+    "projectNotFound": "Проект не найден или у вас нет к нему доступа — запуск не создан."
+  },
+  "run": {
+    "title": "Run · {{mode}}",
+    "loading": "Загрузка run…",
+    "objective": "Цель",
+    "mode": "Режим",
+    "status": "Статус",
+    "blockedReason": "Причина блокировки",
+    "pendingApprovals": "Ожидают одобрения",
+    "taskCounts": "Задачи по статусам",
+    "requestedBy": "Инициатор",
+    "createdAt": "Создан",
+    "controls": "Управление run",
+    "pause": "Приостановить",
+    "resume": "Возобновить",
+    "cancel": "Отменить run",
+    "cancelConfirm": "Отменить run? Незавершённые задачи будут отменены.",
+    "cancelYes": "Да, отменить",
+    "cancelNo": "Нет",
+    "commandSending": "Отправка команды…",
+    "commandAccepted": {
+      "pause": "Команда «приостановить» принята.",
+      "resume": "Команда «возобновить» принята.",
+      "cancel": "Команда «отменить» принята."
+    },
+    "tasks": "Задачи",
+    "tasksLoading": "Загрузка задач…",
+    "tasksEmpty": "Задач пока нет — план ещё не построен.",
+    "tasksCaption": "Задачи run (план v{{version}})",
+    "col": {
+      "title": "Задача",
+      "role": "Роль",
+      "status": "Статус",
+      "attempts": "Попытки",
+      "dependsOn": "Зависит от"
+    },
+    "attempts": "{{count}} из {{max}}",
+    "noDependencies": "—",
+    "unknownTask": "задача {{id}}",
+    "feed": "Лента событий",
+    "feedEmpty": "Событий пока нет.",
+    "feedLabel": "События run",
+    "feedTrimmed": "Показаны последние {{count}} событий.",
+    "stream": {
+      "connecting": "Подключение к потоку событий…",
+      "open": "Поток событий подключён.",
+      "reconnecting": "Связь потеряна, переподключение…",
+      "closed": "Run завершён, поток событий закрыт.",
+      "failed": "Поток событий недоступен."
+    },
+    "resynced": "Часть истории событий вне окна хранения — состояние перечитано, лента продолжена с текущего момента.",
+    "reconnect": "Переподключиться"
+  },
+  "event": {
+    "type": {
+      "run.state_changed": "Статус run",
+      "task.state_changed": "Статус задачи",
+      "agent.message": "Сообщение агента",
+      "cli.output": "Вывод CLI",
+      "directive.impact_ready": "Анализ директивы",
+      "directive.state_changed": "Статус директивы",
+      "approval.requested": "Запрос одобрения",
+      "approval.decided": "Решение по одобрению",
+      "gate.completed": "Проверка качества",
+      "run.completed": "Run завершён",
+      "chat.message": "Сообщение чата"
+    },
+    "transition": "{{from}} → {{to}}",
+    "taskTransition": "«{{task}}»: {{from}} → {{to}}",
+    "agentMessage": "{{from}} → {{to}}: {{summary}}",
+    "gate": "{{gate}}: {{status}}",
+    "approvalDecided": "{{action}}: {{status}}",
+    "runCompleted": "Итог: {{status}}; обязательные проверки {{passed}} из {{total}}",
+    "seq": "№ {{seq}}"
   }
 }

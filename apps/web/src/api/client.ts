@@ -26,6 +26,16 @@ export type Problem = Schemas['Problem'];
 export type FieldError = Schemas['FieldError'];
 export type DocumentationMode = Schemas['DocumentationMode'];
 export type QualityProfile = Schemas['QualityProfile'];
+export type RunMode = Schemas['RunMode'];
+export type RunStatus = Schemas['RunStatus'];
+export type RunSummary = Schemas['RunSummary'];
+export type Run = Schemas['Run'];
+export type RunPage = Schemas['RunPage'];
+export type TaskStatus = Schemas['TaskStatus'];
+export type TaskSummary = Schemas['TaskSummary'];
+export type TaskGraph = Schemas['TaskGraph'];
+export type RunCommand = Schemas['RunCommandAccepted']['command'];
+export type SseEventType = Schemas['SseEventType'];
 
 type JsonBody<Op extends keyof operations> = NonNullable<operations[Op]['requestBody']> extends {
   content: { 'application/json': infer B };
@@ -41,6 +51,9 @@ export type WorkspaceCreateRequest = JsonBody<'createWorkspace'>;
 export type ProjectCreateRequest = JsonBody<'createProject'>;
 export type ListWorkspacesQuery = Query<'listWorkspaces'>;
 export type ListProjectsQuery = Query<'listProjects'>;
+export type RunCreateRequest = JsonBody<'createRun'>;
+export type ListRunsQuery = Query<'listRuns'>;
+export type RunTasksQuery = Query<'getRunTasks'>;
 
 /** Коды, которые клиент порождает сам (их нет в контракте). */
 export type ClientErrorCode = 'network_error' | 'unknown_error';
@@ -228,10 +241,12 @@ type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 interface RequestOptions {
   method: Method;
   path: string;
-  query?: Record<string, string | number | undefined | null> | undefined;
+  query?: Record<string, string | number | readonly string[] | undefined | null> | undefined;
   body?: unknown;
   idempotencyKey?: string | undefined;
   workspaceId?: string | undefined;
+  /** Optimistic locking (API_DESIGN §9): If-Match: "v<version>". */
+  ifMatchVersion?: number | undefined;
   /** false — не отправлять X-CSRF-Token (только POST /auth/login). */
   csrf?: boolean;
   /** false — 401 не вызывает переход на вход (login, session, logout). */
@@ -243,7 +258,8 @@ function buildUrl(path: string, query: RequestOptions['query']): string {
   const params = new URLSearchParams();
   if (query) {
     for (const [k, v] of Object.entries(query)) {
-      if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
+      if (Array.isArray(v)) for (const item of v) params.append(k, String(item));
+      else if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
     }
   }
   const qs = params.toString();
@@ -280,6 +296,7 @@ export async function request<T>(opts: RequestOptions): Promise<T> {
   }
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
   if (opts.workspaceId) headers['X-Workspace-Id'] = opts.workspaceId;
+  if (opts.ifMatchVersion !== undefined) headers['If-Match'] = `"v${opts.ifMatchVersion}"`;
 
   // Повторять можно только то, что безопасно: GET или POST с Idempotency-Key.
   const retryable = !unsafe || Boolean(opts.idempotencyKey);
@@ -325,6 +342,38 @@ export async function request<T>(opts: RequestOptions): Promise<T> {
   }
 }
 
+/**
+ * Открывает поток text/event-stream (GET /runs/{id}/events). Возвращает Response с телом-потоком;
+ * не-2xx ответ разбирается в ApiError (401 — через общий обработчик). Повторы — забота вызывающего
+ * (см. src/api/runEvents.ts): только он знает последний seq.
+ */
+export async function openEventStream(opts: {
+  path: string;
+  query?: RequestOptions['query'];
+  lastEventId?: string | undefined;
+  signal: AbortSignal;
+}): Promise<Response> {
+  const headers: Record<string, string> = { Accept: 'text/event-stream' };
+  if (opts.lastEventId !== undefined) headers['Last-Event-ID'] = opts.lastEventId;
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(opts.path, opts.query), {
+      method: 'GET',
+      headers,
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal: opts.signal,
+    });
+  } catch (cause) {
+    if (opts.signal.aborted) throw cause;
+    throw new ApiError({ status: 0, code: 'network_error', cause });
+  }
+  if (res.ok) return res;
+  const error = parseProblem(res.status, await readBody(res), res.headers.get('Retry-After'));
+  if (res.status === 401) unauthorizedHandler(error);
+  throw error;
+}
+
 // ---------------------------------------------------------------------------
 // Операции контракта, используемые web shell
 // ---------------------------------------------------------------------------
@@ -364,5 +413,40 @@ export const api = {
     idempotencyKey: string,
   ): Promise<JsonResponse<'createProject', 201>> {
     return request({ method: 'POST', path: '/projects', body, workspaceId, idempotencyKey });
+  },
+
+  getProject(projectId: string, signal?: AbortSignal): Promise<JsonResponse<'getProject', 200>> {
+    return request({ method: 'GET', path: `/projects/${encodeURIComponent(projectId)}`, signal });
+  },
+
+  listRuns(workspaceId: string, query: ListRunsQuery = {}, signal?: AbortSignal): Promise<RunPage> {
+    return request({ method: 'GET', path: '/runs', query, workspaceId, signal });
+  },
+
+  createRun(body: RunCreateRequest, idempotencyKey: string): Promise<JsonResponse<'createRun', 201>> {
+    return request({ method: 'POST', path: '/runs', body, idempotencyKey });
+  },
+
+  getRun(runId: string, signal?: AbortSignal): Promise<Run> {
+    return request({ method: 'GET', path: `/runs/${encodeURIComponent(runId)}`, signal });
+  },
+
+  getRunTasks(runId: string, query: RunTasksQuery = {}, signal?: AbortSignal): Promise<TaskGraph> {
+    return request({ method: 'GET', path: `/runs/${encodeURIComponent(runId)}/tasks`, query, signal });
+  },
+
+  /** pause | resume | cancel (202: команда принята; переход публикуется событием run.state_changed). */
+  runCommand(
+    runId: string,
+    command: RunCommand,
+    idempotencyKey: string,
+    ifMatchVersion?: number,
+  ): Promise<JsonResponse<'pauseRun', 202>> {
+    return request({
+      method: 'POST',
+      path: `/runs/${encodeURIComponent(runId)}/${command}`,
+      idempotencyKey,
+      ifMatchVersion,
+    });
   },
 };

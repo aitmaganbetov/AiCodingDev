@@ -1076,6 +1076,16 @@ export interface components {
             /** @description Для invalid_state_transition */
             current_status?: string;
             retry_after_seconds?: number;
+            /**
+             * Format: int64
+             * @description Для replay_window_exceeded (410): текущий максимальный seq run — переподключение с after_seq=last_seq (API_DESIGN §13)
+             */
+            last_seq?: number;
+            /**
+             * Format: int64
+             * @description Для replay_window_exceeded (410): наименьший seq, ещё доступный для replay
+             */
+            min_available_seq?: number;
         };
         FieldError: {
             /**
@@ -1706,6 +1716,11 @@ export interface components {
             task_id?: string | null;
             /** Format: uuid */
             execution_id?: string | null;
+            /**
+             * Format: int64
+             * @description Порядковый номер в run (как `seq` SSE)
+             */
+            seq?: number;
             event_type: string;
             payload: Record<string, never>;
             /**
@@ -1980,8 +1995,11 @@ export interface components {
             id: string;
             /** Format: uuid */
             workspace_id: string;
-            /** Format: uuid */
-            run_id: string;
+            /**
+             * Format: uuid
+             * @description null — действие вне run (например, DOCS_DOWNLOAD)
+             */
+            run_id: string | null;
             /** Format: uuid */
             task_id?: string | null;
             action_type: components["schemas"]["ApprovalActionType"];
@@ -2142,27 +2160,28 @@ export interface components {
             payload: Record<string, never>;
         };
         RunStateChangedPayload: {
-            from_status: components["schemas"]["RunStatus"];
+            from_status: components["schemas"]["RunStatus"] | null;
             to_status: components["schemas"]["RunStatus"];
             /**
              * Format: int64
-             * @description Optimistic locking version; ETag = "v<version>"
+             * @description Версия run после перехода; ETag = "v<run_version>"
              */
-            version: number;
+            run_version: number;
             blocked_reason?: components["schemas"]["TaskBlockedReason"] | null;
             reason?: string | null;
         };
         TaskStateChangedPayload: {
             /** Format: uuid */
             task_id: string;
+            title?: string;
             agent_role: components["schemas"]["AgentRole"];
-            from_status: components["schemas"]["TaskStatus"];
+            from_status: components["schemas"]["TaskStatus"] | null;
             to_status: components["schemas"]["TaskStatus"];
             /**
              * Format: int64
-             * @description Optimistic locking version; ETag = "v<version>"
+             * @description Версия задачи (на момент публикации события)
              */
-            version: number;
+            task_version: number;
             attempt_no?: number | null;
             provider?: components["schemas"]["CliProvider"] | null;
             blocked_reason?: components["schemas"]["TaskBlockedReason"] | null;
@@ -3349,6 +3368,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];

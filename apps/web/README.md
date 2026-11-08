@@ -1,6 +1,6 @@
-# apps/web — web shell (P1-13)
+# apps/web — web shell (P1-13) + Run view (P3-15)
 
-SPA AiCodingDev: вход, layout, рабочие пространства и проекты. Архитектура — ADR-0014; правила API — `docs/api/API_DESIGN.md`; контракт — `packages/contracts/openapi.yaml` (единственный источник, ADR-0013).
+SPA AiCodingDev: вход, layout, рабочие пространства, проекты, запуски (runs) и экран run с лентой событий SSE. Архитектура — ADR-0014; правила API — `docs/api/API_DESIGN.md`; контракт — `packages/contracts/openapi.yaml` (единственный источник, ADR-0013).
 
 ## Команды (pnpm, Node ≥ 22.12)
 
@@ -21,10 +21,12 @@ SPA AiCodingDev: вход, layout, рабочие пространства и п
 - `src/api/client.ts` — fetch-клиент: база `/api/v1`, `credentials: 'same-origin'`, `X-CSRF-Token` (из `SessionInfo.csrf_token`, fallback — cookie `aicd_csrf`) на небезопасных методах, `Idempotency-Key` на POST-командах (`IdempotentIntent`: один ключ на намерение, тот же ключ при повторе), `X-Workspace-Id` для `/projects`, разбор `application/problem+json` в `ApiError`, 401 → переход на `/login?next=…`. Автоповторы — только безопасные (GET или POST с ключом: сетевая ошибка, `idempotency_key_in_flight`, 503 для GET).
 - `src/api/schema.d.ts` — сгенерированные типы (не править вручную).
 - `src/auth/` — сессия (`GET /auth/session`), охрана маршрутов, мост 401 → вход.
-- `src/pages/` — Login, Workspaces (список + создание), Projects (список с cursor-пагинацией + создание), 404.
+- `src/pages/` — Login, Workspaces (список + создание), Projects (список с cursor-пагинацией + создание), Runs проекта (`/w/:ws/projects/:project/runs`: список + форма запуска), Run (`…/runs/:run`: статус, blocked_reason, ожидающие одобрения, задачи с «зависит от», pause/resume/cancel по статусу и праву `run:control`, лента событий), 404.
+- `src/api/runEvents.ts` — клиент SSE `GET /runs/{id}/events` на `fetch` + `ReadableStream` (а не `EventSource`: нужен HTTP-статус для 410/401/403/429/503 и явный `Last-Event-ID` при любом переподключении; зависимостей не добавляет). Дедупликация: событие с `seq ≤ последнего` или повторным `event_id` отбрасывается (EVENT_SCHEMAS §5). Реконнект: после обрыва/закрытия сервером — с `Last-Event-ID` = последний принятый seq через `retry:` сервера (backoff только при ошибках, watchdog 45 с без heartbeat); `410 replay_window_exceeded` → перечитать run/задачи и продолжить с `after_seq` = `last_seq` из problem; после `run.completed` или терминального статуса — без реконнекта. События `*.state_changed`/`run.completed`/`approval.*`/`gate.completed` инвалидируют запросы run/задач (одна инвалидация на пачку). Лента держит последние 500 событий.
 - `src/components/` — layout (skip link, переключатель workspace, меню пользователя, навигация только по реализованным разделам), состояния loading/empty/error, поля форм с ошибками по `errors[].pointer`.
 - `src/i18n/ru.json` — все строки UI (локаль `ru` по умолчанию; новая локаль — ещё один ресурс).
-- `e2e/support/contract.ts` — ajv (JSON Schema 2020-12) по схемам самого контракта: тела запросов UI, обязательные заголовки, CSRF и тела ответов моков; нарушения валят тест.
+- `e2e/support/contract.ts` — ajv (JSON Schema 2020-12) по схемам самого контракта: тела запросов UI, обязательные заголовки, CSRF и тела ответов моков; SSE-кадры мока — по `packages/contracts/schemas/events/1.0/sse-event.schema.json`; нарушения валят тест.
+- `e2e/mocked/run.spec.ts` — Run view: обрыв SSE посреди кадра → реконнект с `Last-Event-ID`, сервер повторяет часть событий → в ленте каждое событие ровно один раз и без пропусков; 410 → `after_seq`; pause/cancel через событие; форма запуска; права viewer.
 
 Права в UI (скрытие «Создать проект» для ролей без `project:create`) — только UX; авторизацию выполняет сервер.
 

@@ -12,6 +12,7 @@ import {
   validateHeader,
   validateRequest,
   validateResponse,
+  validateSseEvent,
 } from './contract';
 
 type S = components['schemas'];
@@ -34,6 +35,38 @@ interface Reply {
   status: number;
   body?: unknown;
   headers?: Record<string, string>;
+  /** Сырой текст ответа (text/event-stream) вместо JSON. */
+  raw?: string;
+}
+
+/** Конверт SSE (schemas/events/1.0/sse-event.schema.json). */
+export interface MockRunEvent {
+  event_id: string;
+  run_id: string;
+  seq: number;
+  type: string;
+  timestamp: string;
+  schema_version: '1.0';
+  payload: Record<string, unknown>;
+}
+
+/**
+ * Сценарий одного SSE-подключения (по порядку подключений). По умолчанию мок ведёт себя
+ * как сервер: события с seq > Last-Event-ID (или after_seq) и закрытие потока.
+ *  - fromSeq — начать с этого seq (≤ Last-Event-ID имитирует повторную доставку);
+ *  - toSeq   — отдать события только до этого seq;
+ *  - cut     — после них отдать половину следующего кадра и оборвать соединение;
+ *  - status  — ответить ошибкой (например 410 replay_window_exceeded).
+ */
+export interface SseConnectionScript {
+  fromSeq?: number;
+  toSeq?: number;
+  cut?: boolean;
+  status?: 410;
+}
+
+export function sseFrame(e: MockRunEvent): string {
+  return `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
 }
 
 function problem(status: number, code: S['Problem']['code'], extra: Partial<S['Problem']> = {}): Reply {
@@ -58,7 +91,26 @@ const ROUTES: { method: string; path: string; operationId: string }[] = [
   { method: 'POST', path: '/api/v1/workspaces', operationId: 'createWorkspace' },
   { method: 'GET', path: '/api/v1/projects', operationId: 'listProjects' },
   { method: 'POST', path: '/api/v1/projects', operationId: 'createProject' },
+  { method: 'GET', path: '/api/v1/projects/{id}', operationId: 'getProject' },
+  { method: 'GET', path: '/api/v1/runs', operationId: 'listRuns' },
+  { method: 'POST', path: '/api/v1/runs', operationId: 'createRun' },
+  { method: 'GET', path: '/api/v1/runs/{id}', operationId: 'getRun' },
+  { method: 'GET', path: '/api/v1/runs/{id}/tasks', operationId: 'getRunTasks' },
+  { method: 'GET', path: '/api/v1/runs/{id}/events', operationId: 'streamRunEvents' },
+  { method: 'POST', path: '/api/v1/runs/{id}/pause', operationId: 'pauseRun' },
+  { method: 'POST', path: '/api/v1/runs/{id}/resume', operationId: 'resumeRun' },
+  { method: 'POST', path: '/api/v1/runs/{id}/cancel', operationId: 'cancelRun' },
 ];
+
+function matchRoute(method: string, pathname: string): { operationId: string; id: string | undefined } | null {
+  for (const r of ROUTES) {
+    if (r.method !== method) continue;
+    const re = new RegExp(`^${r.path.replace('{id}', '([^/]+)')}$`);
+    const m = re.exec(pathname);
+    if (m) return { operationId: r.operationId, id: m[1] ? decodeURIComponent(m[1]) : undefined };
+  }
+  return null;
+}
 
 export class MockApi {
   readonly violations: string[] = [];
@@ -78,6 +130,141 @@ export class MockApi {
   /** Slug, занятые workspace других пользователей (→ 409 conflict). */
   readonly takenSlugs = new Set<string>();
   private readonly idempotency = new Map<string, { body: string; reply: Reply }>();
+  runs: S['Run'][] = [];
+  tasks = new Map<string, S['TaskSummary'][]>();
+  /** Durable-лог событий run (run_event_log). */
+  events = new Map<string, MockRunEvent[]>();
+  /** Сценарии SSE-подключений по порядку; после исчерпания — поведение сервера. */
+  sseScripts: SseConnectionScript[] = [];
+  /** retry: (мс) в первом кадре потока; сервер шлёт 3000, тестам нужно быстрее. */
+  sseRetryMs = 100;
+  /** Сколько SSE-подключений было и с какими Last-Event-ID / after_seq. */
+  readonly sseConnections: { lastEventId: string | undefined; afterSeq: string | null }[] = [];
+
+  addRun(project: S['Project'], init: Partial<S['Run']> = {}): S['Run'] {
+    const run: S['Run'] = {
+      id: uuid(),
+      project_id: project.id,
+      workspace_id: project.workspace_id,
+      mode: 'DEVELOP',
+      objective: 'Добавить экспорт отчётов в CSV',
+      status: 'RUNNING',
+      blocked_reason: null,
+      requested_by: { id: '01900000-0000-7000-8000-0000000000aa', display_name: this.user.display_name },
+      quality_profile: 'strict',
+      version: 1,
+      created_at: '2026-11-08T08:00:00Z',
+      started_at: '2026-11-08T08:00:05Z',
+      finished_at: null,
+      plan_version: 1,
+      pending_approvals: 0,
+      task_counts: {},
+      ...init,
+    };
+    this.runs.unshift(run);
+    this.tasks.set(run.id, []);
+    this.events.set(run.id, []);
+    return run;
+  }
+
+  addTask(run: S['Run'], title: string, init: Partial<S['TaskSummary']> = {}): S['TaskSummary'] {
+    const task: S['TaskSummary'] = {
+      id: uuid(),
+      run_id: run.id,
+      agent_role: 'developer',
+      title,
+      status: 'PENDING',
+      blocked_reason: null,
+      complexity: 'L2',
+      risk_level: 'low',
+      current_provider: null,
+      attempt_count: 0,
+      max_attempts: 3,
+      depends_on: [],
+      version: 0,
+      updated_at: '2026-11-08T08:00:10Z',
+      ...init,
+    };
+    this.tasks.get(run.id)?.push(task);
+    return task;
+  }
+
+  /** Добавляет событие в лог run; seq и event_id назначаются по порядку. */
+  addEvent(run: S['Run'], type: string, payload: Record<string, unknown>): MockRunEvent {
+    const log = this.events.get(run.id) ?? [];
+    const seq = log.length + 1;
+    const e: MockRunEvent = {
+      event_id: `01900000-0000-7000-a000-${String(seq).padStart(12, '0')}`,
+      run_id: run.id,
+      seq,
+      type,
+      timestamp: `2026-11-08T09:00:${String(seq % 60).padStart(2, '0')}Z`,
+      schema_version: '1.0',
+      payload,
+    };
+    log.push(e);
+    this.events.set(run.id, log);
+    return e;
+  }
+
+  /** Эффект доставленного события на «состояние БД» мока (как будто REST видит то же). */
+  private applyEvent(e: MockRunEvent): void {
+    const run = this.runs.find((r) => r.id === e.run_id);
+    if (!run) return;
+    const p = e.payload;
+    if (e.type === 'run.state_changed') {
+      run.status = p.to_status as S['RunStatus'];
+      run.blocked_reason = (p.blocked_reason as S['TaskBlockedReason'] | null | undefined) ?? null;
+      run.version += 1;
+    } else if (e.type === 'run.completed') {
+      run.status = p.final_status as S['RunStatus'];
+      run.finished_at = e.timestamp;
+    } else if (e.type === 'approval.requested') {
+      run.pending_approvals = (run.pending_approvals ?? 0) + 1;
+    } else if (e.type === 'task.state_changed') {
+      const task = this.tasks.get(run.id)?.find((x) => x.id === p.task_id);
+      if (task) {
+        task.status = p.to_status as S['TaskStatus'];
+        if (typeof p.attempt_no === 'number') task.attempt_count = p.attempt_no;
+        task.version += 1;
+      }
+    }
+  }
+
+  private runView(run: S['Run']): S['Run'] {
+    const counts: Record<string, number> = {};
+    for (const task of this.tasks.get(run.id) ?? []) counts[task.status] = (counts[task.status] ?? 0) + 1;
+    return { ...run, task_counts: counts };
+  }
+
+  private streamEvents(run: S['Run'], headers: Record<string, string>, url: URL): Reply {
+    const lastEventId = headers['last-event-id'];
+    const afterSeq = url.searchParams.get('after_seq');
+    this.sseConnections.push({ lastEventId, afterSeq });
+    const script = this.sseScripts.shift() ?? {};
+    const log = this.events.get(run.id) ?? [];
+    if (script.status === 410) {
+      return problem(410, 'replay_window_exceeded', {
+        min_available_seq: log[0]?.seq ?? 1,
+        last_seq: log.at(-1)?.seq ?? 0,
+      } as Partial<S['Problem']>);
+    }
+    const start = script.fromSeq ?? Number(lastEventId ?? afterSeq ?? 0) + 1;
+    const end = script.toSeq ?? Number.MAX_SAFE_INTEGER;
+    const batch = log.filter((e) => e.seq >= start && e.seq <= end);
+    let raw = `retry: ${this.sseRetryMs}\n\n`;
+    for (const e of batch) {
+      const error = validateSseEvent(e);
+      if (error) this.violations.push(`mock ${error}`);
+      this.applyEvent(e);
+      raw += sseFrame(e);
+    }
+    if (script.cut) {
+      const next = log.find((e) => e.seq > end);
+      if (next) raw += sseFrame(next).slice(0, 40); // кадр оборван посередине: id без пустой строки
+    }
+    return { status: 200, raw, headers: { 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } };
+  }
 
   addWorkspace(name: string, slug: string, role: S['WorkspaceRole'] = 'owner'): S['Workspace'] {
     const ws: S['Workspace'] = { id: uuid(), name, slug, role, created_at: '2026-11-01T09:00:00Z' };
@@ -136,7 +323,7 @@ export class MockApi {
     const req = route.request();
     const url = new URL(req.url());
     const method = req.method();
-    const match = ROUTES.find((r) => r.method === method && r.path === url.pathname);
+    const match = matchRoute(method, url.pathname);
     if (!match) {
       this.violations.push(`unexpected request ${method} ${url.pathname}`);
       await route.fulfill({ status: 404, contentType: 'application/problem+json', body: JSON.stringify(problem(404, 'not_found').body) });
@@ -148,11 +335,25 @@ export class MockApi {
     const body: unknown = raw ? JSON.parse(raw) : undefined;
     this.requests.push({ operationId, headers, body });
 
-    const reply = this.dispatch(operationId, url, headers, body);
+    if (operationId === 'streamRunEvents' && this.sseScripts.length === 0 && match.id) {
+      // Как live-сервер: при отсутствии новых событий держим соединение (до 1,5 с), а не закрываем сразу.
+      const after = Number(headers['last-event-id'] ?? url.searchParams.get('after_seq') ?? 0);
+      const runId = match.id;
+      const hasNew = () => (this.events.get(runId) ?? []).some((e) => e.seq > after);
+      for (let waited = 0; waited < 1500 && !hasNew(); waited += 50) await new Promise((r) => setTimeout(r, 50));
+    }
+    const reply = this.dispatch(operationId, url, headers, body, match.id);
 
-    const responseError = validateResponse(operationId, reply.status, reply.body);
+    const responseError = validateResponse(operationId, reply.status, reply.raw ?? reply.body);
     if (responseError) this.violations.push(`mock ${responseError}`);
     const contentType = responseMediaType(operationId, reply.status) ?? 'application/json';
+    if (reply.raw !== undefined) {
+      // Страница могла закрыться, пока поток «висел» в ожидании событий.
+      await route
+        .fulfill({ status: reply.status, headers: { 'content-type': contentType, ...reply.headers }, body: reply.raw })
+        .catch(() => undefined);
+      return;
+    }
     await route.fulfill({
       status: reply.status,
       headers: { ...(reply.body === undefined ? {} : { 'content-type': contentType }), ...reply.headers },
@@ -160,7 +361,7 @@ export class MockApi {
     });
   }
 
-  private dispatch(operationId: string, url: URL, headers: Record<string, string>, body: unknown): Reply {
+  private dispatch(operationId: string, url: URL, headers: Record<string, string>, body: unknown, id?: string): Reply {
     // Порядок проверок как на сервере (API_DESIGN §6): 401 → CSRF → tenant → idempotency → схема.
     if (operationId !== 'login') {
       if (!this.loggedIn) return problem(401, 'unauthenticated');
@@ -195,14 +396,14 @@ export class MockApi {
         if (stored.body !== JSON.stringify(body)) return problem(422, 'idempotency_key_reuse');
         return { ...stored.reply, headers: { ...stored.reply.headers, 'Idempotency-Replayed': 'true' } };
       }
-      const reply = this.execute(operationId, url, headers, body);
+      const reply = this.execute(operationId, url, headers, body, id);
       if (reply.status < 500) this.idempotency.set(scoped, { body: JSON.stringify(body), reply });
       return reply;
     }
-    return this.execute(operationId, url, headers, body);
+    return this.execute(operationId, url, headers, body, id);
   }
 
-  private execute(operationId: string, url: URL, headers: Record<string, string>, body: unknown): Reply {
+  private execute(operationId: string, url: URL, headers: Record<string, string>, body: unknown, id?: string): Reply {
     const workspaceId = headers['x-workspace-id'] ?? '';
     const ws = this.workspaces.find((w) => w.id === workspaceId);
     switch (operationId) {
@@ -243,6 +444,85 @@ export class MockApi {
         p.settings.documentation_mode = b.documentation_mode ?? 'SMART';
         p.settings.quality_profile = b.quality_profile ?? 'strict';
         return { status: 201, body: p, headers: { Location: `/api/v1/projects/${p.id}`, ETag: '"v0"' } };
+      }
+      case 'getProject': {
+        const p = [...this.projects.values()].flat().find((x) => x.id === id);
+        return p ? { status: 200, body: p } : problem(404, 'not_found');
+      }
+      case 'listRuns': {
+        if (!ws) return problem(404, 'not_found');
+        const projectId = url.searchParams.get('project_id');
+        const items = this.runs
+          .filter((r) => r.workspace_id === ws.id && (!projectId || r.project_id === projectId))
+          .map((r) => {
+            const summary: S['RunSummary'] = {
+              id: r.id,
+              project_id: r.project_id,
+              workspace_id: r.workspace_id,
+              mode: r.mode,
+              objective: r.objective,
+              status: r.status,
+              blocked_reason: r.blocked_reason ?? null,
+              requested_by: r.requested_by,
+              quality_profile: r.quality_profile,
+              version: r.version,
+              created_at: r.created_at,
+              started_at: r.started_at ?? null,
+              finished_at: r.finished_at ?? null,
+            };
+            return summary;
+          });
+        return { status: 200, body: this.page(items, url.searchParams.get('cursor')) };
+      }
+      case 'createRun': {
+        const b = body as S['RunCreateRequest'];
+        const p = [...this.projects.values()].flat().find((x) => x.id === b.project_id);
+        if (!p) return problem(404, 'not_found');
+        const run = this.addRun(p, { mode: b.mode, objective: b.objective, status: 'CREATED', version: 0, started_at: null });
+        return {
+          status: 201,
+          body: { run_id: run.id, status: run.status, event_stream: `/api/v1/runs/${run.id}/events` },
+          headers: { Location: `/api/v1/runs/${run.id}`, ETag: '"v0"' },
+        };
+      }
+      case 'getRun': {
+        const run = this.runs.find((r) => r.id === id);
+        return run ? { status: 200, body: this.runView(run), headers: { ETag: `"v${run.version}"` } } : problem(404, 'not_found');
+      }
+      case 'getRunTasks': {
+        const run = this.runs.find((r) => r.id === id);
+        if (!run) return problem(404, 'not_found');
+        const tasks = this.tasks.get(run.id) ?? [];
+        const edges = tasks.flatMap((x) =>
+          x.depends_on.map((d) => ({ task_id: x.id, depends_on_task_id: d, dependency_type: 'blocks' })),
+        );
+        return {
+          status: 200,
+          body: { run_id: run.id, plan_version: run.plan_version ?? 1, tasks, edges, next_cursor: null },
+        };
+      }
+      case 'streamRunEvents': {
+        const run = this.runs.find((r) => r.id === id);
+        return run ? this.streamEvents(run, headers, url) : problem(404, 'not_found');
+      }
+      case 'pauseRun':
+      case 'resumeRun':
+      case 'cancelRun': {
+        const run = this.runs.find((r) => r.id === id);
+        if (!run) return problem(404, 'not_found');
+        const ifMatch = headers['if-match'];
+        if (ifMatch && ifMatch !== `"v${run.version}"`) return problem(412, 'precondition_failed');
+        const command = operationId.replace('Run', '') as 'pause' | 'resume' | 'cancel';
+        const target = command === 'pause' ? 'PAUSED' : command === 'cancel' ? 'CANCELLED' : 'RUNNING';
+        if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(run.status)) {
+          return problem(409, 'invalid_state_transition', { current_status: run.status });
+        }
+        // Переход публикуется событием (как на сервере): REST увидит его после доставки по SSE.
+        this.addEvent(run, 'run.state_changed', { from_status: run.status, to_status: target, run_version: run.version + 1 });
+        return {
+          status: 202,
+          body: { run_id: run.id, command, status: run.status, version: run.version, accepted_at: '2026-11-08T09:30:00Z' },
+        };
       }
       default:
         return problem(404, 'not_found');

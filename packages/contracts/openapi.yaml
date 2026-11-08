@@ -2337,6 +2337,8 @@ components:
         current_version: {type: integer, description: Для version_mismatch/precondition_failed}
         current_status: {type: string, description: Для invalid_state_transition}
         retry_after_seconds: {type: integer}
+        last_seq: {type: integer, format: int64, minimum: 0, description: 'Для replay_window_exceeded (410): текущий максимальный seq run — переподключение с after_seq=last_seq (API_DESIGN §13)'}
+        min_available_seq: {type: integer, format: int64, minimum: 0, description: 'Для replay_window_exceeded (410): наименьший seq, ещё доступный для replay'}
       required: [type, title, status, code]
       description: RFC 7807 application/problem+json
     FieldError:
@@ -3098,6 +3100,7 @@ components:
         execution_id:
           type: [string, 'null']
           format: uuid
+        seq: {type: integer, format: int64, minimum: 1, description: 'Порядковый номер в run (как `seq` SSE)'}
         event_type: {type: string}
         payload: {type: object}
         occurred_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
@@ -3632,24 +3635,31 @@ components:
     RunStateChangedPayload:
       type: object
       properties:
-        from_status: {$ref: '#/components/schemas/RunStatus'}
+        from_status:
+          oneOf:
+          - {$ref: '#/components/schemas/RunStatus'}
+          - {type: 'null'}
         to_status: {$ref: '#/components/schemas/RunStatus'}
-        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+        run_version: {type: integer, format: int64, minimum: 0, description: 'Версия run после перехода; ETag = "v<run_version>"'}
         blocked_reason:
           oneOf:
           - {$ref: '#/components/schemas/TaskBlockedReason'}
           - {type: 'null'}
         reason:
           type: [string, 'null']
-      required: [from_status, to_status, version]
+      required: [from_status, to_status, run_version]
     TaskStateChangedPayload:
       type: object
       properties:
         task_id: {type: string, format: uuid}
+        title: {type: string, maxLength: 500}
         agent_role: {$ref: '#/components/schemas/AgentRole'}
-        from_status: {$ref: '#/components/schemas/TaskStatus'}
+        from_status:
+          oneOf:
+          - {$ref: '#/components/schemas/TaskStatus'}
+          - {type: 'null'}
         to_status: {$ref: '#/components/schemas/TaskStatus'}
-        version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
+        task_version: {type: integer, format: int64, minimum: 0, description: 'Версия задачи (на момент публикации события)'}
         attempt_no:
           type: [integer, 'null']
         provider:
@@ -3664,7 +3674,7 @@ components:
           oneOf:
           - {$ref: '#/components/schemas/FailureCategory'}
           - {type: 'null'}
-      required: [task_id, agent_role, from_status, to_status, version]
+      required: [task_id, agent_role, from_status, to_status, task_version]
     AgentMessagePayload:
       type: object
       properties:

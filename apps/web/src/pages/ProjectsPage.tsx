@@ -36,6 +36,13 @@ function ProjectCard({ project }: { project: Project }) {
         <dt className="text-slate-600">{t('common.createdAt')}</dt>
         <dd>{formatDate(project.created_at, i18n.language)}</dd>
       </dl>
+      <Link
+        to={`/w/${project.workspace_id}/projects/${project.id}/runs`}
+        className="self-start font-medium text-blue-800 underline"
+        aria-label={t('projects.runsLinkLabel', { name: project.name })}
+      >
+        {t('projects.runsLink')}
+      </Link>
     </li>
   );
 }

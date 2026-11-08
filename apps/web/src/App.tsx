@@ -7,7 +7,9 @@ import { HomeRedirect } from './pages/HomeRedirect';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ProjectCreatePage } from './pages/ProjectCreatePage';
+import { ProjectRunsPage } from './pages/ProjectRunsPage';
 import { ProjectsPage } from './pages/ProjectsPage';
+import { RunPage } from './pages/RunPage';
 import { WorkspaceCreatePage } from './pages/WorkspaceCreatePage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 
@@ -25,6 +27,8 @@ export function AppRoutes() {
             <Route path="workspaces/new" element={<WorkspaceCreatePage />} />
             <Route path="w/:workspaceId/projects" element={<ProjectsPage />} />
             <Route path="w/:workspaceId/projects/new" element={<ProjectCreatePage />} />
+            <Route path="w/:workspaceId/projects/:projectId/runs" element={<ProjectRunsPage />} />
+            <Route path="w/:workspaceId/projects/:projectId/runs/:runId" element={<RunPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Route>

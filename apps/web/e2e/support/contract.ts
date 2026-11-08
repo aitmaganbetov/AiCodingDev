@@ -100,6 +100,7 @@ export function validateRequest(operationId: string, body: unknown): string | nu
   const { path, method, op } = findOperation(operationId);
   const requestBody = op.requestBody as Json | undefined;
   if (!requestBody) return body === undefined ? null : `${operationId}: contract declares no request body`;
+  if (body === undefined) return requestBody.required === true ? `${operationId}: request body is required` : null;
   const fn = compilePointer(`/paths/${escape(path)}/${method}/requestBody/content/application~1json/schema`);
   return fn(body) ? null : `${operationId} request: ${format(fn)}`;
 }
@@ -123,4 +124,19 @@ export function requiresCsrf(operationId: string): boolean {
   const { op } = findOperation(operationId);
   const security = (op.security ?? spec.security) as Json[] | undefined;
   return Boolean(security?.some((s) => 'csrfHeader' in s));
+}
+
+const SSE_SCHEMA_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../packages/contracts/schemas/events/1.0/sse-event.schema.json',
+);
+let sseValidator: ValidateFunction | null = null;
+
+/**
+ * Ошибка валидации SSE-конверта (кадр `data:` потока streamRunEvents) или null. Схема —
+ * нормативная `schemas/events/1.0/sse-event.schema.json` (EVENT_SCHEMAS §3, по ней пишет сервер).
+ */
+export function validateSseEvent(envelope: unknown): string | null {
+  sseValidator ??= ajv.compile(JSON.parse(readFileSync(SSE_SCHEMA_PATH, 'utf8')) as Json);
+  return sseValidator(envelope) ? null : `SSE event: ${format(sseValidator)}`;
 }
