@@ -27,16 +27,20 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_code_intelligence.docs.importer import DocumentationImporter
+from aicd_code_intelligence.docs.policy import ApprovalState
 from aicd_code_intelligence.technologies.detect import detect_at_commit
 from aicd_code_intelligence.technologies.store import ensure_technology_version, persist_detection
 from aicd_orchestration import external_actions
+from aicd_orchestration.docs_ports import DOCS_DOWNLOAD_TTL, DocsApprovals, DocsLedger
 from aicd_platform.artifacts import FileSystemArtifactStore
 from aicd_platform.db import DbContext, transaction
 from aicd_security.ssrf import PinnedTransport, SsrfFetcher, SsrfPolicy, Target
 from tests.conftest import UserSession, login
+from tests.support import db as testdb
+from tests.support import orchestration as orch
 from tests.support.contract import validate_response
 
 pytestmark = pytest.mark.db
@@ -398,36 +402,10 @@ class _LocalHttpTransport:
         return self.inner.stream(replace(target, scheme="http", port=self.port), headers, policy)
 
 
-class _Ledger:
-    """Адаптер порта DocsDownloadPort к ledger оркестрации (так его подключит worker)."""
-
-    async def plan(self, conn: AsyncConnection, **kw: Any) -> uuid.UUID:  # pragma: no cover — не нужен импортёру
-        raise NotImplementedError
-
-    async def begin(self, conn: AsyncConnection, action_id: uuid.UUID, fencing_token: int) -> None:
-        await external_actions.begin(conn, action_id, fencing_token)
-
-    async def confirm(
-        self,
-        conn: AsyncConnection,
-        action_id: uuid.UUID,
-        *,
-        fencing_token: int,
-        external_ref: str,
-        result: dict[str, Any],
-    ) -> None:
-        await external_actions.confirm(
-            conn, action_id, fencing_token=fencing_token, external_ref=external_ref, result=result
-        )
-
-    async def fail(self, conn: AsyncConnection, action_id: uuid.UUID, *, error: str, fencing_token: int | None) -> None:
-        await external_actions.fail(conn, action_id, error=error, fencing_token=fencing_token)
-
-
 def _importer(worker_engine: AsyncEngine, tmp_path: Path, port: int, ip: str = "127.0.0.1") -> DocumentationImporter:
     policy = SsrfPolicy(extra_allowed_networks=(ipaddress.ip_network("127.0.0.1/32"),))
     fetcher = SsrfFetcher(policy, resolver=_Resolver({"docs.example.com": ip}), transport=_LocalHttpTransport(port))
-    return DocumentationImporter(worker_engine, FileSystemArtifactStore(tmp_path / "artifacts"), fetcher, _Ledger())
+    return DocumentationImporter(worker_engine, FileSystemArtifactStore(tmp_path / "artifacts"), fetcher, DocsLedger())
 
 
 async def _refresh(user: UserSession, source_id: str) -> uuid.UUID:
@@ -527,3 +505,39 @@ async def test_importer_end_to_end(
             await conn.execute(text("SELECT status FROM documentation_snapshots WHERE id = :id"), {"id": f.snapshot_id})
         ).scalar_one()
     assert failed is not None and failed.status == "FAILED" and status == "FAILED"
+
+
+async def test_docs_approvals_port_reuses_pending_and_reports_state(
+    worker_engine: AsyncEngine, database: testdb.TestDatabase
+) -> None:
+    """DocsApprovals: повторный запрос того же предмета — тот же PENDING approval; TTL 7 дней; состояние."""
+    with orch.connect_admin(database) as admin:
+        tenant = orch.seed_tenant(admin)
+    port = DocsApprovals()
+    subject = {"kind": "docs_download", "uri": "https://docs.example.com/guide", "reason": "нужна справка"}
+    async with transaction(worker_engine, DbContext(workspace_id=tenant.workspace_id, actor_type="system")) as conn:
+        first = await port.request_docs_download(
+            conn,
+            workspace_id=tenant.workspace_id,
+            project_id=tenant.project_id,
+            run_id=None,
+            task_id=None,
+            subject=subject,
+            requested_by_role=None,
+        )
+        again = await port.request_docs_download(
+            conn,
+            workspace_id=tenant.workspace_id,
+            project_id=tenant.project_id,
+            run_id=None,
+            task_id=None,
+            subject=subject,
+            requested_by_role=None,
+        )
+        assert first == again
+        assert await port.approval_state(conn, first) == ApprovalState.PENDING
+        ttl = (
+            await conn.execute(text("SELECT expires_at - now() FROM approvals WHERE id = :a"), {"a": first})
+        ).scalar_one()
+        assert abs(ttl - DOCS_DOWNLOAD_TTL).total_seconds() < 60
+        assert await port.approval_state(conn, uuid.uuid4()) == ApprovalState.NONE
