@@ -53,3 +53,17 @@ def test_json_log_line_has_correlation_and_no_secrets() -> None:
     assert line["request_id"] == "r1" and line["run_id"] == "run-9"
     assert "supersecretvalue" not in json.dumps(line) and "p@ss" not in json.dumps(line)
     context.clear()
+
+
+def test_redaction_keeps_json_valid() -> None:
+    """Значение без кавычек не съедает закрывающую кавычку JSON-строки (отчёты gitleaks и др.)."""
+    import json
+
+    from aicd_platform.redaction import redact_text
+
+    raw = json.dumps(
+        {"Fingerprint": "abc:file.py:aws-access-token:3", "Secret": "AKIAABCDEFGHIJKLMNOP", "password": "x"}
+    )
+    redacted = redact_text(raw)
+    parsed = json.loads(redacted)
+    assert "AKIA" not in redacted and parsed["Fingerprint"].endswith("[REDACTED]")
