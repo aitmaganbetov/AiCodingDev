@@ -572,6 +572,9 @@ async def test_contract_fuzz_never_5xx_and_responses_conform(
             headers["X-CSRF-Token"] = owner.csrf
             if operation_id != "receiveGitHubWebhook":
                 headers.setdefault("Idempotency-Key", key())
-            r = await owner.client.post(f"/api/v1{path}", headers=headers, json=case.body, params=case.query or None)
+            body = (
+                case.body if isinstance(case.body, dict | list | str | int | float | bool) else None
+            )  # NotSet — без тела
+            r = await owner.client.post(f"/api/v1{path}", headers=headers, json=body, params=case.query or None)
         assert r.status_code < 500, f"{operation_id} {path} {case.body!r}: {r.status_code} {r.text}"
         validate_response(operation_id, r)

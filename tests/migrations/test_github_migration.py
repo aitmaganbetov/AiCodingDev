@@ -368,7 +368,7 @@ def test_github_approvals_allowed_in_completed_run(database: testdb.TestDatabase
         q.gate_execution(
             conn, tenant, run, gate, "LINT", "PASS", commit, evidence_id=q.evidence(conn, tenant, run, commit)
         )
-        drive_run(conn, run, "COMPLETED")
+        update(conn, "runs", run, status="COMPLETED", finished_at="now")
 
         def approval(action: str, subject: dict[str, str]) -> uuid.UUID:
             aid = uuid7()

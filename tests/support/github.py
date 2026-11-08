@@ -109,7 +109,7 @@ def completed_run(
     """COMPLETED run: задача SUCCEEDED, worktree с коммитом `files` в локальной копии и PASS gate на нём."""
     t = dataclasses.replace(tenant, repository_id=repository_id)
     run = new_run(conn, t)
-    conn.execute("UPDATE runs SET base_commit_sha = %s WHERE id = %s", (base_sha, run))
+    update(conn, "runs", run, base_commit_sha=base_sha)
     drive_run(conn, run, "DISCOVERY", "PLANNED")
     update(conn, "runs", run, approved_plan_version=1)
     drive_run(conn, run, "RUNNING")
@@ -128,8 +128,9 @@ def completed_run(
     gate = q.ensure_gate(conn, "ruff-lint", "LINT")
     ev = q.evidence(conn, t, run, head)
     q.gate_execution(conn, t, run, gate, "LINT", "PASS", head, evidence_id=ev, task=task)
-    update(conn, "tasks", task, status="SUCCEEDED")
-    drive_run(conn, run, "VERIFYING", "COMPLETED")
+    update(conn, "tasks", task, status="SUCCEEDED", finished_at="now")
+    drive_run(conn, run, "VERIFYING")
+    update(conn, "runs", run, status="COMPLETED", finished_at="now")
     return CompletedRun(t, run, task, branch, base_sha, head)
 
 
