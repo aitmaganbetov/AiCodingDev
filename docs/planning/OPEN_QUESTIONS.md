@@ -87,3 +87,4 @@
 | 2026-11-08 | Phase 6 | Отчёт Phase 5 принят, старт Phase 6 (Quality, Security & Standards); P5-08 (LSP) отложен; OQ-35…OQ-41 ожидают решения | Владелец продукта |
 | 2026-11-08 | Phase 7 | Отчёт Phase 6 принят, старт Phase 7 (Mission Control & Live Agent Chat); PHPStan/офлайн-БД/prepare-шаг — по OQ-43; OQ-35…OQ-43 ожидают решения | Владелец продукта |
 | 2026-11-08 | Phase 8 | Отчёт Phase 7 принят, старт Phase 8 (GitHub Integrations & Analytics); пробелы API из OQ-45 (c)–(f) — в Phase 8; OQ-44/OQ-45 ожидают решения | Владелец продукта (сообщение в сессии: «Да») |
+| 2026-11-08 | Phase 9 | Отчёт Phase 8 принят, старт Phase 9 (Verification & Release); в Phase 9 переносятся OQ-47 (2), (7), OQ-45 step-up/таймаут, P3-18; OQ-35…OQ-47 ожидают решения; production deployment — только с отдельного разрешения | Владелец продукта (сообщение в сессии: «Да») |
