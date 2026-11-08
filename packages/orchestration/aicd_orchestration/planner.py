@@ -1,15 +1,17 @@
-"""Детерминированный шаблонный планировщик Phase 3 (DATA_FLOW §2).
+"""Детерминированный шаблонный планировщик (DATA_FLOW §2, P4-09).
 
-В Phase 3 план строится по шаблону режима run: это проверяемая заглушка уровня «L1 —
-детерминированные инструменты» (ТЗ §5), которую Phase 4 заменяет планом от роли `planner`
-(P4-09, AGENT_ROLES). Независимое ревью включается для задач L3+ (ROUTING_POLICY).
+План строится по data-driven шаблону конвейера режима (`pipelines`, AGENT_ROLES §4) с надстройками
+уровня L1–L5 (ROUTING_POLICY §8). Для L1 это окончательный план; для L2+ — каркас, который уточняет
+роль `planner` (её план проходит ту же валидацию `dag.validate_plan`).
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from aicd_orchestration.dag import PlannedTask, validate_plan
+from aicd_orchestration.pipelines import PipelinePlan, build_pipeline
 
 
 @dataclass(frozen=True)
@@ -24,47 +26,33 @@ class TaskSpec:
     acceptance_criteria: tuple[str, ...] = ()
 
 
-_PRIMARY_ROLE = {
-    "CREATE": "developer",
-    "DEVELOP": "developer",
-    "DEBUG": "maintenance",
-    "MODERNIZE": "maintenance",
-    "MAINTAIN": "maintenance",
-    "OPTIMIZE": "performance",
-    "TEST": "qa",
-    "DOCUMENT": "documentation",
-    "AUDIT": "reviewer",
-    "REVIEW": "reviewer",
-    "SECURITY": "security",
-}
-_WRITES_CODE = frozenset({"developer", "maintenance", "performance", "documentation", "qa"})
-
-
 def template_plan(mode: str, objective: str, *, complexity: int = 3, risk_level: str = "medium") -> list[TaskSpec]:
-    role = _PRIMARY_ROLE[mode]
-    criteria = ("Изменение выполнено в worktree задачи", "Обязательные проверки качества пройдены")
-    main = TaskSpec(
-        key="main",
-        role=role,
-        title=f"{mode}: {objective[:200]}",
-        instructions=objective,
-        complexity=complexity,
-        risk_level=risk_level,
-        acceptance_criteria=criteria,
-    )
-    plan = [main]
-    if role in _WRITES_CODE and complexity >= 3:
-        plan.append(
-            TaskSpec(
-                key="review",
-                role="reviewer",
-                title="Независимое ревью изменения",
-                instructions="Проверить изменение задачи main на корректность, безопасность и соответствие критериям.",
-                complexity=2,
-                risk_level=risk_level,
-                depends_on=("main",),
-                acceptance_criteria=("Найденные проблемы зафиксированы как findings",),
-            )
+    """Детерминированный план по шаблону режима (P4-09, `pipelines.build_pipeline`).
+
+    Уровень задач = max(complexity, минимум режима); approvals уровня — в `pipeline_plan(...).approvals`.
+    """
+    return specs_from_pipeline(pipeline_plan(mode, objective, complexity=complexity, risk_level=risk_level))
+
+
+def pipeline_plan(
+    mode: str, objective: str, *, complexity: int = 3, risk_level: str = "medium", signals: Iterable[str] = ()
+) -> PipelinePlan:
+    return build_pipeline(mode, objective, complexity=complexity, risk_level=risk_level, signals=signals)
+
+
+def specs_from_pipeline(plan: PipelinePlan) -> list[TaskSpec]:
+    specs = [
+        TaskSpec(
+            key=t.key,
+            role=t.role,
+            title=t.title,
+            instructions=t.instructions,
+            complexity=plan.level,
+            risk_level=plan.risk_level,
+            depends_on=t.depends_on,
+            acceptance_criteria=t.acceptance_criteria,
         )
-    validate_plan([PlannedTask(t.key, t.role, t.complexity, t.depends_on) for t in plan])
-    return plan
+        for t in plan.tasks
+    ]
+    validate_plan([PlannedTask(t.key, t.role, t.complexity, t.depends_on) for t in specs])
+    return specs

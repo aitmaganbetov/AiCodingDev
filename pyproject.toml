@@ -67,6 +67,10 @@ packages = [
   "apps/worker/aicd_worker",
 ]
 
+[tool.hatch.build.targets.wheel.force-include]
+# Нормативные JSON Schema нужны во время исполнения (разбор AgentResult/ACP, P4-03).
+"packages/contracts/schemas" = "aicd_contracts/schemas"
+
 [tool.uv]
 package = true
 

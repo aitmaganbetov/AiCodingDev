@@ -1,0 +1,16 @@
+{
+  "role": "maintenance",
+  "version": "1.0.0",
+  "acp_protocol": "acp/1.0",
+  "cli_contract": "1.0",
+  "output_contract": "agent/1.0/agent-result.schema.json",
+  "files": {
+    "role.md": "024700d21a24b396258c29dea68edb200496a3fe65e0fa9d9af81c223d4fbc42"
+  },
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "changes": "Первая версия шаблона (P4-02)."
+    }
+  ]
+}

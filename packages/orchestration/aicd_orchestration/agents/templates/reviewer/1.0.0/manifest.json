@@ -1,0 +1,16 @@
+{
+  "role": "reviewer",
+  "version": "1.0.0",
+  "acp_protocol": "acp/1.0",
+  "cli_contract": "1.0",
+  "output_contract": "agent/1.0/agent-result.schema.json",
+  "files": {
+    "role.md": "3cbfe39b9a987cd926805e9e4d751064e66298fbd6858004d4e5f297fe93a51d"
+  },
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "changes": "Первая версия шаблона (P4-02)."
+    }
+  ]
+}
