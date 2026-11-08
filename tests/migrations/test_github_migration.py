@@ -117,16 +117,16 @@ def test_classes_rls_and_grants(database: testdb.TestDatabase) -> None:
             assert not priv("aicd_app", "github_webhook_deliveries", p), p
         assert priv("aicd_app", "pull_requests", "SELECT")
         assert not priv("aicd_app", "pull_requests", "INSERT") and not priv("aicd_app", "pull_requests", "UPDATE")
-        # 0014 (OQ-47 (2)): установку подключает воркер после проверки через GitHub API; api — только статус.
-        assert not priv("aicd_app", "github_installations", "INSERT")
+        # 0014 (OQ-47 (2)): api регистрирует установку в статусе PENDING, данные аккаунта/права пишет воркер.
+        assert priv("aicd_app", "github_installations", "INSERT")
         status_update = conn.execute(
             "SELECT has_column_privilege('aicd_app', 'aicd.github_installations', 'status', 'UPDATE'),"
             " has_column_privilege('aicd_app', 'aicd.github_installations', 'permissions', 'UPDATE')"
         ).fetchone()
-        assert status_update == (True, False)  # только status (отключение установки)
+        assert status_update == (True, False)  # только status (отключение / повторная проверка)
         assert not priv("aicd_app", "github_installations", "DELETE")
-        # worker: подключает установки после проверки, ведёт PR и статус доставок.
-        assert priv("aicd_worker", "github_installations", "INSERT")
+        # worker: не создаёт установки (заполняет проверенные), ведёт PR и статус доставок.
+        assert not priv("aicd_worker", "github_installations", "INSERT")
         assert priv("aicd_worker", "pull_requests", "INSERT") and priv("aicd_worker", "pull_requests", "UPDATE")
         assert not priv("aicd_worker", "github_webhook_deliveries", "INSERT")
         assert not priv("aicd_worker", "pull_requests", "DELETE")

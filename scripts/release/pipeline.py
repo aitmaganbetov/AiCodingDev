@@ -114,7 +114,7 @@ def build_image(name: str, version: str, git: dict[str, Any], args: argparse.Nam
         "tar": f"images/{name}.tar",
         "tar_sha256": sha256_file(tar),
         "base_images": base_images(dockerfile),
-        "releasable": not build_args.get("AICD_INSTALL_GIT") == "0",
+        "releasable": build_args.get("AICD_INSTALL_GIT") != "0",
         "started_on": started,
         "finished_on": now(),
     }
@@ -129,8 +129,12 @@ def provenance(image: dict[str, Any], git: dict[str, Any], version: str, invocat
         "buildDefinition": {
             "buildType": BUILD_TYPE,
             "externalParameters": {
-                "source": {"uri": git["remote"] or "git+file:.", "digest": {"gitCommit": git["commit"]},
-                           "dirty": git["dirty"], "dirty_paths": git["dirty_paths"]},  # fmt: skip
+                "source": {
+                    "uri": git["remote"] or "git+file:.",
+                    "digest": {"gitCommit": git["commit"]},
+                    "dirty": git["dirty"],
+                    "dirty_paths": git["dirty_paths"],
+                },
                 "dockerfile": image["dockerfile"],
                 "context": ".",
                 "version": version,
@@ -141,9 +145,15 @@ def provenance(image: dict[str, Any], git: dict[str, Any], version: str, invocat
         },
         "runDetails": {
             "builder": {"id": f"https://aicodingdev.local/release/scripts/release/pipeline.py@{git['commit']}"},
-            "metadata": {"invocationId": invocation, "startedOn": image["started_on"], "finishedOn": image["finished_on"]},
-            "byproducts": [{"name": "image_id", "digest": {"sha256": image["image_id"].removeprefix("sha256:")}},
-                           {"name": "image_tag", "uri": f"docker://{image['tag']}"}],  # fmt: skip
+            "metadata": {
+                "invocationId": invocation,
+                "startedOn": image["started_on"],
+                "finishedOn": image["finished_on"],
+            },
+            "byproducts": [
+                {"name": "image_id", "digest": {"sha256": image["image_id"].removeprefix("sha256:")}},
+                {"name": "image_tag", "uri": f"docker://{image['tag']}"},
+            ],
         },
     }
 
@@ -247,7 +257,9 @@ def main(argv: list[str] | None = None) -> int:
         "predicate_type": SLSA_PREDICATE_TYPE,
         "tools": {"syft": SYFT.ref, "cosign": COSIGN.ref},
         "images": images,
-        "sboms": {rel: {"components": components(args.out / rel), "signature": f"{rel}.sigstore.json"} for rel in sboms},
+        "sboms": {
+            rel: {"components": components(args.out / rel), "signature": f"{rel}.sigstore.json"} for rel in sboms
+        },
         "releasable": all(img["releasable"] for img in images) and not git["dirty"],
         "public_key_sha256": sha256_file(key_dir / "cosign.pub"),
     }

@@ -256,3 +256,5 @@ async def test_lease_decisions_ignore_worker_clock_skew(
                                      workspace_id=ws, ttl_seconds=30)  # fmt: skip
         assert newer is not None and newer.fencing_token > lease.fencing_token
         assert not await leases.is_current(conn, "task", resource, lease.fencing_token)
+        # Не оставлять истекающую аренду несуществующей задачи: её подобрал бы reaper других тестов сессии.
+        assert await leases.release(conn, newer)

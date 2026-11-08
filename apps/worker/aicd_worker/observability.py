@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -63,10 +64,16 @@ async def sample_queues(redis: Redis) -> dict[str, int]:
     return depths
 
 
+def _read_status(path: Path) -> str | None:
+    return path.read_text(encoding="utf-8") if path.is_file() else None
+
+
 async def sample_backups(engine: AsyncEngine, status_file: Path | None) -> None:
     """Сбои бэкапов (ТЗ §16): файл статуса утилиты бэкапа (если смонтирован) и pg_stat_archiver сервера."""
-    if status_file is not None and status_file.is_file():
-        metrics.observe_backup_status(json.loads(status_file.read_text(encoding="utf-8")))
+    if status_file is not None:
+        raw = await asyncio.to_thread(_read_status, status_file)
+        if raw is not None:
+            metrics.observe_backup_status(json.loads(raw))
     async with engine.connect() as conn:
         row = (await conn.execute(text("SELECT archived_count, failed_count FROM pg_stat_archiver"))).one()
     metrics.WAL_ARCHIVED.set(int(row[0]))

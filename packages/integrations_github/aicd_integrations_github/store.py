@@ -54,6 +54,49 @@ async def installation_by_github_id(conn: AsyncConnection, installation_id: int)
     return dict(row) if row else None
 
 
+PENDING_ACCOUNT_LOGIN = "pending"  # заглушка до проверки установки воркером (status=PENDING, OQ-47 (2))
+
+
+async def register_pending_installation(
+    conn: AsyncConnection, *, workspace_id: uuid.UUID, installation_id: int, actor_id: uuid.UUID
+) -> tuple[dict[str, Any], bool]:
+    """API (без ключа App): строка установки в статусе PENDING до проверки воркером.
+
+    Установка этого workspace (в т. ч. REVOKED) — повторная проверка (статус PENDING); установка другого
+    workspace ⇒ InstallationConflictError (UNIQUE installation_id). Возвращает (строка, создана ли новая).
+    """
+    existing = await installation_by_github_id(conn, installation_id)
+    if existing is not None:
+        await set_installation_status(conn, existing["id"], "PENDING")
+        row = await get_installation(conn, existing["id"])
+        if row is None:  # pragma: no cover — нарушение инварианта
+            raise LookupError("installation")
+        return row, False
+    row_id = uuid7()
+    try:
+        async with conn.begin_nested():
+            await conn.execute(
+                text(
+                    "INSERT INTO github_installations (id, workspace_id, installation_id, account_login, account_type,"
+                    " repository_selection, permissions, status, installed_by)"
+                    " VALUES (:id, :ws, :inst, :login, 'organization', 'selected', '{}'::jsonb, 'PENDING', :uid)"
+                ),
+                {
+                    "id": row_id,
+                    "ws": workspace_id,
+                    "inst": installation_id,
+                    "login": PENDING_ACCOUNT_LOGIN,
+                    "uid": actor_id,
+                },
+            )
+    except IntegrityError as exc:
+        raise InstallationConflictError(str(installation_id)) from exc
+    row = await get_installation(conn, row_id)
+    if row is None:  # pragma: no cover — нарушение инварианта
+        raise LookupError("installation")
+    return row, True
+
+
 async def connect_installation(
     conn: AsyncConnection, *, workspace_id: uuid.UUID, installation: Installation, actor_id: uuid.UUID
 ) -> tuple[dict[str, Any], bool]:

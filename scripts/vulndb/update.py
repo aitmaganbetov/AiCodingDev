@@ -83,7 +83,7 @@ def download_osv(ecosystem: str, target: Path, ca_bundle: Path | None) -> dict[s
     md5 = hashlib.md5()  # noqa: S324 — сверка с x-goog-hash сервера (целостность передачи), не безопасность
     sha = hashlib.sha256()
     size = 0
-    with _opener(ca_bundle).open(url, timeout=120) as resp, target.open("wb") as out:  # noqa: S310 — https, фикс. хост
+    with _opener(ca_bundle).open(url, timeout=120) as resp, target.open("wb") as out:
         expected_md5 = None
         for header in resp.headers.get_all("x-goog-hash") or []:
             for part in header.split(","):
@@ -122,7 +122,9 @@ def _validate_zip(path: Path) -> int:
     return len(infos)
 
 
-def update_osv(staging: Path, ecosystems: list[str], ca_bundle: Path | None, approval: dict[str, Any]) -> dict[str, Any]:
+def update_osv(
+    staging: Path, ecosystems: list[str], ca_bundle: Path | None, approval: dict[str, Any]
+) -> dict[str, Any]:
     sources = [download_osv(eco, staging / "osv-scalibr" / eco / "all.zip", ca_bundle) for eco in ecosystems]
     manifest = {"updated_at": now().isoformat().replace("+00:00", "Z"), "ecosystems": ecosystems,
                 "sources": sources, "approval": {k: approval[k] for k in (*APPROVAL_FIELDS, "sha256")}}  # fmt: skip
@@ -139,7 +141,17 @@ def update_trivy(staging: Path, repository: str, ca_bundle: Path | None, seed: P
     if seed is not None and (seed / "db").is_dir():  # инкремент: trivy не скачивает свежую БД повторно
         shutil.copytree(seed / "db", staging / "db")
     staging.chmod(0o777)
-    cmd = ["docker", "run", "--rm", "--network", "host", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true"]
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "host",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges:true",
+    ]
     proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
     if proxy:
         cmd += ["-e", f"HTTPS_PROXY={proxy}"]

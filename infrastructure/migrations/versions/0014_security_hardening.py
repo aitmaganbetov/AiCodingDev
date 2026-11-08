@@ -21,8 +21,10 @@ OQ-45 «тайм-аут», OQ-47 (2).
   установки к репозиторию. API (без ключа App) фиксирует запрос + событие outbox `github.verification.requested`
   и отвечает 202; воркер (единственный процесс с ключом App) проверяет через GitHub API и записывает результат.
   Права: aicd_app — SELECT/INSERT (создание и опрос статуса); aicd_worker — SELECT и UPDATE полей результата.
-  Воркер получает INSERT на github_installations и repositories (подключение установки/привязка репозитория
-  после проверки), у aicd_app INSERT на github_installations отзывается (API больше не создаёт установки).
+  Подключение установки (контракт 201 сохранён): API создаёт строку `github_installations` в новом статусе
+  `PENDING` (поля аккаунта — заглушки до проверки), воркер после проверки заполняет данные и ставит ACTIVE/SUSPENDED
+  (или REVOKED при отказе). У aicd_app отозван UPDATE полей аккаунта/прав (остаётся только status); воркер получает
+  UPDATE (account_type, installed_by) и INSERT на repositories (привязка репозитория после проверки).
 
 Миграция — только SQL через op.execute (работает в offline-режиме `alembic upgrade --sql`).
 Обратимость: downgrade удаляет таблицу и столбец, возвращает NOT NULL DEFAULT 1800 (NULL → 1800), строки
@@ -114,11 +116,13 @@ GRANT SELECT ON github_verification_requests TO aicd_worker;
 GRANT UPDATE (status, result_id, error_code, error_detail, completed_at) ON github_verification_requests TO aicd_worker;
 GRANT SELECT, DELETE ON github_verification_requests TO aicd_maintenance;
 
--- OQ-47 (2): установку подключает и репозиторий привязывает воркер после проверки через GitHub API.
-REVOKE INSERT ON github_installations FROM aicd_app;
+-- OQ-47 (2): API создаёт установку в состоянии PENDING (без обращения к GitHub), данные установки (login, тип,
+-- права) заполняет воркер после проверки через GitHub API; репозиторий привязывает воркер.
+ALTER TABLE github_installations DROP CONSTRAINT IF EXISTS github_installations_status_check;
+ALTER TABLE github_installations ADD CONSTRAINT github_installations_status_check
+  CHECK (status IN ('PENDING','ACTIVE','SUSPENDED','REVOKED'));
 REVOKE UPDATE (account_login, account_type, repository_selection, permissions, installed_by)
   ON github_installations FROM aicd_app;
-GRANT INSERT ON github_installations TO aicd_worker;
 GRANT UPDATE (account_type, installed_by) ON github_installations TO aicd_worker;
 GRANT INSERT ON repositories TO aicd_worker;
 """
@@ -126,8 +130,12 @@ GRANT INSERT ON repositories TO aicd_worker;
 DOWNGRADE = r"""
 REVOKE INSERT ON repositories FROM aicd_worker;
 REVOKE UPDATE (account_type, installed_by) ON github_installations FROM aicd_worker;
-REVOKE INSERT ON github_installations FROM aicd_worker;
-GRANT INSERT ON github_installations TO aicd_app;
+ALTER TABLE github_installations NO FORCE ROW LEVEL SECURITY;
+UPDATE github_installations SET status = 'REVOKED' WHERE status = 'PENDING';
+ALTER TABLE github_installations FORCE ROW LEVEL SECURITY;
+ALTER TABLE github_installations DROP CONSTRAINT IF EXISTS github_installations_status_check;
+ALTER TABLE github_installations ADD CONSTRAINT github_installations_status_check
+  CHECK (status IN ('ACTIVE','SUSPENDED','REVOKED'));
 GRANT UPDATE (status, account_login, account_type, repository_selection, permissions, installed_by)
   ON github_installations TO aicd_app;
 DROP TABLE IF EXISTS github_verification_requests;

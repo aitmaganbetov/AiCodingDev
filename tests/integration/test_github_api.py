@@ -129,10 +129,17 @@ async def _noop(message: dict[str, Any]) -> None:
 
 
 async def _verification(user: UserSession, ws: str, accepted: Any) -> dict[str, Any]:
-    """Статус проверки после обработки воркером (getGitHubVerification)."""
-    assert accepted.status_code == 202, accepted.text
-    location = accepted.headers["location"]
-    assert location == f"/api/v1/integrations/github/verifications/{accepted.json()['id']}"
+    """Статус проверки после обработки воркером (getGitHubVerification).
+
+    connectGitHubInstallation — 201 с установкой PENDING и `verification_id`; attachRepository (github) — 202 + Location.
+    """
+    if accepted.status_code == 201:
+        assert accepted.json()["status"] == "PENDING" or accepted.json()["verification_id"], accepted.text
+        location = f"/api/v1/integrations/github/verifications/{accepted.json()['verification_id']}"
+    else:
+        assert accepted.status_code == 202, accepted.text
+        location = accepted.headers["location"]
+        assert location == f"/api/v1/integrations/github/verifications/{accepted.json()['id']}"
     r = await user.client.get(location, headers={"X-Workspace-Id": ws})
     validate_response("getGitHubVerification", r)
     assert r.status_code == 200, r.text
@@ -145,7 +152,7 @@ async def _team(app: FastAPI, engine: AsyncEngine, admin: psycopg.Connection) ->
 
 
 async def _connect(team: Team, who: str, installation_id: int) -> Any:
-    """Запрос подключения (202); проверку выполняет `_run_verifications`."""
+    """Запрос подключения (201, установка PENDING); проверку выполняет `_run_verifications`."""
     user = team.users[who]
     r = await user.client.post("/api/v1/integrations/github/installations/setup", headers=user.headers(team.ws))
     validate_response("startGitHubInstallation", r)
@@ -171,6 +178,7 @@ async def test_installation_flow_state_and_permissions(
     owner = team.users["owner"]
     requests_before = len(env.gh.requests)
     r, state = await _connect(team, "owner", 89)
+    assert r.status_code == 201 and r.json()["status"] == "PENDING" and r.json()["installation_id"] == 89
     pending = await _verification(owner, team.ws, r)
     assert pending["status"] == "PENDING" and pending["kind"] == "installation" and pending["result_id"] is None
     assert len(env.gh.requests) == requests_before, "API не обращается к GitHub API (ключ App — только у воркера)"
@@ -180,7 +188,7 @@ async def test_installation_flow_state_and_permissions(
     body = (
         await owner.client.get("/api/v1/integrations/github/installations", headers={"X-Workspace-Id": team.ws})
     ).json()["items"][0]
-    assert body["id"] == done["result_id"]
+    assert body["id"] == done["result_id"] == r.json()["id"]
     assert body["installation_id"] == 89 and body["status"] == "ACTIVE" and body["account_login"] == "acme2"
     assert body["permissions"] == {"contents": "write", "pull_requests": "write", "checks": "read",
                                    "statuses": "write", "metadata": "read"}  # fmt: skip
@@ -208,22 +216,32 @@ async def test_installation_flow_state_and_permissions(
     r_excess, _ = await _connect(team, "owner", 88)
     # Несуществующая установка.
     r_missing, _ = await _connect(team, "admin", 999_999)
-    # Та же установка в другом workspace — conflict (UNIQUE installation_id).
+    # Та же установка в другом workspace — 409 сразу в API (UNIQUE installation_id).
     other = await _team(gapp, app_engine, admin)
     r_conflict, _ = await _connect(other, "owner", 89)
-    assert sorted(await _run_verifications(admin, worker_engine, env)) == ["failed"] * 3
+    assert r_conflict.status_code == 409 and r_conflict.json()["code"] == "conflict"
+    assert sorted(await _run_verifications(admin, worker_engine, env)) == ["failed"] * 2
     excess = await _verification(owner, team.ws, r_excess)
     assert excess["status"] == "FAILED" and excess["error"]["code"] == "permissions"
     assert "workflows:write" in excess["error"]["detail"]
     assert (await _verification(team.users["admin"], team.ws, r_missing))["error"]["code"] == "not_found"
-    assert (await _verification(other.users["owner"], other.ws, r_conflict))["error"]["code"] == "conflict"
+    # Отклонённые установки не подключаются (REVOKED).
+    statuses: dict[int, str] = dict(
+        admin.execute(
+            "SELECT installation_id, status FROM github_installations WHERE workspace_id = %s",
+            (team.tenant.workspace_id,),
+        ).fetchall()
+    )
+    assert statuses == {89: "ACTIVE", 88: "REVOKED", 999_999: "REVOKED"}
     # Проверка чужого workspace — 404.
-    r = await owner.client.get(r_conflict.headers["location"], headers={"X-Workspace-Id": team.ws})
+    r = await other.users["owner"].client.get(
+        f"/api/v1/integrations/github/verifications/{excess['id']}", headers={"X-Workspace-Id": other.ws}
+    )
     validate_response("getGitHubVerification", r)
     assert r.status_code == 404
     r = await owner.client.get("/api/v1/integrations/github/installations", headers={"X-Workspace-Id": team.ws})
     validate_response("listGitHubInstallations", r)
-    [item] = r.json()["items"]
+    [item] = [i for i in r.json()["items"] if i["installation_id"] == 89]
     r = await owner.client.delete(
         f"/api/v1/integrations/github/installations/{item['id']}", headers=owner.headers(team.ws)
     )

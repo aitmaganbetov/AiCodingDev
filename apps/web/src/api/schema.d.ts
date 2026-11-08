@@ -1186,7 +1186,7 @@ export interface paths {
         put?: never;
         /**
          * Подключить установку GitHub App к workspace (P8-02) [дополнение к ТЗ]
-         * @description Вызывается UI со страницы Setup URL App с installation_id и state из startGitHubInstallation. Сервер проверяет state (HMAC, workspace и пользователь сессии, срок, однократность) и ставит проверку установки воркеру ⇒ 202 GitHubVerification (OQ-47 (2): процесс API не держит закрытый ключ App, SECURITY_ARCHITECTURE §6.1). Воркер читает установку через GitHub API (JWT App) и завершает проверку FAILED, если права шире минимального набора App или содержат workflows/administration/secrets/ environments/actions (SC-GH-04, error.code=permissions), установка другого App (foreign_app), не найдена (not_found) или подключена к другому workspace (conflict); SUCCEEDED — result_id = id установки. Повторное подключение REVOKED-установки этого workspace — реактивация. Статус — getGitHubVerification.
+         * @description Вызывается UI со страницы Setup URL App с installation_id и state из startGitHubInstallation. Сервер проверяет state (HMAC, workspace и пользователь сессии, срок, однократность) и регистрирует установку в статусе PENDING (поля аккаунта и права — заглушки до проверки) с verification_id; проверку через GitHub API (JWT App) выполняет воркер (OQ-47 (2): процесс API не держит закрытый ключ App, SECURITY_ARCHITECTURE §6.1): права шире минимального набора App или workflows/administration/ secrets/environments/actions (SC-GH-04, error.code=permissions), установка другого App (foreign_app) или не найдена (not_found) ⇒ проверка FAILED, установка REVOKED; иначе ACTIVE (SUSPENDED) с данными аккаунта. Установка другого workspace ⇒ 409. Повторное подключение установки этого workspace — повторная проверка. Статус проверки — getGitHubVerification.
          */
         post: operations["connectGitHubInstallation"];
         delete?: never;
@@ -1349,8 +1349,16 @@ export interface components {
             permissions: {
                 [key: string]: string;
             };
-            /** @enum {string} */
-            status: "ACTIVE" | "SUSPENDED" | "REVOKED";
+            /**
+             * @description PENDING — установка зарегистрирована, проверка через GitHub API на воркере ещё не завершена (account_login, account_type, permissions — заглушки)
+             * @enum {string}
+             */
+            status: "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED";
+            /**
+             * Format: uuid
+             * @description Только в ответе connectGitHubInstallation — проверка установки воркером (getGitHubVerification)
+             */
+            verification_id?: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -6735,18 +6743,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Проверка установки поставлена воркеру */
-            202: {
+            /** @description Created (status PENDING до проверки воркером) */
+            201: {
                 headers: {
                     "RateLimit-Limit": components["headers"]["RateLimitLimit"];
                     "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
                     "RateLimit-Reset": components["headers"]["RateLimitReset"];
-                    Location: components["headers"]["Location"];
                     "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GitHubVerification"];
+                    "application/json": components["schemas"]["GitHubInstallation"];
                 };
             };
             400: components["responses"]["BadRequest"];

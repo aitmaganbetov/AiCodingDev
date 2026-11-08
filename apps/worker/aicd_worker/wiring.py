@@ -117,7 +117,9 @@ def default_ports(
     approvals = Approvals()
     # Образы gates: качество/миграции (images.py) + безопасность/цепочка поставок (security_gates), все — по digest;
     # в production ссылка без digest — ошибка конфигурации (ImagePolicyError), воркер не стартует.
-    images = default_gate_images(SECURITY_GATE_IMAGES, require_digest=settings.environment == "production")
+    images = default_gate_images(
+        {**SECURITY_GATE_IMAGES, **settings.verification_images}, require_digest=settings.environment == "production"
+    )
     verifier = VerificationEngine(
         engine=engine,
         store=store,

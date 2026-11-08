@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import io
+import itertools
 import re
 import subprocess
 import tarfile
@@ -111,7 +112,8 @@ def base_backup(repo: Repository, target: PgTarget, *, label: str = "aicd") -> d
     stderr: list[bytes] = []
     with streaming_tool(target, argv) as proc:
         drain = _drain(proc.stderr, stderr)
-        assert proc.stdout is not None
+        if proc.stdout is None:
+            raise BackupError("нет stdout pg_basebackup")
         stats = encrypt_file(repo.key, f"base/{backup_id}/base.tar.gz", read_chunks(proc.stdout), out)
         code = proc.wait()
         drain.join()
@@ -280,7 +282,8 @@ def logical_dump(repo: Repository, target: PgTarget) -> dict[str, Any]:
     stderr: list[bytes] = []
     with streaming_tool(target, argv) as proc:
         drain = _drain(proc.stderr, stderr)
-        assert proc.stdout is not None
+        if proc.stdout is None:
+            raise BackupError("нет stdout pg_dump")
         stats = encrypt_file(repo.key, f"dump/{backup_id}/aicd.dump", read_chunks(proc.stdout), out)
         code = proc.wait()
         drain.join()
@@ -343,7 +346,7 @@ def _segment_gaps(segments: list[str]) -> list[str]:
         by_tl.setdefault(name[:8], []).append(int(name[8:16], 16) * 0x100 + int(name[16:24], 16))
     for tl, numbers in by_tl.items():
         numbers.sort()
-        for prev, cur in zip(numbers, numbers[1:], strict=False):
+        for prev, cur in itertools.pairwise(numbers):
             if cur != prev + 1:
                 gaps.append(f"timeline {tl}: после {prev:X} следует {cur:X}")
     return gaps
@@ -363,7 +366,8 @@ def _pipe_into_container(cmd: list[str], chunks: Iterator[bytes]) -> None:
     stderr: list[bytes] = []
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)  # noqa: S603
     drain = _drain(proc.stderr, stderr)
-    assert proc.stdin is not None
+    if proc.stdin is None:
+        raise BackupError("нет stdin контейнера")
     try:
         for chunk in chunks:
             proc.stdin.write(chunk)
@@ -482,9 +486,14 @@ def post_restore(target: PgTarget) -> dict[str, Any]:
     )  # миграции старее 0002/0003 — части таблиц/последовательности нет
     new_value = "0"
     if "worker_lease_fencing_seq" in existing:
-        parts = [f"(SELECT coalesce(max({col}), 0) FROM aicd.{table})" for table, col in FENCING_SOURCES if table in existing]
-        greatest = f"GREATEST({', '.join([*parts, '(SELECT last_value FROM aicd.worker_lease_fencing_seq)'])})"
-        new_value = psql(target, f"SELECT setval('aicd.worker_lease_fencing_seq', {greatest} + {FENCING_BUMP})")
+        parts = [
+            f"(SELECT coalesce(max({col}), 0) FROM aicd.{table})"  # noqa: S608 — константы FENCING_SOURCES
+            for table, col in FENCING_SOURCES
+            if table in existing
+        ]
+        greatest = f"GREATEST({', '.join([*parts, '(SELECT last_value FROM aicd.worker_lease_fencing_seq)'])})"  # noqa: S608
+        sql = f"SELECT setval('aicd.worker_lease_fencing_seq', {greatest} + {FENCING_BUMP})"
+        new_value = psql(target, sql)
     timeline = psql(target, "SELECT timeline_id FROM pg_control_checkpoint()")
     return {"fencing_seq": int(new_value), "timeline": int(timeline), **server_facts(target)}
 

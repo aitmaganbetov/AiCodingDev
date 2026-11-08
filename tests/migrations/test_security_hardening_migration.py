@@ -111,7 +111,12 @@ def test_verification_table_rls_grants_and_terminal_states(database: testdb.Test
 
         assert not any_col("aicd_app", "UPDATE") and not priv("aicd_app", "DELETE")
         assert priv("aicd_worker", "SELECT") and any_col("aicd_worker", "UPDATE") and not priv("aicd_worker", "INSERT")
-        assert not priv("aicd_app", "INSERT", "github_installations"), "OQ-47 (2): установки создаёт воркер"
+        assert priv("aicd_app", "INSERT", "github_installations"), "api регистрирует установку PENDING"
+        assert not priv("aicd_worker", "INSERT", "github_installations")
+        check = conn.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'github_installations_status_check'"
+        ).fetchone()
+        assert check is not None and "PENDING" in check[0]
         assert priv("aicd_worker", "INSERT", "repositories")
 
         tenant = seed_tenant(conn)

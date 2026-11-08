@@ -331,6 +331,7 @@ criteria:
           - py: tests/unit/test_acp_schema.py::test_negative_payload_rejected
           - py: tests/unit/test_acp_schema.py::test_negative_envelope_rejected
           - py: tests/unit/test_agent_result.py::test_invalid_results_rejected
+          - py: tests/integration/test_outbox_dispatcher.py::test_dispatched_messages_match_outbox_envelope_schema
 
   - id: AC-16
     title: CLI-авторизация недоступна

@@ -80,30 +80,37 @@ def _scan_files(root: Path, needles: tuple[str, ...]) -> tuple[list[str], int]:
     return leaked, len(files)
 
 
-def _scan_database(database: testdb.TestDatabase, needles: tuple[str, ...]) -> dict[str, list[str]]:
-    """Таблицы схемы `aicd`, в текстовом представлении строк которых встречается секрет."""
-    hits: dict[str, list[str]] = {}
+def _scan_database(
+    database: testdb.TestDatabase, needles: tuple[str, ...], workspace_ids: tuple[uuid.UUID, ...]
+) -> dict[str, int]:
+    """Число строк схемы `aicd` с секретом в текстовом представлении: tenant-таблицы — только строки workspace
+    теста (общая тестовая БД содержит намеренные фикстуры-секреты других тестов), глобальные таблицы — целиком
+    (сравниваются до/после теста)."""
+    hits: dict[str, int] = {}
+    ws = [str(w) for w in workspace_ids]
     with psycopg.connect(database.superuser_url, autocommit=True) as conn:
-        tables = [
-            r[0]
-            for r in conn.execute(
-                "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-                " WHERE n.nspname = 'aicd' AND c.relkind IN ('r','p') AND NOT c.relispartition"
-            ).fetchall()
-        ]
-        for table in tables:
+        tables = conn.execute(
+            "SELECT c.relname, EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid"
+            "   AND a.attname = 'workspace_id' AND NOT a.attisdropped)"
+            " FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+            " WHERE n.nspname = 'aicd' AND c.relkind IN ('r','p') AND NOT c.relispartition"
+        ).fetchall()
+        for table, tenant in tables:
+            scope = " AND t.workspace_id::text = ANY(%s)" if tenant else ""
             for needle in needles:
+                params: tuple[object, ...] = (f"%{needle}%", ws) if tenant else (f"%{needle}%",)
                 row = conn.execute(
-                    f"SELECT count(*) FROM aicd.{table} t WHERE t::text LIKE %s",
-                    (f"%{needle}%",),
+                    f"SELECT count(*) FROM aicd.{table} t WHERE t::text LIKE %s{scope}",
+                    params,
                 ).fetchone()
                 if row and row[0]:
-                    hits.setdefault(table, []).append(needle)
+                    hits[f"{table}:{needle[:6]}"] = int(row[0])
     return hits
 
 
 async def test_cli_output_secrets_absent_from_db_and_artifacts(env: Env, database: testdb.TestDatabase) -> None:  # noqa: F811
     request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id, task_attempt_id=env.attempt_id)
+    before = _scan_database(database, CLI_SECRETS, (env.workspace_id,))
     seen: list[str] = []
 
     async def on_event(e: Any) -> None:
@@ -114,7 +121,8 @@ async def test_cli_output_secrets_absent_from_db_and_artifacts(env: Env, databas
     )
     assert outcome.result.status == "completed"
     assert seen and not any(s in text for s in CLI_SECRETS for text in seen), "события Gateway (→ outbox/SSE)"
-    assert _scan_database(database, CLI_SECRETS) == {}, "секрет сохранён в БД"
+    # Строки workspace теста — ни одной; глобальные таблицы — без новых совпадений.
+    assert _scan_database(database, CLI_SECRETS, (env.workspace_id,)) == before, "секрет сохранён в БД"
     leaked, stored = _scan_files(Path(env.store._root), CLI_SECRETS)
     assert stored, "raw log и output сохранены"
     assert leaked == [], f"секрет в артефактах: {leaked}"
@@ -146,7 +154,7 @@ async def test_sse_and_activity_never_carry_secrets(
     body = json.dumps(events)
     assert CANARY_TOKEN not in body and "AKIAABCDEFGHIJKLMNOP" not in body
     assert "[REDACTED]" in body, body[:500]
-    assert _scan_database(database, (CANARY_TOKEN,)) == {}
+    assert _scan_database(database, (CANARY_TOKEN,), (sse_env.tenant.workspace_id,)) == {}
 
 
 @pytest.fixture

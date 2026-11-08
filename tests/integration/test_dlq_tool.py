@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from dramatiq import Message
@@ -17,7 +19,7 @@ REDIS_URL = os.environ.get("AICD_TEST_DLQ_REDIS_URL", "redis://127.0.0.1:6379/13
 
 
 @pytest.fixture
-def redis() -> Redis:
+def redis() -> Iterator[Redis]:
     client = Redis.from_url(REDIS_URL, socket_timeout=2)
     try:
         client.ping()
@@ -31,7 +33,7 @@ def redis() -> Redis:
 
 def _dead_letter(redis: Redis, queue: str) -> str:
     """Как `nack` dispatch.lua Dramatiq: сообщение в zset `.XQ` и тело в `.XQ.msgs`."""
-    message = Message(
+    message: Message[Any] = Message(
         queue_name=queue,
         actor_name="execute_task",
         args=({"run_id": str(uuid.uuid4()), "task_id": str(uuid.uuid4()), "prompt": "секрет не печатается"},),
@@ -43,7 +45,9 @@ def _dead_letter(redis: Redis, queue: str) -> str:
     return message.message_id
 
 
-def test_list_replay_and_drop(redis: Redis, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_list_replay_and_drop(
+    redis: Redis, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     first = _dead_letter(redis, "exec")
     second = _dead_letter(redis, "exec")
     listed = dlq.list_dead(redis, ["exec", "orchestrator"])

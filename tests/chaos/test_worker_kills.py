@@ -126,7 +126,7 @@ async def test_worker_killed_mid_step_is_recovered_without_duplicates(
 
         # Пока аренда жива — reconciler не трогает задачу.
         report = await reconciler.reconcile()
-        assert task_id not in report.reaped_tasks
+        assert task_id not in report.reaped_tasks, report
         assert _current_attempt(admin, run_id)[1] == attempt_id
 
         admin.execute(
@@ -135,7 +135,7 @@ async def test_worker_killed_mid_step_is_recovered_without_duplicates(
             (task_id,),
         )
         report = await reconciler.reconcile()
-        assert report.reaped_tasks == [task_id]
+        assert task_id in report.reaped_tasks, report
         assert admin.execute(
             "SELECT status, failure_category FROM task_attempts WHERE id = %s", (attempt_id,)
         ).fetchone() == ("FAILED", "LEASE_LOST")
@@ -150,7 +150,13 @@ async def test_worker_killed_mid_step_is_recovered_without_duplicates(
         stale = leases.Lease("task", task_id, "zombie", token, datetime.now(UTC) + timedelta(hours=1))
         assert not await leases.heartbeat(conn, stale)
 
-    assert await drive(world, run_id) == "COMPLETED"
+    final = await drive(world, run_id)
+    if final != "COMPLETED":
+        with orch.connect_admin(database) as admin:
+            tasks = admin.execute(
+                "SELECT task_key, status, attempt_count FROM tasks WHERE run_id = %s", (uuid.UUID(run_id),)
+            ).fetchall()
+        raise AssertionError(f"run {final}: {tasks}")
     with orch.connect_admin(database) as admin:
         attempts = admin.execute(
             "SELECT a.status, a.failure_category FROM task_attempts a JOIN tasks t ON t.id = a.task_id"

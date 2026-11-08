@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -150,14 +151,24 @@ class FsSource:
         return self._path(key).is_file()
 
     def write(self, key: str, chunks: Iterator[bytes], sha256: str, size: int) -> None:
+        """Как FileSystemArtifactStore: каталоги 0700, файл 0400, владелец — владелец корня хранилища (uid процесса
+        api/воркеров в томе), иначе после восстановления от root приложение не прочитает объекты."""
         del sha256, size
         target = self._path(key)
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        owner = self.root.stat()
+        created = [p for p in [*reversed(target.parent.relative_to(self.root).parents), target.parent.relative_to(self.root)]
+                   if p != Path(".") and not (self.root / p).exists()]  # fmt: skip
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = target.with_name(f".aicd-upload-restore-{target.name}")
         with tmp.open("wb") as out:
             for chunk in chunks:
                 out.write(chunk)
         tmp.chmod(0o400)
+        if os.geteuid() == 0:
+            for rel in created:
+                os.chown(self.root / rel, owner.st_uid, owner.st_gid)
+            os.chown(tmp, owner.st_uid, owner.st_gid)
         tmp.rename(target)
 
 
@@ -212,7 +223,9 @@ def previous_objects(repo: Repository, prefix: str) -> dict[str, dict[str, Any]]
     return {k: v for k, v in manifest["objects"].items() if object_path(repo, v["sha256"]).exists()}
 
 
-def backup_artifacts(repo: Repository, source: ArtifactSource, load_rows: RowsLoader, *, full: bool = False) -> dict[str, Any]:
+def backup_artifacts(
+    repo: Repository, source: ArtifactSource, load_rows: RowsLoader, *, full: bool = False
+) -> dict[str, Any]:
     """Снимок хранилища. Инкрементально: ключи из прошлого снимка не перечитываются (артефакты неизменяемы:
     FS — `link()` без перезаписи, S3 — отказ при существующем ключе); `full=True` — перечитать и пересчитать sha256
     всех объектов (периодическая проверка целостности хранилища)."""
@@ -223,7 +236,7 @@ def backup_artifacts(repo: Repository, source: ArtifactSource, load_rows: RowsLo
     previous = {} if full else previous_objects(repo, prefix)
     objects: dict[str, dict[str, Any]] = {}
     new_objects = reused = 0
-    for key in source.keys():
+    for key in source.keys():  # noqa: SIM118 — метод источника, не dict
         if key in previous:
             objects[key] = previous[key]
             reused += 1

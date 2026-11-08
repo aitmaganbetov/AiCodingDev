@@ -64,7 +64,7 @@ VOLUMES = ("aicd-dr-pgdata", "aicd-dr-pgwal", "aicd-dr-s3data", "aicd-dr-pgdata-
 # S3-совместимое хранилище дрилла — тот же образ, что у контейнера разработки aicd-s3-dev, по digest.
 S3_IMAGE = "rustfs/rustfs@sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2"
 BUCKET = "aicd-artifacts"
-PASSWORD = "Dr-Drill-Correct-Horse-9"
+PASSWORD = "Dr-Drill-Correct-Horse-9"  # noqa: S105 — пароль одноразовых пользователей стенда
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
 SECRET_NAMES = ("pg_admin_password", "pg_migrator_password", "pg_app_password", "pg_worker_password",
                 "pg_maintenance_password", "app_secret_key", "redis_password", "s3_access_key", "s3_secret_key")  # fmt: skip
@@ -431,7 +431,7 @@ class Drill:
             tables = [r[0] for r in conn.execute(
                 "SELECT relname FROM pg_class WHERE relnamespace = 'aicd'::regnamespace AND relkind IN ('r','p')"
                 " AND NOT relispartition ORDER BY relname").fetchall()]  # fmt: skip
-            return {t: int(conn.execute(f'SELECT count(*) FROM aicd."{t}"').fetchone()[0]) for t in tables}  # type: ignore[index]
+            return {t: int(conn.execute(f'SELECT count(*) FROM aicd."{t}"').fetchone()[0]) for t in tables}  # type: ignore[index]  # noqa: S608 — имена таблиц из pg_class
 
     def rls_facts(self) -> dict[str, Any]:
         with psycopg.connect(self.url("aicd_admin"), autocommit=True) as conn:
@@ -715,7 +715,8 @@ def run_drill(drill: Drill) -> None:
     with drill.step("проверки: RPO, строки, RLS, артефакты, вход, run продолжаются"):
         with psycopg.connect(drill.url("aicd_admin"), autocommit=True) as conn:
             hb = conn.execute("SELECT max(id), max(committed_at), count(*) FROM dr_drill.heartbeat").fetchone()
-        assert hb is not None and heartbeat.last_acked is not None
+        if hb is None or heartbeat.last_acked is None:
+            raise RuntimeError("нет heartbeat-записей")
         lost = heartbeat.last_acked[0] - int(hb[0] or 0)
         restored_last = hb[1].timestamp() if hb[1] else 0.0
         rpo = max(heartbeat.last_acked[1] - restored_last, 0.0)
@@ -803,7 +804,7 @@ def run_drill(drill: Drill) -> None:
         with psycopg.connect(drill.url("aicd_admin", "aicd_dumpcheck"), autocommit=True) as conn:
             mismatched = []
             for table, count in counts_dump.items():
-                got = conn.execute(f'SELECT count(*) FROM aicd."{table}"').fetchone()
+                got = conn.execute(f'SELECT count(*) FROM aicd."{table}"').fetchone()  # noqa: S608 — имена таблиц из pg_class
                 if got is None or int(got[0]) != count:
                     mismatched.append((table, count, got[0] if got else None))
         drill.check("логический дамп восстанавливается (pg_restore) со строками на момент дампа", not mismatched,
@@ -830,7 +831,8 @@ def dump_restore(drill: Drill, backup_id: str, env: dict[str, str]) -> str:
         ["docker", "exec", "-i", PG, "pg_restore", "-U", "aicd_admin", "-d", "aicd_dumpcheck", "--exit-on-error"],  # noqa: S607
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )  # fmt: skip
-    assert proc.stdin is not None and proc.stdout is not None
+    if proc.stdin is None or proc.stdout is None:
+        raise RuntimeError("pg_restore: нет stdin/stdout")
     for chunk in decrypt_file(repo.key, f"dump/{backup_id}/{entry['name']}", path):
         proc.stdin.write(chunk)
     proc.stdin.close()

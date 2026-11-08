@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 import pytest
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -17,6 +18,10 @@ from aicd_platform.sse import envelope
 from tests.support import db as testdb
 from tests.support import orchestration as orch
 from tests.support.events import validate_sse
+from tests.support.phase3 import Slice, create_run, drive, install_both, world
+from tests.support.tracing import spans
+
+__all__ = ["spans", "world"]  # фикстуры pytest
 
 pytestmark = pytest.mark.db
 
@@ -255,3 +260,47 @@ async def test_task_and_terminal_events_match_sse_schema(
     cli = envelope(log[2])["payload"]
     assert "internal" not in cli and cli["truncated"] is True
     assert len(cli["text"].encode()) <= 8192
+
+
+# --- P9-01 / OQ-49: настоящие сообщения диспетчера соответствуют outbox-envelope.schema.json -------------------
+
+
+def _envelope_validator() -> Any:
+    import json
+
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    from tests.support.contract import ROOT
+
+    path = ROOT / "packages" / "contracts" / "schemas" / "events" / "1.0" / "outbox-envelope.schema.json"
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
+async def test_dispatched_messages_match_outbox_envelope_schema(world: Slice, spans: InMemorySpanExporter) -> None:
+    """Сквозной DEVELOP-run на Fake CLI (run/task/agent_message/gate/… события), затем диспетчер публикует все
+    события: каждое тело Dramatiq-сообщения валидно по схеме, поля, которые читают потребители воркеров,
+    присутствуют; traceparent спана публикации — W3C. Старый проект конверта (`trace`/`data`) схемой отклоняется."""
+    validator = _envelope_validator()
+    await install_both(world.worker)
+    run_id = await create_run(world)
+    assert await drive(world, run_id) == "COMPLETED"
+    rec = Recorder()
+    while await dispatch_batch(world.worker, rec.publish, rec.notify, batch=500):
+        pass
+    mine = rec.for_run(uuid.UUID(run_id))
+    assert len(mine) >= 10, "run порождает события run/task/agent_message/gate"
+    kinds = {(e["aggregate_type"], e["event_type"]) for e in mine}
+    assert {"run", "task", "agent_message", "gate_execution"} <= {k[0] for k in kinds}, kinds
+    for message in rec.published:  # и события других тестов сессии — все сообщения диспетчера
+        errors = [f"{'/'.join(map(str, e.path))}: {e.message}" for e in validator.iter_errors(message)]
+        assert not errors, (message["event_type"], errors)
+    assert all(isinstance(e["payload"], dict) and e["workspace_id"] == world.ws for e in mine)
+    assert any(e["traceparent"] for e in mine), "спан публикации передаёт traceparent потребителям"
+    sample = mine[0]
+    legacy = {k: v for k, v in sample.items() if k not in ("payload", "traceparent", "correlation_id", "causation_id")}
+    legacy |= {"trace": {"correlation_id": sample["correlation_id"]}, "data": sample["payload"]}
+    assert list(validator.iter_errors(legacy)), "непринятый проект конверта (trace/data) не должен проходить"
+    for broken in ({**sample, "event_type": "RunStateChanged"}, {**sample, "traceparent": "abc"}, {**sample, "x": 1}):
+        assert list(validator.iter_errors(broken)), broken

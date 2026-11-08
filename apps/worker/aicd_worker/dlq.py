@@ -59,7 +59,8 @@ def list_dead(redis: Redis, queues: Sequence[str]) -> list[dict[str, Any]]:
     out = []
     for queue in queues:
         zkey, hkey = _keys(queue)
-        for member, score in redis.zrange(zkey, 0, -1, withscores=True):
+        members: list[tuple[bytes | str, float]] = redis.zrange(zkey, 0, -1, withscores=True)  # type: ignore[assignment]
+        for member, score in members:
             message_id = member.decode() if isinstance(member, bytes) else str(member)
             raw = redis.hget(hkey, message_id)
             out.append(_summary(queue, message_id, raw if isinstance(raw, bytes) else None, float(score)))
@@ -76,7 +77,7 @@ def replay(redis: Redis, broker: Any, queue: str, message_ids: Sequence[str]) ->
             continue
         message = Message.decode(raw)
         options = {k: v for k, v in message.options.items() if k not in ("retries", "traceback", "redis_message_id")}
-        fresh = Message(
+        fresh: Message[Any] = Message(
             queue_name=message.queue_name,
             actor_name=message.actor_name,
             args=message.args,

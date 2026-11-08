@@ -31,7 +31,9 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def run(cmd: Sequence[str], *, timeout: float = 1800, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: Sequence[str], *, timeout: float = 1800, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 — аргументы списком
         list(cmd), capture_output=True, text=True, timeout=timeout, check=False, env=env
     )

@@ -40,6 +40,8 @@ Prometheus находит воркеры по DNS-именам сервисов 
 | approval wait time | `aicd_approval_wait_seconds{action_type}` | worker-outbox (`approval.decided.wait_seconds`) |
 | CLI token usage (если достоверно) | `aicd_cli_tokens_total{provider}` — только `source=cli_reported` | worker-exec |
 
+Бэкапы (P9-05): `aicd_backup_last_success_timestamp_seconds{component}`, `aicd_backup_last_attempt_failed{component}` (файл статуса утилиты бэкапа), `aicd_postgres_wal_archived`, `aicd_postgres_wal_archive_failures` (`pg_stat_archiver`) — worker-outbox.
+
 Дополнительно: HTTP (`aicd_http_requests_total{method,route,status}`, `aicd_http_request_duration_seconds`), безопасность (`aicd_auth_failures_total{reason}`, `aicd_authz_denied_total{reason}` (permission, tenant)), SSE (`aicd_sse_connections{stream}`, stream: run, workspace), вебхуки GitHub (`aicd_webhook_signature_invalid_total{reason}`: missing, malformed, mismatch), stuck leases (`aicd_worker_leases_expired{resource_type}`), хранилище (`aicd_artifact_storage_free_bytes/size_bytes`, `aicd_database_size_bytes`), Dramatiq (`aicd_worker_messages_total{actor,outcome}`, `aicd_queue_dead_letters`).
 
 **Гигиена (SC-OBS-03):** метки — только из ограниченных множеств (статусы FSM, типы событий, провайдер, шаблон маршрута); неизвестное значение → `other`. Идентификаторы run/task/user/workspace, e-mail, пути, тексты ошибок в метки не попадают. Доменные счётчики считаются по **зафиксированным** outbox-событиям: откаченная транзакция не учитывается; at-least-once доставка может дать редкий двойной счёт.
@@ -64,8 +66,7 @@ Prometheus находит воркеры по DNS-именам сервисов 
 | AicdOutboxLag, AicdQueueBacklog, AicdDeadLetters | outbox не доставляется 5 мин / очередь растёт / DLQ | worker-outbox и Redis; DLQ — разбор `last_error` |
 | AicdArtifactStorageLow/Critical | < 10% / < 5% свободно в FS-хранилище | расширить том, retention (`aicd maintenance`) |
 | AicdTargetDown | цель не скрейпится 5 мин | процесс/сеть/токен скрейпа |
-
-Сбои бэкапов (ТЗ §16) — после появления бэкапов (P9-05): метрики пока нет, правило не добавлено.
+| AicdBackupFailed, AicdBaseBackupStale, AicdWalSyncStale, AicdArtifactsBackupStale, AicdWalArchiveFailing | сбой/устаревание бэкапов (P9-05): файл статуса `python -m scripts.backup` (`AICD_BACKUP_STATUS_FILE` в worker-outbox) и `pg_stat_archiver` | [backups.md §6](backups.md) |
 
 ## 5. Проверки
 

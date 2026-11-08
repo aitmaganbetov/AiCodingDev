@@ -154,7 +154,7 @@ async def start_installation(request: Request, principal: identity.Principal = D
     )
 
 
-@router.post("/integrations/github/installations", status_code=202, **op("connectGitHubInstallation", "github:manage"))
+@router.post("/integrations/github/installations", status_code=201, **op("connectGitHubInstallation", "github:manage"))
 async def connect_installation(
     request: Request, body: InstallationConnectRequest, principal: identity.Principal = Depends(current_principal)
 ) -> Response:
@@ -177,17 +177,21 @@ async def connect_installation(
         # Однократность state: повтор того же Idempotency-Key возвращает сохранённый ответ раньше этой точки.
         if not await state.redis.set(nonce_key, "1", nx=True, ex=state.settings.github_install_state_ttl_seconds):
             raise ProblemError("validation_error", errors=[FieldError("/state", "state_used", "state уже использован")])
-        params: dict[str, Any] = {"installation_id": body.installation_id}
+        try:
+            inst, _created = await gh.store.register_pending_installation(
+                conn, workspace_id=access.workspace_id, installation_id=body.installation_id, actor_id=principal.user_id
+            )
+        except gh.store.InstallationConflictError as exc:
+            raise ProblemError("conflict", detail="Установка подключена к другому workspace") from exc
+        params: dict[str, Any] = {"installation_id": body.installation_id, "installation_row_id": str(inst["id"])}
         if body.setup_action is not None:
             params["setup_action"] = body.setup_action
         row = await github_verification.request_verification(
             conn, workspace_id=access.workspace_id, kind="installation", params=params, actor_id=principal.user_id
         )
-        return CommandResult(
-            202,
-            github_verification.verification_view(row),
-            {"Location": f"/api/v1/integrations/github/verifications/{row['id']}"},
-        )
+        # 201 (контракт сохранён): установка в статусе PENDING; данные аккаунта и права заполнит воркер после
+        # проверки через GitHub API (ключ App — только у воркера, OQ-47 (2)); статус проверки — verification_id.
+        return CommandResult(201, {**installation_view(inst), "verification_id": row["id"]})
 
     return await run_idempotent(request, access.db(), body.model_dump(), command)
 

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -157,7 +158,11 @@ def cmd_list(args: argparse.Namespace) -> dict[str, Any]:
     wal: dict[str, Any] = {}
     for sysdir in sorted(p for p in (repo.root / "wal").glob("*") if p.is_dir()):
         names = pg.wal_names(repo, sysdir.name)
-        wal[sysdir.name] = {"files": len(names), "first": names[0] if names else None, "last": names[-1] if names else None}
+        wal[sysdir.name] = {
+            "files": len(names),
+            "first": names[0] if names else None,
+            "last": names[-1] if names else None,
+        }
     status_path = repo.root / "status.json"
     return {
         "key_id": repo.key.key_id_hex,
@@ -369,10 +374,8 @@ def main(argv: list[str] | None = None) -> int:
         detail = getattr(exc, "report", None)
         print(json.dumps({"ok": False, "error": str(exc), "detail": detail}, ensure_ascii=False, indent=2))
         if component and args.repo and args.key_file:
-            try:
+            with contextlib.suppress(RepositoryError, BackupCryptoError, OSError):
                 _repo(args).record_status(component, ok=False, error=str(exc), extra_status_file=args.status_file)
-            except (RepositoryError, BackupCryptoError, OSError):
-                pass
         return 1
     if component:
         _repo(args).record_status(component, ok=True, extra_status_file=args.status_file)

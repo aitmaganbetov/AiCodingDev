@@ -34,49 +34,41 @@ flowchart LR
 
 ### 2.1 Конверт outbox-события
 
-Колонки `outbox_events` (ТЗ §7.2) + `workspace_id`, `run_id` (дополнение для RLS и порядка). Поле `payload` хранит объект ниже целиком (это же тело Dramatiq-сообщения).
+Колонки `outbox_events` (ТЗ §7.2) + `workspace_id`, `run_id` (дополнение для RLS и порядка) + `traceparent` (P8-06). Столбец `payload` хранит данные события (поля из каталога §2.2); конверт ниже — тело Dramatiq-сообщения, которое outbox-dispatcher собирает из строки (`OutboxRecord.message()`, `aicd_platform.sse`) и которое читают обработчики воркеров (`aicd_worker.handlers`/`docs`/`github`, доставка ACP): `payload` — данные, `traceparent` — продолжение трассы.
+
+> P9-01 (OQ-49): первоначальный проект конверта (`trace{…}`, `data`, закрытое перечисление `aggregate_type`) не был реализован — с Phase 3 код и все потребители используют плоский конверт ниже. Схема приведена к фактическому сообщению; соответствие проверяет `tests/integration/test_outbox_dispatcher.py::test_dispatched_messages_match_outbox_envelope_schema` (настоящие сообщения диспетчера). Форматы `event_type`/`aggregate_type` — как CHECK-ограничения `outbox_events` (миграция 0003).
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aicodingdev.local/contracts/events/1.0/outbox-envelope.schema.json",
   "title": "OutboxEventEnvelope",
+  "description": "Тело Dramatiq-сообщения outbox-dispatcher (OutboxRecord.message(), aicd_platform.sse): строка outbox_events + traceparent. Потребители перечитывают состояние из PostgreSQL; payload — данные события (каталог EVENT_SCHEMAS §2.2).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_id", "event_type", "schema_version", "aggregate_type", "aggregate_id", "workspace_id", "occurred_at", "trace", "data"],
+  "required": ["event_id", "event_type", "schema_version", "aggregate_type", "aggregate_id", "workspace_id", "run_id", "occurred_at", "correlation_id", "causation_id", "payload", "traceparent"],
   "properties": {
     "event_id": {"type": "string", "format": "uuid", "description": "= outbox_events.id (UUIDv7)"},
-    "event_type": {"type": "string", "pattern": "^[a-z_]+\\.[a-z_]+$"},
+    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$", "description": "= outbox_events.event_type (CHECK миграции 0003)"},
     "schema_version": {"const": "1.0"},
-    "aggregate_type": {"enum": ["run", "task", "task_attempt", "cli_execution", "agent_message", "chat_message", "directive", "approval", "gate_execution", "evidence", "finding", "compliance_result", "cli_installation", "routing_decision", "checkpoint", "external_action", "code_index_snapshot", "context_pack", "documentation_snapshot", "github_webhook_delivery"]},
+    "aggregate_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "= outbox_events.aggregate_type (run, task, agent_message, chat_message, directive, approval, gate_execution, external_action, cli_provider, documentation_source, github_verification, worktree, …)"},
     "aggregate_id": {"type": "string", "format": "uuid"},
-    "aggregate_version": {"type": ["integer", "null"], "minimum": 0},
-    "workspace_id": {"type": ["string", "null"], "format": "uuid", "description": "null только для глобальных агрегатов (cli_installation)"},
+    "workspace_id": {"type": ["string", "null"], "format": "uuid", "description": "null только для глобальных агрегатов"},
     "run_id": {"type": ["string", "null"], "format": "uuid"},
-    "occurred_at": {"type": "string", "format": "date-time"},
-    "trace": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "task_id": {"type": ["string", "null"], "format": "uuid"},
-        "execution_id": {"type": ["string", "null"], "format": "uuid"},
-        "correlation_id": {"type": ["string", "null"], "format": "uuid"},
-        "causation_id": {"type": ["string", "null"], "format": "uuid", "description": "event_id/команда, вызвавшая это событие"},
-        "actor_type": {"enum": ["user", "agent", "system", "github"]},
-        "actor_id": {"type": ["string", "null"]},
-        "otel_trace_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{32}$"}
-      }
-    },
-    "data": {"type": "object"}
+    "occurred_at": {"type": "string", "format": "date-time", "description": "outbox_events.created_at, UTC с Z"},
+    "correlation_id": {"type": ["string", "null"], "format": "uuid", "description": "по умолчанию run_id"},
+    "causation_id": {"type": ["string", "null"], "format": "uuid", "description": "event_id/команда, вызвавшая это событие"},
+    "payload": {"type": "object", "description": "данные события (outbox_events.payload, редактированы, ≤ 64 KiB)"},
+    "traceparent": {"type": ["string", "null"], "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$", "description": "W3C trace context спана публикации (P8-06); потребитель продолжает трассу"}
   }
 }
 ```
 
 ### 2.2 Каталог
 
-Колонка «SSE» указывает проекцию в `run_event_log` (раздел 3). Поля `data` перечислены кратко; все ID — UUID; тексты — санитизированы.
+Колонка «SSE» указывает проекцию в `run_event_log` (раздел 3). Поля `payload` перечислены кратко; все ID — UUID; тексты — санитизированы.
 
-| `event_type` | Агрегат | Триггер (в одной tx с) | Поля `data` | SSE |
+| `event_type` | Агрегат | Триггер (в одной tx с) | Поля `payload` | SSE |
 |---|---|---|---|---|
 | `run.created` | run | `INSERT runs` | `mode`, `objective_excerpt`, `quality_profile`, `approval_policy`, `policy_snapshot_hash` | `run.state_changed` (from=null) |
 | `run.state_changed` | run | переход Run FSM | `from_status`, `to_status`, `blocked_reason?`, `run_version`, `reason` | `run.state_changed` |

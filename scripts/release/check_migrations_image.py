@@ -50,7 +50,7 @@ def check(image: str) -> tuple[bool, str]:
         (root / "alembic" / "versions" / "0001_items.py").write_text(VERSION)
         for path in [root, *root.rglob("*")]:
             path.chmod(0o755 if path.is_dir() else 0o644)
-        cmd = ["docker", "run", "--rm", "--network", "none", "--user", "70:70", "--read-only", "--tmpfs", "/tmp",
+        cmd = ["docker", "run", "--rm", "--network", "none", "--user", "70:70", "--read-only", "--tmpfs", "/tmp",  # noqa: S108 — tmpfs контейнера
                "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-e", "PYTHONDONTWRITEBYTECODE=1",
                "-v", f"{root}:/work:ro", "-w", "/work", image,
                "sh", "-c", MIGRATION_DRIVER, "aicd-migrate", "alembic", "alembic.ini"]  # fmt: skip

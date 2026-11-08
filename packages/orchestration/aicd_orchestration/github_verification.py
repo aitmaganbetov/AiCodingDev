@@ -5,8 +5,9 @@ API не держит ключ App и не обращается к GitHub API с
 
 1. API (`request_verification`) проверяет то, что можно проверить локально (state установки, путь локальной
    копии, RBAC), и фиксирует в одной транзакции строку `github_verification_requests` (PENDING) + событие
-   outbox `github.verification.requested` + аудит; ответ — `202` и ресурс проверки
-   (`GET /integrations/github/verifications/{id}`).
+   outbox `github.verification.requested` + аудит; привязка репозитория отвечает `202` (ресурс проверки), подключение
+   установки — `201` с установкой в статусе `PENDING` (контракт сохранён) и `verification_id`;
+   статус — `GET /integrations/github/verifications/{id}`.
 2. Воркер (`GitHubVerifier.verify`) читает установку/репозиторий через GitHub API и в одной транзакции записывает
    результат (`SUCCEEDED` + `result_id` | `FAILED` + `error_code`) вместе с эффектом: подключение установки
    (`store.connect_installation`) или привязка репозитория (`projects.attach_github_repository` + задание индексации).
@@ -208,6 +209,14 @@ class GitHubVerifier:
         return "failed"
 
     async def _record_failure(self, conn: AsyncConnection, row: Mapping[str, Any], failed: _Failed) -> None:
+        if row["kind"] == "installation":
+            # Установка, созданная API в статусе PENDING (или повторно проверяемая), не подключается.
+            await conn.execute(
+                text(
+                    "UPDATE github_installations SET status = 'REVOKED' WHERE installation_id = :i AND status = 'PENDING'"
+                ),
+                {"i": int(row["params"]["installation_id"])},
+            )
         await verifications.fail(conn, row["id"], failed.code, failed.detail)
         action = "github.installation.connect" if row["kind"] == "installation" else "repository.attach"
         await audit.record(

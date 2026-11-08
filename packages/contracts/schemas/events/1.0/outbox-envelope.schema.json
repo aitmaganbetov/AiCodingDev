@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aicodingdev.local/contracts/events/1.0/outbox-envelope.schema.json",
   "title": "OutboxEventEnvelope",
+  "description": "Тело Dramatiq-сообщения outbox-dispatcher (OutboxRecord.message(), aicd_platform.sse): строка outbox_events + traceparent. Потребители перечитывают состояние из PostgreSQL; payload — данные события (каталог EVENT_SCHEMAS §2.2).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,9 +12,12 @@
     "aggregate_type",
     "aggregate_id",
     "workspace_id",
+    "run_id",
     "occurred_at",
-    "trace",
-    "data"
+    "correlation_id",
+    "causation_id",
+    "payload",
+    "traceparent"
   ],
   "properties": {
     "event_id": {
@@ -23,45 +27,20 @@
     },
     "event_type": {
       "type": "string",
-      "pattern": "^[a-z_]+\\.[a-z_]+$"
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "description": "= outbox_events.event_type (CHECK миграции 0003)"
     },
     "schema_version": {
       "const": "1.0"
     },
     "aggregate_type": {
-      "enum": [
-        "run",
-        "task",
-        "task_attempt",
-        "cli_execution",
-        "agent_message",
-        "chat_message",
-        "directive",
-        "approval",
-        "gate_execution",
-        "evidence",
-        "finding",
-        "compliance_result",
-        "cli_installation",
-        "routing_decision",
-        "checkpoint",
-        "external_action",
-        "code_index_snapshot",
-        "context_pack",
-        "documentation_snapshot",
-        "github_webhook_delivery"
-      ]
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "description": "= outbox_events.aggregate_type (run, task, agent_message, chat_message, directive, approval, gate_execution, external_action, cli_provider, documentation_source, github_verification, worktree, …)"
     },
     "aggregate_id": {
       "type": "string",
       "format": "uuid"
-    },
-    "aggregate_version": {
-      "type": [
-        "integer",
-        "null"
-      ],
-      "minimum": 0
     },
     "workspace_id": {
       "type": [
@@ -69,7 +48,7 @@
         "null"
       ],
       "format": "uuid",
-      "description": "null только для глобальных агрегатов (cli_installation)"
+      "description": "null только для глобальных агрегатов"
     },
     "run_id": {
       "type": [
@@ -80,66 +59,36 @@
     },
     "occurred_at": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "outbox_events.created_at, UTC с Z"
     },
-    "trace": {
+    "correlation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid",
+      "description": "по умолчанию run_id"
+    },
+    "causation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid",
+      "description": "event_id/команда, вызвавшая это событие"
+    },
+    "payload": {
       "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "task_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "uuid"
-        },
-        "execution_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "uuid"
-        },
-        "correlation_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "uuid"
-        },
-        "causation_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "uuid",
-          "description": "event_id/команда, вызвавшая это событие"
-        },
-        "actor_type": {
-          "enum": [
-            "user",
-            "agent",
-            "system",
-            "github"
-          ]
-        },
-        "actor_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "otel_trace_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "pattern": "^[0-9a-f]{32}$"
-        }
-      }
+      "description": "данные события (outbox_events.payload, редактированы, ≤ 64 KiB)"
     },
-    "data": {
-      "type": "object"
+    "traceparent": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+      "description": "W3C trace context спана публикации (P8-06); потребитель продолжает трассу"
     }
   }
 }
