@@ -273,6 +273,8 @@ def agent_bad(scenario: str) -> int:
 AGENT_SCENARIOS = (
     "agent",
     "agent_develop",
+    "agent_docs_required",
+    "agent_docs_insist",
     "agent_review_approve",
     "agent_review_changes",
     "agent_complete",
@@ -283,8 +285,60 @@ AGENT_SCENARIOS = (
 )
 
 
+# Решения оркестратора о документации (DECISION_RECORDED.chosen_option), после которых агент не запрашивает её снова.
+DOCS_DECISIONS = ("local_index", "docs_cache")
+
+
+def docs_resolved(prompt: str) -> bool:
+    """В промпте есть раздел docs Context Pack или в inbox — решение оркестратора о документации."""
+    if any(line.strip() == "# section: docs" for line in prompt.splitlines()):
+        return True
+    for m in inbox_of(prompt):
+        sender = m.get("from")
+        payload = m.get("payload")
+        if (
+            m.get("type") == "DECISION_RECORDED"
+            and isinstance(sender, dict)
+            and sender.get("role") == "orchestrator"
+            and isinstance(payload, dict)
+            and payload.get("chosen_option") in DOCS_DECISIONS
+        ):
+            return True
+    return False
+
+
+def agent_docs_blocked() -> int:
+    """Developer без документации: BLOCKED(DOCS_REQUIRED, needed_from=user) оркестратору (ACP §9.4)."""
+    write_result(
+        {
+            "agent_result_version": "1.0",
+            "summary": "Нужна документация библиотеки",
+            "claims": [{"type": "other", "summary": "требуется документация"}],
+            "acp_messages": [
+                {
+                    "to_role": "orchestrator",
+                    "type": "BLOCKED",
+                    "payload": {
+                        "reason": "DOCS_REQUIRED",
+                        "detail": "Для реализации нужна документация используемой библиотеки",
+                        "needed_from": "user",
+                        "unblock_condition": "документация загружена или решение продолжать по локальному коду",
+                    },
+                }
+            ],
+        }
+    )
+    return finish("нужна документация", "other")
+
+
 def run_agent(scenario: str, task: dict[str, object], prompt: str) -> int:
     role = role_of(task)
+    if scenario in ("agent_docs_required", "agent_docs_insist"):
+        # developer без документации и без решения оркестратора — BLOCKED; иначе как сценарий "agent".
+        # agent_docs_insist — негативный: developer требует документацию всегда (защита оркестратора от цикла).
+        if role == "developer" and (scenario == "agent_docs_insist" or not docs_resolved(prompt)):
+            return agent_docs_blocked()
+        scenario = "agent"
     if scenario == "agent":
         scenario = (
             "agent_develop"

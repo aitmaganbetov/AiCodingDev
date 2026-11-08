@@ -9,19 +9,14 @@
 from __future__ import annotations
 
 import io
-import ipaddress
 import os
 import secrets
 import shutil
 import subprocess
-import threading
 import uuid
 import zipfile
-from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import replace
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 import httpx
 import pytest
@@ -37,11 +32,13 @@ from aicd_orchestration import external_actions
 from aicd_orchestration.docs_ports import DOCS_DOWNLOAD_TTL, DocsApprovals, DocsLedger
 from aicd_platform.artifacts import FileSystemArtifactStore
 from aicd_platform.db import DbContext, transaction
-from aicd_security.ssrf import PinnedTransport, SsrfFetcher, SsrfPolicy, Target
 from tests.conftest import UserSession, login
 from tests.support import db as testdb
 from tests.support import orchestration as orch
 from tests.support.contract import validate_response
+from tests.support.docs_http import DocsHandler, docs_server, local_fetcher
+
+__all__ = ["docs_server"]  # фикстура pytest
 
 pytestmark = pytest.mark.db
 
@@ -356,55 +353,8 @@ async def test_documentation_sources_and_refresh(
 # --- P5-10: импортёр end-to-end ----------------------------------------------------------------
 
 
-class _Docs(BaseHTTPRequestHandler):
-    routes: ClassVar[dict[str, tuple[str, bytes]]] = {}
-
-    def do_GET(self) -> None:
-        ctype, body = self.routes.get(self.path, ("text/plain", b""))
-        self.send_response(200 if self.path in self.routes else 404)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 — сигнатура базового класса
-        return
-
-
-@pytest.fixture(scope="module")
-def docs_server() -> Iterator[int]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Docs)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        yield server.server_address[1]
-    finally:
-        server.shutdown()
-
-
-class _Resolver:
-    def __init__(self, mapping: dict[str, str]) -> None:
-        self.mapping = mapping
-
-    async def resolve(self, host: str, port: int) -> Sequence[str]:
-        if host not in self.mapping:
-            raise OSError("NXDOMAIN")
-        return [self.mapping[host]]
-
-
-class _LocalHttpTransport:
-    """Тестовый транспорт: проверенная https-цель (pinned IP) обслуживается локальным http-сервером."""
-
-    def __init__(self, port: int) -> None:
-        self.port = port
-        self.inner = PinnedTransport()
-
-    def stream(self, target: Target, headers: Mapping[str, str], policy: SsrfPolicy) -> Any:
-        return self.inner.stream(replace(target, scheme="http", port=self.port), headers, policy)
-
-
 def _importer(worker_engine: AsyncEngine, tmp_path: Path, port: int, ip: str = "127.0.0.1") -> DocumentationImporter:
-    policy = SsrfPolicy(extra_allowed_networks=(ipaddress.ip_network("127.0.0.1/32"),))
-    fetcher = SsrfFetcher(policy, resolver=_Resolver({"docs.example.com": ip}), transport=_LocalHttpTransport(port))
+    fetcher = local_fetcher(port, ip)
     return DocumentationImporter(worker_engine, FileSystemArtifactStore(tmp_path / "artifacts"), fetcher, DocsLedger())
 
 
@@ -420,7 +370,7 @@ async def test_importer_end_to_end(
     ws = (await user.create_workspace())["id"]
     tv = await _technology_version(worker_engine, ws)
     md = b"Intro\n\n# Install\n\npip install demo\n\n## Usage\n\nSPDX-License-Identifier: MIT\n"
-    _Docs.routes["/guide.md"] = ("text/markdown", md)
+    DocsHandler.routes["/guide.md"] = ("text/markdown", md)
     src = (await _register(user, ws, tv, "https://docs.example.com/guide.md")).json()
     importer = _importer(worker_engine, tmp_path, docs_server)
 
@@ -482,7 +432,7 @@ async def test_importer_end_to_end(
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("../../escape.md", b"# pwned")
-    _Docs.routes["/bundle.zip"] = ("application/zip", buf.getvalue())
+    DocsHandler.routes["/bundle.zip"] = ("application/zip", buf.getvalue())
     zsrc = (await _register(user, ws, tv, "https://docs.example.com/bundle.zip")).json()
     q = await importer.run(
         workspace_id=uuid.UUID(ws),

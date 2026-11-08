@@ -229,20 +229,23 @@ async def update_project(
 
 # --- Repositories --------------------------------------------------------------------------
 
+# latest_index_snapshot (контракт Repository): последний READY-снимок индекса кода репозитория (P5-02).
 _REPO_SELECT = (
-    "SELECT id, project_id, provider, remote_url, default_branch, local_root_ref, last_synced_at, created_at"
-    " FROM repositories"
+    "SELECT r.id, r.project_id, r.provider, r.remote_url, r.default_branch, r.local_root_ref, r.last_synced_at,"
+    " r.created_at, s.id AS index_snapshot_id, s.commit_sha AS index_commit_sha, s.status AS index_status"
+    " FROM repositories r LEFT JOIN LATERAL (SELECT c.id, c.commit_sha, c.status FROM code_index_snapshots c"
+    "   WHERE c.repository_id = r.id AND c.status = 'READY' ORDER BY c.created_at DESC, c.id DESC LIMIT 1) s ON true"
 )
 
 
 async def list_repositories(
     conn: AsyncConnection, project_id: uuid.UUID, after: tuple[datetime, uuid.UUID] | None, limit: int
 ) -> list[dict[str, Any]]:
-    where = " WHERE project_id = :p" + (" AND (created_at, id) > (:t, :id)" if after else "")
+    where = " WHERE r.project_id = :p" + (" AND (r.created_at, r.id) > (:t, :id)" if after else "")
     rows = (
         (
             await conn.execute(
-                text(_REPO_SELECT + where + " ORDER BY created_at, id LIMIT :lim"),
+                text(_REPO_SELECT + where + " ORDER BY r.created_at, r.id LIMIT :lim"),
                 {"p": project_id, "t": after[0] if after else None, "id": after[1] if after else None, "lim": limit},
             )
         )
@@ -308,5 +311,5 @@ async def attach_local_repository(
         workspace_id=workspace_id,
         metadata={"provider": "local", "local_root_ref": resolved.ref, "project_id": str(project_id)},
     )
-    row = (await conn.execute(text(_REPO_SELECT + " WHERE id = :id"), {"id": repo_id})).mappings().one()
+    row = (await conn.execute(text(_REPO_SELECT + " WHERE r.id = :id"), {"id": repo_id})).mappings().one()
     return dict(row)

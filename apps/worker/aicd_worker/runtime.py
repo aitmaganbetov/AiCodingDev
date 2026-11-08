@@ -15,6 +15,7 @@ from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_code_intelligence.docs.importer import DocumentationImporter
 from aicd_orchestration.recovery import Reconciler
 
 
@@ -37,6 +38,8 @@ class OrchestratorPort(Protocol):
 
     async def execute_task(self, task_id: uuid.UUID, ws: uuid.UUID) -> None: ...
 
+    async def on_docs_available(self, ws: uuid.UUID, source_id: uuid.UUID) -> list[uuid.UUID]: ...
+
 
 @dataclass
 class Runtime:
@@ -48,6 +51,8 @@ class Runtime:
     stale_ready_seconds: int = 30
     # Recovery reconciler хоста исполнения (только у воркера exec: процессы и worktrees — его).
     reconciler: Reconciler | None = None
+    # Импортёр документации (очередь docs; в тестах — с тестовым SsrfFetcher).
+    docs_importer: DocumentationImporter | None = None
 
 
 _current: Runtime | None = None

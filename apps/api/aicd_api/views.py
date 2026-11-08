@@ -55,8 +55,16 @@ def repository(row: dict[str, Any]) -> dict[str, Any]:
         "default_branch": row["default_branch"],
         "local_root_ref": row["local_root_ref"],
         "last_synced_at": row["last_synced_at"],
-        # Индексация кода появится в Phase 5 (P5-02); до этого снимков нет.
-        "latest_index_snapshot": None,
+        # Последний READY-снимок индекса кода репозитория (P5-02); до первой индексации — null.
+        "latest_index_snapshot": (
+            {
+                "snapshot_id": row["index_snapshot_id"],
+                "commit_sha": row["index_commit_sha"],
+                "status": row["index_status"],
+            }
+            if row.get("index_snapshot_id")
+            else None
+        ),
     }
 
 

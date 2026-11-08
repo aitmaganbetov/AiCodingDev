@@ -32,6 +32,8 @@ EXEC_CONSUMER = "exec.execute_task"
 ORCHESTRATOR_EVENT_TYPES = frozenset(
     {"run.created", "run.state_changed", "task.state_changed", "approval.decided", "agent.message"}
 )
+# Запрос загрузки документации (без run): очередь docs, обработчик `aicd_worker.docs.import_documentation`.
+DOCS_EVENT_TYPES = frozenset({"documentation_source.refresh_requested"})
 # Потребители доставки ACP (ACP §7), обслуживаемые воркером: проекции в чат run и ленту активности.
 ACP_PROJECTORS = ((acp.CONSUMER_CHAT, acp.project_chat), (acp.CONSUMER_ACTIVITY, acp.project_activity))
 

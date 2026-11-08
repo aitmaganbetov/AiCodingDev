@@ -38,3 +38,9 @@ class WorkerSettings(Settings):
     index_export_keep: int = Field(default=8, ge=1, le=1000)
     index_prune_interval_seconds: float = Field(default=3600.0, gt=0)
     ensure_index_timeout_seconds: float = Field(default=300.0, gt=0, le=3600)
+
+    # Загрузка документации (P5-10, AC-10): только через security.ssrf; egress-proxy — второй слой защиты
+    # (`ProxyTransport`), без него — прямое соединение с проверенным pinned IP (`PinnedTransport`).
+    egress_proxy_url: str | None = None
+    docs_max_bytes: int = Field(default=50 * 1024 * 1024, ge=1024, le=200 * 1024 * 1024)
+    docs_fetch_timeout_seconds: float = Field(default=120.0, gt=0, le=600)

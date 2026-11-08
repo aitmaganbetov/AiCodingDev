@@ -197,6 +197,41 @@ async def transition_task(
     return str(row["status"])
 
 
+async def reblock_task(conn: AsyncConnection, task_id: uuid.UUID, blocked_reason: str, *, why: str) -> None:
+    """Смена причины блокировки BLOCKED-задачи (BLOCKED → BLOCKED не переход FSM: статус не меняется,
+    `allowed_transitions` не проверяется). Событие `task.state_changed` — чтобы UI увидел новую причину."""
+    row = (
+        (
+            await conn.execute(
+                text(
+                    "UPDATE tasks SET blocked_reason = :b, version = version + 1"
+                    " WHERE id = :id AND status = 'BLOCKED' RETURNING workspace_id, run_id"
+                ),
+                {"b": blocked_reason, "id": task_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise VersionConflictError(None, None)
+    await outbox.emit(
+        conn,
+        event_type="task.state_changed",
+        aggregate_type="task",
+        aggregate_id=task_id,
+        workspace_id=row["workspace_id"],
+        run_id=row["run_id"],
+        payload={
+            "task_id": str(task_id),
+            "from": "BLOCKED",
+            "to": "BLOCKED",
+            "reason": why,
+            "blocked_reason": blocked_reason,
+        },
+    )
+
+
 class _Now:
     """Маркер «now() на стороне БД»."""
 

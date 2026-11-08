@@ -18,7 +18,7 @@ from aicd_platform import outbox
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 from aicd_worker import handlers, maintenance, runtime
-from aicd_worker.broker import EXEC_QUEUE, ORCHESTRATOR_QUEUE, build_broker, register_actors
+from aicd_worker.broker import DOCS_QUEUE, EXEC_QUEUE, ORCHESTRATOR_QUEUE, build_broker, register_actors
 from aicd_worker.main import main, run_outbox
 from aicd_worker.settings import WorkerSettings
 from aicd_worker.wiring import ConfigurationError, check_exec_adapter
@@ -52,6 +52,10 @@ class FakeOrchestrator:
 
     async def tick(self, run_id: uuid.UUID, ws: uuid.UUID) -> list[uuid.UUID]:
         self.calls.append(("tick", run_id))
+        return []
+
+    async def on_docs_available(self, ws: uuid.UUID, source_id: uuid.UUID) -> list[uuid.UUID]:
+        self.calls.append(("on_docs_available", source_id))
         return []
 
     async def execute_task(self, task_id: uuid.UUID, ws: uuid.UUID) -> None:
@@ -129,6 +133,26 @@ async def test_routing(database: testdb.TestDatabase, worker_engine: AsyncEngine
     assert await handlers.handle_event(rt, {"event_id": str(uuid7())}) == "ignored"
     # повтор того же event_id — no-op
     assert await handlers.handle_event(rt, cases[0][0]) == "duplicate"
+
+
+async def test_docs_refresh_event_routed_to_docs_queue() -> None:
+    """`documentation_source.refresh_requested` (без run) — в очередь docs, не в очередь оркестратора."""
+    broker = build_broker(None, stub=True)
+    assert isinstance(broker, StubBroker)
+    actors = register_actors(broker)
+    ws, source = uuid7(), uuid7()
+    refresh = {
+        "event_id": str(uuid7()),
+        "event_type": "documentation_source.refresh_requested",
+        "workspace_id": str(ws),
+        "run_id": None,
+        "aggregate_id": str(source),
+        "payload": {"source_id": str(source), "external_action_id": str(uuid7())},
+    }
+    await actors.publish(refresh)
+    await actors.publish({**refresh, "event_type": "cli.output"})  # прочие события без run не публикуются
+    assert broker.queues[DOCS_QUEUE].qsize() == 1
+    assert broker.queues[ORCHESTRATOR_QUEUE].qsize() == 0
 
 
 async def test_handler_failure_rolls_back_claim(worker_engine: AsyncEngine) -> None:

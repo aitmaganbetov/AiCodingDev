@@ -116,18 +116,18 @@
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P5-01 | Миграции code intelligence, documentation, technologies | FR-CI-01, FR-DOC-01 | P1-08 | P0 | Migration + RLS тесты | TODO |
-| P5-02 | Snapshots по commit, file tree, инкрементальное хэширование, `indexing_jobs`, `worker-index` | FR-CI-01, FR-CI-05 | P5-01 | P0 | Повторная индексация меняет только изменённые файлы | TODO |
-| P5-03 | tree-sitter символы для языков OQ-09 | FR-CI-02 | P5-02 | P0 | Golden-тесты на фикстурах каждого языка | TODO |
-| P5-04 | ripgrep (безопасный argv) + FTS/pg_trgm | FR-CI-03 | P5-02 | P0 | Тест command injection через запрос | TODO |
-| P5-05 | Граф зависимостей + test links | FR-CI-04 | P5-03 | P0 | Golden-тесты | TODO |
-| P5-06 | Ранжирование, бюджет, Context Pack builder, кэш, маркировка stale | FR-CI-06, FR-CI-07 | P5-04, P5-05 | P0 | Тест: фрагмент другого commit помечен/исключён | TODO |
-| P5-07 | Определение стека (`technologies`, `project_technologies`), `GET /projects/{id}/technologies` | FR-PRJ-04 | P5-02 | P0 | Фикстуры Python/TS/PHP | TODO |
+| P5-01 | Миграции code intelligence, documentation, technologies | FR-CI-01, FR-DOC-01 | P1-08 | P0 | Migration + RLS тесты | DONE |
+| P5-02 | Snapshots по commit, file tree, инкрементальное хэширование, `indexing_jobs`, `worker-index` | FR-CI-01, FR-CI-05 | P5-01 | P0 | Повторная индексация меняет только изменённые файлы | DONE |
+| P5-03 | tree-sitter символы для языков OQ-09 | FR-CI-02 | P5-02 | P0 | Golden-тесты на фикстурах каждого языка | DONE |
+| P5-04 | ripgrep (безопасный argv) + FTS/pg_trgm | FR-CI-03 | P5-02 | P0 | Тест command injection через запрос | DONE |
+| P5-05 | Граф зависимостей + test links | FR-CI-04 | P5-03 | P0 | Golden-тесты | DONE |
+| P5-06 | Ранжирование, бюджет, Context Pack builder, кэш, маркировка stale | FR-CI-06, FR-CI-07 | P5-04, P5-05 | P0 | Тест: фрагмент другого commit помечен/исключён | DONE |
+| P5-07 | Определение стека (`technologies`, `project_technologies`), `GET /projects/{id}/technologies` | FR-PRJ-04 | P5-02 | P0 | Фикстуры Python/TS/PHP | DONE |
 | P5-08 | LSP-интеграция (опционально, по наличию) | FR-CI-02 | P5-03 | P1 | Отключение LSP не ломает индекс | TODO |
-| P5-09 | Documentation policy OFF/SMART/STRICT + approval `DOCS_DOWNLOAD`; `GET/PATCH /projects/{id}/documentation-policy` | FR-DOC-01, FR-DOC-02, FR-DOC-03 | P5-01, P3-10 | P0 | AC-10 тесты | TODO |
-| P5-10 | Безопасный импортёр документации: SSRF guard, MIME/size, архивы, HTML sanitize, лицензии; `/documentation/sources`, refresh | FR-DOC-04, FR-DOC-05, FR-DOC-06 | P5-09 | P1 | Security-тесты SSRF/zip bomb/traversal | TODO |
-| P5-11 | Интеграция context packs в исполнение (ro mount) + метрики размера | FR-CI-06 | P5-06, P2-11 | P0 | Integration на Fake | TODO |
-| P5-12 | Freshness/retrieval тесты, AC-02, AC-10 | AC-02, AC-10, NFR-DOC-01 | P5-11 | P0 | Зелёные | TODO |
+| P5-09 | Documentation policy OFF/SMART/STRICT + approval `DOCS_DOWNLOAD`; `GET/PATCH /projects/{id}/documentation-policy` | FR-DOC-01, FR-DOC-02, FR-DOC-03 | P5-01, P3-10 | P0 | AC-10 тесты | DONE |
+| P5-10 | Безопасный импортёр документации: SSRF guard, MIME/size, архивы, HTML sanitize, лицензии; `/documentation/sources`, refresh | FR-DOC-04, FR-DOC-05, FR-DOC-06 | P5-09 | P1 | Security-тесты SSRF/zip bomb/traversal | DONE |
+| P5-11 | Интеграция context packs в исполнение (ro mount) + метрики размера | FR-CI-06 | P5-06, P2-11 | P0 | Integration на Fake | DONE |
+| P5-12 | Freshness/retrieval тесты, AC-02, AC-10 | AC-02, AC-10, NFR-DOC-01 | P5-11 | P0 | Зелёные | DONE |
 
 ## Phase 6 — Quality, Security & Standards
 
@@ -276,6 +276,25 @@
 | P3-17 | DONE | `tests/e2e/test_phase3_slice.py`, `tests/support/phase3.py` | 7 passed: COMPLETED с VERIFIED evidence; FAILED (gate/CLI); BLOCKED `PROVIDER_UNAVAILABLE`/`AUTH_REQUIRED` без обхода; AWAITING_APPROVAL → решение → COMPLETED |
 
 Исправления, найденные сквозными тестами: повтор задачи падал на существующей ветке worktree; run не переходил в BLOCKED, пока оставались PENDING-потомки заблокированной задачи; verifier не создавал staging-каталог.
+
+### Phase 5 — Code Intelligence (2026-11-08)
+
+Окружение проверки: PostgreSQL 17, Redis 7, RustFS (S3), Docker; tree-sitter 0.26 (Python/JS/TS/PHP), ripgrep; агенты — Fake CLI.
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P5-01 | DONE | `infrastructure/migrations/versions/0007_code_intelligence.py` | `tests/migrations/test_code_intelligence_migration.py` → 46 passed: up/down/up, offline SQL, RLS по 15 таблицам арендатора, глобальные таблицы, FSM `indexing_jobs`, CHECK, FTS/pg_trgm, `sys_plan_docs_download` (узкая SECURITY DEFINER вместо INSERT для API), `sys_indexing_workspaces` |
+| P5-02 | DONE | `aicd_code_intelligence/index/{gitsource,builder,store,jobs,policy}.py`, `aicd_security/git.py` (`run_git_bytes`) | Чтение commit через `ls-tree`/`cat-file` без checkout и фильтров; повторная индексация после изменения одного файла: `blobs_read == 1`, `files_parsed == 1`, остальное переиспользовано (`test_code_index_db.py`) |
+| P5-03 | DONE | `index/{symbols,languages}.py`, `tests/fixtures/code/**` | Golden-тесты по каждому языку (Python, JS, TS/TSX, PHP, SQL, Markdown, YAML, JSON); YAML без конструирования объектов |
+| P5-04 | DONE | `index/search.py` | ripgrep: фиксированный argv, запрос после `--`, fixed-strings по умолчанию, лимиты; корпус инъекций (`--pre=sh`, `-e`, `$(…)`, обратные кавычки, `;`, `|`, NUL, перевод строки) — как текст; FTS + pg_trgm на БД |
+| P5-05 | DONE | `index/graph.py` | Golden-рёбра импортов (Python/JS/TS/PHP) и test links. Не реализовано: tsconfig `paths`, PSR-4, рёбра вызовов |
+| P5-06 | DONE | `context/{ranking,retrieval,store,snapshot}.py` | 16 passed: порядок map > exact > dependency > relevance > recency, бюджеты по ролям, фрагмент другого commit исключён (или `stale=true` при политике mark, также в `retrieval_results`), кэш по content_hash+commit+policy |
+| P5-07 | DONE | `technologies/{detect,store}.py`, `GET /projects/{id}/technologies` | 9 passed (фикстуры Python/TypeScript/PHP, версии из lock-файлов, evidence файл:строка); определение стека после каждого снимка в воркере |
+| P5-08 | TODO | — | LSP (P1, опционально) не реализован; индекс от LSP не зависит |
+| P5-09 | DONE | `docs/policy.py`, `aicd_orchestration/{docs_ports,docs_flow}.py`, `GET/PATCH documentation-policy` | 47 unit (решения OFF/SMART/STRICT); сквозные AC-10 — ниже |
+| P5-10 | DONE | `aicd_security/ssrf.py`, `docs/{archives,html_text,content,importer}.py`, `/documentation/sources`, refresh, воркер-очередь `docs` | 133 security passed: приватные/metadata адреса вкл. встроенный IPv4, десятичные/восьмеричные формы, DNS-pinning, редиректы, zip-bomb, traversal, symlink, размер, MIME + magic bytes; импорт end-to-end на локальном сервере |
+| P5-11 | DONE | `cli_executor.py`, `agent_io.py`, `apps/worker/aicd_worker/indexing.py` | Исполнитель на Fake: промпт содержит repo_map/code/tests, `ExecutionRequest.input.context_pack` ссылается на строку `context_packs`; индекс строится перед исполнением (ошибка не валит задачу); каталог промпта монтируется только для чтения; метрики пакета в manifest и `agent.prompt_assembled` |
+| P5-12 | DONE | `tests/e2e/test_phase5_acceptance.py` | 7 passed: AC-02 (подключение → индекс HEAD → стек → DAG без циклов → Context Pack на снимке); AC-10 OFF (нет approval/загрузки/запросов, только локальный индекс; NFR-DOC-01); SMART (approval → до одобрения ноль запросов к серверу → загрузка воркером → docs в следующем промпте; отказ → без docs); STRICT (BLOCKED до одобрения; отказ → MANUAL_REVIEW); защита от зацикливания |
 
 ### Phase 4 — Multi-Agent System (2026-11-08)
 

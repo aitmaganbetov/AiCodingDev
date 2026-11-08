@@ -19,11 +19,14 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from aicd_orchestration import checkpoints, directives, plans, retry, review_flow, routing_service, store
+from aicd_code_intelligence.docs.policy import DocumentationGate
+from aicd_collaboration.acp import AcpBroker
+from aicd_orchestration import checkpoints, directives, docs_flow, plans, retry, review_flow, routing_service, store
 from aicd_orchestration.agent_io import AgentIoSummary
 from aicd_orchestration.agents.profiles import profile as role_profile
 from aicd_orchestration.classification import Signals, classify
 from aicd_orchestration.dag import PlannedTask, critical_path_lengths
+from aicd_orchestration.docs_ports import DocsApprovals, DocsLedger
 from aicd_orchestration.planner import template_plan
 from aicd_platform import context, leases
 from aicd_platform.artifacts import ArtifactStore
@@ -120,6 +123,10 @@ class Orchestrator:
     artifacts: ArtifactStore | None = None
     worker_id: str = field(default_factory=lambda: leases.worker_identity("orchestrator"))
     lease_ttl_seconds: int = 120
+    # Документация по запросу агента (BLOCKED DOCS_REQUIRED, ACP §9.4): approvals, ledger загрузок, решения ACP.
+    docs_approvals: DocsApprovals = field(default_factory=DocsApprovals)
+    docs_ledger: DocsLedger = field(default_factory=DocsLedger)
+    acp: AcpBroker = field(default_factory=AcpBroker)
     _cancel_hooks: dict[uuid.UUID, Callable[[str], Awaitable[None]]] = field(default_factory=dict)
 
     def _ctx(self, ws: uuid.UUID) -> DbContext:
@@ -188,13 +195,32 @@ class Orchestrator:
             await self.tick(run_id, ws)
 
     async def on_task_approval_decided(self, approval_id: uuid.UUID, ws: uuid.UUID) -> None:
-        """Решение по approval уровня задачи из маршрутизации (ROUTING_POLICY §5, P4-08).
+        """Решение по approval уровня задачи из маршрутизации (ROUTING_POLICY §5, P4-08) и документации (ACP §9.4).
 
         * SELF_REVIEW_FALLBACK одобрен → задача снова READY; Router выберет провайдера-автора (маркировка self_review);
         * MANUAL_REVIEW одобрен → ревью выполнено человеком: задача SUCCEEDED (маркировка human_review);
           отклонён → задача FAILED (REVIEW_REJECTED). То же — после исчерпания review/fix циклов (ACP §6).
+        * DOCS_DOWNLOAD и MANUAL_REVIEW потока документации — `_on_docs_approval_decided`.
         Идемпотентно: действует только на задачу в ожидаемом состоянии BLOCKED.
         """
+        async with transaction(self.engine, self._ctx(ws)) as conn:
+            head = (
+                (
+                    await conn.execute(
+                        text("SELECT action_type, subject FROM approvals WHERE id = :a"), {"a": approval_id}
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if head is None:
+            return
+        subject = head["subject"] if isinstance(head["subject"], dict) else {}
+        if head["action_type"] == "DOCS_DOWNLOAD" or (
+            head["action_type"] == "MANUAL_REVIEW" and subject.get("reason") == docs_flow.MANUAL_REVIEW_REASON
+        ):
+            await self._on_docs_approval_decided(approval_id, ws)
+            return
         async with transaction(self.engine, self._ctx(ws)) as conn:
             row = (
                 (
@@ -227,6 +253,167 @@ class Orchestrator:
                 return
             run_id = (await conn.execute(text("SELECT run_id FROM tasks WHERE id = :t"), {"t": task_id})).scalar_one()
         await self.tick(run_id, ws)
+
+    # ---------- документация по запросу агента (ACP §9.4, AC-10) ----------
+    async def _on_docs_approval_decided(self, approval_id: uuid.UUID, ws: uuid.UUID) -> None:
+        """DOCS_DOWNLOAD решён (одобрен/отклонён/истёк) → задачи BLOCKED(DOCS_REQUIRED) workspace оцениваются заново:
+        одобрен — загрузка в ledger + событие импортёру (задача ждёт снимка); отклонён/истёк — SMART: новая попытка
+        по локальному индексу (DECISION_RECORDED), STRICT: MANUAL_REVIEW. PENDING по предмету в workspace один,
+        поэтому решение касается всех ожидающих задач, а не только задачи-инициатора.
+
+        MANUAL_REVIEW потока документации: одобрен — новая попытка без документации (решение человека в
+        DECISION_RECORDED), отклонён — задача FAILED.
+        """
+        runs: set[uuid.UUID] = set()
+        async with transaction(self.engine, self._ctx(ws)) as conn:
+            row = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT a.action_type, a.status, a.task_id, a.decided_by, t.run_id, t.status AS task_status,"
+                            " t.blocked_reason FROM approvals a JOIN tasks t ON t.id = a.task_id WHERE a.id = :a"
+                            " FOR UPDATE OF t"
+                        ),
+                        {"a": approval_id},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row is None or row["status"] == "PENDING":
+                return
+            if row["action_type"] == "DOCS_DOWNLOAD":
+                runs.update(await self._reevaluate_docs_blocked(conn, ws))
+            elif row["task_status"] == "BLOCKED" and row["blocked_reason"] == "MANUAL_REVIEW":
+                task = await _task_row(conn, row["task_id"])
+                run = await _run_row(conn, row["run_id"])
+                if task is None or run is None:  # pragma: no cover — FK
+                    return
+                if row["status"] == "APPROVED":
+                    await store.transition_task(conn, task["id"], "READY", reason="docs_manual_review_approved")
+                    evaluation = docs_flow.DocsEvaluation(
+                        docs_flow.mode_of(run), "proceed", "решение человека: продолжить без документации"
+                    )
+                    await docs_flow.record_decision(
+                        conn, self.acp, run=run, task=task, evaluation=evaluation,
+                        decided_by_user=row["decided_by"], approval_id=approval_id,
+                    )  # fmt: skip
+                else:
+                    await store.transition_task(conn, task["id"], "FAILED", reason="docs_manual_review_rejected")
+                runs.add(row["run_id"])
+        for run_id in sorted(runs):
+            await self.tick(run_id, ws)
+
+    async def on_docs_available(self, ws: uuid.UUID, source_id: uuid.UUID) -> list[uuid.UUID]:
+        """Импорт источника завершён (снимок READY или загрузка не удалась): задачи BLOCKED(DOCS_REQUIRED) активных
+        run проектов этого источника оцениваются заново (снимок есть ⇒ новая попытка с разделом docs; загрузка
+        не удалась ⇒ SMART — по локальному индексу, STRICT — MANUAL_REVIEW). Возвращает READY-задачи после tick.
+        Идемпотентно: повторный вызов не находит заблокированных задач."""
+        async with transaction(self.engine, self._ctx(ws)) as conn:
+            runs = await self._reevaluate_docs_blocked(conn, ws, source_id=source_id)
+        ready: list[uuid.UUID] = []
+        for run_id in sorted(runs):
+            ready += await self.tick(run_id, ws)
+        return ready
+
+    async def _reevaluate_docs_blocked(
+        self, conn: AsyncConnection, ws: uuid.UUID, *, source_id: uuid.UUID | None = None
+    ) -> set[uuid.UUID]:
+        del ws  # RLS-контекст транзакции уже ограничен workspace
+        params: dict[str, Any] = {"s": source_id}
+        relevant = (
+            ""
+            if source_id is None
+            else " AND EXISTS (SELECT 1 FROM documentation_sources s WHERE s.id = :s AND (s.technology_version_id IS NULL"
+            " OR s.technology_version_id IN (SELECT pt.technology_version_id FROM project_technologies pt"
+            "   WHERE pt.project_id = r.project_id)))"
+        )
+        task_ids = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT t.id FROM tasks t JOIN runs r ON r.id = t.run_id WHERE t.status = 'BLOCKED'"  # noqa: S608
+                        " AND t.blocked_reason = 'DOCS_REQUIRED' AND t.superseded_at IS NULL"
+                        " AND r.status IN ('RUNNING','BLOCKED')" + relevant + " ORDER BY t.created_at, t.id LIMIT 100"
+                    ),
+                    params,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        runs: set[uuid.UUID] = set()
+        for task_id in task_ids:
+            task = await _task_row(conn, task_id)
+            if task is None or task["status"] != "BLOCKED" or task["blocked_reason"] != "DOCS_REQUIRED":
+                continue
+            run = await _run_row(conn, task["run_id"])
+            if run is None:  # pragma: no cover — FK
+                continue
+            evaluation = await docs_flow.evaluate(
+                conn, DocumentationGate(self.docs_approvals), self.docs_approvals, run=run, task=task
+            )
+            await self._apply_docs(conn, task, run, evaluation)
+            runs.add(run["id"])
+        return runs
+
+    async def _on_docs_required(
+        self, conn: AsyncConnection, task: dict[str, Any], run: dict[str, Any], attempt_id: uuid.UUID, spent: int
+    ) -> None:
+        """Попытка завершилась BLOCKED(DOCS_REQUIRED) агента. Попытка закрывается без расхода max_attempts."""
+        if await docs_flow.decision_sent(conn, run["id"], task["id"]):
+            # Защита от цикла: решение уже сообщено, агент его оспаривает (см. docs_flow).
+            await fail_attempt(conn, task, attempt_id, "POLICY_DENIED", spent)
+            return
+        evaluation = await docs_flow.evaluate(
+            conn, DocumentationGate(self.docs_approvals), self.docs_approvals, run=run, task=task
+        )
+        await _finish_attempt_row(conn, attempt_id, "CANCELLED", None)
+        await self._apply_docs(conn, task, run, evaluation)
+
+    async def _apply_docs(
+        self, conn: AsyncConnection, task: dict[str, Any], run: dict[str, Any], ev: docs_flow.DocsEvaluation
+    ) -> None:
+        running = task["status"] != "BLOCKED"  # RUNNING (итог попытки) или BLOCKED (повторная оценка)
+        free = {"attempt_count": max(task["attempt_count"] - 1, 0)} if running else {}
+        for download in ev.downloads:
+            await docs_flow.plan_download(
+                conn, self.docs_ledger, workspace_id=run["workspace_id"], run_id=run["id"], task_id=task["id"],
+                download=download,
+            )  # fmt: skip
+        if ev.outcome == "proceed":
+            if running:
+                # RUNNING → READY не разрешён FSM: немедленный RETRY_WAIT (tick переводит в READY), попытка не расходуется.
+                await store.transition_task(
+                    conn,
+                    task["id"],
+                    "RETRY_WAIT",
+                    reason="docs_unavailable",
+                    extra={"next_attempt_at": utcnow(), **free},
+                )
+            else:
+                await store.transition_task(conn, task["id"], "READY", reason="docs_resolved")
+            await docs_flow.record_decision(conn, self.acp, run=run, task=task, evaluation=ev)
+            return
+        reason = "MANUAL_REVIEW" if ev.outcome == "manual_review" else "DOCS_REQUIRED"
+        if running:
+            await store.transition_task(
+                conn, task["id"], "BLOCKED", reason="docs_required", extra={"blocked_reason": reason, **free}
+            )
+        elif task["blocked_reason"] != reason:
+            await store.reblock_task(conn, task["id"], reason, why="docs_required")
+        if reason == "MANUAL_REVIEW" and not await _approved(conn, task["id"], "MANUAL_REVIEW", statuses=("PENDING",)):
+            await self.approvals.request(
+                conn,
+                workspace_id=run["workspace_id"],
+                project_id=run["project_id"],
+                run_id=run["id"],
+                task_id=task["id"],
+                action_type="MANUAL_REVIEW",
+                risk_level=task["risk_level"],
+                subject={"task_id": str(task["id"]), "reason": docs_flow.MANUAL_REVIEW_REASON, "detail": ev.reason},
+                requested_by_type="system",
+            )
 
     async def on_run_paused_or_cancelled(self, run_id: uuid.UUID, ws: uuid.UUID, status: str) -> None:
         """Safe point: работающие исполнения run останавливаются штатно (DATA_FLOW §6.2)."""
@@ -529,6 +716,18 @@ class Orchestrator:
                 await leases.release(conn, lease)
                 return
         rejected_category = _agent_result_failure(outcome)
+        io = outcome.agent_io
+        if outcome.status == "completed" and rejected_category is None and io is not None and io.accepted_message_ids:
+            # Агент заявил BLOCKED(DOCS_REQUIRED): до проверок — решение политики документации (ACP §9.4).
+            async with transaction(self.engine, self._ctx(ws)) as conn:
+                if await docs_flow.docs_required(conn, io.accepted_message_ids):
+                    if not await leases.is_current(conn, "task", task_id, lease.fencing_token):
+                        return
+                    task = await _task_row(conn, task_id)
+                    if task is not None and task["status"] == "RUNNING":
+                        await self._on_docs_required(conn, task, run, attempt_id, spent)
+                    await leases.release(conn, lease)
+                    return
         read_only = role_profile(current["agent_role"]).permissions.write_scope == "none" if current else False
         if outcome.status == "completed" and rejected_category is None and outcome.head_commit_sha:
             async with transaction(self.engine, self._ctx(ws)) as conn:
@@ -650,7 +849,8 @@ async def _run_row(conn: AsyncConnection, run_id: uuid.UUID, *, lock: bool = Fal
             await conn.execute(
                 text(
                     "SELECT id, workspace_id, project_id, repository_id, requested_by, mode, objective, status, base_commit_sha,"  # noqa: S608 — константа
-                    " quality_profile, approval_policy, policy_snapshot, plan_version, approved_plan_version, version"
+                    " quality_profile, approval_policy, documentation_mode, policy_snapshot, plan_version, approved_plan_version,"
+                    " version"
                     " FROM runs WHERE id = :id" + (" FOR UPDATE" if lock else "")
                 ),
                 {"id": run_id},
