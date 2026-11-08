@@ -32,6 +32,7 @@ from aicd_platform import context, leases
 from aicd_platform.artifacts import ArtifactStore
 from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
+from aicd_standards.store import evaluate_run as evaluate_compliance
 from aicd_verification.verdict import run_completion_verdict
 
 log = logging.getLogger("aicd.orchestrator")
@@ -564,6 +565,9 @@ class Orchestrator:
                 await store.transition_run(conn, run_id, "VERIFYING", reason="all_tasks_succeeded")
                 # Guard завершения (P6-09, QUALITY_GATES §5.3): обязательные gates PASS на финальном commit с
                 # полным evidence, нет открытых блокирующих findings; guard БД (§18.4) — второй рубеж.
+                # Сначала compliance.evaluate(run): вердикты контролей на финальном commit пишутся в
+                # compliance_results, иначе блокирующие контроли (§5.3 п.6) guard'ом не учитываются.
+                await evaluate_compliance(conn, run_id)
                 verdict = await run_completion_verdict(conn, run_id, store=self.artifacts)
                 if not verdict.ok:
                     await store.transition_run(
