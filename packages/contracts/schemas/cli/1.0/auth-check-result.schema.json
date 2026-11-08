@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/cli/1.0/auth-check-result.schema.json",
+  "title": "AuthCheckResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "provider",
+    "installation_id",
+    "auth_status",
+    "checked_at",
+    "method"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "provider": {
+      "enum": [
+        "codex",
+        "claude"
+      ]
+    },
+    "installation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "auth_status": {
+      "enum": [
+        "UNKNOWN",
+        "AUTHENTICATED",
+        "AUTH_REQUIRED",
+        "EXPIRED",
+        "ERROR"
+      ]
+    },
+    "method": {
+      "enum": [
+        "cli_status_command",
+        "credential_presence_check",
+        "last_execution_signal",
+        "not_determinable"
+      ]
+    },
+    "account_hint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 100,
+      "description": "только неидентифицирующий тип плана, если CLI его сам печатает; никаких email/токенов"
+    },
+    "operator_action": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500,
+      "description": "инструкция оператору: выполнить официальный login CLI на хосте"
+    },
+    "checked_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

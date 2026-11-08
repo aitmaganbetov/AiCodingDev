@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/BLOCKED.schema.json",
+  "title": "BLOCKED payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reason",
+    "detail",
+    "needed_from"
+  ],
+  "properties": {
+    "reason": {
+      "enum": [
+        "APPROVAL_REQUIRED",
+        "PROVIDER_UNAVAILABLE",
+        "AUTH_REQUIRED",
+        "DIRECTIVE_REPLAN",
+        "RUN_PAUSED",
+        "DOCS_REQUIRED",
+        "MANUAL_REVIEW",
+        "REVIEW_LOOP_EXHAUSTED",
+        "DEPENDENCY_FAILED"
+      ]
+    },
+    "detail": {
+      "$ref": "../common.schema.json#/$defs/text_long"
+    },
+    "needed_from": {
+      "enum": [
+        "user",
+        "operator",
+        "role",
+        "external"
+      ]
+    },
+    "needed_role": {
+      "$ref": "../common.schema.json#/$defs/agent_role"
+    },
+    "unblock_condition": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "approval_id": {
+      "$ref": "../common.schema.json#/$defs/uuid"
+    },
+    "evidence_refs": {
+      "$ref": "../common.schema.json#/$defs/refs"
+    }
+  }
+}

@@ -1009,7 +1009,7 @@ CREATE TABLE cli_installations (
   id                     uuid7          NOT NULL,
   provider_id            uuid           NOT NULL,
   host_id                uuid           NOT NULL,
-  binary_path            text           NOT NULL CHECK (binary_path ~ '^/[A-Za-z0-9._/+-]{1,1023}$'),
+  binary_path            text           NOT NULL CHECK (binary_path ~ '^/[A-Za-z0-9._/+-]+$' AND length(binary_path) <= 1024),
   detected_version       text           CHECK (length(detected_version) <= 100),
   compatibility          text           NOT NULL DEFAULT 'untested'
                                         CHECK (compatibility IN ('supported','untested','unsupported')),  -- по compatibility matrix
@@ -1862,7 +1862,7 @@ CREATE TABLE artifacts (
   kind             text        NOT NULL CHECK (kind IN
                      ('git_diff','cli_raw_log','cli_output','test_report','coverage_report','scan_report','sbom',
                       'context_pack','checkpoint_state','documentation','knowledge','report','archive','other')),
-  storage_ref      text        NOT NULL CHECK (storage_ref ~ '^(s3|file)://[A-Za-z0-9._/-]{1,1024}$'),
+  storage_ref      text        NOT NULL CHECK (storage_ref ~ '^(s3|file)://[A-Za-z0-9._/-]+$' AND length(storage_ref) <= 1100),
   sha256           sha256_hex  NOT NULL,
   size_bytes       bigint      NOT NULL CHECK (size_bytes >= 0),
   mime_type        text        NOT NULL CHECK (mime_type ~ '^[a-z]+/[a-z0-9.+-]+$'),

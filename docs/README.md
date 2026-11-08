@@ -1,9 +1,9 @@
 # AiCodingDev v1.0 — документация Phase 0
 
-**Статус:** Phase 0 (Architecture & Planning) — проектные документы, ожидающие утверждения владельцем продукта.
+**Статус:** Phase 0 утверждена 2026-11-07; Phase 1 (Project Foundation) — реализация, см. `planning/IMPLEMENTATION_BACKLOG.md`.
 **Source of Truth требований:** [`/AiCodingDev_v1_TZ.md`](../AiCodingDev_v1_TZ.md) (далее — ТЗ). При расхождении документа Phase 0 с ТЗ приоритет у ТЗ, кроме пунктов, явно помеченных `DEVIATION` и вынесенных в [`planning/OPEN_QUESTIONS.md`](planning/OPEN_QUESTIONS.md) на утверждение.
 
-> Ни один документ этого каталога не утверждает, что функциональность реализована. На момент Phase 0 в репозитории нет исполняемого кода; все статусы задач — `TODO`.
+> Статус реализации ведётся только в `planning/IMPLEMENTATION_BACKLOG.md` (с evidence). Проектные документы описывают целевое состояние.
 
 ## 1. Карта документов
 
@@ -14,10 +14,12 @@
 | | [DATA_FLOW.md](architecture/DATA_FLOW.md) | Потоки данных, state machines Run/Task/Execution/Directive/Approval, DAG Scheduler, retry/checkpoint/recovery/idempotency |
 | | [SECURITY_ARCHITECTURE.md](architecture/SECURITY_ARCHITECTURE.md) | Зоны доверия, AuthN/AuthZ, RBAC, sandbox, секреты, RLS |
 | | [adr/](architecture/adr/) | Architecture Decision Records (ADR-0001…) |
+| | [data-model.md](architecture/data-model.md), [state-machines.md](architecture/state-machines.md), [permissions-matrix.md](architecture/permissions-matrix.md) | Указатели путей ТЗ §21 на нормативные разделы |
+| `runbooks/` | [README.md](runbooks/README.md) | Эксплуатационные инструкции (local deployment; остальные — P9) |
 | `database/` | [DATABASE_DESIGN.md](database/DATABASE_DESIGN.md) | Полная логическая схема PostgreSQL: таблицы, ограничения, индексы, RLS, retention |
 | | [ER_DIAGRAM.md](database/ER_DIAGRAM.md) | ER-диаграммы по доменам (Mermaid), кардинальности, инварианты |
 | `api/` | [API_DESIGN.md](api/API_DESIGN.md) | Правила REST API v1: ошибки, пагинация, idempotency, ETag, SSE, RBAC |
-| | [openapi.yaml](api/openapi.yaml) | Машиночитаемая спецификация OpenAPI 3.1 |
+| | [openapi.yaml](api/openapi.yaml) | Символьная ссылка на единственный источник `packages/contracts/openapi.yaml` (ADR-0013) |
 | `protocols/` | [CLI_ADAPTER_CONTRACT.md](protocols/CLI_ADAPTER_CONTRACT.md) | CLI Execution Contract v1.0, probe, нормализованные события и ошибки |
 | | [AGENT_COMMUNICATION_PROTOCOL.md](protocols/AGENT_COMMUNICATION_PROTOCOL.md) | ACP v1.0: конверт, типы, payload-схемы, ACL, доставка |
 | | [EVENT_SCHEMAS.md](protocols/EVENT_SCHEMAS.md) | Доменные/outbox/SSE события, контракты Live Agent Chat |

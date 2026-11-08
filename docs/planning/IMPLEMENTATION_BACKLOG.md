@@ -18,38 +18,39 @@
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P0-01 | Анализ ТЗ и реестр FR/NFR | все | — | P0 | Реестр покрывает §1–§23 ТЗ | IN_REVIEW |
-| P0-02 | Системная архитектура, модули, потоки данных, state machines | FR-ORCH-*, NFR-MAINT-* | P0-01 | P0 | SYSTEM_ARCHITECTURE, MODULE_BOUNDARIES, DATA_FLOW | IN_REVIEW |
-| P0-03 | ADR-0001…0014 | все | P0-02 | P0 | ADR в `docs/architecture/adr/` | IN_REVIEW |
-| P0-04 | Логическая схема PostgreSQL + ERD | FR-IAM-04, ТЗ §7 | P0-02 | P0 | Все таблицы каталога + дополнения, RLS, индексы | IN_REVIEW |
-| P0-05 | OpenAPI 3.1 + API design | FR-API-* | P0-04 | P0 | `openapi.yaml` проходит валидатор | IN_REVIEW |
-| P0-06 | CLI contract, ACP v1.0, event schemas | FR-CLI-03, FR-ACP-01, FR-CHAT-07 | P0-02 | P0 | JSON Schema валидны (Draft 2020-12) | IN_REVIEW |
-| P0-07 | Роли агентов, routing policy, quality gates, standards | FR-AGENT-*, FR-ROUTE-*, FR-QG-*, FR-STD-* | P0-06 | P0 | 12 ролей, L1–L5, профили gates | IN_REVIEW |
-| P0-08 | Security architecture, threat model, controls | NFR-SEC-* | P0-02 | P0 | STRIDE, каталог SC-* | IN_REVIEW |
-| P0-09 | Roadmap, backlog, dependency graph, acceptance criteria | все | P0-01 | P0 | Документы planning/ | IN_REVIEW |
-| P0-10 | Утверждение владельцем: OQ-01…OQ-16, ADR Proposed → Accepted | — | P0-01…09 | P0 | Записи в журнале решений OPEN_QUESTIONS §3 | TODO |
+| P0-01 | Анализ ТЗ и реестр FR/NFR | все | — | P0 | Реестр покрывает §1–§23 ТЗ | DONE |
+| P0-02 | Системная архитектура, модули, потоки данных, state machines | FR-ORCH-*, NFR-MAINT-* | P0-01 | P0 | SYSTEM_ARCHITECTURE, MODULE_BOUNDARIES, DATA_FLOW | DONE |
+| P0-03 | ADR-0001…0014 | все | P0-02 | P0 | ADR в `docs/architecture/adr/` | DONE |
+| P0-04 | Логическая схема PostgreSQL + ERD | FR-IAM-04, ТЗ §7 | P0-02 | P0 | Все таблицы каталога + дополнения, RLS, индексы | DONE |
+| P0-05 | OpenAPI 3.1 + API design | FR-API-* | P0-04 | P0 | `openapi.yaml` проходит валидатор | DONE |
+| P0-06 | CLI contract, ACP v1.0, event schemas | FR-CLI-03, FR-ACP-01, FR-CHAT-07 | P0-02 | P0 | JSON Schema валидны (Draft 2020-12) | DONE |
+| P0-07 | Роли агентов, routing policy, quality gates, standards | FR-AGENT-*, FR-ROUTE-*, FR-QG-*, FR-STD-* | P0-06 | P0 | 12 ролей, L1–L5, профили gates | DONE |
+| P0-08 | Security architecture, threat model, controls | NFR-SEC-* | P0-02 | P0 | STRIDE, каталог SC-* | DONE |
+| P0-09 | Roadmap, backlog, dependency graph, acceptance criteria | все | P0-01 | P0 | Документы planning/ | DONE |
+| P0-10 | Утверждение владельцем: OQ-01…OQ-16, ADR Proposed → Accepted | — | P0-01…09 | P0 | Записи в журнале решений OPEN_QUESTIONS §3 | DONE |
 
 ## Phase 1 — Project Foundation
 
 | ID | Задача | Требования | Зависит от | Pri | Критерии готовности | Статус |
 |---|---|---|---|---|---|---|
-| P1-01 | Скелет монорепозитория: `apps/`, `packages/`, Python 3.12 (uv workspace), pnpm для web; ruff, mypy --strict, pre-commit (gitleaks) | NFR-MAINT-02 | P0-10 | P0 | `uv sync`, `ruff check`, `mypy` проходят на пустых модулях | TODO |
-| P1-02 | `docker compose` профиль `local`: postgres 17, redis 7, artifacts FS/MinIO, reverse proxy; `.env.example`, секреты через файлы | NFR-PORT-01 | P1-01 | P0 | `docker compose up` → health всех сервисов | TODO |
-| P1-03 | `packages/contracts`: перенос OpenAPI/JSON Schema, codegen Pydantic/TS, CI drift-check, `oasdiff` | FR-API-01, FR-API-04, ADR-0013 | P1-01 | P0 | CI падает при расхождении схем и кода | TODO |
-| P1-04 | CI: lint, typecheck, unit, contract, migration tests, osv-scanner, gitleaks, Syft SBOM, deny-gate SDK AI-провайдеров | NFR-SEC-01, NFR-SEC-05, NFR-TEST-01 | P1-01 | P0 | Зелёный pipeline; тестовый PR с `openai`/`anthropic` SDK блокируется | TODO |
-| P1-05 | `import-linter` контракты границ + тест владения таблицами | NFR-MAINT-02 | P1-01 | P0 | Нарушение границы → CI fail (негативный тест) | TODO |
-| P1-06 | `platform`: DB-сессия + RLS-контекст, UUIDv7, problem+json, конфиг, JSON-логи с redaction и корреляцией, OTel baseline | FR-OBS-01, FR-ORCH-12, NFR-OBS-01 | P1-01 | P0 | Unit-тесты redaction; лог содержит `run_id/task_id` при наличии | TODO |
-| P1-07 | Alembic + harness тестов миграций (upgrade/downgrade/seeded) + DB-роли `aicd_*` | NFR-REL-04 | P1-02 | P0 | `pytest tests/migrations` зелёный | TODO |
-| P1-08 | Миграции IAM/projects/audit/idempotency/artifacts + RLS | FR-IAM-01, FR-IAM-04, FR-AUD-01 | P1-07 | P0 | RLS-тесты на каждую таблицу | TODO |
-| P1-09 | `identity`: локальный вход (argon2id), сессии, CSRF, lockout, `aicd admin create-owner` | FR-IAM-02 | P1-08 | P0 | Негативные тесты CSRF/lockout/фиксации сессии | TODO |
-| P1-10 | RBAC: матрица прав как код, `authorize()`, тест-матрица endpoint × роль | FR-IAM-03, FR-IAM-05 | P1-09 | P0 | 100% эндпоинтов покрыты матрицей (тест генерируется из OpenAPI `x-required-permission`) | TODO |
-| P1-11 | API skeleton: middleware (auth, CSRF, Idempotency-Key, rate limit, ETag), health, workspaces, members, projects, audit-events | FR-API-01, FR-API-02, FR-PRJ-01, FR-AUD-02 | P1-10, P1-03 | P0 | Schemathesis по реализованным операциям без ошибок | TODO |
-| P1-12 | Привязка локального репозитория: allowlist путей, проверка Git, защита от traversal/symlink | FR-PRJ-02 | P1-11 | P0 | Security-тесты path traversal | TODO |
-| P1-13 | Web shell: React/TS/Vite/Tailwind, роутинг, вход, layout, i18n `ru`, клиент из OpenAPI, axe baseline | NFR-UX-01, ADR-0014 | P1-03 | P0 | Playwright smoke: вход → список проектов; axe без нарушений уровня serious | TODO |
-| P1-14 | Скрипт матрицы трассировки требования → задачи → тесты; CI-проверка покрытия P0/P1 | NFR-HONEST-01, NFR-AUD-01 | P1-04 | P1 | Отчёт генерируется в CI | TODO |
-| P1-15 | Artifact store: FS + S3/MinIO адаптеры, sha256, presigned download с TTL | FR-QG-05 | P1-06 | P0 | Integration-тест обоих адаптеров | TODO |
-| P1-16 | Cross-tenant negative test suite (API + RLS) | FR-IAM-05, NFR-ISO-01 | P1-11 | P0 | Все тесты отрицательны (доступ запрещён) | TODO |
-| P1-17 | Документы ТЗ §21: `data-model.md`, `state-machines.md`, `permissions-matrix.md` (ссылки на нормативные разделы), каркас `docs/runbooks/` | NFR-MAINT-01 | P0-10 | P1 | Ссылки валидны (link-check в CI) | TODO |
+| P1-01 | Скелет монорепозитория: `apps/`, `packages/`, Python 3.12 (uv workspace), pnpm для web; ruff, mypy --strict, pre-commit (gitleaks) | NFR-MAINT-02 | P0-10 | P0 | `uv sync`, `ruff check`, `mypy` проходят на пустых модулях | DONE |
+| P1-02 | `docker compose` профиль `local`: postgres 17, redis 7, artifacts FS/MinIO, reverse proxy; `.env.example`, секреты через файлы | NFR-PORT-01 | P1-01 | P0 | `docker compose up` → health всех сервисов | IN_REVIEW |
+| P1-03 | `packages/contracts`: перенос OpenAPI/JSON Schema, codegen Pydantic/TS, CI drift-check, `oasdiff` | FR-API-01, FR-API-04, ADR-0013 | P1-01 | P0 | CI падает при расхождении схем и кода | DONE |
+| P1-04 | CI: lint, typecheck, unit, contract, migration tests, osv-scanner, gitleaks, Syft SBOM, deny-gate SDK AI-провайдеров | NFR-SEC-01, NFR-SEC-05, NFR-TEST-01 | P1-01 | P0 | Зелёный pipeline; тестовый PR с `openai`/`anthropic` SDK блокируется | IN_REVIEW |
+| P1-05 | `import-linter` контракты границ + тест владения таблицами | NFR-MAINT-02 | P1-01 | P0 | Нарушение границы → CI fail (негативный тест) | DONE |
+| P1-06 | `platform`: DB-сессия + RLS-контекст, UUIDv7, problem+json, конфиг, JSON-логи с redaction и корреляцией, OTel baseline | FR-OBS-01, FR-ORCH-12, NFR-OBS-01 | P1-01 | P0 | Unit-тесты redaction; лог содержит `run_id/task_id` при наличии | DONE |
+| P1-07 | Alembic + harness тестов миграций (upgrade/downgrade/seeded) + DB-роли `aicd_*` | NFR-REL-04 | P1-02 | P0 | `pytest tests/migrations` зелёный | DONE |
+| P1-08 | Миграции IAM/projects/audit/idempotency/artifacts + RLS | FR-IAM-01, FR-IAM-04, FR-AUD-01 | P1-07 | P0 | RLS-тесты на каждую таблицу | DONE |
+| P1-09 | `identity`: локальный вход (argon2id), сессии, CSRF, lockout, `aicd admin create-owner` | FR-IAM-02 | P1-08 | P0 | Негативные тесты CSRF/lockout/фиксации сессии | DONE |
+| P1-10 | RBAC: матрица прав как код, `authorize()`, тест-матрица endpoint × роль | FR-IAM-03, FR-IAM-05 | P1-09 | P0 | 100% эндпоинтов покрыты матрицей (тест генерируется из OpenAPI `x-required-permission`) | DONE |
+| P1-11 | API skeleton: middleware (auth, CSRF, Idempotency-Key, rate limit, ETag), health, workspaces, members, projects, audit-events | FR-API-01, FR-API-02, FR-PRJ-01, FR-AUD-02 | P1-10, P1-03 | P0 | Schemathesis по реализованным операциям без ошибок | DONE |
+| P1-12 | Привязка локального репозитория: allowlist путей, проверка Git, защита от traversal/symlink | FR-PRJ-02 | P1-11 | P0 | Security-тесты path traversal | DONE |
+| P1-13 | Web shell: React/TS/Vite/Tailwind, роутинг, вход, layout, i18n `ru`, клиент из OpenAPI, axe baseline | NFR-UX-01, ADR-0014 | P1-03 | P0 | Playwright smoke: вход → список проектов; axe без нарушений уровня serious | DONE |
+| P1-14 | Скрипт матрицы трассировки требования → задачи → тесты; CI-проверка покрытия P0/P1 | NFR-HONEST-01, NFR-AUD-01 | P1-04 | P1 | Отчёт генерируется в CI | DONE |
+| P1-15 | Artifact store: FS + S3/MinIO адаптеры, sha256, presigned download с TTL | FR-QG-05 | P1-06 | P0 | Integration-тест обоих адаптеров | DONE |
+| P1-16 | Cross-tenant negative test suite (API + RLS) | FR-IAM-05, NFR-ISO-01 | P1-11 | P0 | Все тесты отрицательны (доступ запрещён) | DONE |
+| P1-17 | Документы ТЗ §21: `data-model.md`, `state-machines.md`, `permissions-matrix.md` (ссылки на нормативные разделы), каркас `docs/runbooks/` | NFR-MAINT-01 | P0-10 | P1 | Ссылки валидны (link-check в CI) | DONE |
+| P1-18 | `oasdiff breaking` в CI против спецификации целевой ветки; генерация Pydantic-моделей из JSON Schema (`datamodel-code-generator`) для CLI/ACP/событий (перенесено из P1-03: потребители появляются в P2) | FR-API-04, NFR-MAINT-01 | P1-03 | P0 | CI блокирует ломающее изменение контракта; сгенерированные модели без расхождений | TODO |
 
 ## Phase 2 — CLI Integration
 
@@ -199,4 +200,30 @@
 
 | Задача | Статус | Изменённые файлы | Проверки (команда → результат) | Commit |
 |---|---|---|---|---|
-| P0-01…P0-09 | IN_REVIEW (ожидает P0-10) | `docs/**` (см. `docs/README.md`) | `python -m openapi_spec_validator docs/api/openapi.yaml` → `OK`; встроенные JSON Schema (22) → `Draft202012Validator.check_schema`: 0 ошибок; примеры против схем + 3 негативных кейса → OK; `$ref` (OpenAPI 184, протоколы 111) → 0 неразрешённых; Mermaid (протоколы/агенты, 13 блоков) → parse OK; FK в DATABASE_DESIGN → все ссылаются на определённые таблицы (76 `CREATE TABLE`); покрытие требований backlog-ом → 0 непокрытых. Исполняемого кода и тестов нет. | ветка `ccr-69fbf9a8-p2650i` |
+| P0-01…P0-10 | DONE (утверждено 2026-11-07) | `docs/**` (см. `docs/README.md`) | `python -m openapi_spec_validator docs/api/openapi.yaml` → `OK`; встроенные JSON Schema (22) → `Draft202012Validator.check_schema`: 0 ошибок; примеры против схем + 3 негативных кейса → OK; `$ref` (OpenAPI 184, протоколы 111) → 0 неразрешённых; Mermaid (протоколы/агенты, 13 блоков) → parse OK; FK в DATABASE_DESIGN → все ссылаются на определённые таблицы (76 `CREATE TABLE`); покрытие требований backlog-ом → 0 непокрытых. Исполняемого кода и тестов нет. | ветка `ccr-69fbf9a8-p2650i` |
+
+### Phase 1 — Project Foundation (2026-11-08)
+
+Окружение проверки: PostgreSQL 17.11 (контейнер), Redis 7, RustFS (S3-совместимый), Python 3.13 (requires-python ≥ 3.12), Node 22, Chromium (Playwright 1.63.0).
+
+| Задача | Статус | Изменённые файлы | Проверки (команда → результат) |
+|---|---|---|---|
+| P1-01 | DONE | `pyproject.toml`, `uv.lock`, `apps/*`, `packages/*`, `.pre-commit-config.yaml` | `uv sync --frozen`; `ruff check .` → All checks passed; `mypy` (strict) → no issues in 77 files |
+| P1-02 | IN_REVIEW | `infrastructure/docker/*`, `infrastructure/postgres/*` | `docker compose up` → postgres/redis healthy, migrate exit 0, api healthy, web up; `/health/ready` → `ok`; `aicd admin create-owner` + вход + проект через nginx; `pnpm e2e:live` → 1 passed. **Оговорка:** шаг `apt-get install git` рабочего Dockerfile не проверен — egress-политика среды блокирует deb.debian.org; стек проверен образом-вариантом без этого шага. Закрыть после сборки в CI (job `images`) |
+| P1-03 | DONE | `packages/contracts/**`, `docs/api/openapi.yaml` (symlink), `apps/web/src/api/schema.d.ts` | `tests/contract/test_contracts.py` → 29 passed (OpenAPI 3.1 валидна; 22 JSON Schema валидны и совпадают с документами; 18 операций приложения совпадают с контрактом по пути/методу/праву); каждый ответ API в интеграционных тестах валидируется по контракту; `pnpm check:api` → соответствует. oasdiff и Pydantic-codegen → P1-18 |
+| P1-04 | IN_REVIEW | `.github/workflows/ci.yml`, `scripts/check_no_ai_sdk.py`, `.gitleaks.toml` | Workflow на GitHub ещё не запускался. Локально выполнены эквиваленты всех шагов: ruff, mypy, import-linter, deny-gate (110 py / 498 js пакетов, 0 нарушений; негативный тест), pytest, alembic `--sql`, gitleaks (no leaks), pip-audit и pnpm audit (no known vulnerabilities), Syft SBOM (687 пакетов) |
+| P1-05 | DONE | `pyproject.toml [tool.importlinter]`, `OWNED_TABLES`, `tests/contract/test_architecture.py` | `lint-imports` → 4 kept, 0 broken; негативный тест нарушения → BROKEN; каждая таблица БД принадлежит ровно одному модулю |
+| P1-06 | DONE | `packages/platform/**` | `tests/unit/test_redaction.py`, `test_ids.py`, `test_pagination.py`, `test_config.py` — passed; лог содержит request_id/run_id, секреты маскируются. OTel: локальный провайдер + console-экспорт; OTLP — P8-06 |
+| P1-07 | DONE | `infrastructure/migrations/**`, `infrastructure/postgres/bootstrap-*.sql` | `tests/migrations` → upgrade→downgrade→upgrade, offline dry-run, роли без BYPASSRLS — passed |
+| P1-08 | DONE | `0001_foundation.py` (12 таблиц, домены, функции, RLS, SECURITY DEFINER) | `tests/security/test_rls.py` → 22 passed (A/B × app/worker × таблицы, fail-closed без контекста, составные FK, sys_* функции, last owner). Исправлен дефект документа БД: CHECK `{1,1024}` превышает лимит повторений PostgreSQL (255) |
+| P1-09 | DONE | `packages/identity/**`, `apps/api/aicd_api/routers/auth.py`, `apps/cli/**` | `tests/integration/test_api_auth.py` → cookie HttpOnly/Secure/SameSite=Strict, CSRF и Origin, блокировка после 5 неудач, idle-timeout, logout; `test_cli.py` — bootstrap владельца, слабый пароль отклонён |
+| P1-10 | DONE | `packages/identity/aicd_identity/rbac.py`, `apps/api/aicd_api/deps.py` | `tests/unit/test_rbac.py` → 135 ячеек матрицы + approvals/директивы; контрактный тест прав всех 55 операций OpenAPI; HTTP-тесты ролей |
+| P1-11 | DONE | `apps/api/**` | `tests/integration/test_api_*.py` → 30 passed: idempotency (повтор/реюз/отсутствие/сохранение 409), ETag/If-Match/428/412/304, cursor-пагинация и подделка курсора, problem+json, 413/415, заголовки безопасности, health, аудит |
+| P1-12 | DONE | `packages/security/**`, `packages/projects/aicd_projects/api.py` | traversal, вне корня, symlink-побег, не-Git, вложенный каталог → 422 без раскрытия путей хоста; Git запускается без хуков/конфигов репозитория |
+| P1-13 | DONE | `apps/web/**` | `pnpm typecheck`, `lint`, `build` → 0; `pnpm test` → 29 passed; `pnpm e2e` → 6 passed (axe без serious/critical, 360px, клавиатура); `pnpm e2e:live` против compose → 1 passed |
+| P1-14 | DONE | `scripts/traceability.py` | 125 требований, 130 задач, непокрытых P0/P1: 0; тест скрипта |
+| P1-15 | DONE | `packages/platform/aicd_platform/artifacts.py` | FS: неизменяемость, проверка sha256, отклонение чужих/побеговых ссылок; S3: put/get/presigned URL/integrity на RustFS (S3-совместимый). MinIO недоступен в среде (образы не скачиваются) |
+| P1-16 | DONE | `tests/security/test_cross_tenant_api.py`, `test_rls.py` | 11 операций против чужого workspace → 404 (как для несуществующего ID), изменений нет; удалённый участник теряет доступ |
+| P1-17 | DONE | `docs/architecture/{data-model,state-machines,permissions-matrix}.md`, `docs/runbooks/*` | `tests/contract/test_docs_links.py` → все относительные ссылки разрешаются |
+
+**Итог прогона Python-тестов:** `uv run pytest --cov` → **299 passed**, покрытие 88% (branch), из них с реальными PostgreSQL 17, Redis и S3.

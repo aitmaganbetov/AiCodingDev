@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/agent/1.0/agent-result.schema.json",
+  "title": "AgentResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "agent_result_version",
+    "summary",
+    "claims",
+    "acp_messages"
+  ],
+  "properties": {
+    "agent_result_version": {
+      "const": "1.0"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    },
+    "claims": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "implementation_completed",
+              "tests_added",
+              "tests_passed",
+              "review_completed",
+              "analysis_completed",
+              "documentation_updated",
+              "migration_prepared",
+              "no_changes_needed",
+              "other"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "files": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          }
+        }
+      }
+    },
+    "declared_outputs": {
+      "type": "array",
+      "maxItems": 50,
+      "description": "файлы-отчёты, созданные агентом в выделенном каталоге вывода (/output); gateway сохраняет их как artifacts",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "path"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "requirements_doc",
+              "adr",
+              "diagram",
+              "plan",
+              "review_report",
+              "threat_model",
+              "test_plan",
+              "test_report",
+              "benchmark",
+              "analysis_report",
+              "migration_plan",
+              "rollback_plan",
+              "documentation",
+              "other"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^output/[A-Za-z0-9._/-]{1,200}$"
+          }
+        }
+      }
+    },
+    "acp_messages": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "to_role",
+          "type",
+          "payload"
+        ],
+        "properties": {
+          "to_role": {
+            "enum": [
+              "requirements",
+              "architect",
+              "planner",
+              "developer",
+              "reviewer",
+              "security",
+              "qa",
+              "database",
+              "performance",
+              "devops",
+              "maintenance",
+              "documentation",
+              "orchestrator",
+              "user"
+            ]
+          },
+          "type": {
+            "enum": [
+              "HANDOFF",
+              "QUESTION",
+              "ANSWER",
+              "REVIEW_REQUEST",
+              "FINDING",
+              "FIX_REQUEST",
+              "EVIDENCE_SUBMITTED",
+              "DECISION_PROPOSAL",
+              "BLOCKED",
+              "TASK_COMPLETED"
+            ]
+          },
+          "reply_to_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "payload": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "directive_acks": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "directive_id",
+          "status"
+        ],
+        "properties": {
+          "directive_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "not_applicable",
+              "cannot_comply"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      }
+    }
+  }
+}

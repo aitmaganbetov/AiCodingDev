@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/DECISION_RECORDED.schema.json",
+  "title": "DECISION_RECORDED payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision_id",
+    "decision_type",
+    "outcome",
+    "decided_by",
+    "rationale"
+  ],
+  "properties": {
+    "decision_id": {
+      "$ref": "../common.schema.json#/$defs/uuid",
+      "description": "agent_decisions.id"
+    },
+    "decision_type": {
+      "enum": [
+        "architecture",
+        "technology_choice",
+        "scope_change",
+        "plan_change",
+        "risk_acceptance",
+        "data_model",
+        "api_contract",
+        "review_verdict",
+        "routing",
+        "other"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "accepted",
+        "rejected",
+        "superseded"
+      ]
+    },
+    "chosen_option": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{1,40}$"
+    },
+    "decided_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "user",
+            "policy"
+          ]
+        },
+        "user_id": {
+          "$ref": "../common.schema.json#/$defs/uuid"
+        },
+        "policy_version": {
+          "type": "string",
+          "maxLength": 100
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "user"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "user_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "policy"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "policy_version"
+            ]
+          }
+        }
+      ]
+    },
+    "approval_id": {
+      "$ref": "../common.schema.json#/$defs/uuid"
+    },
+    "rationale": {
+      "$ref": "../common.schema.json#/$defs/text_long"
+    },
+    "evidence_refs": {
+      "$ref": "../common.schema.json#/$defs/refs"
+    },
+    "adr_ref": {
+      "$ref": "../common.schema.json#/$defs/ref"
+    }
+  }
+}

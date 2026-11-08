@@ -1,0 +1,68 @@
+"""Модели запросов (зеркало `packages/contracts/openapi.yaml`, `additionalProperties: false`).
+
+Соответствие контракту проверяется контрактными тестами (tests/contract).
+"""
+
+from __future__ import annotations
+
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from aicd_identity.rbac import Role
+
+DocumentationMode = Literal["OFF", "SMART", "STRICT"]
+QualityProfile = Literal["basic", "strict", "critical"]
+ProjectStatus = Literal["ACTIVE", "ARCHIVED"]
+
+# Синтаксическая проверка email без DNS/«special-use» ограничений email-validator:
+# self-hosted установки используют внутренние домены (.local, .corp, .internal).
+Email = Annotated[str, StringConstraints(pattern=r"^[^@\s]{1,64}@[^@\s]{1,255}$", max_length=320)]
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
+
+class LoginRequest(_Strict):
+    email: Email
+    password: Annotated[str, Field(min_length=1, max_length=1024)]
+
+
+class WorkspaceCreateRequest(_Strict):
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    # Контракт: ^[a-z0-9][a-z0-9-]{1,62}$; дополнительно правило CHECK БД — без дефиса в конце (OQ-31).
+    slug: Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$")]
+
+
+class MemberCreateRequest(_Strict):
+    email: Email
+    role: Role
+
+
+class MemberUpdateRequest(_Strict):
+    role: Role
+
+
+class ProjectCreateRequest(_Strict):
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    description: Annotated[str, Field(max_length=4000)] | None = None
+    documentation_mode: DocumentationMode = "SMART"
+    quality_profile: QualityProfile = "strict"
+
+
+class ProjectUpdateRequest(_Strict):
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
+
+    name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    description: Annotated[str, Field(max_length=4000)] | None = None
+    status: ProjectStatus | None = None
+    quality_profile: QualityProfile | None = None
+    routing_policy_id: str | None = None
+
+
+class RepositoryAttachRequest(_Strict):
+    provider: Literal["local", "github"]
+    remote_url: Annotated[str, Field(max_length=2048)] | None = None
+    local_path: Annotated[str, Field(max_length=4096)] | None = None
+    default_branch: Annotated[str, Field(max_length=255)] | None = None

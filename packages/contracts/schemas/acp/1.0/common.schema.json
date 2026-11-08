@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/common.schema.json",
+  "title": "AcpCommon",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^(artifact|evidence|finding|message|task|decision|gate_execution|context_pack|adr|requirement|approval|knowledge):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "refs": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/ref"
+      },
+      "uniqueItems": true
+    },
+    "text_short": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "text_long": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "agent_role": {
+      "enum": [
+        "requirements",
+        "architect",
+        "planner",
+        "developer",
+        "reviewer",
+        "security",
+        "qa",
+        "database",
+        "performance",
+        "devops",
+        "maintenance",
+        "documentation"
+      ]
+    },
+    "provider": {
+      "enum": [
+        "codex",
+        "claude"
+      ]
+    },
+    "file_path": {
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$",
+      "description": "относительный путь внутри репозитория, без .."
+    },
+    "commit_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "evidence_refs"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "implementation_completed",
+            "tests_added",
+            "tests_passed",
+            "review_completed",
+            "analysis_completed",
+            "documentation_updated",
+            "migration_prepared",
+            "no_changes_needed",
+            "other"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "evidence_refs": {
+          "$ref": "#/$defs/refs"
+        }
+      }
+    }
+  }
+}

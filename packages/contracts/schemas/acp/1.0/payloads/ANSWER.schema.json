@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/payloads/ANSWER.schema.json",
+  "title": "ANSWER payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "answer"
+  ],
+  "properties": {
+    "answer": {
+      "$ref": "../common.schema.json#/$defs/text_long"
+    },
+    "selected_option": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "confidence": {
+      "enum": [
+        "confirmed",
+        "assumption",
+        "unknown"
+      ]
+    },
+    "evidence_refs": {
+      "$ref": "../common.schema.json#/$defs/refs"
+    }
+  }
+}

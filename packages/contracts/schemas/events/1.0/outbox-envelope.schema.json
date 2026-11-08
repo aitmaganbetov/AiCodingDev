@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/events/1.0/outbox-envelope.schema.json",
+  "title": "OutboxEventEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "aggregate_type",
+    "aggregate_id",
+    "workspace_id",
+    "occurred_at",
+    "trace",
+    "data"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "= outbox_events.id (UUIDv7)"
+    },
+    "event_type": {
+      "type": "string",
+      "pattern": "^[a-z_]+\\.[a-z_]+$"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "aggregate_type": {
+      "enum": [
+        "run",
+        "task",
+        "task_attempt",
+        "cli_execution",
+        "agent_message",
+        "chat_message",
+        "directive",
+        "approval",
+        "gate_execution",
+        "evidence",
+        "finding",
+        "compliance_result",
+        "cli_installation",
+        "routing_decision",
+        "checkpoint",
+        "external_action",
+        "code_index_snapshot",
+        "context_pack",
+        "documentation_snapshot",
+        "github_webhook_delivery"
+      ]
+    },
+    "aggregate_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "aggregate_version": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "workspace_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid",
+      "description": "null только для глобальных агрегатов (cli_installation)"
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "execution_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "correlation_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "causation_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "description": "event_id/команда, вызвавшая это событие"
+        },
+        "actor_type": {
+          "enum": [
+            "user",
+            "agent",
+            "system",
+            "github"
+          ]
+        },
+        "actor_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "otel_trace_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      }
+    },
+    "data": {
+      "type": "object"
+    }
+  }
+}

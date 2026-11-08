@@ -1,0 +1,24 @@
+# Локальные проверки перед коммитом (secure SDLC, SECURITY_CONTROLS). Установка: pre-commit install
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.28.0
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: no-ai-sdk
+        name: deny-gate SDK AI-провайдеров
+        entry: uv run python scripts/check_no_ai_sdk.py
+        language: system
+        files: (uv\.lock|pnpm-lock\.yaml)$
+        pass_filenames: false

@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/cli/1.0/execution-result.schema.json",
+  "title": "ExecutionResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "execution_id",
+    "provider",
+    "status",
+    "exit_code",
+    "artifacts",
+    "claims",
+    "verification",
+    "usage",
+    "execution_status",
+    "started_at",
+    "finished_at"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "execution_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "provider": {
+      "enum": [
+        "codex",
+        "claude"
+      ]
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "execution_status": {
+      "enum": [
+        "COLLECTED",
+        "TIMED_OUT",
+        "CANCELLED",
+        "CRASHED",
+        "AUTH_REQUIRED",
+        "RATE_LIMITED"
+      ]
+    },
+    "exit_code": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "null если процесс не стартовал или убит сигналом"
+    },
+    "signal": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "SIGTERM",
+        "SIGKILL",
+        null
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "ref",
+          "sha256",
+          "size_bytes"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "git_diff",
+              "raw_log",
+              "output_excerpt",
+              "structured_output",
+              "file_snapshot",
+              "test_report",
+              "plan",
+              "review_report",
+              "other"
+            ]
+          },
+          "ref": {
+            "type": "string",
+            "pattern": "^artifact:[0-9a-f-]{36}$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "protected": {
+            "type": "boolean",
+            "description": "true для raw_log: доступ только admin/owner, не отдаётся в чат"
+          }
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "evidence_refs"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "implementation_completed",
+              "tests_added",
+              "tests_passed",
+              "review_completed",
+              "analysis_completed",
+              "documentation_updated",
+              "migration_prepared",
+              "no_changes_needed",
+              "other"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^artifact:[0-9a-f-]{36}$"
+            }
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "const": "pending"
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "source"
+      ],
+      "properties": {
+        "tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "source": {
+          "enum": [
+            "cli_reported",
+            "not_exposed_by_cli"
+          ]
+        },
+        "quota_remaining": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200,
+          "description": "только если CLI сообщает; иначе null (UI: unknown)"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "not_exposed_by_cli"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tokens": {
+                "const": null
+              },
+              "input_tokens": {
+                "const": null
+              },
+              "output_tokens": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "CLI_NOT_INSTALLED",
+            "AUTH_REQUIRED",
+            "RATE_LIMITED",
+            "TIMEOUT",
+            "SANDBOX_DENIED",
+            "PROCESS_FAILED",
+            "OUTPUT_PARSE_ERROR",
+            "UNSUPPORTED_VERSION",
+            "CANCELLED"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "санитизированный текст"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "retry_after_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "detection_signal": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "cli_version": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "adapter_version": {
+      "type": "string",
+      "maxLength": 50
+    },
+    "command_profile": {
+      "type": "string"
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "session_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "events_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "raw log обрезан по max_output_bytes"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit_code": {
+            "const": 0
+          },
+          "execution_status": {
+            "const": "COLLECTED"
+          }
+        },
+        "not": {
+          "required": [
+            "error"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "error"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "cancelled"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "execution_status": {
+            "const": "CANCELLED"
+          },
+          "error": {
+            "properties": {
+              "code": {
+                "const": "CANCELLED"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

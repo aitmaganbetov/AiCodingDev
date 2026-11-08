@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/acp/1.0/envelope.schema.json",
+  "title": "AcpEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "message_id",
+    "run_id",
+    "task_id",
+    "from",
+    "to",
+    "type",
+    "correlation_id",
+    "reply_to_id",
+    "payload",
+    "created_at"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "acp/1.0"
+    },
+    "message_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "task_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "task_attempt_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "requirements",
+            "architect",
+            "planner",
+            "developer",
+            "reviewer",
+            "security",
+            "qa",
+            "database",
+            "performance",
+            "devops",
+            "maintenance",
+            "documentation",
+            "orchestrator",
+            "user"
+          ]
+        },
+        "provider": {
+          "enum": [
+            "codex",
+            "claude"
+          ]
+        },
+        "user_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "enum": [
+                  "orchestrator",
+                  "user"
+                ]
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "provider"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "provider"
+            ],
+            "not": {
+              "required": [
+                "user_id"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "user"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "user_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "orchestrator"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "user_id"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "to": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "requirements",
+            "architect",
+            "planner",
+            "developer",
+            "reviewer",
+            "security",
+            "qa",
+            "database",
+            "performance",
+            "devops",
+            "maintenance",
+            "documentation",
+            "orchestrator",
+            "user"
+          ]
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "конкретная задача-получатель, если известна"
+        }
+      }
+    },
+    "type": {
+      "enum": [
+        "TASK_ASSIGN",
+        "HANDOFF",
+        "QUESTION",
+        "ANSWER",
+        "REVIEW_REQUEST",
+        "FINDING",
+        "FIX_REQUEST",
+        "EVIDENCE_SUBMITTED",
+        "DECISION_PROPOSAL",
+        "DECISION_RECORDED",
+        "BLOCKED",
+        "TASK_COMPLETED"
+      ]
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reply_to_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ANSWER"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reply_to_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "enum": [
+              "TASK_ASSIGN",
+              "DECISION_RECORDED"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "from": {
+            "properties": {
+              "role": {
+                "const": "orchestrator"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

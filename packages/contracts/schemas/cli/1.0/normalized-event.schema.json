@@ -1,0 +1,352 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/cli/1.0/normalized-event.schema.json",
+  "title": "NormalizedCliEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "execution_id",
+    "seq",
+    "type",
+    "timestamp",
+    "payload"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "execution_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "type": {
+      "enum": [
+        "started",
+        "output",
+        "tool_event",
+        "artifact",
+        "warning",
+        "finished"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "output"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/output"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tool_event"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/tool_event"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "artifact"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/artifact"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "warning"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "finished"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/finished"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "started": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "cli_version",
+        "command_profile",
+        "runner_ref"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "codex",
+            "claude"
+          ]
+        },
+        "cli_version": {
+          "type": "string"
+        },
+        "command_profile": {
+          "type": "string"
+        },
+        "runner_ref": {
+          "type": "string"
+        },
+        "session_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stream",
+        "text",
+        "redactions",
+        "truncated"
+      ],
+      "properties": {
+        "stream": {
+          "enum": [
+            "stdout",
+            "stderr",
+            "agent_message"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "санитизированная выдержка"
+        },
+        "redactions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "tool_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_kind",
+        "phase"
+      ],
+      "properties": {
+        "tool_kind": {
+          "enum": [
+            "file_read",
+            "file_write",
+            "file_patch",
+            "command",
+            "search",
+            "network",
+            "other"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "requested",
+            "started",
+            "completed",
+            "denied",
+            "failed"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "путь относительно worktree или имя команды; санитизировано"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_type",
+        "ref",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "artifact_type": {
+          "enum": [
+            "git_diff",
+            "raw_log",
+            "output_excerpt",
+            "structured_output",
+            "file_snapshot",
+            "test_report",
+            "plan",
+            "review_report",
+            "other"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^artifact:[0-9a-f-]{36}$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "OUTPUT_TRUNCATED",
+            "SECRET_REDACTED",
+            "UNPARSED_LINE",
+            "SANDBOX_VIOLATION_ATTEMPT",
+            "RATE_LIMIT_HINT",
+            "AUTH_HINT",
+            "IDLE",
+            "UNTESTED_CLI_VERSION",
+            "OTHER"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "finished": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_status",
+        "exit_code"
+      ],
+      "properties": {
+        "execution_status": {
+          "enum": [
+            "EXITED",
+            "TIMED_OUT",
+            "CANCELLED",
+            "CRASHED",
+            "AUTH_REQUIRED",
+            "RATE_LIMITED"
+          ]
+        },
+        "exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error_code": {
+          "enum": [
+            "CLI_NOT_INSTALLED",
+            "AUTH_REQUIRED",
+            "RATE_LIMITED",
+            "TIMEOUT",
+            "SANDBOX_DENIED",
+            "PROCESS_FAILED",
+            "OUTPUT_PARSE_ERROR",
+            "UNSUPPORTED_VERSION",
+            "CANCELLED",
+            null
+          ]
+        }
+      }
+    }
+  }
+}

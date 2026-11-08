@@ -1,0 +1,145 @@
+[project]
+name = "aicodingdev"
+version = "0.1.0.dev0"
+description = "AiCodingDev — self-hosted AI Coding Development & Multi-Agent Orchestration platform"
+readme = "README.md"
+license = "GPL-3.0-only"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic>=2.7",
+  "pydantic-settings",
+  "sqlalchemy[asyncio]>=2.0.30",
+  "psycopg[binary]>=3.2",
+  "alembic",
+  "argon2-cffi",
+  "redis>=5",
+  "boto3",
+  "opentelemetry-api",
+  "opentelemetry-sdk",
+  "pyyaml",
+  "jsonschema",
+]
+
+[project.scripts]
+aicd = "aicd_cli.main:main"
+
+[dependency-groups]
+dev = [
+  "pytest",
+  "pytest-asyncio",
+  "httpx",
+  "hypothesis",
+  "mypy",
+  "ruff",
+  "import-linter",
+  "openapi-spec-validator",
+  "schemathesis",
+  "types-PyYAML",
+  "types-jsonschema",
+  "boto3-stubs[s3]",
+  "pip-audit",
+  "pytest-cov",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "packages/platform/aicd_platform",
+  "packages/contracts/aicd_contracts",
+  "packages/identity/aicd_identity",
+  "packages/projects/aicd_projects",
+  "packages/security/aicd_security",
+  "apps/api/aicd_api",
+  "apps/cli/aicd_cli",
+]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["packages/*", "apps/*", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "A", "C4", "SIM", "RUF", "ASYNC", "PT", "TID"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # кириллица в строках/комментариях допустима
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Header"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S311", "S603", "S607", "S608", "PT012", "PT018", "E501", "E741", "SIM117"]
+"infrastructure/migrations/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+mypy_path = "packages/platform:packages/contracts:packages/identity:packages/projects:packages/security:apps/api:apps/cli"
+explicit_package_bases = true
+files = ["packages", "apps/api", "apps/cli", "tests", "scripts"]
+exclude = ["^infrastructure/migrations/", "^apps/web/"]
+
+[[tool.mypy.overrides]]
+module = ["boto3.*", "botocore.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+markers = [
+  "db: requires PostgreSQL (AICD_TEST_DATABASE_ADMIN_URL)",
+  "redis: requires Redis",
+  "s3: requires S3-compatible storage (AICD_TEST_S3_ENDPOINT)",
+]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+branch = true
+concurrency = ["greenlet", "thread"]
+source = ["aicd_platform", "aicd_identity", "aicd_projects", "aicd_security", "aicd_api", "aicd_contracts", "aicd_cli"]
+
+[tool.importlinter]
+root_packages = ["aicd_platform", "aicd_contracts", "aicd_security", "aicd_identity", "aicd_projects", "aicd_api", "aicd_cli"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Слои: приложения → домены → security → platform/contracts"
+type = "layers"
+layers = [
+  "aicd_api | aicd_cli",
+  "aicd_projects",
+  "aicd_identity",
+  "aicd_security",
+  "aicd_platform",
+  "aicd_contracts",
+]
+
+[[tool.importlinter.contracts]]
+name = "Приватные модули домена (repository) недоступны другим модулям — только через api"
+type = "forbidden"
+source_modules = ["aicd_api", "aicd_cli", "aicd_projects", "aicd_platform", "aicd_security"]
+forbidden_modules = ["aicd_identity.repository"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Платформенный слой и security не зависят от доменов и приложений"
+type = "forbidden"
+source_modules = ["aicd_platform", "aicd_security", "aicd_contracts"]
+forbidden_modules = ["aicd_identity", "aicd_projects", "aicd_api", "aicd_cli"]
+
+[[tool.importlinter.contracts]]
+name = "Запрет SDK AI-провайдеров (ТЗ §1, ADR-0003)"
+type = "forbidden"
+source_modules = ["aicd_platform", "aicd_contracts", "aicd_security", "aicd_identity", "aicd_projects", "aicd_api", "aicd_cli"]
+forbidden_modules = ["openai", "anthropic", "mistralai", "cohere", "ollama", "langchain", "litellm"]
+ignore_imports = []

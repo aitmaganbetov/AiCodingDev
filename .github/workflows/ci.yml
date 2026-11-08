@@ -1,0 +1,136 @@
+# CI AiCodingDev (P1-04). Обычный CI не требует авторизации CLI-подписок (ТЗ §20, NFR-TEST-01).
+# Действия сторонних авторов закреплены по версиям; закрепление по commit SHA — задача
+# P9-08 (supply chain релиза), после чего обновления сопровождает Dependabot.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: aicd_admin
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aicd_admin" --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
+    env:
+      AICD_TEST_DATABASE_ADMIN_URL: postgresql://aicd_admin:ci-only-password@127.0.0.1:5432/postgres
+      AICD_TEST_REDIS_URL: redis://127.0.0.1:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+      - run: uv sync --frozen
+      - name: Lint (ruff)
+        run: uv run ruff check . && uv run ruff format --check packages apps/api apps/cli tests scripts
+      - name: Typecheck (mypy --strict)
+        run: uv run mypy
+      - name: Module boundaries (import-linter)
+        run: uv run lint-imports --no-cache
+      - name: Deny-gate SDK AI-провайдеров (ТЗ §1)
+        run: uv run python scripts/check_no_ai_sdk.py
+      - name: Traceability (требования → задачи)
+        run: uv run python scripts/traceability.py --report traceability.md
+      - name: Tests (unit, contract, migrations, RLS, integration, security)
+        run: uv run pytest --cov --cov-report=xml --cov-report=term -q
+      - name: Migration dry-run (offline SQL)
+        run: |
+          AICD_MIGRATOR_DATABASE_URL=postgresql://dry:run@localhost/dry \
+            uv run alembic -c infrastructure/migrations/alembic.ini upgrade head --sql > migration-dry-run.sql
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-reports
+          path: |
+            coverage.xml
+            traceability.md
+            migration-dry-run.sql
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:api
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: SCA (OSV-Scanner) — uv.lock и pnpm-lock.yaml
+        uses: google/osv-scanner-action/osv-scanner-action@v2.0.2
+        with:
+          scan-args: |-
+            --lockfile=uv.lock
+            --lockfile=apps/web/pnpm-lock.yaml
+      - name: SBOM (Syft, SPDX JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: sbom.spdx.json
+
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend and web images
+        run: |
+          docker build -f infrastructure/docker/backend.Dockerfile -t aicodingdev/backend:ci .
+          docker build -f infrastructure/docker/web.Dockerfile -t aicodingdev/web:ci .
+      - name: Compose smoke
+        run: |
+          cd infrastructure/docker
+          ./init-secrets.sh
+          mkdir -p repos
+          docker tag aicodingdev/backend:ci aicodingdev/backend:local
+          docker tag aicodingdev/web:ci aicodingdev/web:local
+          AICD_COOKIE_SECURE=false docker compose up -d --no-build --wait --wait-timeout 180
+          curl -fsS http://localhost:8080/api/v1/health/ready
+          docker compose down -v
