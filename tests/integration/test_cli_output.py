@@ -17,7 +17,6 @@ import json
 import os
 import time
 import uuid
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -68,7 +67,7 @@ def _event(seq: int, type_: str, payload: dict[str, Any]) -> NormalizedCliEvent:
         contract_version="1.0",
         execution_id=uuid7(),
         seq=seq,
-        type=type_,  # type: ignore[arg-type]
+        type=type_,
         timestamp=datetime.now(UTC),
         payload=payload,
     )
@@ -94,8 +93,11 @@ def test_payloads_of_every_cli_event_type_match_sse_schema() -> None:
         _event(2, "output", {"stream": "stderr", "text": "x" * 5000, "redactions": 1, "truncated": False}),
         _event(3, "tool_event", {"tool_kind": "command", "phase": "completed", "target": "npm test"}),
         _event(4, "warning", {"code": "OUTPUT_TRUNCATED", "message": "token=abcdefghijkl"}),
-        _event(5, "artifact", {"artifact_type": "output_excerpt", "ref": f"artifact:{art}", "sha256": "0" * 64,
-                               "size_bytes": 1}),  # fmt: skip
+        _event(
+            5,
+            "artifact",
+            {"artifact_type": "output_excerpt", "ref": f"artifact:{art}", "sha256": "0" * 64, "size_bytes": 1},
+        ),
         _event(6, "finished", {"execution_status": "EXITED", "exit_code": 0, "error_code": None}),
     ]
     payloads = [payload_for(ctx, e) for e in events]
@@ -104,7 +106,7 @@ def test_payloads_of_every_cli_event_type_match_sse_schema() -> None:
     assert len(payloads[1]["text"]) == 4096, "текст ограничен схемой (4096 символов)"
     assert "abcdefghijkl" not in payloads[3]["text"], "текст повторно редактируется"
     assert payloads[4]["artifact_id"] == art
-    merged = coalesce(payloads[1:3] + [payloads[1]])
+    merged = coalesce([*payloads[1:3], payloads[1]])
     validate_sse(_envelope(merged))
     assert merged["cli_event_type"] == "tool_event" and merged["coalesced_count"] == 3
     assert merged["dropped_chunks"] == 2 and merged["cli_seq"] == 2
@@ -113,16 +115,26 @@ def test_payloads_of_every_cli_event_type_match_sse_schema() -> None:
 def test_coalesce_merges_output_in_order_and_counts_dropped() -> None:
     ctx = _ctx()
     outs = [
-        payload_for(ctx, _event(i, "output", {"stream": "agent_message", "text": f"line {i}", "redactions": i % 2,
-                                              "truncated": False}))  # fmt: skip
+        payload_for(
+            ctx,
+            _event(
+                i, "output", {"stream": "agent_message", "text": f"line {i}", "redactions": i % 2, "truncated": False}
+            ),
+        )
         for i in range(1, 6)
     ]
     merged = coalesce(outs)
     assert merged["text"] == "\n".join(f"line {i}" for i in range(1, 6))
-    assert (merged["coalesced_count"], merged["dropped_chunks"], merged["cli_seq"], merged["redactions"]) == (5, 0, 5, 3)
+    assert (merged["coalesced_count"], merged["dropped_chunks"], merged["cli_seq"], merged["redactions"]) == (
+        5,
+        0,
+        5,
+        3,
+    )
     big = [
-        payload_for(ctx, _event(i, "output", {"stream": "stdout", "text": "y" * 3000, "redactions": 0,
-                                              "truncated": False}))  # fmt: skip
+        payload_for(
+            ctx, _event(i, "output", {"stream": "stdout", "text": "y" * 3000, "redactions": 0, "truncated": False})
+        )
         for i in range(1, 5)
     ]
     merged = coalesce(big)
@@ -206,7 +218,7 @@ async def world(
     redis: Any,  # noqa: F811
     user: UserSession,
     tmp_path: Path,
-) -> AsyncIterator[World]:
+) -> World:
     with orch.connect_admin(database) as conn:
         tenant = orch.seed_tenant(conn, owner_id=uuid.UUID(user.user_id))
         run = orch.new_run(conn, tenant)
@@ -227,7 +239,7 @@ async def world(
     store = FileSystemArtifactStore(tmp_path / "artifacts")
     root = tmp_path / "worktrees"
     root.mkdir()
-    yield World(
+    return World(
         database, worker_engine, redis, store, ExecutionGateway(engine=worker_engine, store=store), root,
         tenant.workspace_id, run, task, attempt, inst,
     )  # fmt: skip
@@ -278,8 +290,7 @@ async def test_live_cli_output_arrives_over_sse_in_order_sanitized(
                     for env in _events(batch):  # каждый кадр — по нормативной схеме SSE
                         received.append((time.monotonic(), env))
                     done = any(
-                        e["type"] == "cli.output" and e["payload"]["cli_event_type"] == "finished"
-                        for _, e in received
+                        e["type"] == "cli.output" and e["payload"]["cli_event_type"] == "finished" for _, e in received
                     )
                     if done or closed or not batch:
                         return
@@ -332,7 +343,9 @@ async def test_live_cli_output_arrives_over_sse_in_order_sanitized(
     highlights = [c for c in chat if c["message_kind"] == "CLI_HIGHLIGHT"]
     assert any("command npm test — completed" in c["body"] for c in highlights), chat
     assert any("CLI завершён — EXITED" in c["body"] for c in highlights)
-    assert all(c["sender_role"] == "developer" and c["provider"] == "codex" and c["scope"] == "TASK" for c in highlights)
+    assert all(
+        c["sender_role"] == "developer" and c["provider"] == "codex" and c["scope"] == "TASK" for c in highlights
+    )
     assert publisher.highlights == len(highlights)
     async with _client(server, user) as client:
         feed = await client.get(f"/runs/{world.run_id}/chat", params={"stream": "codex"})
@@ -377,7 +390,7 @@ async def test_rate_cap_coalesces_with_dropped_chunks(world: World) -> None:
 @pytest.mark.redis
 async def test_cli_secrets_never_reach_db_sse_or_artifacts(world: World) -> None:
     before = _scan_database(world.database, CLI_SECRETS, (world.workspace_id,))
-    request, publisher, seen, outcome = await _execute(world, "secret_leak")
+    request, publisher, _seen, outcome = await _execute(world, "secret_leak")
     assert outcome.result.status == "completed" and publisher.emitted
     await world.dispatch()
     payloads = world.outbox_payloads(request.execution_id)

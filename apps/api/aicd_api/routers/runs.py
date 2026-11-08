@@ -208,7 +208,8 @@ async def run_view(conn: AsyncConnection, run_id: uuid.UUID) -> dict[str, Any]:
         "base_commit_sha": row["base_commit_sha"],
         "approval_policy": row["approval_policy"],
         "plan_version": row["plan_version"],
-        "routing": snapshot.get("routing", {}),
+        # Контракт RunRouting: стратегия и провайдеры; прочие поля snapshot (политика UNTESTED) — внутренние.
+        "routing": {k: v for k, v in snapshot.get("routing", {}).items() if k in ("strategy", "allowed_providers")},
         "task_counts": {k: int(v) for k, v in counts.items()},
         "pending_approvals": int(pending),
         "updated_at": row["updated_at"],

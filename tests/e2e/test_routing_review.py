@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_orchestration.approvals import Approvals
 from aicd_platform.db import DbContext, transaction
-from tests.support.phase3 import Slice, create_run, drive, install_both, install_cli, world
+from aicd_orchestration import router
+from tests.support.phase3 import Slice, create_run, drive, install_both, install_cli, install_probed, world
 
 __all__ = ["world"]  # фикстура pytest
 
@@ -122,3 +123,43 @@ async def test_basic_profile_self_review_only_after_explicit_approval(world: Sli
     )
     assert review[0]["outcome"] == "FALLBACK"
     assert review[0]["score_breakdown"]["review_independence"] == "self_review", "самопроверка ≠ independent (ТЗ §4)"
+
+
+async def test_untested_fake_cli_routes_by_profile_policy(world: Slice) -> None:
+    """CLI_ADAPTER_CONTRACT §5.3: установки после штатного probe — `untested` (матрица пуста); basic/strict их
+    допускают с предупреждением в routing_decisions, critical — исключает (`untested_version`)."""
+    ours = {
+        str(await install_probed(world.worker, provider="codex")),
+        str(await install_probed(world.worker, provider="claude", isolate=False)),
+    }
+    run_id = await create_run(world)  # strict
+    snapshot = await _rows(world, "SELECT policy_snapshot FROM runs WHERE id = :r", run_id)
+    assert snapshot[0]["policy_snapshot"]["routing"]["allow_untested_cli_versions"] is True
+    assert await drive(world, run_id) == "COMPLETED"
+    decisions = await _rows(
+        world,
+        "SELECT d.outcome, d.reason, d.score_breakdown FROM routing_decisions d JOIN tasks t ON t.id = d.task_id"
+        " WHERE t.run_id = :r",
+        run_id,
+    )
+    assert decisions and all(d["outcome"] == "SELECTED" for d in decisions)
+    for d in decisions:
+        assert d["score_breakdown"]["warnings"] == [router.UNTESTED_WARNING]
+        assert router.UNTESTED_WARNING in d["reason"]
+        assert {c["compatibility"] for c in d["score_breakdown"]["candidates"]} == {"untested"}
+    r = await world.user.client.get(f"/api/v1/runs/{run_id}")
+    assert set(r.json()["routing"]) == {"strategy", "allowed_providers"}  # контракт RunRouting
+
+    critical = await create_run(world, quality_profile="critical")
+    snapshot = await _rows(world, "SELECT policy_snapshot FROM runs WHERE id = :r", critical)
+    assert snapshot[0]["policy_snapshot"]["routing"]["allow_untested_cli_versions"] is False
+    assert await drive(world, critical) == "BLOCKED"
+    blocked = await _rows(
+        world,
+        "SELECT d.outcome, d.score_breakdown FROM routing_decisions d JOIN tasks t ON t.id = d.task_id"
+        " WHERE t.run_id = :r",
+        critical,
+    )
+    assert blocked[0]["outcome"] == "BLOCKED"
+    excluded = {e["installation_id"]: e["reason"] for e in blocked[0]["score_breakdown"]["excluded"]}
+    assert {excluded[i] for i in ours} == {"untested_version"}  # прочие — выключенные установки других тестов

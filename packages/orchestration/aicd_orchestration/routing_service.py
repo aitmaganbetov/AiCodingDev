@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from aicd_cli_adapters import registry
-from aicd_orchestration import quality, router
+from aicd_orchestration import quality, router, runs
 from aicd_orchestration.review_flow import WRITING_ROLES
 from aicd_platform.ids import uuid7
 
@@ -172,7 +172,10 @@ async def select(
             review_policy.get("independence_required_from_level", 2 if profile == "critical" else 3)
         ),
         independence_fallback=review_policy.get("independence_fallback"),
-        allow_untested=bool(routing_policy.get("allow_untested_cli_versions", False)),
+        # snapshot run несёт значение политики; у run, созданных до его появления, — значение по умолчанию профиля.
+        allow_untested=bool(
+            routing_policy.get("allow_untested_cli_versions", runs.allow_untested_cli_versions(profile))
+        ),
         previous_provider=previous,
         previous_failed_twice_by_provider=failed_twice,
         implementer_provider=next(iter(authors)) if len(authors) == 1 else None,

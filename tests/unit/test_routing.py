@@ -211,6 +211,24 @@ def test_unknown_auth_allowed_after_recent_success_and_untested_by_policy() -> N
     assert router.route(req(allow_untested=True), [cand("codex", compatibility="untested")]).outcome == "SELECTED"
 
 
+def test_untested_versions_follow_policy_with_recorded_warning() -> None:
+    untested = cand("codex", compatibility="untested")
+    allowed = router.route(req(allow_untested=True), [untested])
+    assert allowed.outcome == "SELECTED" and allowed.selected == untested
+    assert allowed.breakdown["warnings"] == [router.UNTESTED_WARNING]
+    assert allowed.breakdown["allow_untested_cli_versions"] is True
+    assert allowed.breakdown["candidates"][0]["compatibility"] == "untested"
+    assert router.UNTESTED_WARNING in allowed.reason
+    # Проверенная установка выбирается без предупреждения; untested при запрете политики исключается с причиной.
+    supported = router.route(req(allow_untested=True), [cand("claude")])
+    assert "warnings" not in supported.breakdown and router.UNTESTED_WARNING not in supported.reason
+    blocked = router.route(req(profile="critical", allow_untested=False), [untested])
+    assert blocked.outcome == "BLOCKED" and blocked.breakdown["allow_untested_cli_versions"] is False
+    assert blocked.breakdown["excluded"] == [
+        {"installation_id": str(untested.installation_id), "provider": "codex", "reason": "untested_version"}
+    ]
+
+
 def test_policy_and_resume_session_filters() -> None:
     assert (
         router.route(req(allowed_providers=frozenset({"claude"})), [cand("codex")]).breakdown["excluded"][0]["reason"]

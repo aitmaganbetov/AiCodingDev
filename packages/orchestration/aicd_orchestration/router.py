@@ -31,6 +31,8 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "w_r": 0.10,
 }
 STICKINESS_BONUS = 0.15
+# Предупреждение выбора установки с версией CLI вне матрицы совместимости (CLI_ADAPTER_CONTRACT §5.3).
+UNTESTED_WARNING = "UNTESTED_CLI_VERSION"
 TIE_EPSILON = 0.01
 # Роли, для которых действует правило независимости (ROUTING_POLICY §5, H7).
 REVIEW_ROLES = frozenset({"reviewer", "security"})
@@ -209,6 +211,7 @@ def _rank(pool: list[Candidate], req: RouteRequest) -> tuple[Candidate, list[dic
                 {
                     "installation_id": str(c.installation_id),
                     "provider": c.provider,
+                    "compatibility": c.compatibility,
                     "components": comps,
                     "stickiness": sticky,
                     "score": total,
@@ -254,6 +257,7 @@ def route(req: RouteRequest, candidates: list[Candidate]) -> RouteDecision:
             excluded.append({"installation_id": str(c.installation_id), "provider": c.provider, "reason": reason})
     breakdown: dict[str, Any] = {
         "weights": dict(req.weights),
+        "allow_untested_cli_versions": req.allow_untested,
         "excluded": excluded,
         "quality_inputs": {p: q.inputs() for p, q in req.quality.items()},
     }
@@ -302,6 +306,10 @@ def route(req: RouteRequest, candidates: list[Candidate]) -> RouteDecision:
         text = f"{winner.provider}: score {next(r['score'] for r in ranked if r['provider'] == winner.provider)}"
         if fallback:
             text += f"; независимый провайдер недоступен — {fallback} (маркировка {independence})"
+        if winner.compatibility == "untested":
+            # Допущено политикой allow_untested_cli_versions: причина — в решении маршрутизации (аудит, UI).
+            breakdown["warnings"] = [UNTESTED_WARNING]
+            text += f"; {UNTESTED_WARNING}: версия CLI вне матрицы совместимости"
         return RouteDecision(outcome, winner, None, independence, fallback, approval, text[:500], breakdown)
 
     if independent:

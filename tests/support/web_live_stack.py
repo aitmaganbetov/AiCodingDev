@@ -13,7 +13,8 @@
   исполнитель — Fake CLI (`AICD_FAKE_SCENARIO`, по умолчанию `agent`: developer → REVIEW_REQUEST →
   независимый reviewer), gates — `LocalProcessRunner` без gates «только в контейнере»;
 * артефакты — S3 (MinIO, отдельный bucket) при заданном AICD_E2E_S3_ENDPOINT, иначе FS;
-* данные: пользователь (email/пароль), workspace, проект с локальным git-репозиторием, установки CLI codex+claude.
+* данные: пользователь (email/пароль), workspace, проект с локальным git-репозиторием, установки CLI codex+claude
+  (probe Fake CLI → `untested`, без отметки `supported` в БД).
 
 Управляющий HTTP (только 127.0.0.1, для тестов): `GET /fixture`, `POST /project` (новый проект с репозиторием),
 `POST /exec/stop|start` (остановить/запустить воркер исполнения — темп сценария),
@@ -267,15 +268,16 @@ class Stack:
     async def _seed_async(self) -> None:
         from aicd_identity import api as identity
         from aicd_platform.db import DbContext, create_engine, transaction
-        from tests.support.phase3 import install_cli
+        from tests.support.phase3 import install_probed
 
         app_engine = create_engine(self.database.url_for("aicd_app"))
         worker = create_engine(self.database.url_for("aicd_worker"))
         try:
             async with transaction(app_engine, DbContext(actor_type="system")) as conn:
                 await identity.create_user(conn, email=self.email, display_name="E2E Оператор", password=self.password)
-            await install_cli(worker, provider="codex")
-            await install_cli(worker, provider="claude", isolate=False)
+            # Установки — штатным probe Fake CLI (`untested`, допускается политикой профиля), как у worker-exec.
+            await install_probed(worker, provider="codex")
+            await install_probed(worker, provider="claude", isolate=False)
         finally:
             await app_engine.dispose()
             await worker.dispose()

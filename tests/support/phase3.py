@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import tempfile
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_cli_adapters import registry
 from aicd_cli_adapters.fake.adapter import FakeCLIExecutor, ScenarioSpec
 from aicd_cli_adapters.gateway import ExecutionGateway, worktree_resolver
 from aicd_orchestration.approvals import Approvals
@@ -36,6 +38,7 @@ from aicd_verification.engine import VerificationEngine
 from aicd_verification.registry import GATE_SPECS
 from tests.conftest import UserSession, init_git_repo
 from tests.support import db as testdb
+from tests.support.cli import MemorySink
 from tests.support.contract import validate_response
 from tests.support.orchestration import connect_admin
 
@@ -136,6 +139,27 @@ async def install_cli(
                 "provider": provider,
             },
         )
+
+
+async def install_probed(worker: AsyncEngine, *, provider: str = "codex", isolate: bool = True) -> uuid.UUID:
+    """Установка Fake CLI штатным путём worker-exec: `probe()` адаптера → `registry.record_probe`.
+
+    Матрица совместимости пуста (`cli-compatibility.yaml`), поэтому установка — `untested`, как в реальном
+    развёртывании до P2-01; маршрутизация допускает её по политике `allow_untested_cli_versions` snapshot run.
+    """
+    adapter = FakeCLIExecutor(
+        provider="claude" if provider == "claude" else "codex",
+        runner=LocalProcessRunner(),
+        artifact_sink=MemorySink(),  # probe артефактов не пишет
+        worktree_path=worktree_resolver(Path(tempfile.gettempdir())),
+        env_source={"PATH": os.environ["PATH"]},
+    )
+    probe = await adapter.probe(installation_id=uuid7())
+    async with transaction(worker, DbContext(actor_type="system")) as conn:
+        if isolate:
+            await conn.execute(text("UPDATE cli_installations SET enabled = false WHERE enabled"))
+        host = await registry.register_host(conn, hostname=f"probe-{secrets.token_hex(4)}")
+        return await registry.record_probe(conn, host_id=host, probe=probe, duration_ms=1)
 
 
 @pytest.fixture
