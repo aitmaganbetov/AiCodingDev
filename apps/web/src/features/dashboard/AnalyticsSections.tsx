@@ -64,7 +64,7 @@ export function AgentPerformance({ analytics }: { analytics: Analytics }) {
               rows={data.tasks.by_role}
               rowKey={(r) => r.role}
               density="compact"
-              minWidthClass="min-w-[560px]"
+              minWidthClass="min-w-[460px]"
               defaultSort={{ columnId: 'attempts', direction: 'desc' }}
             />
           )}

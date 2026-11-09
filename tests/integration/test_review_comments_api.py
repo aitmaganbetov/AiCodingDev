@@ -18,6 +18,7 @@ import pytest
 import schemathesis
 from fastapi import FastAPI
 from hypothesis import HealthCheck, given
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -25,7 +26,7 @@ from aicd_orchestration.approvals import Approvals
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 from aicd_platform.sse import OutboxRecord, envelope, project
-from tests.conftest import UserSession, login
+from tests.conftest import REDIS_URL, UserSession, login
 from tests.support import db as testdb
 from tests.support import quality as q
 from tests.support.contract import OPENAPI_PATH, validate_response
@@ -497,6 +498,12 @@ def _cases(operation_id: str, count: int) -> list[Any]:
 @pytest.mark.parametrize("op_id", OPS)
 async def test_contract_fuzz_never_5xx_and_responses_conform(world: World, op_id: str) -> None:
     owner = world.user("owner")
+    # Лимит записей ревью (60/мин на пользователя) — отдельный бакет; fuzz шлёт больше — сброс окна перед операцией.
+    redis = Redis.from_url(REDIS_URL)
+    keys = [k async for k in redis.scan_iter(match=f"aicd:rl:review:user:{owner.user_id}*")]
+    if keys:
+        await redis.delete(*keys)
+    await redis.aclose()
     thread = await _create(world)
     real = {
         "project_id": world.project,

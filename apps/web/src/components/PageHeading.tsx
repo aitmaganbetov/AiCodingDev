@@ -24,6 +24,10 @@ export function PageHeading({ title, children }: Props) {
   }, [t, title]);
 
   useEffect(() => {
+    // Ленивый экран монтируется позже перехода: не отбираем фокус у уже открытого меню/диалога
+    // (Radix закрыл бы его при потере фокуса), иначе — фокус на h1.
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest('[role="menu"], [role="dialog"], [role="listbox"]')) return;
     ref.current?.focus();
   }, [pathname]);
 

@@ -174,8 +174,8 @@ export function ActivityTimeline({
             items={items}
             getKey={(i) => i.id}
             estimateSize={76}
-            className="h-[26rem]"
-            initialHeight={416}
+            className={items.length < 5 ? 'h-72' : 'h-[26rem]'}
+            initialHeight={items.length < 5 ? 288 : 416}
             renderItem={(item) => <EventRow item={item} workspaceId={workspaceId} runProjects={runProjects} />}
           />
         </div>

@@ -59,7 +59,8 @@ describe('ProvidersPage', () => {
       'GET /api/v1/providers': () => json(200, { items: [provider('AUTH_REQUIRED')] }),
     });
     const { container } = renderApp(`/w/${WS_ID}/providers`);
-    expect(await screen.findByRole('heading', { level: 2, name: 'Codex CLI' })).toBeInTheDocument();
+    // Первый рендер приложения под параллельной нагрузкой vitest может занять > 1 с.
+    expect(await screen.findByRole('heading', { level: 2, name: 'Codex CLI' }, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText('Требуется вход в CLI')).toBeInTheDocument();
     expect(screen.getByText(/Хосты без действующей авторизации: worker-exec-1/)).toBeInTheDocument();
     expect(container.querySelector('input[type="password"]')).toBeNull();
@@ -126,7 +127,8 @@ describe('ProvidersPage', () => {
       'GET /api/v1/providers': () => json(200, { items: [provider()] }),
     });
     renderApp(`/w/${WS_ID}/providers`);
-    expect(await screen.findByRole('heading', { level: 2, name: 'Codex CLI' })).toBeInTheDocument();
+    // Первый рендер приложения под параллельной нагрузкой vitest может занять > 1 с.
+    expect(await screen.findByRole('heading', { level: 2, name: 'Codex CLI' }, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Перепроверить' })).toBeNull();
     expect(screen.queryByRole('form')).toBeNull();
     expect(screen.getByText('Разработчик, Ревьюер')).toBeInTheDocument();

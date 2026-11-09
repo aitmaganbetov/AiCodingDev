@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageHeading } from '../../components/PageHeading';
 import { ButtonLink, Card } from '../../components/ui';
@@ -8,7 +8,7 @@ import { rememberWorkspace } from '../../lib/storage';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
 import { ActiveWorkflows } from './ActiveWorkflows';
-import { ActivityTimeline, LiveIndicator } from './ActivityTimeline';
+import { ActivityTimeline } from './ActivityTimeline';
 import { AgentPerformance, QualityOverview } from './AnalyticsSections';
 import { useActiveProjects, useActiveRuns, useAnalytics, useDashboardLive, useDashboardWindow } from './data';
 import { AgentsTile, ApprovalsTile, CompletedTile, ProjectsTile, ProvidersTile, QualityTile, SecurityTile, WorkflowSuccessTile } from './KpiTiles';
@@ -22,7 +22,6 @@ function Hero({
   window,
   noProjects,
   canCreateProject,
-  live,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -30,7 +29,6 @@ function Hero({
   window: { from: string; to: string };
   noProjects: boolean;
   canCreateProject: boolean;
-  live: ReactNode;
 }) {
   const { t, i18n } = useTranslation();
   const lastDay = new Date(Date.parse(window.to) - 1).toISOString();
@@ -47,7 +45,6 @@ function Hero({
               {t('dashboard.hero.subtitle')}
             </p>
           </div>
-          {live}
         </div>
         <p className="text-sm text-fg-muted">
           {t('dashboard.hero.workspace', { workspace: workspaceName, role: t(`enums.workspace_role.${role}`, { defaultValue: role }) })}
@@ -94,7 +91,6 @@ function DashboardContent({ workspaceId, workspaceName, role }: { workspaceId: s
   const live = useDashboardLive(workspaceId);
   const projectNames = useMemo(() => new Map((projects.data?.items ?? []).map((p) => [p.id, p.name])), [projects.data]);
   const runProjects = useMemo(() => new Map((activeRuns.data?.items ?? []).map((r) => [r.id, r.project_id])), [activeRuns.data]);
-  const liveIndicator = <LiveIndicator state={live.state} onReconnect={live.reconnect} />;
 
   return (
     <div className="flex flex-col gap-4 xl:gap-5">
@@ -105,7 +101,6 @@ function DashboardContent({ workspaceId, workspaceName, role }: { workspaceId: s
         window={window}
         noProjects={projects.data?.items.length === 0}
         canCreateProject={can(role, 'project:create')}
-        live={liveIndicator}
       />
       <section aria-labelledby="dashboard-kpi-title">
         <h2 id="dashboard-kpi-title" className="sr-only">

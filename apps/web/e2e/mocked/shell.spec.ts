@@ -122,7 +122,7 @@ test('error state with retry; session expiry redirects to login', async ({ page,
   api.addProject(ws.id, 'Сервис');
   await login(page, api);
   await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда' })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: 'Последние запуски' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Активные процессы' })).toBeVisible();
   api.failProjectsTimes = 1;
   await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Проекты', exact: true }).click();
 

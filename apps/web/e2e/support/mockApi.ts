@@ -105,13 +105,62 @@ const ROUTES: { method: string; path: string; operationId: string }[] = [
 ];
 
 /**
- * Операции, которые вызывает оболочка на каждом экране (F2: чипы CLI, счётчик approvals, поиск).
- * Ответ по умолчанию — пустой; spec переопределяет его через `api.route(...)` (приоритет у spec).
+ * Операции, которые вызывает оболочка на каждом экране (F2: чипы CLI, счётчик approvals, поиск) и
+ * стартовый экран Dashboard (F3). Ответ по умолчанию — пустой; spec переопределяет его через `api.route(...)` (приоритет у spec).
  */
 const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply: () => Reply }[] = [
   { method: 'GET', path: '/api/v1/providers', operationId: 'listProviders', reply: () => ({ status: 200, body: { items: [] } }) },
   { method: 'GET', path: '/api/v1/approvals', operationId: 'listApprovals', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  // F3 Bento Dashboard — стартовый экран после входа в каждом spec: пустые, но валидные ответы
+  // (как у workspace без данных); dashboard.spec и другие spec переопределяют их через api.route.
+  { method: 'GET', path: '/api/v1/tasks', operationId: 'listTasks', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  { method: 'GET', path: '/api/v1/findings', operationId: 'listFindings', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  { method: 'GET', path: '/api/v1/activity', operationId: 'listActivity', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  { method: 'GET', path: '/api/v1/analytics/summary', operationId: 'getAnalyticsSummary', reply: () => ({ status: 200, body: emptyAnalyticsSummary() }) },
+  {
+    method: 'GET',
+    path: '/api/v1/system/health',
+    operationId: 'getSystemHealth',
+    reply: () => ({
+      status: 200,
+      body: {
+        status: 'unknown',
+        checked_at: '2026-11-08T09:00:00Z',
+        cache_ttl_seconds: 10,
+        components: [],
+        worker_hosts: null,
+        worker_kinds: null,
+        queues: null,
+        backups: null,
+      } satisfies S['SystemHealth'],
+    }),
+  },
 ];
+
+/** Сводка analytics workspace без данных за окно (нули и null-доли — как у сервера). */
+export function emptyAnalyticsSummary(): S['AnalyticsSummary'] {
+  const none = { p50: null, p90: null, avg: null };
+  return {
+    window: { from: '2026-10-09T09:00:00Z', to: '2026-11-08T09:00:00Z' },
+    project_id: null,
+    runs: { total: 0, finished: 0, completed: 0, success_rate: null, by_status: {}, duration_seconds: none, by_mode: [] },
+    daily: [],
+    tasks: { attempts: 0, succeeded: 0, failed: 0, retries: 0, verified_completion_rate: null, tasks_finished: 0, latency_seconds: none, by_role: [] },
+    gates: [],
+    providers: [],
+    review_loops: { review_requests: 0, fix_requests: 0, review_chains: 0, chains_with_fixes: 0, avg_fix_rounds: null, max_fix_rounds: 0, loops_exhausted: 0 },
+    agent_messages: { total: 0, by_type: {} },
+    approvals: { requested: 0, pending: 0, by_status: {}, wait_seconds: none },
+    context: {
+      packs: 0,
+      avg_size_bytes: null,
+      max_size_bytes: null,
+      fragments: 0,
+      stale_fragment_ratio: null,
+      usefulness: { rate: null, packs_evaluated: 0, fragments_referenced: 0, fragments_total: 0, truncated: false },
+    },
+  };
+}
 
 /** Запрос к дополнительной операции мока (MockApi.route). */
 export interface MockRequest {

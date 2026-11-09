@@ -2902,6 +2902,9 @@ CREATE TRIGGER trg_runs_transition BEFORE INSERT OR UPDATE OF status ON runs
 | finding | `VERIFIED_FIXED` | `OPEN` (регрессия на более позднем commit run) |
 | finding | `FALSE_POSITIVE` | `OPEN` (решение человека отозвано) |
 | finding | `ACCEPTED_RISK` | `OPEN` (принятие риска отозвано/истекло) |
+| review_thread | `__new__` | `OPEN` |
+| review_thread | `OPEN` | `RESOLVED` |
+| review_thread | `RESOLVED` | `OPEN` (повторное открытие; миграция 0019, ADR-0015) |
 
 Терминальные состояния (нет исходящих строк): run `COMPLETED/FAILED/CANCELLED`; task `SUCCEEDED/FAILED/CANCELLED`; execution `COLLECTED/TIMED_OUT/CANCELLED/CRASHED/AUTH_REQUIRED/RATE_LIMITED`; directive `COMPLETED/REJECTED/CANCELLED/FAILED`; approval — все, кроме `PENDING`; external_action `COMPENSATED`; indexing_job `SUCCEEDED/FAILED/CANCELLED` (строки indexing_job — миграция 0007, P5-01; в §10.9 FSM не задан). У finding терминальных состояний нет: любое закрытие может быть отозвано (`→ OPEN`); строки finding — миграция 0008 (P6-01; в §12.6 FSM не задан). Дополнительно `trg_findings_guard`: `FALSE_POSITIVE`/`ACCEPTED_RISK` — только `resolved_by = app_current_user()` (человек сессии, ТЗ §10), `VERIFIED_FIXED` — только с `VERIFIED` evidence. Дополнительно `trg_runs_resume_guard`: выход из `PAUSED`/`BLOCKED` в нетерминальное состояние допустим только в `resume_status` (или `PAUSED` из `BLOCKED`).
 

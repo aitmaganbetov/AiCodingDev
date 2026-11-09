@@ -94,6 +94,8 @@ export function Sparkline({
       {table && points.length > 0 ? (
         <details className="text-xs">
           <summary className="min-h-target cursor-pointer py-1 text-link underline">{t('ds.chart.showTable')}</summary>
+          {/* Прокручиваемая таблица доступна с клавиатуры (axe scrollable-region-focusable). */}
+          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
           <div className="mt-1 max-h-40 overflow-auto rounded-md border border-border" tabIndex={0} role="region" aria-label={summary}>
             <table className="w-full text-left text-xs">
               <caption className="sr-only">{summary}</caption>

@@ -41,7 +41,7 @@ describe('auth', () => {
     await user.type(await screen.findByLabelText('Электронная почта'), 'anna@example.com');
     await user.type(screen.getByLabelText('Пароль'), 'secret{Enter}');
     expect(await screen.findByRole('heading', { level: 1, name: 'Обзор · Команда 1' })).toBeInTheDocument();
-    expect(await screen.findByText('Последние запуски', { selector: 'h2' })).toBeInTheDocument();
+    expect(await screen.findByText('Активные процессы', { selector: 'h2 span' })).toBeInTheDocument();
     const list = calls.find((c) => c.url.pathname === '/api/v1/projects');
     expect(list?.headers.get('X-Workspace-Id')).toBe(WS_ID);
   });

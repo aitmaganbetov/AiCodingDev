@@ -407,13 +407,18 @@ async def test_mark_read_semantics_and_idempotency(world: World) -> None:
 
 
 async def test_mark_read_is_audited(world: World, admin: psycopg.Connection) -> None:
+    """Каждая отметка — `notification.marked_read` (режим и число; без id уведомлений)."""
+    dev = world.team.users["developer"]
+    own = (await _list(dev, world.ws)).json()["items"][0]["id"]
+    for body in ({"notification_ids": [str(uuid7())]}, {"up_to": own}, {"all": True}):
+        assert (await _mark(dev, world.ws, body)).status_code == 200
     rows = admin.execute(
-        "SELECT actor_id, metadata FROM audit_events WHERE action = 'notification.marked_read' AND workspace_id = %s",
-        (world.tenant.workspace_id,),
+        "SELECT metadata FROM audit_events WHERE action = 'notification.marked_read' AND workspace_id = %s"
+        " AND actor_id = %s AND resource_type = 'workspace'",
+        (world.tenant.workspace_id, world.uid("developer")),
     ).fetchall()
-    assert rows and all(r[0] == world.uid("owner") for r in rows)
-    assert {r[1]["mode"] for r in rows} >= {"ids", "up_to", "all"}
-    assert all("notification_ids" not in r[1] for r in rows)
+    assert {r[0]["mode"] for r in rows} >= {"ids", "up_to", "all"}
+    assert all(set(r[0]) <= {"mode", "marked", "request_id"} for r in rows), "без id уведомлений"
 
 
 @pytest.mark.parametrize("role", ROLES)
