@@ -7,6 +7,12 @@ import type { Project } from '../api/projects';
 import type { WorkspaceRole } from '../api/workspaces';
 import { StreamManager } from '../api/streamManager';
 import { createQueryClient } from '../queryClient';
+import { preloadLazyPages } from '../routes/lazyPage';
+
+// Экраны в приложении ленивые (lazyPage). Их модули и namespace загружаются один раз на файл тестов
+// до первого теста: иначе первый рендер экрана под нагрузкой (трансформация модулей) съедает таймаут
+// ожидания конкретного теста, и результат зависит от загрузки CPU, а не от поведения экрана.
+await preloadLazyPages();
 
 export interface RecordedRequest {
   method: string;

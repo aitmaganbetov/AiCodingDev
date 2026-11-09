@@ -79,7 +79,7 @@ describe('run in AI Mission Control', () => {
     });
     renderApp(mcPath);
     // Ленивый экран: модуль Mission Control и строки его namespace грузятся при первом переходе.
-    await screen.findByTestId('mc-run-bar', {}, { timeout: 5000 });
+    await screen.findByTestId('mc-run-bar');
     expect(await screen.findByText('Требуется одобрение')).toBeInTheDocument();
     expect(screen.getByTestId('run-status')).toHaveTextContent('Заблокирован');
     expect(screen.getByTestId('run-pending-approvals')).toHaveTextContent('2');
@@ -107,7 +107,7 @@ describe('run in AI Mission Control', () => {
       [`GET /api/v1/runs/${RUN_ID}/events`]: () => problem(403, 'forbidden'),
     });
     renderApp(mcPath);
-    await screen.findByTestId('mc-run-bar', {}, { timeout: 5000 });
+    await screen.findByTestId('mc-run-bar');
     expect(await screen.findByText('Недостаточно прав для этого действия.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Переподключиться' })).toBeInTheDocument();
     // viewer: нет run:control

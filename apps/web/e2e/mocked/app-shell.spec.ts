@@ -418,7 +418,12 @@ test('context panel on Mission Control: default "no context", selected run summa
   await expect(sep).toHaveAttribute('aria-valuenow', '560');
   await page.reload();
   await expect(sep).toHaveAttribute('aria-valuenow', '560');
-  await panel.getByRole('button', { name: 'Сбросить ширину панели' }).click();
+  // Без перетаскивания и без клавиатуры (2.5.7): меню ширины — «Уже», затем сброс.
+  await panel.getByRole('button', { name: 'Ширина контекстной панели' }).click();
+  await page.getByRole('menuitem', { name: 'Уже' }).click();
+  await expect(sep).toHaveAttribute('aria-valuenow', '496');
+  await panel.getByRole('button', { name: 'Ширина контекстной панели' }).click();
+  await page.getByRole('menuitem', { name: 'Сбросить ширину панели' }).click();
   await expect(sep).toHaveAttribute('aria-valuenow', '340');
 
   // Скрыть — сохраняется по экрану; кнопка возвращает панель.

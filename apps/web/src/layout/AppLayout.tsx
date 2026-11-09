@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
+import { useScreenChangeTracker } from '../components/PageHeading';
 import { IconButton } from '../components/ui/Button';
 import { Dialog, DialogContent } from '../components/ui/Dialog';
 import { cx } from '../components/ui/cx';
@@ -61,6 +62,7 @@ export function AppLayout() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  useScreenChangeTracker();
   const { workspaceId, membership } = useCurrentWorkspace();
   const [navOpen, setNavOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);

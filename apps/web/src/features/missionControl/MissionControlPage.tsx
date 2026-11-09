@@ -18,8 +18,23 @@ import type { ChatFilters } from '../../api/chat';
 import type { Run } from '../../api/runs';
 import { PageHeading } from '../../components/PageHeading';
 import { StatusBadge } from '../../components/StatusBadge';
-import { ButtonLink, EmptyState, ErrorState, IconButton, LoadingState, Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui';
-import { ResizableGroup, ResizableHandle, ResizablePanel, useResizableGroup } from '../../components/ui/Resizable';
+import {
+  ButtonLink,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  LoadingState,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '../../components/ui';
+import { ResizableGroup, ResizableHandle, ResizablePanel, useResizableGroup, type ResizableGroupControls } from '../../components/ui/Resizable';
 import { ContextPanel } from '../../layout/ContextPanel';
 import { MQ_DESKTOP, useContextOpenPref, useMediaQuery } from '../../lib/layoutPrefs';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
@@ -71,14 +86,38 @@ function RunChooser({ workspaceId, onSelect }: { workspaceId: string; onSelect: 
 }
 
 /** Сброс размеров обеих групп панелей (WCAG 2.5.7: альтернатива перетаскиванию — кнопка). */
-function RegisterGroupReset({ register }: { register: (fn: () => void) => void }) {
-  const { reset } = useResizableGroup();
-  useEffect(() => register(reset), [register, reset]);
+function RegisterGroupReset({ register }: { register: (controls: ResizableGroupControls) => void }) {
+  const controls = useResizableGroup();
+  useEffect(() => register(controls), [register, controls]);
   return null;
 }
-function ResetLayoutButton({ resets }: { resets: { current: (() => void)[] } }) {
+
+/** Шаг изменения размера панели из меню (процентные пункты ширины/высоты группы). */
+const PANEL_STEP = 8;
+
+/**
+ * Размеры панелей без перетаскивания (WCAG 2.5.7): меню с шагами для навигатора и Command Center
+ * и сброс. Клавиатура — стрелки на разделителях; это меню — для указателя без жеста перетаскивания.
+ */
+function PanelSizeMenu({ groups }: { groups: { current: (ResizableGroupControls | undefined)[] } }) {
   const { t } = useTranslation();
-  return <IconButton icon="refresh" label={t('missionControl.resetPanels')} onClick={() => resets.current.forEach((fn) => fn())} />;
+  const outer = () => groups.current[0];
+  const inner = () => groups.current[1];
+  return (
+    <Menu>
+      <MenuTrigger asChild>
+        <IconButton icon="panelSizes" label={t('missionControl.panelSizes.menu')} data-testid="mc-panel-sizes" />
+      </MenuTrigger>
+      <MenuContent>
+        <MenuItem onSelect={() => outer()?.resize('mc-nav', PANEL_STEP)}>{t('missionControl.panelSizes.navWider')}</MenuItem>
+        <MenuItem onSelect={() => outer()?.resize('mc-nav', -PANEL_STEP)}>{t('missionControl.panelSizes.navNarrower')}</MenuItem>
+        <MenuItem onSelect={() => inner()?.resize('mc-command', PANEL_STEP)}>{t('missionControl.panelSizes.commandTaller')}</MenuItem>
+        <MenuItem onSelect={() => inner()?.resize('mc-command', -PANEL_STEP)}>{t('missionControl.panelSizes.commandShorter')}</MenuItem>
+        <MenuSeparator />
+        <MenuItem onSelect={() => groups.current.forEach((g) => g?.reset())}>{t('missionControl.resetPanels')}</MenuItem>
+      </MenuContent>
+    </Menu>
+  );
 }
 
 function RunBar({ run, planVersion, taskTitle, onClearTask, extra }: { run: Run; planVersion: number; taskTitle: string | null; onClearTask: () => void; extra?: ReactNode }) {
@@ -124,13 +163,13 @@ function RunWorkspace({
   const wide = useMediaQuery(MQ_MC_WIDE, true);
   const desktop = useMediaQuery(MQ_DESKTOP, true);
   const [, setContextOpen] = useContextOpenPref(wide ? MC_SCREEN_ID : null);
-  // Сброс обеих групп панелей (горизонтальной и вертикальной) одной кнопкой в строке run.
-  const resets = useRef<(() => void)[]>([]);
-  const registerOuterReset = useCallback((fn: () => void) => {
-    resets.current[0] = fn;
+  // Обе группы панелей (горизонтальная и вертикальная) — для меню «Размеры панелей» в строке run.
+  const groups = useRef<(ResizableGroupControls | undefined)[]>([]);
+  const registerOuterReset = useCallback((controls: ResizableGroupControls) => {
+    groups.current[0] = controls;
   }, []);
-  const registerInnerReset = useCallback((fn: () => void) => {
-    resets.current[1] = fn;
+  const registerInnerReset = useCallback((controls: ResizableGroupControls) => {
+    groups.current[1] = controls;
   }, []);
   const run = data.run.data;
   const selected = useTaskSummary(data.tasks, state.taskId);
@@ -304,7 +343,7 @@ function RunWorkspace({
         planVersion={data.planVersion}
         taskTitle={selected?.title ?? null}
         onClearTask={clearTask}
-        extra={wide ? <ResetLayoutButton resets={resets} /> : null}
+        extra={wide ? <PanelSizeMenu groups={groups} /> : null}
       />
       <p className="sr-only" role="status" aria-live="polite" data-testid="graph-announcement">
         {data.announcement}

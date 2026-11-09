@@ -133,16 +133,16 @@ test('error state with retry; session expiry redirects to login', async ({ page,
   await error.getByRole('button', { name: 'Повторить' }).click();
   await expect(page.getByRole('list', { name: 'Список проектов' }).getByRole('listitem')).toHaveCount(1);
 
-  // Истёкшая сессия: первым 401 может ответить и фоновый запрос оболочки (поток уведомлений, опрос CLI) —
-  // тогда next= указывает на текущий экран; в любом случае после входа пользователь возвращается туда.
-  api.expireSessionOnNextRequest = true;
+  // Истёкшая сессия: 401 отвечает запрос списка workspace (а не случайный фоновый запрос оболочки —
+  // иначе переход уводил на /login посреди клика). После входа пользователь возвращается на тот же экран.
+  api.expireSessionOnNextRequest = 'listWorkspaces';
   await page.getByRole('link', { name: 'Рабочие пространства' }).click();
-  await expect(page).toHaveURL(/\/login\?next=%2F(workspaces|w%2F[^&]+%2Fprojects)$/);
-  const next = decodeURIComponent(new URL(page.url()).searchParams.get('next') ?? '');
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkspaces$/);
   await page.getByLabel('Электронная почта').fill(api.user.email);
   await page.getByLabel('Пароль').fill(PASSWORD);
   await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page).toHaveURL(next);
+  await expect(page).toHaveURL(/\/workspaces$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Рабочие пространства' })).toBeVisible();
 });
 
 test('role-aware UI: viewer does not see "Создать проект"', async ({ page, api }) => {

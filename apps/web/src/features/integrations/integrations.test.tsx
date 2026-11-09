@@ -88,7 +88,7 @@ describe('GitHub integration page', () => {
     });
     renderApp(`/w/${WS_ID}/integrations?installation_id=42&state=st-1&setup_action=install`);
     expect(await screen.findByText('Установка 42 зарегистрирована и проверяется.')).toBeInTheDocument();
-    expect(await screen.findByText('Установка проверена и подключена.', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText('Установка проверена и подключена.')).toBeInTheDocument();
     const table = await screen.findByRole('table', { name: 'Установки GitHub App' });
     await waitFor(() => expect(within(table).getByText('acme')).toBeInTheDocument());
     expect(within(table).getByText('Активна')).toBeInTheDocument();

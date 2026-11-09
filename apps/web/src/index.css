@@ -8,6 +8,12 @@
 @layer base {
   html {
     @apply bg-canvas font-sans text-fg antialiased;
+    /*
+     * WCAG 2.4.11 Focus Not Obscured: прокрутка к элементу с фокусом (Tab, якоря, scrollIntoView)
+     * оставляет его ниже sticky верхней панели (h-topbar) и выше области уведомлений.
+     */
+    scroll-padding-top: calc(theme(spacing.topbar) + 0.75rem);
+    scroll-padding-bottom: 1rem;
     /* Inter: однозначные цифры и «l» (cv11, ss01); числа и время — tabular-nums там, где выравниваются. */
     font-feature-settings: 'cv11', 'ss01';
   }

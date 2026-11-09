@@ -18,6 +18,7 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDashed,
+  Columns3Cog,
   CircleHelp,
   CirclePause,
   CircleX,
@@ -94,7 +95,7 @@ import type { SVGProps } from 'react';
  * Иконки декоративны (aria-hidden): смысл несёт текст рядом или aria-label кнопки.
  * Stroke 1,75, размеры 16/20/24 (классы h-4/h-5/h-6), цвет — currentColor.
  */
-const ICONS = {
+export const ICONS = {
   // Навигация и разделы (прежний набор из 21 самодельной иконки → эквиваленты Lucide).
   dashboard: LayoutDashboard,
   folder: Folder,
@@ -136,6 +137,7 @@ const ICONS = {
   gitBranch: GitBranch,
   gripVertical: GripVertical,
   gripHorizontal: GripHorizontal,
+  panelSizes: Columns3Cog,
   sun: Sun,
   moon: Moon,
   monitor: Monitor,

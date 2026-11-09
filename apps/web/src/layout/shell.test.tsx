@@ -233,7 +233,7 @@ describe('app shell', () => {
       'GET /api/v1/providers': () => problem(500, 'internal_error'),
     });
     renderApp(`/w/${WS_ID}/projects`);
-    const chips = await screen.findByRole('list', { name: 'Состояние CLI-провайдеров' }, { timeout: 5000 });
+    const chips = await screen.findByRole('list', { name: 'Состояние CLI-провайдеров' });
     expect(within(chips).getByRole('link', { name: /Codex CLI · статус недоступен/ })).toHaveAttribute('data-state', 'error');
   });
 

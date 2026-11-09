@@ -163,7 +163,7 @@ describe('AgentsPage', () => {
         }),
     });
     renderApp(`/w/${WS_ID}/agents`);
-    const catalog = await screen.findByRole('list', { name: 'Роли агентов' }, { timeout: 5000 });
+    const catalog = await screen.findByRole('list', { name: 'Роли агентов' });
     expect(within(catalog).getAllByRole('article')).toHaveLength(12);
     const dev = within(catalog).getByRole('article', { name: 'Разработчик' });
     expect(await within(dev).findByText('Активна · выполняет 1 задачу')).toBeInTheDocument();

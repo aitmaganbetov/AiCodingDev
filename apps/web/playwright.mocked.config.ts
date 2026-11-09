@@ -11,6 +11,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
+  // Сценарии длинные (несколько экранов, axe в двух темах, 4 ширины): под параллельной нагрузкой
+  // (workers > ядер, `taskset`) 30 с по умолчанию не хватает. Ожидания — по условию (expect/локаторы),
+  // таймауты — только верхняя граница; ретраев нет: нестабильность должна быть видна.
+  timeout: 90_000,
+  expect: { timeout: 10_000 },
   reporter: [['list']],
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,

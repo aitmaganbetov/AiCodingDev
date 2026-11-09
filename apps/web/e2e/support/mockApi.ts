@@ -245,8 +245,11 @@ export class MockApi {
    * для всех операций; клиент её не повторяет автоматически — повтор только кнопкой).
    */
   failProjectsTimes = 0;
-  /** Следующий запрос (кроме auth) ответит 401 session_expired. */
-  expireSessionOnNextRequest = false;
+  /**
+   * Следующий запрос (кроме auth) ответит 401 session_expired. Строка — operationId: истекает только
+   * этот запрос (детерминированно, без гонки с фоновыми запросами оболочки — опрос CLI, поток уведомлений).
+   */
+  expireSessionOnNextRequest: boolean | string = false;
   pageSize = 3;
   /** Slug, занятые workspace других пользователей (→ 409 conflict). */
   readonly takenSlugs = new Set<string>();
@@ -603,7 +606,8 @@ export class MockApi {
     // Порядок проверок как на сервере (API_DESIGN §6): 401 → CSRF → tenant → idempotency → схема.
     if (operationId !== 'login') {
       if (!this.loggedIn) return problem(401, 'unauthenticated');
-      if (this.expireSessionOnNextRequest && operationId !== 'getSession') {
+      const expire = this.expireSessionOnNextRequest;
+      if (expire && operationId !== 'getSession' && (expire === true || expire === operationId)) {
         this.expireSessionOnNextRequest = false;
         this.loggedIn = false;
         return problem(401, 'session_expired');

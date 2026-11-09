@@ -94,7 +94,7 @@ describe('ProvidersPage', () => {
     });
     const { container } = renderApp(`/w/${WS_ID}/providers`);
     // Первый рендер приложения под параллельной нагрузкой vitest может занять > 1 с.
-    expect(await screen.findByRole('heading', { level: 2, name: 'Codex CLI' }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Codex CLI' })).toBeInTheDocument();
     expect(screen.getByText('Требуется вход в CLI')).toBeInTheDocument();
     expect(screen.getByText(/Хосты без действующей авторизации: worker-exec-1/)).toBeInTheDocument();
     expect(container.querySelector('input[type="password"]')).toBeNull();
@@ -134,10 +134,10 @@ describe('ProvidersPage', () => {
         json(200, { ...SETTINGS, ...(req.body as object), settings_version: 4 }),
     });
     renderApp(`/w/${WS_ID}/providers`);
-    await user.click(await screen.findByRole('button', { name: 'Перепроверить' }, { timeout: 5000 }));
+    await user.click(await screen.findByRole('button', { name: 'Перепроверить' }));
     expect(await screen.findByText(/Перепроверка «Codex CLI» выполняется/, { selector: 'p' })).toBeInTheDocument();
     // OQ-45 (c): статус опрашивается по status_url до финального состояния.
-    expect(await screen.findByText(/Проверка завершена: хост worker-exec-1, авторизация — Выполнен вход/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText(/Проверка завершена: хост worker-exec-1, авторизация — Выполнен вход/)).toBeInTheDocument();
     expect(calls.filter((c) => c.url.pathname.includes('/probes/')).every((c) => c.headers.get('X-Workspace-Id') === WS_ID)).toBe(true);
     const probe = calls.find((c) => c.method === 'POST');
     expect(probe?.headers.get('Idempotency-Key')).toBeTruthy();
@@ -162,7 +162,7 @@ describe('ProvidersPage', () => {
     });
     renderApp(`/w/${WS_ID}/providers`);
     // Первый рендер приложения под параллельной нагрузкой vitest может занять > 1 с.
-    expect(await screen.findByRole('heading', { level: 2, name: 'Codex CLI' }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Codex CLI' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Перепроверить' })).toBeNull();
     expect(screen.queryByRole('form')).toBeNull();
     expect(screen.getByText('Разработчик, Ревьюер')).toBeInTheDocument();

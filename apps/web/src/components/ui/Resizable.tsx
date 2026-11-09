@@ -25,20 +25,28 @@ export const safeLayoutStorage: LayoutStorage = {
   },
 };
 
-interface GroupContextValue {
+export interface ResizableGroupControls {
   reset: () => void;
+  /**
+   * Изменяет размер панели на `delta` процентных пунктов за счёт соседней (группа из двух панелей) —
+   * альтернатива перетаскиванию одним указателем без жеста перетаскивания (WCAG 2.5.7): кнопки или
+   * пункты меню. Ограничения minSize/maxSize применяет библиотека (`setLayout` валидирует раскладку).
+   */
+  resize: (panelId: string, delta: number) => void;
 }
-const ResizableContext = createContext<GroupContextValue | null>(null);
+const ResizableContext = createContext<ResizableGroupControls | null>(null);
 
-/** Сброс размеров панелей ближайшей ResizableGroup к значениям по умолчанию (кнопка «Сбросить»). */
-export function useResizableGroup(): GroupContextValue {
-  return useContext(ResizableContext) ?? { reset: () => undefined };
+/** Управление размерами панелей ближайшей ResizableGroup (сброс к значениям по умолчанию, шаг). */
+export function useResizableGroup(): ResizableGroupControls {
+  return useContext(ResizableContext) ?? { reset: () => undefined, resize: () => undefined };
 }
 
 /**
  * Группа изменяемых панелей (react-resizable-panels v4) с сохранением размеров в localStorage
  * под ключом `aicd.layout.<id>`. Перетаскивание (WCAG 2.5.7) дублируется клавиатурой на
- * разделителе (стрелки, Home/End, Enter — свернуть сворачиваемую панель) и кнопкой сброса.
+ * разделителе (стрелки, Home/End, Enter — свернуть сворачиваемую панель), а для указателя без
+ * перетаскивания — `useResizableGroup().resize/reset` (кнопки/меню экрана, например «Размеры панелей»
+ * в Mission Control).
  */
 export function ResizableGroup({
   id,
@@ -69,7 +77,20 @@ export function ResizableGroup({
       /* ignore */
     }
   }, [defaultLayout, groupRef, storageId]);
-  const value = useMemo(() => ({ reset }), [reset]);
+  const resize = useCallback(
+    (panelId: string, delta: number) => {
+      const group = groupRef.current;
+      if (!group) return;
+      const layout = group.getLayout();
+      const current = layout[panelId];
+      const other = Object.keys(layout).find((key) => key !== panelId);
+      if (current === undefined || other === undefined || Object.keys(layout).length !== 2) return;
+      const next = Math.min(100, Math.max(0, current + delta));
+      group.setLayout({ [panelId]: next, [other]: 100 - next });
+    },
+    [groupRef],
+  );
+  const value = useMemo(() => ({ reset, resize }), [reset, resize]);
   return (
     <ResizableContext.Provider value={value}>
       <Group

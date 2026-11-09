@@ -427,7 +427,7 @@ export function SecurityCenterPage() {
               />
             </section>
             {selected ? (
-              <div className="min-w-0 xl:sticky xl:top-4 xl:self-start">
+              <div className="min-w-0 xl:sticky xl:top-[calc(theme(spacing.topbar)+1rem)] xl:self-start">
                 <FindingDetail
                   findingId={selected}
                   workspaceId={workspaceId}

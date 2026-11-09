@@ -15,8 +15,6 @@ import {
   summarizePack,
 } from './model';
 
-/** Ленивый экран + namespace грузятся асинхронно: под нагрузкой (параллельные тесты) дольше 1 с по умолчанию. */
-const LAZY = { timeout: 5000 };
 const P1 = project(1);
 const SHA = 'a'.repeat(40);
 const REPO: Repository = {
@@ -132,8 +130,8 @@ describe('CodeIntelligencePage', () => {
       [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [{ ...REPO, latest_index_snapshot: null }], next_cursor: null }),
     });
     renderApp(`/w/${WS_ID}/code`);
-    expect(await screen.findByRole('heading', { level: 1, name: 'Code Intelligence' }, LAZY)).toBeInTheDocument();
-    const state = await screen.findByTestId('no-index', {}, LAZY);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Code Intelligence' })).toBeInTheDocument();
+    const state = await screen.findByTestId('no-index');
     expect(state).toHaveTextContent('Индекс кода ещё не построен');
     expect(state).toHaveTextContent('aicd-worker index');
     expect(within(screen.getByTestId('index-snapshot')).getByText('не построен')).toBeInTheDocument();
@@ -155,10 +153,10 @@ describe('CodeIntelligencePage', () => {
         }),
     });
     renderApp(`/w/${WS_ID}/code?tab=symbols`);
-    await user.type(await screen.findByRole('textbox', { name: /^Символ/ }, LAZY), 'Invoice');
+    await user.type(await screen.findByRole('textbox', { name: /^Символ/ }), 'Invoice');
     await user.selectOptions(screen.getByLabelText('Вид'), 'class');
     await user.click(screen.getByRole('button', { name: 'Искать' }));
-    const results = await screen.findByRole('list', { name: 'Символы по запросу «Invoice»' }, LAZY);
+    const results = await screen.findByRole('list', { name: 'Символы по запросу «Invoice»' });
     expect(within(results).getByText('class Invoice(Base):')).toBeInTheDocument();
     expect(screen.getByTestId('snapshot-line')).toHaveTextContent('12 файлов');
     const req = calls.find((c) => c.url.pathname.endsWith('/symbols'));
@@ -183,8 +181,8 @@ describe('CodeIntelligencePage', () => {
         json(200, { items: [{ id: attempt, task_id: task, attempt_no: 1, status: 'FAILED', agent_role: 'developer' }], next_cursor: null }),
     });
     renderApp(`/w/${WS_ID}/code?tab=context&run=${run}&task=${task}`);
-    expect(await screen.findByText('Context Pack не собирался', {}, LAZY)).toBeInTheDocument();
-    await waitFor(() => expect(window.location.search).toContain(`attempt=${attempt}`), LAZY);
+    expect(await screen.findByText('Context Pack не собирался')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.search).toContain(`attempt=${attempt}`));
     expect(window.location.search).toContain(`project=${P1.id}`);
   });
 });

@@ -13,6 +13,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { IconButton } from '../components/ui/Button';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '../components/ui/DropdownMenu';
 import { cx } from '../components/ui/cx';
 import { Icon } from '../components/ui/Icon';
 import { CONTEXT_WIDTH, MQ_WIDE, clampContextWidth, useContextOpenPref, useContextWidth, useMediaQuery } from '../lib/layoutPrefs';
@@ -124,15 +125,24 @@ export function ShellContextPanel() {
     requestAnimationFrame(() => (document.querySelector('[data-context-toggle]') as HTMLElement | null)?.focus());
   }, [setOpen]);
 
-  // Наложение (< 1280 px): Escape закрывает и возвращает фокус на кнопку.
+  // Наложение (< 1280 px): Escape закрывает и возвращает фокус на кнопку. Фокус, ушедший в основную
+  // область (Tab, клик), закрывает наложение: иначе сфокусированный элемент мог бы оказаться под
+  // панелью (WCAG 2.4.11 Focus Not Obscured); фокус остаётся там, куда его перевёл пользователь.
   useEffect(() => {
     if (!open || wide) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !e.defaultPrevented) close();
     };
+    const onFocusIn = (e: FocusEvent) => {
+      if (e.target instanceof Element && e.target.closest('#main')) setOpen(false);
+    };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, wide, close]);
+    document.addEventListener('focusin', onFocusIn);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocusIn);
+    };
+  }, [open, wide, close, setOpen]);
 
   if (!ctx?.registration || !open) return null;
   const current = dragWidth ?? width;
@@ -224,7 +234,23 @@ export function ShellContextPanel() {
             {ctx.registration.title}
           </h2>
           {wide ? (
-            <IconButton icon="refresh" label={t('shell.context.resetWidth')} onClick={() => setWidth(null)} disabled={width === CONTEXT_WIDTH.default} />
+            // Ширина без перетаскивания (WCAG 2.5.7): шаг ±CONTEXT_WIDTH.step×4 и сброс из меню.
+            <Menu>
+              <MenuTrigger asChild>
+                <IconButton icon="panelSizes" label={t('shell.context.widthMenu')} data-testid="context-width-menu" />
+              </MenuTrigger>
+              <MenuContent>
+                <MenuItem disabled={current >= CONTEXT_WIDTH.max} onSelect={() => setWidth(current + CONTEXT_WIDTH.step * 4)}>
+                  {t('shell.context.wider')}
+                </MenuItem>
+                <MenuItem disabled={current <= CONTEXT_WIDTH.min} onSelect={() => setWidth(current - CONTEXT_WIDTH.step * 4)}>
+                  {t('shell.context.narrower')}
+                </MenuItem>
+                <MenuItem disabled={width === CONTEXT_WIDTH.default} onSelect={() => setWidth(null)}>
+                  {t('shell.context.resetWidth')}
+                </MenuItem>
+              </MenuContent>
+            </Menu>
           ) : null}
           <IconButton icon="close" label={t('shell.context.close')} onClick={close} />
         </div>

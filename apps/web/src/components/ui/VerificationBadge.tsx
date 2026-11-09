@@ -9,7 +9,7 @@ import { Icon, type IconName } from './Icon';
  * (сплошная заливка / штриховка / пунктир / контур с точкой) — состояние различимо без цвета.
  * Исходный статус контракта — в подсказке (title) и для скринридера; `showSource` — видимо.
  */
-const STYLE: Record<VerificationDisplayState, { icon: IconName; className: string }> = {
+export const VERIFICATION_STYLE: Record<VerificationDisplayState, { icon: IconName; className: string }> = {
   PASS: { icon: 'verifyPass', className: 'border-verify-pass bg-verify-pass-soft text-verify-pass-fg' },
   FAIL: { icon: 'verifyFail', className: 'border-verify-fail bg-verify-fail-soft text-verify-fail-fg' },
   BLOCKED: { icon: 'verifyBlocked', className: 'pattern-hatch border-verify-blocked bg-verify-blocked-soft text-verify-blocked-fg' },
@@ -33,7 +33,7 @@ export function VerificationBadge({
   className?: string;
 }) {
   const { t } = useTranslation();
-  const { icon, className: style } = STYLE[result.state];
+  const { icon, className: style } = VERIFICATION_STYLE[result.state];
   const source = result.source ? t('ds.verification.source', { status: result.source }) : undefined;
   return (
     <span
