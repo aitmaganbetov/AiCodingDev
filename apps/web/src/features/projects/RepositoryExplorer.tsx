@@ -5,7 +5,7 @@
  * (React экранирует; без HTML/markdown, без подсветки, ссылки из содержимого не создаются).
  */
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { projectKeys, projectsApi, type Repository, type RepositoryCommitSummary, type RepositoryTreeEntry } from '../../api/projects';
 import { TextField } from '../../components/form';
@@ -50,17 +50,48 @@ function parentPath(path: string): string {
   return i < 0 ? '' : path.slice(0, i);
 }
 
-function FileView({ projectId, repositoryId, commit, path }: { projectId: string; repositoryId: string; commit: string; path: string }) {
+/** Выделенный диапазон строк файла (переход к символу/фрагменту Context Pack). */
+export interface LineRange {
+  from: number;
+  to: number;
+}
+
+/** Высота строки и верхний отступ текста файла (px): выделение строк позиционируется по ним. */
+const LINE_PX = 24;
+const PAD_PX = 12;
+
+function FileView({
+  projectId,
+  repositoryId,
+  commit,
+  path,
+  highlight = null,
+}: {
+  projectId: string;
+  repositoryId: string;
+  commit: string;
+  path: string;
+  highlight?: LineRange | null;
+}) {
   const { t, i18n } = useTranslation();
   const captionId = useId();
+  const regionRef = useRef<HTMLDivElement>(null);
   const query = useQuery({
     queryKey: projectKeys.file(projectId, repositoryId, commit, path),
     queryFn: ({ signal }) => projectsApi.file(projectId, repositoryId, { path, ...(commit ? { commit } : {}) }, signal),
   });
+  const loaded = query.isSuccess;
+  useEffect(() => {
+    // Прокрутить к выделенным строкам (без анимации — reduced motion не затрагивается).
+    if (!loaded || !highlight || !regionRef.current) return;
+    regionRef.current.scrollTop = Math.max(0, PAD_PX + (highlight.from - 1) * LINE_PX - 3 * LINE_PX);
+  }, [loaded, highlight]);
   if (query.isPending) return <LoadingState label={t('projects.explorer.fileLoading')} />;
   if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   const f = query.data;
   const content = f.content ?? '';
+  const lineCount = content === '' ? 0 : content.split('\n').length - (content.endsWith('\n') ? 1 : 0);
+  const band = highlight && highlight.from <= lineCount ? { from: highlight.from, to: Math.min(highlight.to, lineCount) } : null;
   return (
     <section aria-labelledby={captionId} className="flex min-w-0 flex-col gap-2" data-testid="repository-file">
       <div className="flex flex-wrap items-center gap-2">
@@ -81,22 +112,38 @@ function FileView({ projectId, repositoryId, commit, path }: { projectId: string
               {t('projects.explorer.truncated', { shown: formatBytes(f.max_bytes, i18n.language), size: formatBytes(f.size, i18n.language) })}
             </Callout>
           ) : null}
+          {highlight ? (
+            <p className="text-sm text-fg" data-testid="highlighted-lines">
+              {band
+                ? t('projects.explorer.highlighted', { from: band.from, to: band.to })
+                : t('projects.explorer.highlightOutside', { from: highlight.from, count: lineCount })}
+            </p>
+          ) : null}
           {content === '' ? (
             <p className="text-sm text-fg-muted">{t('projects.explorer.emptyFile')}</p>
           ) : (
             <div
+              ref={regionRef}
               // Прокручиваемая область фокусируема с клавиатуры (axe scrollable-region-focusable), как в CodeBlock.
               tabIndex={SCROLL_FOCUSABLE}
               role="region"
               aria-label={t('projects.explorer.contentLabel', { path: f.path })}
-              className="max-h-[32rem] overflow-auto rounded-md border border-border bg-surface-muted text-sm leading-relaxed"
+              className="max-h-[32rem] overflow-auto rounded-md border border-border bg-surface-muted text-sm leading-6"
               data-testid="repository-file-content"
             >
-              <div className="flex min-w-max">
-                <pre aria-hidden="true" className="select-none border-r border-border px-3 py-3 text-right text-fg-muted" data-testid="line-numbers">
+              <div className="relative flex min-w-max">
+                {band ? (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-x-0 border-l-2 border-highlight bg-highlight-soft"
+                    style={{ top: PAD_PX + (band.from - 1) * LINE_PX, height: (band.to - band.from + 1) * LINE_PX }}
+                    data-testid="line-highlight"
+                  />
+                ) : null}
+                <pre aria-hidden="true" className="relative select-none border-r border-border px-3 py-3 text-right text-fg-muted" data-testid="line-numbers">
                   {lineNumbers(content)}
                 </pre>
-                <pre className="whitespace-pre px-3 py-3 text-fg">
+                <pre className="relative whitespace-pre px-3 py-3 text-fg">
                   <code>{content}</code>
                 </pre>
               </div>
@@ -141,35 +188,63 @@ function EntryRow({ entry, selected, onOpen }: { entry: RepositoryTreeEntry; sel
   );
 }
 
-/** Дерево файлов репозитория с выбором commit и просмотром файла как текста с номерами строк. */
-export function RepositoryExplorer({ projectId, repo, initialBranch }: { projectId: string; repo: Repository; initialBranch?: string | undefined }) {
+/**
+ * Дерево файлов репозитория с выбором commit и просмотром файла как текста с номерами строк.
+ * F8 (Code Intelligence): `commit` задаёт commit снаружи (свои селекторы ветки/commit скрыты),
+ * `initialFile` + `highlight` — открыть файл с выделенными строками (вызывающий меняет key).
+ */
+export function RepositoryExplorer({
+  projectId,
+  repo,
+  initialBranch,
+  commit: fixedCommit,
+  initialFile,
+  highlight = null,
+}: {
+  projectId: string;
+  repo: Repository;
+  initialBranch?: string | undefined;
+  commit?: string | undefined;
+  initialFile?: string | undefined;
+  highlight?: LineRange | null;
+}) {
   const { t } = useTranslation();
   const uid = useId();
   const snapshot = repo.latest_index_snapshot ?? null;
+  const locked = fixedCommit !== undefined;
   // F6: «Открыть файлы ветки» со вкладки «Ветки» (вызывающий меняет key при смене ветки).
   const [branch, setBranch] = useState(initialBranch || repo.default_branch);
   const [choice, setChoice] = useState<CommitChoice>('');
   const [draft, setDraft] = useState('');
   const [draftError, setDraftError] = useState<string | undefined>(undefined);
   const [custom, setCustom] = useState('');
-  const [path, setPath] = useState('');
-  const [file, setFile] = useState<string | null>(null);
+  const [path, setPath] = useState(initialFile ? parentPath(initialFile) : '');
+  const [file, setFile] = useState<string | null>(initialFile || null);
   // HEAD ветки по умолчанию — без параметра (сервер разрешает сам, с fallback на снимок индекса).
   const branchRef = branch === repo.default_branch ? '' : branch;
-  const commit =
-    choice === '' ? branchRef : choice === 'index' ? (snapshot?.commit_sha ?? '') : choice === 'custom' ? custom : choice;
-  const mode = choice === 'custom' ? 'custom' : 'other';
+  const commit = locked
+    ? fixedCommit
+    : choice === ''
+      ? branchRef
+      : choice === 'index'
+        ? (snapshot?.commit_sha ?? '')
+        : choice === 'custom'
+          ? custom
+          : choice;
+  const mode = !locked && choice === 'custom' ? 'custom' : 'other';
 
   // OQ-45 (c): ветки и последние commit выбранной ветки — вместо ручного ввода SHA.
   const branches = useQuery({
     queryKey: projectKeys.branches(projectId, repo.id),
     queryFn: ({ signal }) => projectsApi.branches(projectId, repo.id, { limit: BRANCHES_PAGE_SIZE }, signal),
     staleTime: 30_000,
+    enabled: !locked,
   });
   const recent = useQuery({
     queryKey: projectKeys.commits(projectId, repo.id, branch),
     queryFn: ({ signal }) => projectsApi.commits(projectId, repo.id, { limit: RECENT_COMMITS, ...(branchRef ? { commit: branchRef } : {}) }, signal),
     staleTime: 30_000,
+    enabled: !locked,
   });
   const branchNames = branches.data?.items.map((b) => b.name) ?? [];
   if (!branchNames.includes(repo.default_branch)) branchNames.unshift(repo.default_branch);
@@ -224,60 +299,64 @@ export function RepositoryExplorer({ projectId, repo, initialBranch }: { project
   return (
     <div className="flex flex-col gap-3" data-testid="repository-explorer">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor={`${uid}-branch`} className="text-sm font-medium text-fg">
-            {t('projects.explorer.branch')}
-          </label>
-          <select id={`${uid}-branch`} className="input" value={branch} onChange={(e) => onBranchChange(e.target.value)} data-testid="explorer-branch">
-            {branchNames.map((name) => (
-              <option key={name} value={name}>
-                {name === repo.default_branch ? t('projects.explorer.branchDefault', { branch: name }) : name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={`${uid}-commit`} className="text-sm font-medium text-fg">
-            {t('projects.explorer.commit')}
-          </label>
-          <select id={`${uid}-commit`} className="input max-w-[28rem]" value={choice} onChange={(e) => onChoiceChange(e.target.value)} data-testid="explorer-commit">
-            <option value="">{t('projects.explorer.commitDefault', { branch })}</option>
-            {recentCommits.length > 0 ? (
-              <optgroup label={t('projects.explorer.recentCommits', { branch })}>
-                {recentCommits.map((c) => (
-                  <option key={c.sha} value={c.sha}>
-                    {commitLabel(c)}
+        {locked ? null : (
+          <>
+            <div className="flex flex-col gap-1">
+              <label htmlFor={`${uid}-branch`} className="text-sm font-medium text-fg">
+                {t('projects.explorer.branch')}
+              </label>
+              <select id={`${uid}-branch`} className="input" value={branch} onChange={(e) => onBranchChange(e.target.value)} data-testid="explorer-branch">
+                {branchNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name === repo.default_branch ? t('projects.explorer.branchDefault', { branch: name }) : name}
                   </option>
                 ))}
-              </optgroup>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor={`${uid}-commit`} className="text-sm font-medium text-fg">
+                {t('projects.explorer.commit')}
+              </label>
+              <select id={`${uid}-commit`} className="input max-w-[28rem]" value={choice} onChange={(e) => onChoiceChange(e.target.value)} data-testid="explorer-commit">
+                <option value="">{t('projects.explorer.commitDefault', { branch })}</option>
+                {recentCommits.length > 0 ? (
+                  <optgroup label={t('projects.explorer.recentCommits', { branch })}>
+                    {recentCommits.map((c) => (
+                      <option key={c.sha} value={c.sha}>
+                        {commitLabel(c)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {snapshot ? <option value="index">{t('projects.explorer.commitIndex', { sha: snapshot.commit_sha.slice(0, 12) })}</option> : null}
+                <option value="custom">{t('projects.explorer.commitCustom')}</option>
+              </select>
+            </div>
+            {branches.isError || recent.isError ? (
+              <p className="text-sm text-fg-muted" role="status">
+                {t('projects.explorer.historyUnavailable')}
+              </p>
             ) : null}
-            {snapshot ? <option value="index">{t('projects.explorer.commitIndex', { sha: snapshot.commit_sha.slice(0, 12) })}</option> : null}
-            <option value="custom">{t('projects.explorer.commitCustom')}</option>
-          </select>
-        </div>
-        {branches.isError || recent.isError ? (
-          <p className="text-sm text-fg-muted" role="status">
-            {t('projects.explorer.historyUnavailable')}
-          </p>
-        ) : null}
-        {mode === 'custom' ? (
-          <form className="flex flex-wrap items-end gap-2" onSubmit={applyCustom} noValidate aria-label={t('projects.explorer.commitCustom')}>
-            <TextField
-              id={`${uid}-commit-custom`}
-              label={t('projects.explorer.commitInput')}
-              hint={t('projects.explorer.commitInputHint')}
-              autoComplete="off"
-              spellCheck={false}
-              maxLength={255}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              error={draftError}
-            />
-            <Button type="submit" variant="secondary">
-              {t('projects.explorer.commitApply')}
-            </Button>
-          </form>
-        ) : null}
+            {mode === 'custom' ? (
+              <form className="flex flex-wrap items-end gap-2" onSubmit={applyCustom} noValidate aria-label={t('projects.explorer.commitCustom')}>
+                <TextField
+                  id={`${uid}-commit-custom`}
+                  label={t('projects.explorer.commitInput')}
+                  hint={t('projects.explorer.commitInputHint')}
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={255}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  error={draftError}
+                />
+                <Button type="submit" variant="secondary">
+                  {t('projects.explorer.commitApply')}
+                </Button>
+              </form>
+            ) : null}
+          </>
+        )}
         {resolved ? (
           <p className="text-sm text-fg-muted" data-testid="explorer-resolved-commit">
             {t('projects.explorer.resolved')}{' '}
@@ -362,7 +441,7 @@ export function RepositoryExplorer({ projectId, repo, initialBranch }: { project
         </div>
         <div className="min-w-0">
           {file && resolved ? (
-            <FileView projectId={projectId} repositoryId={repo.id} commit={resolved} path={file} />
+            <FileView projectId={projectId} repositoryId={repo.id} commit={resolved} path={file} highlight={file === initialFile ? highlight : null} />
           ) : (
             <p className="text-sm text-fg-muted">{t('projects.explorer.selectFile')}</p>
           )}

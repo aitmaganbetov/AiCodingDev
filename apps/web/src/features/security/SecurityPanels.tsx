@@ -166,14 +166,12 @@ export function KindTile({
   unclassified,
   loading,
   workspaceId,
-  onFilter,
 }: {
   kind: 'dependency' | 'secrets';
   items: Finding[];
   unclassified: number;
   loading: boolean;
   workspaceId: string;
-  onFilter?: () => void;
 }) {
   const { t } = useTranslation();
   const unresolved = items.filter((f) => UNRESOLVED_STATUSES.includes(f.status)).length;
@@ -185,13 +183,6 @@ export function KindTile({
       title={t(`security.kind.${kind}.title`)}
       loading={loading}
       source={t(`security.kind.${kind}.source`)}
-      actions={
-        onFilter && items.length > 0 ? (
-          <button type="button" className="btn-ghost btn-sm" onClick={onFilter}>
-            {t('security.kind.showInList')}
-          </button>
-        ) : undefined
-      }
     >
       <p className="text-sm text-fg" data-testid={`kind-${kind}-count`} data-count={items.length}>
         {t('security.kind.count', { count: items.length, unresolved })}

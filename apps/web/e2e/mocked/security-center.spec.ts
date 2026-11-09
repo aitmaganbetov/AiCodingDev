@@ -134,8 +134,10 @@ function seed(api: MockApi, role: S['WorkspaceRole'] = 'owner', opts: { bulk?: n
   const evidences = [evidence(EV.sca, r1.id, 'VERIFIED'), evidence(EV.secrets, r1.id, 'VERIFIED'), evidence(EV.sast, r1.id, 'UNVERIFIED'), evidence(EV.sbom, r2.id, 'VERIFIED')];
   const transitions: { headers: Record<string, string>; body: unknown }[] = [];
   let attempts = 0;
+  const findingQueries: URLSearchParams[] = [];
 
   api.route('GET', '/api/v1/findings', 'listFindings', ({ url }) => {
+    findingQueries.push(url.searchParams);
     const sev = url.searchParams.getAll('severity');
     const st = url.searchParams.getAll('status');
     const src = url.searchParams.getAll('source');
@@ -189,13 +191,13 @@ function seed(api: MockApi, role: S['WorkspaceRole'] = 'owner', opts: { bulk?: n
       ? { status: 200, body: { ...api.session(), reauthenticated_at: '2026-11-08T09:30:00Z' } }
       : problem(403, 'reauthentication_failed'),
   );
-  return { ws, pay, portal, r1, r2, findings, transitions };
+  return { ws, pay, portal, r1, r2, findings, transitions, lastQuery: () => findingQueries.at(-1) };
 }
 
 const list = (page: import('@playwright/test').Page) => page.getByRole('list', { name: 'Находки рабочего пространства' });
 
 test('security center: workspace findings, severity, CWE/controls from data, dependency & secrets by gate type, evidence D-8, filters', async ({ page, api }) => {
-  const { ws, pay, r1, findings } = seed(api);
+  const { ws, pay, r1, findings, lastQuery } = seed(api);
   await login(page, api);
   await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Центр безопасности' }).click();
   await expect(page).toHaveURL(`/w/${ws.id}/security`);
@@ -248,18 +250,18 @@ test('security center: workspace findings, severity, CWE/controls from data, dep
   await page.getByRole('button', { name: 'Критическая', exact: true }).click();
   await expect(page).toHaveURL(/severity=critical/);
   await expect(list(page).getByRole('listitem')).toHaveCount(2);
-  await expect.poll(() => api.requests.filter((r) => r.operationId === 'listFindings').at(-1)?.url.searchParams.getAll('severity')).toEqual(['critical']);
+  await expect.poll(() => lastQuery()?.getAll('severity')).toEqual(['critical']);
   await expect(page.getByRole('button', { name: 'Критическая', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Высокая', exact: true }).click();
   await expect(list(page).getByRole('listitem')).toHaveCount(4);
   await page.getByLabel('Статус исправления').selectOption('unresolved');
   await expect(list(page).getByRole('listitem')).toHaveCount(4);
-  await expect.poll(() => api.requests.filter((r) => r.operationId === 'listFindings').at(-1)?.url.searchParams.getAll('status')).toEqual(['OPEN', 'ACKNOWLEDGED']);
+  await expect.poll(() => lastQuery()?.getAll('status')).toEqual(['OPEN', 'ACKNOWLEDGED']);
   await page.getByLabel('Проект').selectOption({ label: 'Платёжный шлюз' });
   await expect(list(page).getByRole('listitem')).toHaveCount(3);
-  await expect.poll(() => api.requests.filter((r) => r.operationId === 'listFindings').at(-1)?.url.searchParams.get('project_id')).toBe(pay.id);
+  await expect.poll(() => lastQuery()?.get('project_id')).toBe(pay.id);
   await page.getByLabel('Запуск').selectOption({ label: 'Экспорт отчётов в CSV' });
-  await expect.poll(() => api.requests.filter((r) => r.operationId === 'listFindings').at(-1)?.url.searchParams.get('run_id')).toBe(r1.id);
+  await expect.poll(() => lastQuery()?.get('run_id')).toBe(r1.id);
   await page.getByLabel('Источник').selectOption('gate');
   await expect(list(page).getByRole('listitem')).toHaveCount(3);
   // Клиентский фильтр CWE (в API нет параметра) — по загруженной выборке.
@@ -275,12 +277,12 @@ test('security center: workspace findings, severity, CWE/controls from data, dep
   await expect(page).toHaveURL(`/w/${ws.id}/security`);
 
   // Drill-down: карточка находки.
-  await list(page).getByRole('link', { name: 'AWS access key в конфигурации' }).click();
+  await list(page).getByRole('link', { name: 'AWS access key в конфигурации', exact: true }).click();
   await expect(page).toHaveURL(`/w/${ws.id}/quality/findings/${findings[1]!.id}`);
   await expect(page.getByTestId('finding-title')).toHaveText('AWS access key в конфигурации');
 });
 
-test('security center: remediation from the detail panel — FSM transition with If-Match and step-up; reviewer cannot accept risk; viewer is read-only', async ({ page, api }) => {
+test('security center: remediation from the detail panel — FSM transition with If-Match and step-up; critical profile blocks accepting a critical risk', async ({ page, api }) => {
   const { ws, findings, transitions } = seed(api, 'owner', { stepUp: true });
   await login(page, api);
   await page.goto(`/w/${ws.id}/security`);
@@ -347,7 +349,7 @@ test('security center RBAC: viewer sees findings without decisions', async ({ pa
   await expect(list(page).getByRole('listitem')).toHaveCount(6);
 });
 
-test('security center: large list is virtualized with load more; error state with retry; no overflow 375/768/1366/1920 in both themes; reduced motion', async ({ page, api }) => {
+test('security center: large list is virtualized with load more and keyboard; no overflow 375/768/1366/1920 in both themes; reduced motion', async ({ page, api }) => {
   const { ws } = seed(api, 'owner', { bulk: 260 });
   await login(page, api);
   await page.goto(`/w/${ws.id}/security`);

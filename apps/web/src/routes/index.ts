@@ -14,7 +14,7 @@ import { designSystemArea } from './designSystem';
 import { integrationsArea } from './integrations';
 import { knowledgeArea } from './knowledge';
 import { missionControlArea } from './missionControl';
-import { codeIntelligenceArea } from './pending';
+import { codeIntelligenceArea } from './codeIntelligence';
 import { projectsArea } from './projects';
 import { providersArea } from './providers';
 import { qualityArea } from './quality';
