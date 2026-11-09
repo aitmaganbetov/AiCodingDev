@@ -50,7 +50,7 @@ CONSUMER_CHAT = "chat.projector"
 CONSUMER_ACTIVITY = "activity.projector"
 DEFAULT_CONSUMERS: tuple[str, ...] = (CONSUMER_ACP_HANDLER, CONSUMER_CHAT, CONSUMER_ACTIVITY)
 
-OUTBOX_ACCEPTED = "agent.message"  # тип SSE (sse.PERSISTED_TYPES); в EVENT_SCHEMAS §2 — acp.message_accepted
+OUTBOX_ACCEPTED = "agent.message"  # тип SSE (sse.PERSISTED_TYPES) и каталога EVENT_SCHEMAS §2.2
 OUTBOX_REJECTED = "acp.message_rejected"
 ACTIVITY_REJECTED = "acp.rejected"
 EXCERPT_BYTES = 1024

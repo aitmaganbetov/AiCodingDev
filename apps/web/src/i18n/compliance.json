@@ -1,0 +1,158 @@
+{
+  "compliance": {
+    "title": "Стандарты и соответствие",
+    "runTitle": "Матрица соответствия запуска",
+    "loading": "Загрузка матрицы соответствия…",
+    "trace": "Трассировка: стандарт → контроль → применимость → роль → проверка → evidence → вердикт.",
+    "caption": "Матрица соответствия запуска",
+    "empty": "Контролей с такими условиями нет.",
+    "summary": "Сводка по вердиктам",
+    "filters": "Фильтры матрицы",
+    "blocking": "Блокирует завершение",
+    "reviewedBy": "Проверил: {{name}}",
+    "openQuality": "Качество и evidence",
+    "openControls": "Контроли проекта",
+    "col": {
+      "standard": "Стандарт",
+      "control": "Контроль",
+      "applicability": "Применимость",
+      "role": "Роль",
+      "check": "Проверка",
+      "evidence": "Evidence",
+      "verdict": "Вердикт",
+      "actions": "Действия",
+      "state": "Состояние"
+    },
+    "index": {
+      "description": "Применимость контролей стандартов утверждается для проекта, вердикты — по каждому запуску с привязкой к evidence. Реестр стандартов собирается из контролей проекта (глобального реестра в API нет).",
+      "projects": "Проекты",
+      "noProjects": "Проектов пока нет",
+      "runs": "Запуски",
+      "openMatrix": "Матрица соответствия",
+      "project": "Проект",
+      "controlsTitle": "Контроли проекта",
+      "manageControls": "Утверждение применимости",
+      "controlFilters": "Фильтры контролей",
+      "controlSearch": "Контроль или пункт",
+      "controlsCaption": "Контроли стандартов выбранного проекта",
+      "runsHint": "Матрица соответствия запуска: стандарт → контроль → проверка → evidence → вердикт, отсутствующие доказательства и отчёты (JSON/Markdown)."
+    },
+    "review": {
+      "open": "Вынести вердикт",
+      "title": "Вердикт по контролю {{control}}",
+      "description": "Вердикт человека заменит текущий; история сохраняется.",
+      "verdict": "Вердикт",
+      "passHint": "Для PASS первое выбранное evidence должно быть подтверждено (VERIFIED).",
+      "evidence": "Evidence этого запуска",
+      "evidenceHint": "Первое выбранное — evidence вердикта. Не более 20.",
+      "evidenceLoading": "Загрузка evidence запуска…",
+      "noEvidence": "У запуска нет evidence — вердикт вынести нельзя.",
+      "evidenceRequired": "Выберите хотя бы одно evidence.",
+      "passNeedsVerified": "Для PASS первое evidence должно быть подтверждено (VERIFIED).",
+      "primary": "evidence вердикта",
+      "notes": "Обоснование",
+      "notesHint": "Обязательно. Видно в матрице и отчёте run.",
+      "submit": "Сохранить вердикт",
+      "done": "Вердикт по {{control}}: {{status}}",
+      "terminal": "Запуск завершён — вердикты по нему больше не меняются.",
+      "noRole": "Выносить вердикт по контролям может роль «Ревьюер» и выше."
+    },
+    "controls": {
+      "title": "Контроли проекта",
+      "titleWithProject": "Контроли проекта · {{project}}",
+      "description": "Применимость, ответственная роль и блокирующий статус контролей утверждаются администратором проекта (ТЗ §13). Формулировки — платформы, а не официальный текст стандарта.",
+      "readOnly": "Утверждать применимость может администратор или владелец.",
+      "loading": "Загрузка контролей…",
+      "caption": "Контроли стандартов проекта",
+      "empty": "Контролей с такими условиями нет.",
+      "approvalState": "Состояние утверждения",
+      "approvedBy": "Утвердил",
+      "approve": "Утвердить",
+      "revise": "Пересмотреть",
+      "dialogTitle": "Применимость контроля {{control}}",
+      "applicability": "Применимость",
+      "rationale": "Обоснование",
+      "rationaleHint": "Необязательно для «Применим».",
+      "rationaleHintRequired": "Обязательно для «Неприменим» и «Адаптирован».",
+      "rationaleRequired": "Укажите обоснование.",
+      "role": "Ответственная роль",
+      "roleDefault": "По умолчанию ({{role}})",
+      "blocking": "Блокирующий",
+      "blockingDefault": "Умолчание платформы",
+      "blockingDefaultHint": "Определяется профилем качества проекта (security-контроли блокируют в strict/critical).",
+      "blocks": "Блокирует",
+      "notBlocks": "Не блокирует",
+      "platformDefault": "умолчание платформы",
+      "projectExplicit": "задано в проекте",
+      "submit": "Утвердить применимость",
+      "approved": "Применимость {{control}} утверждена"
+    },
+    "enums": {
+      "status": {
+        "PASS": "Соответствует (PASS)",
+        "FAIL": "Не соответствует (FAIL)",
+        "UNVERIFIED": "Не проверено",
+        "MANUAL_REVIEW": "Ручная проверка",
+        "NOT_APPLICABLE": "Неприменим"
+      },
+      "applicability": {
+        "APPLICABLE": "Применим",
+        "NOT_APPLICABLE": "Неприменим",
+        "PENDING_REVIEW": "Ожидает утверждения"
+      },
+      "proposed": {
+        "applicable": "Применим",
+        "not_applicable": "Неприменим",
+        "tailored": "Адаптирован"
+      },
+      "approval_state": {
+        "approved": "Утверждено",
+        "draft": "Черновик системы",
+        "missing": "Не задано"
+      },
+      "method": {
+        "automated_gate": "Автоматический gate",
+        "agent_review": "Ревью агента",
+        "manual": "Ручная проверка",
+        "document_check": "Проверка документа"
+      }
+    },
+    "disclaimer": {
+      "title": "Не является официальной сертификацией",
+      "text": "Автоматические проверки и вердикты платформы показывают, какие контроли проверены и каким evidence. Это не официальная сертификация, не аудит и не заключение о соответствии стандарту; формулировки контролей — платформы, а не официальный текст стандарта."
+    },
+    "filterControl": "Контроль или пункт",
+    "evidence": {
+      "missing": "Нет evidence",
+      "unverified": "Evidence не подтверждено ({{status}})",
+      "unknown": "статус evidence не загружен",
+      "gateExecution": "gate execution {{id}}…",
+      "gapsSummary": "Без доказательств: {{missing}} применимых контролей без evidence, {{unverified}} — с неподтверждённым evidence. PASS засчитывается только с подтверждённым (VERIFIED) evidence.",
+      "noGaps": "У всех применимых контролей есть подтверждённое evidence.",
+      "partial": "Статусы evidence загружены не полностью (первые 1000).",
+      "missingOnly": "Только без доказательств"
+    },
+    "reports": {
+      "title": "Отчёты о соответствии"
+    },
+    "registry": {
+      "title": "Реестр стандартов",
+      "empty": "Для проекта нет контролей стандартов.",
+      "filter": "Показать контроли",
+      "unfilter": "Все стандарты",
+      "controls": "Контролей",
+      "applicable": "Применимы",
+      "notApplicable": "Неприменимы",
+      "pending": "Ждут утверждения",
+      "blocking": "Блокируют",
+      "source_one": "listProjectControls: {{count}} контроль проекта",
+      "source_few": "listProjectControls: {{count}} контроля проекта",
+      "source_many": "listProjectControls: {{count}} контролей проекта",
+      "source_other": "listProjectControls: {{count}} контроля проекта",
+      "sourcePartial_one": "listProjectControls: первые {{count}} контроль — есть ещё (полный список — «Утверждение применимости»)",
+      "sourcePartial_few": "listProjectControls: первые {{count}} контроля — есть ещё (полный список — «Утверждение применимости»)",
+      "sourcePartial_many": "listProjectControls: первые {{count}} контролей — есть ещё (полный список — «Утверждение применимости»)",
+      "sourcePartial_other": "listProjectControls: первые {{count}} контроля — есть ещё (полный список — «Утверждение применимости»)"
+    }
+  }
+}

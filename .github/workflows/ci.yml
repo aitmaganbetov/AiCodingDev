@@ -180,6 +180,10 @@ jobs:
           mkdir -p repos
           docker tag aicodingdev/backend:ci aicodingdev/backend:local
           docker tag aicodingdev/web:ci aicodingdev/web:local
-          AICD_COOKIE_SECURE=false docker compose up -d --no-build --wait --wait-timeout 180
+          # Все сервисы, кроме worker-exec: до реальных адаптеров CLI (P2-01) Fake CLI в production запрещён.
+          AICD_COOKIE_SECURE=false docker compose up -d --no-build --wait --wait-timeout 180 \
+            api web worker-outbox worker-orchestrator worker-index
           curl -fsS http://localhost:8080/api/v1/health/ready
+          rc=0; docker compose run --rm --no-deps worker-exec || rc=$?
+          test "$rc" -eq 2  # ConfigurationError: AICD_EXEC_ADAPTER=fake запрещён в production
           docker compose down -v

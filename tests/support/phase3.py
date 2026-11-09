@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import tempfile
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +22,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_cli_adapters import registry
 from aicd_cli_adapters.fake.adapter import FakeCLIExecutor, ScenarioSpec
 from aicd_cli_adapters.gateway import ExecutionGateway, worktree_resolver
 from aicd_orchestration.approvals import Approvals
@@ -32,9 +35,12 @@ from aicd_platform.db import DbContext, create_engine, transaction
 from aicd_platform.ids import uuid7
 from aicd_security.local_runner import LocalProcessRunner
 from aicd_verification.engine import VerificationEngine
+from aicd_verification.registry import GATE_SPECS
 from tests.conftest import UserSession, init_git_repo
 from tests.support import db as testdb
+from tests.support.cli import MemorySink
 from tests.support.contract import validate_response
+from tests.support.orchestration import connect_admin
 
 
 def build_executor(
@@ -135,6 +141,27 @@ async def install_cli(
         )
 
 
+async def install_probed(worker: AsyncEngine, *, provider: str = "codex", isolate: bool = True) -> uuid.UUID:
+    """Установка Fake CLI штатным путём worker-exec: `probe()` адаптера → `registry.record_probe`.
+
+    Матрица совместимости пуста (`cli-compatibility.yaml`), поэтому установка — `untested`, как в реальном
+    развёртывании до P2-01; маршрутизация допускает её по политике `allow_untested_cli_versions` snapshot run.
+    """
+    adapter = FakeCLIExecutor(
+        provider="claude" if provider == "claude" else "codex",
+        runner=LocalProcessRunner(),
+        artifact_sink=MemorySink(),  # probe артефактов не пишет
+        worktree_path=worktree_resolver(Path(tempfile.gettempdir())),
+        env_source={"PATH": os.environ["PATH"]},
+    )
+    probe = await adapter.probe(installation_id=uuid7())
+    async with transaction(worker, DbContext(actor_type="system")) as conn:
+        if isolate:
+            await conn.execute(text("UPDATE cli_installations SET enabled = false WHERE enabled"))
+        host = await registry.register_host(conn, hostname=f"probe-{secrets.token_hex(4)}")
+        return await registry.record_probe(conn, host_id=host, probe=probe, duration_ms=1)
+
+
 @pytest.fixture
 async def world(
     app: FastAPI,
@@ -155,9 +182,41 @@ async def world(
         headers=user.headers(idem=True),
     )
     assert r.status_code == 201, r.text
+    for code in ("basic", "strict", "critical"):
+        local_profile(database, uuid.UUID(ws["id"]), code)
     worker = create_engine(database.url_for("aicd_worker"))
     yield Slice(user, ws["id"], project["id"], worker, tmp_path, settings, {"name": "agent"})
     await worker.dispose()
+
+
+# Gates, которые исполняются только в своих образах (DockerSandboxRunner): в сквозных тестах оркестрации
+# verifier — LocalProcessRunner, где этих инструментов нет (их отсутствие честно даёт ERROR ≠ PASS).
+CONTAINER_ONLY_GATES = frozenset(name for name, spec in GATE_SPECS.items() if spec.image_key is not None)
+
+
+def local_profile(database: testdb.TestDatabase, workspace_id: uuid.UUID, code: str) -> uuid.UUID:
+    """Профиль workspace = глобальный `code` без gates «только в контейнере» (перекрывает глобальный).
+
+    Поведение самих этих gates проверяют их docker-тесты; полный профиль — `tests/e2e/test_full_profile_docker.py`.
+    """
+    profile = uuid7()
+    with connect_admin(database) as conn:
+        conn.execute(
+            "INSERT INTO aicd.quality_profiles (id, workspace_id, code, version, definition)"
+            " SELECT %s, %s, code, 1, definition FROM aicd.quality_profiles WHERE workspace_id IS NULL AND code = %s"
+            " AND version = 1",
+            (profile, workspace_id, code),
+        )
+        conn.execute(
+            "INSERT INTO aicd.quality_gates (id, workspace_id, profile_id, name, gate_type, required, config,"
+            " timeout_seconds)"
+            " SELECT overlay(overlay(md5(random()::text || g.id::text) PLACING '7' FROM 13) PLACING '8' FROM 17)::uuid,"
+            " %s, %s, g.name, g.gate_type, g.required, g.config, g.timeout_seconds FROM aicd.quality_gates g"
+            " JOIN aicd.quality_profiles p ON p.id = g.profile_id"
+            " WHERE p.workspace_id IS NULL AND p.code = %s AND p.version = 1 AND g.name <> ALL(%s)",
+            (workspace_id, profile, code, sorted(CONTAINER_ONLY_GATES)),
+        )
+    return profile
 
 
 async def create_run(s: Slice, objective: str = "Добавить документ", **extra: Any) -> str:

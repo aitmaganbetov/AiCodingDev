@@ -168,6 +168,28 @@ flowchart LR
 
 `evidence.verification_status`: `VERIFIED` — процесс выполнен Verification Engine, результат разобран, артефакты сохранены и хеши совпадают при повторном чтении; `REJECTED` — несоответствие (SHA, хеш, отчёт противоречит коду выхода); `UNVERIFIED` — evidence агента или человека без прогона; `PENDING` — прогон идёт.
 
+### 4.3 Шаг `prepare` — зависимости проекта для gates (OQ-43 (b), дизайн Phase 9, не реализован)
+
+Gates `tsc`/`vitest`/`playwright`/`pytest`/`mypy`/`alembic`/`phpstan` требуют зависимостей **проекта** (`node_modules`,
+виртуальное окружение, `vendor/`), а gate-контейнеры работают с `network none` и read-only checkout. Сейчас такие gates
+находят зависимости только если они уже лежат в checkout, иначе — честный `ERROR`/`FAIL` (не `PASS`). Дизайн шага:
+
+| Аспект | Решение |
+|---|---|
+| Где | отдельный эфемерный контейнер **до** gates той же задачи, образ toolchain по digest (`node`, `python`, `migrations-python`, `php`), non-root, cap-drop ALL, read-only rootfs |
+| Вход | checkout задачи **только для чтения** + lock-файлы (`pnpm-lock.yaml`/`package-lock.json`, `uv.lock`/`requirements*.txt` с хэшами, `composer.lock`); без lock-файла — `ERROR(PREPARE_NO_LOCKFILE)` в strict/critical (недетерминированная установка запрещена) |
+| Выход | отдельный том `aicd-prep-<sha256(lock-файлы + образ)>` (кэш по содержимому), монтируется в gate-контейнеры **только для чтения** (`/deps`; `NODE_PATH`, `PYTHONPATH`/venv, `COMPOSER_VENDOR_DIR`) |
+| Команды (allowlist, argv без shell) | `pnpm install --frozen-lockfile --ignore-scripts --store-dir /deps/.pnpm` / `npm ci --ignore-scripts`; `uv sync --frozen --no-install-project` (или `pip install --require-hashes --no-deps -r …`); `composer install --no-scripts --no-plugins --no-dev` |
+| Скрипты пакетов | **запрещены** (`--ignore-scripts`, `--no-scripts`): install-скрипты — исполнение недоверенного кода с сетью. Пакеты, которым нужна сборка (native), — `ERROR(PREPARE_NEEDS_BUILD)` с указанием пакета; разрешение — политика проекта (admin, audited) |
+| Сеть | только через egress-proxy с allowlist реестров пакетов проекта (registry.npmjs.org, pypi.org/files.pythonhosted.org, repo.packagist.org + dist-хосты) или внутреннего зеркала; без доступа к внутренним сетям и метаданным облака (SSRF-правила `security.ssrf`) |
+| Лимиты | время (по умолчанию 900 с), размер тома (квота), число файлов; превышение — `ERROR(PREPARE_LIMIT)` |
+| Evidence | `gate_executions` записи `prepare` (gate_type `BUILD`, не блокирующая сама по себе): команда, exit code, digest образа, sha256 lock-файлов, ключ кэша, список установленных пакетов (SBOM syft по `/deps`) — связывается с evidence зависимых gates |
+| Безопасность | секреты не передаются; том `aicd-prep-*` никогда не монтируется в runner агента; кэш изолирован по workspace (ключ включает `workspace_id`) — нет отравления кэша между тенантами |
+| Отказ | ошибка prepare → зависимые gates `ERROR(DEPENDENCIES_UNAVAILABLE)`, не запускаются, не `PASS` |
+
+Реализация (Verification Engine + `SandboxRunner` с egress-сетью только для prepare + политика контейнеров для тома
+`aicd-prep-*`) — следующая волна; образы toolchain уже собраны платформой (`migrations-python`, `phpstan`, docs/runbooks/release.md §4).
+
 ## 5. Правила вердикта
 
 ### 5.1 Статус гейта (`gate_execution_status`)
@@ -310,6 +332,6 @@ flowchart LR
 | `gate_executions.commit_sha`, `error_code` (`TOOL_UNAVAILABLE`, `TIMEOUT`, `INFRA`, `SHA_MISMATCH`, `REPORT_UNPARSABLE`, `EMPTY_SUITE`), `attempt_no`, `profile_version` | вердикт и идемпотентность |
 | Перечисление `project_controls.applicability`: `applicable`, `not_applicable`, `undecided` | ТЗ §7.2 без значений |
 | Перечисление `standard_controls.verification_method`: `automated_gate`, `agent_review`, `manual`, `document_check` | ТЗ §13 |
-| Колонки `standard_controls.check_ref`, `responsible_role`, `default_severity`; `project_controls.blocking`, `approved_at` | трассировка контроль → роль → check |
-| `findings.control_refs text[]` | связь findings ↔ контролей |
+| Колонки `standard_controls.check_ref`, `responsible_role`, `default_severity`; `project_controls.blocking`, `approved_at` | трассировка контроль → роль → check; `project_controls.blocking` (NULL — умолчание платформы: `security` в `strict`/`critical`) — **принято, миграция 0010** |
+| `findings.control_refs text[]` | связь findings ↔ контролей — **принято, миграция 0010** |
 | Artifact kinds `gate_log`, `applicability_report`, `sbom`, `signature` | словарь artifacts |

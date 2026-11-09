@@ -18,6 +18,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from aicd_collaboration.acp import render
+from aicd_collaboration.acp.pipeline import iter_refs
 from aicd_collaboration.acp.projection import ensure_thread
 from aicd_platform import audit, outbox
 from aicd_platform.clock import isoformat_z
@@ -30,6 +32,28 @@ from aicd_platform.redaction import redact_text
 SSE_SCOPE = {"all_agents": "RUN", "role": "ROLE", "task": "TASK"}
 API_SCOPE = {"all_agents": "run", "role": "role", "task": "task"}
 BODY_MAX_CHARS = 8000  # SSE chat_message.body maxLength
+
+
+def acp_refs(payload: Any) -> list[dict[str, str]]:
+    """ChatItem.refs из payload ACP-сообщения — те же ссылки, что `links` события chat.message (kind → type)."""
+    if not isinstance(payload, dict):
+        return []
+    return [{"type": link["kind"], "id": link["id"]} for link in render.links(list(dict.fromkeys(iter_refs(payload))))]
+
+
+async def event_seqs(conn: AsyncConnection, run_id: uuid.UUID, message_ids: Sequence[uuid.UUID]) -> dict[str, int]:
+    """seq событий chat.message в run_event_log по id сообщений чата (ещё не спроецированные/удалённые — нет)."""
+    if not message_ids:
+        return {}
+    rows = await conn.execute(
+        text(
+            "SELECT payload ->> 'chat_message_id' AS mid, min(seq) AS seq FROM run_event_log"
+            " WHERE run_id = :run AND event_type = 'chat.message' AND payload ->> 'chat_message_id' = ANY(:ids)"
+            " GROUP BY 1"
+        ),
+        {"run": run_id, "ids": [str(m) for m in message_ids]},
+    )
+    return {str(r.mid): int(r.seq) for r in rows}
 
 
 def event_payload(

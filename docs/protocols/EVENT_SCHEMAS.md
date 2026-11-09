@@ -34,88 +34,85 @@ flowchart LR
 
 ### 2.1 Конверт outbox-события
 
-Колонки `outbox_events` (ТЗ §7.2) + `workspace_id`, `run_id` (дополнение для RLS и порядка). Поле `payload` хранит объект ниже целиком (это же тело Dramatiq-сообщения).
+Колонки `outbox_events` (ТЗ §7.2) + `workspace_id`, `run_id` (дополнение для RLS и порядка) + `traceparent` (P8-06). Столбец `payload` хранит данные события (поля из каталога §2.2); конверт ниже — тело Dramatiq-сообщения, которое outbox-dispatcher собирает из строки (`OutboxRecord.message()`, `aicd_platform.sse`) и которое читают обработчики воркеров (`aicd_worker.handlers`/`docs`/`github`, доставка ACP): `payload` — данные, `traceparent` — продолжение трассы.
+
+> P9-01 (OQ-49): первоначальный проект конверта (`trace{…}`, `data`, закрытое перечисление `aggregate_type`) не был реализован — с Phase 3 код и все потребители используют плоский конверт ниже. Схема приведена к фактическому сообщению; соответствие проверяет `tests/integration/test_outbox_dispatcher.py::test_dispatched_messages_match_outbox_envelope_schema` (настоящие сообщения диспетчера). Форматы `event_type`/`aggregate_type` — как CHECK-ограничения `outbox_events` (миграция 0003).
 
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aicodingdev.local/contracts/events/1.0/outbox-envelope.schema.json",
   "title": "OutboxEventEnvelope",
+  "description": "Тело Dramatiq-сообщения outbox-dispatcher (OutboxRecord.message(), aicd_platform.sse): строка outbox_events + traceparent. Потребители перечитывают состояние из PostgreSQL; payload — данные события (каталог EVENT_SCHEMAS §2.2).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_id", "event_type", "schema_version", "aggregate_type", "aggregate_id", "workspace_id", "occurred_at", "trace", "data"],
+  "required": ["event_id", "event_type", "schema_version", "aggregate_type", "aggregate_id", "workspace_id", "run_id", "occurred_at", "correlation_id", "causation_id", "payload", "traceparent"],
   "properties": {
     "event_id": {"type": "string", "format": "uuid", "description": "= outbox_events.id (UUIDv7)"},
-    "event_type": {"type": "string", "pattern": "^[a-z_]+\\.[a-z_]+$"},
+    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$", "description": "= outbox_events.event_type (CHECK миграции 0003)"},
     "schema_version": {"const": "1.0"},
-    "aggregate_type": {"enum": ["run", "task", "task_attempt", "cli_execution", "agent_message", "chat_message", "directive", "approval", "gate_execution", "evidence", "finding", "compliance_result", "cli_installation", "routing_decision", "checkpoint", "external_action", "code_index_snapshot", "context_pack", "documentation_snapshot", "github_webhook_delivery"]},
+    "aggregate_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "= outbox_events.aggregate_type (run, task, agent_message, chat_message, directive, approval, gate_execution, external_action, cli_provider, documentation_source, github_verification, worktree, …)"},
     "aggregate_id": {"type": "string", "format": "uuid"},
-    "aggregate_version": {"type": ["integer", "null"], "minimum": 0},
-    "workspace_id": {"type": ["string", "null"], "format": "uuid", "description": "null только для глобальных агрегатов (cli_installation)"},
+    "workspace_id": {"type": ["string", "null"], "format": "uuid", "description": "null только для глобальных агрегатов"},
     "run_id": {"type": ["string", "null"], "format": "uuid"},
-    "occurred_at": {"type": "string", "format": "date-time"},
-    "trace": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "task_id": {"type": ["string", "null"], "format": "uuid"},
-        "execution_id": {"type": ["string", "null"], "format": "uuid"},
-        "correlation_id": {"type": ["string", "null"], "format": "uuid"},
-        "causation_id": {"type": ["string", "null"], "format": "uuid", "description": "event_id/команда, вызвавшая это событие"},
-        "actor_type": {"enum": ["user", "agent", "system", "github"]},
-        "actor_id": {"type": ["string", "null"]},
-        "otel_trace_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{32}$"}
-      }
-    },
-    "data": {"type": "object"}
+    "occurred_at": {"type": "string", "format": "date-time", "description": "outbox_events.created_at, UTC с Z"},
+    "correlation_id": {"type": ["string", "null"], "format": "uuid", "description": "по умолчанию run_id"},
+    "causation_id": {"type": ["string", "null"], "format": "uuid", "description": "event_id/команда, вызвавшая это событие"},
+    "payload": {"type": "object", "description": "данные события (outbox_events.payload, редактированы, ≤ 64 KiB)"},
+    "traceparent": {"type": ["string", "null"], "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$", "description": "W3C trace context спана публикации (P8-06); потребитель продолжает трассу"}
   }
 }
 ```
 
 ### 2.2 Каталог
 
-Колонка «SSE» указывает проекцию в `run_event_log` (раздел 3). Поля `data` перечислены кратко; все ID — UUID; тексты — санитизированы.
+Каталог описывает **только** события, которые код действительно записывает в `outbox_events` (OQ-49: каталог приведён к коду): вызовы `aicd_platform.outbox.emit` в `packages/**`/`apps/**` и SQL-функции миграций с `INSERT INTO outbox_events`. Сверку в обе стороны (каждый `event_type` из кода есть в таблице и каждая строка таблицы порождается кодом) выполняет `tests/contract/test_event_catalog.py`. Колонка «SSE» — проекция в `run_event_log` (раздел 3, `aicd_platform.sse.project`; проецируются только события с `run_id`); «Потребители» — очереди Dramatiq, куда диспетчер направляет событие (`apps/worker/aicd_worker/broker.py`). Поля `payload` перечислены по коду; все ID — UUID строкой; тексты — санитизированы (`redact_value`), payload ≤ 64 KiB.
 
-| `event_type` | Агрегат | Триггер (в одной tx с) | Поля `data` | SSE |
-|---|---|---|---|---|
-| `run.created` | run | `INSERT runs` | `mode`, `objective_excerpt`, `quality_profile`, `approval_policy`, `policy_snapshot_hash` | `run.state_changed` (from=null) |
-| `run.state_changed` | run | переход Run FSM | `from_status`, `to_status`, `blocked_reason?`, `run_version`, `reason` | `run.state_changed` |
-| `run.plan_materialized` | run | утверждение DAG (`plan_version`) | `plan_version`, `task_count`, `edge_count` | — (видно через `task.state_changed`) |
-| `run.terminal` | run | переход в `COMPLETED`/`FAILED`/`CANCELLED` | `final_status`, `gate_summary`, `open_findings_by_severity`, `report_artifact_id?` | `run.completed` |
-| `task.created` | task | материализация плана, `NEW_TASK`, replan | `agent_role`, `complexity`, `risk_level`, `depends_on[]`, `plan_version` | `task.state_changed` (from=null, to=PENDING) |
-| `task.state_changed` | task | переход Task FSM | `from_status`, `to_status`, `blocked_reason?`, `task_version`, `attempt_no?`, `failure_category?` | `task.state_changed` |
-| `task_attempt.started` | task_attempt | `INSERT task_attempts` | `task_id`, `attempt_no`, `provider`, `routing_decision_id` | — |
-| `task_attempt.finished` | task_attempt | завершение попытки | `status`, `failure_category?`, `execution_id?` | — |
-| `routing.decision_recorded` | routing_decision | `INSERT routing_decisions` | `task_id`, `selected_provider`, `score_breakdown`, `policy_version`, `review_independence?` | — (в Task Detail через API) |
-| `cli_execution.state_changed` | cli_execution | переход Execution FSM | `from_status`, `to_status`, `failure_category?`, `exit_code?` | — |
-| `cli_execution.output_batch` | cli_execution | worker-exec, батч ≤1 с нормализованных событий (после записи в `agent_activity_events`) | `events[]` (санитизированные NormalizedCliEvent) | `cli.output` (по одному SSE-событию на нормализованное событие) |
-| `cli_execution.finished` | cli_execution | сохранение `ExecutionResult` | `status`, `execution_status`, `error_code?`, `artifact_ids[]`, `usage_source` | — |
-| `acp.message_accepted` | agent_message | шаг 7 конвейера ACP | `type`, `from`, `to`, `correlation_id`, `reply_to_id`, `summary` | `agent.message` |
-| `acp.message_rejected` | agent_message | отказ валидации | `rejection_code`, `type?`, `from_role`, `payload_sha256` | — (только activity/audit) |
-| `chat.message_created` | chat_message | `INSERT chat_messages` | `thread_id`, `message_kind`, `sender_type`, `source_event_id?` | `chat.message` |
-| `directive.received` | directive | `POST /runs/{id}/directives` | `directive_type`, `target`, `requires_impact_preview` | `directive.state_changed` |
-| `directive.state_changed` | directive | переход Directive FSM | `from_status`, `to_status`, `reason?` | `directive.state_changed` |
-| `directive.impact_ready` | directive | `INSERT directive_impacts` завершён | `impacts[]`, `requires_confirmation`, `approval_id?` | `directive.impact_ready` |
-| `directive.ack_changed` | directive | изменение `directive_acknowledgements` | `recipient_role`, `ack_status`, `execution_id?` | `directive.state_changed` (поле `recipients`) |
-| `approval.requested` | approval | `INSERT approvals (PENDING)` | `action_type`, `task_id?`, `required_role`, `expires_at`, `summary` | `approval.requested` |
-| `approval.decided` | approval | `PENDING → APPROVED/REJECTED/EXPIRED/CANCELLED` | `status`, `decided_by?`, `decision_reason?` | `approval.decided` |
-| `gate.started` | gate_execution | `PENDING → RUNNING` | `gate_type`, `commit_sha`, `task_id?` | — |
-| `gate.completed` | gate_execution | терминальный статус гейта | `status`, `gate_type`, `required`, `evidence_id?`, `findings_count` | `gate.completed` |
-| `evidence.recorded` | evidence | `INSERT evidence` | `kind`, `producer`, `verification_status`, `artifact_sha256` | — |
-| `evidence.verification_changed` | evidence | `PENDING → VERIFIED/REJECTED/UNVERIFIED` | `from`, `to` | — |
-| `finding.created` | finding | `INSERT findings` | `severity`, `rule_id`, `file_path?`, `source_gate_id?` | — (агрегат в `gate.completed`, ACP `FINDING` → `agent.message`) |
-| `finding.status_changed` | finding | смена `finding_status` | `from`, `to`, `actor` | — |
-| `compliance.result_recorded` | compliance_result | `INSERT compliance_results` | `control_id`, `status`, `evidence_id?` | — |
-| `provider.health_changed` | cli_installation | новое наблюдение `provider_health`, если изменилось `availability`/`auth_status` | `provider`, `availability`, `auth_status`, `error_category?`, `cooldown_until?` | — (глобальный; UI CLI Providers опрашивает API; затронутые run получают `task.state_changed`) |
-| `provider.auth_restored` | cli_installation | `check_auth` → `AUTHENTICATED` после `AUTH_REQUIRED` | `provider`, `installation_id` | — |
-| `checkpoint.created` | checkpoint | `INSERT checkpoints` | `state_version`, `reason` (`directive`,`pause`,`periodic`) | — |
-| `external_action.state_changed` | external_action | `PLANNED→EXECUTING→CONFIRMED/FAILED/COMPENSATED` | `action_type`, `status`, `idempotency_key`, `external_ref?` | — (видно через approvals/run) |
-| `code_index.snapshot_ready` | code_index_snapshot | индекс построен | `repository_id`, `commit_sha`, `index_version` | — |
-| `context_pack.created` | context_pack | `INSERT context_packs` | `task_attempt_id`, `content_hash`, `size_bytes`, `stale_items` | — |
-| `documentation.snapshot_fetched` | documentation_snapshot | загрузка завершена | `source_id`, `status`, `content_hash` | — |
-| `github.webhook_received` | github_webhook_delivery | `INSERT github_webhook_deliveries` (подпись валидна) | `event`, `delivery_guid` | — |
+| `event_type` | Агрегат | Источник (в одной tx с) | Поля `payload` | SSE | Потребители |
+|---|---|---|---|---|---|
+| `run.created` | run | `INSERT runs` (`aicd_orchestration.runs.create_run`) | `mode` | — (создание видно как `run.state_changed` с `from = null`) | orchestrator |
+| `run.state_changed` | run | создание run (`from = null`, `to = CREATED`); переход Run FSM (`store.transition_run`); перепланирование по поручению (`from = to`, `reason = replanned`) | `from`, `to`, `version`, `reason?`, `blocked_reason?`; при перепланировании — `plan_version`, `directive_id` | `run.state_changed` (`from_status`/`to_status`/`run_version`) | orchestrator |
+| `run.completed` | run | переход run в `COMPLETED`/`FAILED`/`CANCELLED` (вместе с `run.state_changed`) | `final_status` | `run.completed` (`required_gates_total`/`_passed` — из `gate_executions` при проекции) | — |
+| `task.state_changed` | task | переход Task FSM (`store.transition_task`); обновление причины блокировки (`BLOCKED → BLOCKED`) | `task_id`, `from`, `to`, `reason?`, `blocked_reason?` | `task.state_changed` (`title`, `agent_role`, версия, попытка, сложность — из `tasks`) | orchestrator (`to = READY` → постановка в `exec`) |
+| `agent.message` | agent_message | шаг 7 конвейера ACP — сообщение принято (`aicd_collaboration.acp.broker`) | `message_id`, `message_type`, `task_id?`, `from{role, provider?}`, `to{role}`, `correlation_id`, `reply_to_id?`, `summary`, `suspected_injection`, `severity?`; только для потребителей — `recipient_task_id?`, `loop_limit_exceeded`, `consumers[]` | `agent.message` | orchestrator (доставки ACP `message_deliveries`, в т. ч. `chat.projector`) |
+| `cli.output` | cli_execution | worker-exec, исполнение CLI (`aicd_orchestration.cli_output.CliOutputPublisher`, sink `ExecutionGateway.run`): санитизированное нормализованное событие; ≤ 20 событий/с на run, избыток — одним коалесцированным событием | форма SSE `cli_output`: `execution_id`, `task_id`, `provider`, `agent_role`, `cli_seq`, `cli_event_type`, `stream?`, `text?`, `redactions?`, `truncated?`, `coalesced_count?`, `dropped_chunks?`, `tool_kind?`, `tool_phase?`, `target?`, `warning_code?`, `execution_status?`, `artifact_id?` (у `finished` — полный санитизированный вывод, artifact `cli_output`) | `cli.output` | — |
+| `acp.message_rejected` | agent_message | отказ валидации ACP | `rejection_code`, `reason`, `type`, `from_role`, `payload_sha256` | — (только activity/audit) | — |
+| `chat.message` | chat_message | `INSERT chat_messages`: сообщение пользователя (`USER_TEXT`), сообщение поручения (`DIRECTIVE`), проекция ACP (`AGENT_MESSAGE`), выдержка CLI (`CLI_HIGHLIGHT`, worker-exec) | форма SSE `chat_message`: `chat_message_id`, `thread_id`, `scope`, `message_kind`, `sender_type`, `sender_id?`, `sender_role?`, `provider?`, `task_id?`, `target_role?`, `mentions[]`, `body`, `created_at`, `directive_id?`, `approval_id?`, `acp_type?`, `links?`, `source_event_id?` | `chat.message` | — |
+| `review.comment` (UI redesign B5, ADR-0015) | review_thread | команды inline-комментариев ревью кода (`aicd_collaboration.review_comments`): создание треда, ответ, правка комментария, resolve/unresolve, отправка ревью (по событию на тред ревью) | `action` (`thread_created`/`comment_created`/`comment_edited`/`thread_resolved`/`thread_unresolved`/`review_submitted`), `thread_id`, `comment_id?`, `review_id?`, `repository_id`, `task_id?`, `commit_sha`, `side`, `file_path`, `start_line`, `end_line`, `status`, `actor_id`, `occurred_at` — **без тела комментария** (клиент перечитывает `GET /review-threads/{id}`) | `review.comment` (только треды с `run_id`; треды репозитория без run — через REST) | — |
+| `directive.state_changed` | directive | переход Directive FSM (в т. ч. `RECEIVED → IMPACT_ANALYSIS_PENDING` при приёме) | `directive_id`, `directive_type`, `from`/`from_status`, `to`/`to_status`, `version`, `reason?` | `directive.state_changed` | orchestrator (шаги `IMPACT_ANALYSIS_PENDING`, `CONFIRMED`) |
+| `directive.ack_changed` | directive | изменение `directive_acknowledgements` | `directive_id`, `directive_type`, `status`, `recipient_role`, `recipient_task_id?`, `ack_status`, `execution_id?`, `at` | `directive.state_changed` (поле `recipients`) | — |
+| `directive.impact_ready` | directive | impact analysis завершён (`directive_impacts` записаны) | `directive_id`, `summary`, `impacts[{task_id, impact_type}]`, `requires_confirmation`, `approval_id?`, `expected_run_version` | `directive.impact_ready` | — |
+| `approval.requested` | approval | `INSERT approvals (PENDING)` (`aicd_orchestration.approvals`; для `VULN_DB_UPDATE` — SQL-функция `sys_vulndb_request_approval`, миграция 0016, без `run_id`) | `approval_id`, `action_type`, `risk_level`, `required_role`, `task_id?` | `approval.requested` (остальные поля — из `approvals`) | — |
+| `approval.decided` | approval | `PENDING → APPROVED/REJECTED` (решение), `CANCELLED` (отмена), `EXPIRED` (истечение) | `approval_id`, `action_type`, `status`, `subject`, `task_id?`, `wait_seconds?`, `reason?` | `approval.decided` | orchestrator; github (`MERGE`) |
+| `gate.completed` | gate_execution | терминальный статус гейта (`aicd_verification.engine`) | `gate_execution_id`, `gate_type`, `task_id`, `status`, `required`, `commit_sha`, `evidence_id?`, `findings{по severity}`, `duration_ms`, `tool` | `gate.completed` | — |
+| `external_action.state_changed` | external_action | переход ledger внешних действий (`PLANNED→EXECUTING→CONFIRMED/FAILED/COMPENSATED`) | `action_id`, `action_type`, `from`, `to`, `external_ref?` | — (видно через approvals/run) | — |
+| `provider.probe_requested` (Phase 8, OQ-45 (c)) | cli_provider | `POST /providers/{id}/probe` (вместе с audit `provider.probe_requested`) | `probe_request_id`, `provider_id`, `provider` | — (итог — audit `provider.probe_completed`, статус — `GET /providers/{id}/probes/{probe_request_id}`) | exec (`exec.probe_provider`) |
+| `documentation_source.refresh_requested` | documentation_source | PLANNED `docs_download` в ledger: явный refresh источника (`aicd_code_intelligence.docs.sources`) или загрузка, запланированная политикой документации (`aicd_orchestration.docs_flow.plan_download`) | `source_id`, `external_action_id` | — | docs (`aicd_worker.docs.import_documentation`) |
+| `github.pr.requested` | run | `POST /runs/{id}/pull-requests` (`aicd_orchestration.github_flow.request_pull_request`) | `run_id`, `task_id`, `repository_id`, `repository_full_name`, `head_branch`, `head_sha`, `base_branch`, `title`, `requested_by` | — | github |
+| `github.verification.requested` | github_verification | запрос проверки подключения GitHub (`aicd_orchestration.github_verification`) | `verification_id`, `kind` | — | github |
+| `github.webhook.received` | github_webhook_delivery | SQL-функция `sys_github_webhook_receive` (миграция 0012): подпись валидна, событие в allowlist, не дубль | `delivery_id`, `delivery_guid`, `event`, `action?`, `installation_id?`, `hint` | — (глобальное, без `workspace_id`) | github (`process_webhook`) |
+| `worktree.orphan_removed` | worktree | восстановление: удалён осиротевший worktree (diff сохранён артефактом) | `task_id`, `diff_artifact_id?` | — | — |
+| `notification.created` | notification | `INSERT notifications` потребителем `notifications.project` (`aicd_collaboration.notifications.record`, воркер orchestrator; UI redesign B8): по одной строке на получателя | `notification_id`, `kind` | — (не проецируется в `run_event_log`; поток workspace читает строки `notifications` пользователя и отдаёт кадр `notification.created`, §3.2a) | worker-outbox: только сигнал `aicd:ws:{workspace_id}` после commit (`sse.WORKSPACE_SIGNAL_TYPES`) |
 
-Правило: событие без строки в этом каталоге не может быть записано в outbox (валидация `event_type` по реестру в коде; CI-тест сверки реестра и каталога).
+Правило: новый `event_type` добавляется в код и в эту таблицу одним изменением — иначе `tests/contract/test_event_catalog.py` падает (формат имени — CHECK `outbox_events`, миграция 0003).
+
+### 2.2a Спроектированные, но не порождаемые в v1 события
+
+Первоначальный проект каталога содержал события, которые код v1 не пишет в outbox. Они **не** входят в каталог §2.2 (их нельзя ожидать в очереди или SSE); информация доступна иначе:
+
+| Проектное событие | Статус в v1 / где видно |
+|---|---|
+| `run.terminal` | переименовано: `run.completed` (SSE `run.completed`) |
+| `chat.message_created` | переименовано: `chat.message` |
+| `acp.message_accepted` | в outbox — `agent.message`; `acp.message_accepted` остался типом записи `agent_activity_events` (потребитель `activity.projector`) |
+| `directive.received` | приём поручения — `chat.message` (`DIRECTIVE`) + `directive.state_changed` (`RECEIVED → IMPACT_ANALYSIS_PENDING`) |
+| `run.plan_materialized`, `task.created` | материализация плана видна через `task.state_changed` и API задач |
+| `task_attempt.started`, `task_attempt.finished`, `routing.decision_recorded`, `checkpoint.created`, `context_pack.created` | строки БД + `agent_activity_events`/audit; Task Detail через API |
+| `cli_execution.state_changed`, `cli_execution.finished`, `cli_execution.output_batch` | статусы исполнения — `cli_executions`; вывод и завершение — `cli.output` (по событию на нормализованное событие CLI, `cli_event_type` = `output`/`tool_event`/`warning`/`artifact`/`finished`; пакеты не используются) |
+| `gate.started`, `evidence.recorded`, `evidence.verification_changed`, `finding.created`, `finding.status_changed`, `compliance.result_recorded` | строки БД (Quality API); итог гейта — `gate.completed` |
+| `provider.health_changed`, `provider.auth_restored` | `provider_health`, audit `provider.probe_completed`; UI CLI Providers опрашивает API |
+| `code_index.snapshot_ready`, `documentation.snapshot_fetched` | статусы `code_index_snapshots`/`documentation_snapshots` (API индекса и документации) |
+| `github.webhook_received` | переименовано: `github.webhook.received` |
 
 ## 3. SSE events
 
@@ -134,7 +131,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 - `id` = `seq` (bigint, монотонно возрастает в рамках run, ADR-0011). Переподключение: браузер передаёт `Last-Event-ID`; сервер отдаёт `run_event_log WHERE run_id=? AND seq > ?` по возрастанию, затем переходит в live-режим (ожидание wake-up из Redis pub/sub + опрос раз в 5 с как страховка).
 - Если `Last-Event-ID` меньше минимального сохранённого `seq` (retention), сервер первым отправляет синтетический `run.state_changed` с `payload.resync = true` (снимок текущего статуса, `id` = текущий максимальный `seq`), после чего клиент обязан перезагрузить состояние через REST.
 - `heartbeat` каждые 15 с; **не** сохраняется в `run_event_log`, отправляется без строки `id:` (чтобы не сдвигать `Last-Event-ID`).
-- Ограничения: ≤ 3 одновременных SSE-соединения на пользователя на run; `cli.output` поток прореживается сервером до ≤ 20 событий/с на соединение (лишние объединяются; полный поток — в Task Detail через `/activity` с пагинацией).
+- Ограничения: ≤ 3 одновременных SSE-соединения на пользователя на run; `cli.output` прореживается в worker-exec до записи в outbox — ≤ 20 событий/с на run (лишние объединяются в одно событие с `coalesced_count`/`dropped_chunks`; история — `/activity` с пагинацией, полный санитизированный вывод — artifact `cli_output`).
 
 ### 3.2 Схема SSE-события
 
@@ -150,7 +147,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
     "event_id": {"type": "string", "format": "uuid"},
     "run_id": {"type": "string", "format": "uuid"},
     "seq": {"type": ["integer", "null"], "minimum": 1, "description": "null только для heartbeat"},
-    "type": {"enum": ["run.state_changed", "task.state_changed", "agent.message", "cli.output", "directive.impact_ready", "directive.state_changed", "approval.requested", "approval.decided", "gate.completed", "run.completed", "chat.message", "heartbeat"]},
+    "type": {"enum": ["run.state_changed", "task.state_changed", "agent.message", "cli.output", "directive.impact_ready", "directive.state_changed", "approval.requested", "approval.decided", "gate.completed", "run.completed", "chat.message", "review.comment", "heartbeat"]},
     "timestamp": {"type": "string", "format": "date-time"},
     "schema_version": {"const": "1.0"},
     "source_event_id": {"type": ["string", "null"], "format": "uuid", "description": "outbox event_id, из которого спроецировано"},
@@ -168,7 +165,8 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
     {"if": {"properties": {"type": {"const": "approval.decided"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/approval_decided"}}}},
     {"if": {"properties": {"type": {"const": "gate.completed"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/gate_completed"}}}},
     {"if": {"properties": {"type": {"const": "run.completed"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/run_completed"}}}},
-    {"if": {"properties": {"type": {"const": "chat.message"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/chat_message"}}}}
+    {"if": {"properties": {"type": {"const": "chat.message"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/chat_message"}}}},
+    {"if": {"properties": {"type": {"const": "review.comment"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/review_comment"}}}}
   ],
   "$defs": {
     "uuid": {"type": "string", "format": "uuid"},
@@ -254,6 +252,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
         "redactions": {"type": "integer", "minimum": 0},
         "truncated": {"type": "boolean"},
         "coalesced_count": {"type": "integer", "minimum": 1},
+        "dropped_chunks": {"type": "integer", "minimum": 0, "description": "сколько из coalesced_count нормализованных событий не вошло в text (лимит 20 событий/с на run); полный вывод — artifact cli_output"},
         "tool_kind": {"enum": ["file_read", "file_write", "file_patch", "command", "search", "network", "other"]},
         "tool_phase": {"enum": ["requested", "started", "completed", "denied", "failed"]},
         "target": {"type": "string", "maxLength": 1024},
@@ -301,7 +300,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
             "required": ["role", "ack_status"],
             "properties": {
               "role": {"$ref": "#/$defs/agent_role"},
-              "ack_status": {"enum": ["PENDING", "DELIVERED", "ACKNOWLEDGED", "COMPLETED", "FAILED"]},
+              "ack_status": {"enum": ["PENDING", "DELIVERED", "ACKNOWLEDGED", "REJECTED", "EXPIRED", "COMPLETED", "FAILED"]},
               "execution_id": {"type": ["string", "null"], "format": "uuid"},
               "at": {"type": ["string", "null"], "format": "date-time"}
             }
@@ -314,7 +313,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
       "required": ["approval_id", "action_type", "summary", "required_role", "expires_at"],
       "properties": {
         "approval_id": {"$ref": "#/$defs/uuid"},
-        "action_type": {"enum": ["PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE", "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK", "LOCAL_EXECUTION_FALLBACK"]},
+        "action_type": {"enum": ["PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE", "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK", "LOCAL_EXECUTION_FALLBACK", "VULN_DB_UPDATE"]},
         "task_id": {"type": ["string", "null"], "format": "uuid"},
         "summary": {"type": "string", "maxLength": 2000},
         "required_role": {"enum": ["owner", "admin", "developer", "reviewer"]},
@@ -331,7 +330,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
       "required": ["approval_id", "action_type", "status"],
       "properties": {
         "approval_id": {"$ref": "#/$defs/uuid"},
-        "action_type": {"enum": ["PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE", "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK", "LOCAL_EXECUTION_FALLBACK"]},
+        "action_type": {"enum": ["PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE", "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK", "LOCAL_EXECUTION_FALLBACK", "VULN_DB_UPDATE"]},
         "status": {"enum": ["APPROVED", "REJECTED", "EXPIRED", "CANCELLED"]},
         "decided_by": {"type": ["string", "null"], "format": "uuid"},
         "decision_reason": {"type": ["string", "null"], "maxLength": 2000}
@@ -381,6 +380,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
         "target_role": {"anyOf": [{"$ref": "#/$defs/agent_role"}, {"type": "null"}]},
         "mentions": {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/agent_role"}},
         "body": {"type": "string", "maxLength": 8000},
+        "acp_type": {"enum": ["TASK_ASSIGN", "HANDOFF", "QUESTION", "ANSWER", "REVIEW_REQUEST", "FINDING", "FIX_REQUEST", "EVIDENCE_SUBMITTED", "DECISION_PROPOSAL", "DECISION_RECORDED", "BLOCKED", "TASK_COMPLETED", null], "description": "тип ACP-сообщения для AGENT_MESSAGE (= ChatItem.acp_type)"},
         "source_event_id": {"type": ["string", "null"], "format": "uuid"},
         "directive_id": {"type": ["string", "null"], "format": "uuid"},
         "approval_id": {"type": ["string", "null"], "format": "uuid"},
@@ -393,6 +393,205 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
         },
         "created_at": {"type": "string", "format": "date-time"}
       }
+    },
+    "review_comment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action", "thread_id", "repository_id", "commit_sha", "side", "file_path", "start_line", "end_line", "status", "actor_id", "occurred_at"],
+      "description": "ADR-0015 §6: изменение треда inline-комментариев; тело комментария не передаётся (GET /review-threads/{thread_id})",
+      "properties": {
+        "action": {"enum": ["thread_created", "comment_created", "comment_edited", "thread_resolved", "thread_unresolved", "review_submitted"]},
+        "thread_id": {"$ref": "#/$defs/uuid"},
+        "comment_id": {"type": ["string", "null"], "format": "uuid"},
+        "review_id": {"type": ["string", "null"], "format": "uuid"},
+        "repository_id": {"$ref": "#/$defs/uuid"},
+        "task_id": {"type": ["string", "null"], "format": "uuid"},
+        "commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+        "side": {"enum": ["base", "head"]},
+        "file_path": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "status": {"enum": ["OPEN", "RESOLVED"]},
+        "actor_id": {"$ref": "#/$defs/uuid"},
+        "occurred_at": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}
+```
+
+### 3.2a Поток уведомлений workspace (Phase 8, OQ-45 (c))
+
+`GET /api/v1/workspaces/{workspace_id}/events` — тот же формат кадров и конверт `SseEnvelope` (схема `sse-event.schema.json`), но только типы `approval.requested`, `approval.decided`, `run.state_changed`, `run.completed` **всех run workspace** (источник — `run_event_log`, RLS). Отличия от потока run (API_DESIGN §13.1):
+
+- `id:` — курсор потока: `run_event_log.created_at` в микросекундах Unix epoch (не `seq`; `seq` в данных — номер события в его run);
+- возобновление по `Last-Event-ID` с перекрытием 60 с — **клиент дедуплицирует по `event_id`** (§5); курсор старше 24 ч ⇒ `410 replay_window_exceeded`, без `Last-Event-ID` — с текущего момента;
+- heartbeat: `event: heartbeat`, `data: {"type":"heartbeat","workspace_id":"…","timestamp":"…"}` без `id:` (контракт `WorkspaceSseHeartbeat`);
+- пробуждение — Redis `aicd:ws:{workspace_id}` (worker-outbox после commit, только сигнал), опрос раз в 5 с как страховка;
+- поток не терминальный (сервер закрывает его по max lifetime 30 мин, при отзыве доступа и удалении участника).
+
+**Персональные уведомления (UI redesign B8, ADR-0016).** Тип `notification.created` в том же потоке — новые строки `notifications` **текущего пользователя** (RLS `user_id = app_current_user()`; другие участники workspace их не получают). Уведомления создаёт потребитель outbox `notifications.project` из событий `approval.requested`, `approval.decided`, `run.completed`, `run.state_changed` (→ `BLOCKED`), `directive.state_changed`, `external_action.state_changed` (`pr_create`/`pr_merge`), `gate.completed` (критические находки) — набор видов и получателей в API_DESIGN §13.2; в той же транзакции пишется outbox `notification.created` (§2.2), после публикации которого worker-outbox подаёт сигнал `aicd:ws:{workspace_id}`. Поток выбирает строки журнала run и уведомления одним запросом в порядке `(created_at, event_id)`, поэтому курсор `id:` (время записи/создания, микросекунды epoch), перекрытие 60 с и окно повтора 24 ч общие для обоих источников. Данные кадра — схема ниже (контракт `SseNotificationCreated`): `seq = null`, `event_id` = id уведомления, `payload` = `Notification` (как в `GET /notifications`), без секретов и без payload доменных событий. Фильтр `types` потока принимает `notification.created`.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/events/1.0/notification-event.schema.json",
+  "title": "NotificationSseEvent",
+  "description": "data: кадра notification.created потока workspace (GET /workspaces/{id}/events): новое персональное уведомление текущего пользователя (строка notifications, миграция 0020). id: кадра — курсор потока (created_at, микросекунды epoch). Содержимое — шаблонный заголовок, редактированная выжимка и идентификаторы; без секретов и payload доменных событий.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "run_id",
+    "seq",
+    "type",
+    "timestamp",
+    "schema_version",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "= payload.id (notifications.id)"
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "seq": {
+      "type": "null"
+    },
+    "type": {
+      "const": "notification.created"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "payload": {
+      "$ref": "#/$defs/notification"
+    }
+  },
+  "$defs": {
+    "uuid_or_null": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "severity",
+        "title",
+        "body",
+        "project_id",
+        "run_id",
+        "task_id",
+        "resource_type",
+        "resource_id",
+        "data",
+        "created_at",
+        "read_at",
+        "read"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "approval.requested",
+            "approval.decided",
+            "run.completed",
+            "run.failed",
+            "run.blocked",
+            "directive.awaiting_confirmation",
+            "directive.acknowledged",
+            "directive.completed",
+            "directive.failed",
+            "pull_request.merged",
+            "pull_request.failed",
+            "finding.critical"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "success",
+            "warning",
+            "error"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "project_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "run_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "task_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "resource_type": {
+          "enum": [
+            "approval",
+            "run",
+            "directive",
+            "gate_execution",
+            "external_action"
+          ]
+        },
+        "resource_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 12,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "read_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "read": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }
@@ -402,8 +601,8 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 
 1. Проекцию выполняет `worker-outbox` в той же транзакции, где выставляется `outbox_events.published_at` для событий из каталога с непустой колонкой «SSE»: `INSERT run_event_log(workspace_id, run_id, seq, event_id, event_type, schema_version, payload)`.
 2. `seq` назначается под per-run advisory lock (`pg_advisory_xact_lock(hashtext(run_id))`) как `max(seq)+1` (или счётчик `runs.last_event_seq`); откат транзакции откатывает и `seq` → разрывов нет, но клиенты не обязаны на это полагаться.
-3. `run_event_log.event_id` = новый UUIDv7, `source_event_id` = outbox `event_id`; `UNIQUE(source_event_id, event_type)` обеспечивает идемпотентность повторной публикации (одно outbox-событие `cli_execution.output_batch` даёт несколько `cli.output` — уникальность по `(source_event_id, payload.cli_seq)` через частичный индекс).
-4. После коммита — `PUBLISH run:{run_id} <seq>` в Redis (только сигнал; потеря сигнала компенсируется опросом раз в 5 с).
+3. `run_event_log.event_id` = новый UUIDv7, `source_event_id` = outbox `event_id`; `UNIQUE(source_event_id, event_type)` обеспечивает идемпотентность повторной публикации (`cli.output` пишется в outbox по одному событию на SSE-событие — пакетов вывода нет, §2.2).
+4. После коммита — `PUBLISH run:{run_id} <seq>` в Redis (только сигнал; потеря сигнала компенсируется опросом раз в 5 с); для потока уведомлений workspace — также `PUBLISH aicd:ws:{workspace_id}` (Phase 8).
 5. Payload SSE не содержит секретов, полных промптов, raw log, скрытых рассуждений; тексты прошли санитизацию CLI Gateway (CLI_ADAPTER_CONTRACT §11) и ограничены по длине.
 
 ## 4. Live Agent Chat
@@ -435,7 +634,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 |---|---|---|---|
 | `USER_TEXT` | user | `POST /runs/{id}/chat/messages` без директивы | комментарий |
 | `DIRECTIVE` | user | `POST /runs/{id}/directives` (создаёт и сообщение, и `user_directives`) | `CHANGE_REQUEST` |
-| `AGENT_MESSAGE` | agent | проекция `acp.message_accepted` | `FIX_REQUEST reviewer→developer` |
+| `AGENT_MESSAGE` | agent | проекция `agent.message` | `FIX_REQUEST reviewer→developer` |
 | `CLI_HIGHLIGHT` | agent | проекция значимых нормализованных CLI-событий: `tool_event` (`file_patch`, `command` completed/denied), `warning`, `finished` | «developer (codex) изменил 3 файла» |
 | `STATUS` | system | `task.state_changed`, `run.state_changed`, `gate.completed` | «Гейт QG-UNIT: FAIL» |
 | `APPROVAL` | system | `approval.requested` / `approval.decided` | «Требуется MERGE approval» |
@@ -448,9 +647,9 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 
 | Источник | Правило | `source_event_id` |
 |---|---|---|
-| ACP `acp.message_accepted` | 1 сообщение `AGENT_MESSAGE` в тред: `TASK` (если `task_id`) иначе `RUN`; `body` = шаблонное резюме по типу (например, для `FINDING`: severity, title, файл), ссылки → `links` | outbox `event_id` |
+| ACP `agent.message` | 1 сообщение `AGENT_MESSAGE` в тред: `TASK` (если `task_id`) иначе `RUN`; `body` = шаблонное резюме по типу (например, для `FINDING`: severity, title, файл), ссылки → `links` | outbox `event_id` |
 | ACP к/от `user` | в тред `ROLE` (роль-собеседник) | outbox `event_id` |
-| `cli_execution.output_batch` | только события из 4.2 `CLI_HIGHLIGHT`; не более 1 сообщения на 10 с на execution (коалесцирование) | outbox `event_id` + индекс |
+| `cli.output` (worker-exec, `CliOutputPublisher`) | `CLI_HIGHLIGHT` (`chat_messages.message_kind = 'cli_excerpt'`, тред задачи): инструмент `file_patch`/`file_write`/`command` в фазе `completed`/`denied`/`failed`, предупреждение, завершение; не более 1 сообщения на 10 с на execution (кроме завершения), остальные — пропускаются | — (пишется в момент исполнения, до outbox) |
 | `task.state_changed` | только переходы в `RUNNING`, `VERIFYING`, `SUCCEEDED`, `BLOCKED`, `FAILED`, `CANCELLED` | outbox `event_id` |
 | `gate.completed` | только `required = true` или `status ∈ {FAIL, ERROR}` | outbox `event_id` |
 | `approval.*` | всегда | outbox `event_id` |
@@ -489,18 +688,18 @@ stateDiagram-v2
 
 | Понятие в UI | Статус | Точное условие | Событие |
 |---|---|---|---|
-| «Принято системой» | `RECEIVED` | директива сохранена, RBAC пройден | `directive.received` |
+| «Принято системой» | `RECEIVED` | директива сохранена, RBAC пройден | `chat.message` (`DIRECTIVE`) + `directive.state_changed` (`RECEIVED → IMPACT_ANALYSIS_PENDING`) |
 | «Анализ влияния готов» | `IMPACT_READY` | все `directive_impacts` записаны | `directive.impact_ready` |
 | «Ожидает подтверждения» | `AWAITING_CONFIRMATION` | нужен confirm/approval | `directive.state_changed` + `approval.requested` |
-| «Отправлено» | `DISPATCHED` | директива включена в inbox (ACP `TASK_ASSIGN`/Context Pack) задач-получателей; `directive_acknowledgements.status = PENDING` | `directive.state_changed` |
-| **«Доставлено»** | ack `DELIVERED` (по получателю) | исполнение CLI, чей Context Pack содержит директиву, перешло в `RUNNING` (событие `started`) | `directive.ack_changed` |
-| **«Принято агентом»** | `ACKNOWLEDGED` (директива) / ack `ACKNOWLEDGED` | структурированный итог исполнения содержит `directive_acks[{directive_id, status:"accepted"}]`, принятый Orchestrator; директива `ACKNOWLEDGED`, когда все обязательные получатели подтвердили | `directive.ack_changed`, `directive.state_changed` |
-| **«Выполнено»** | `COMPLETED` | все задачи, созданные/изменённые директивой, `SUCCEEDED` (т.е. прошли обязательные гейты); для `ASK` — принят `ANSWER`; для `PAUSE`/`RESUME`/`STOP` — run достиг целевого статуса | `directive.state_changed` |
-| «Не выполнено» | `FAILED` / `REJECTED` / `CANCELLED` | с причиной | `directive.state_changed` |
+| «Отправлено» | `DISPATCHED` | строки `directive_acknowledgements` получателей созданы (`PENDING`): задачи замены/новые задачи несут огороженный текст поручения, поручение войдёт в раздел `directives` Context Pack следующей попытки задачи-получателя (отдельного ACP `TASK_ASSIGN` оркестратор не формирует, `acp_message_id = NULL`) | `directive.state_changed` |
+| **«Доставлено»** | ack `DELIVERED` (по получателю) | попытка задачи-получателя стартовала (задача `LEASED → RUNNING`, её Context Pack содержит директиву); получатель уровня run привязывается к первой стартовавшей задаче своей роли; попытка, начатая до dispatch, поручение не получает | `directive.ack_changed` |
+| **«Принято агентом»** | `ACKNOWLEDGED` (директива) / ack `ACKNOWLEDGED` | принятый Orchestrator итог попытки, которой директива доставлена, содержит `directive_acks[{directive_id, status:"accepted"\|"not_applicable"}]`; итог без записи о директиве — неявное `accepted`; `cannot_comply` → ack `REJECTED`, директива `FAILED`; директива `ACKNOWLEDGED`, когда все получатели подтвердили | `directive.ack_changed`, `directive.state_changed` |
+| **«Выполнено»** | `COMPLETED` | все задачи-получатели и их производные по `origin_task_id` (замены, fix-задачи), кроме вытесненных, `SUCCEEDED` (т.е. прошли обязательные гейты); для `ASK`/`REVIEW` — то же для задач-получателей (ответ агента — итог его задачи; связь ACP `ANSWER` с директивой не моделируется); для `PAUSE`/`RESUME`/`STOP` — run/задача достигли целевого статуса | `directive.state_changed` |
+| «Не выполнено» | `FAILED` / `REJECTED` / `CANCELLED` | с причиной (`failure_message`): отказ агента, задача рабочего множества `FAILED`/`CANCELLED`, получатель не получил/не подтвердил директиву (ack `EXPIRED`), run завершён раньше; открытые ack при этом → `EXPIRED` | `directive.state_changed` |
 
 UI обязан показывать «доставлено», «принято агентом» и «выполнено» разными индикаторами (ТЗ §11); `COMPLETED` никогда не выставляется по факту доставки или по заявлению агента.
 
-`directive_acknowledgements.status`: `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `COMPLETED`, `FAILED` (предложенное перечисление, раздел 7).
+`directive_acknowledgements.status` (DATABASE_DESIGN §9.8): `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `REJECTED`, `EXPIRED`. SSE `recipients[].ack_status` использует эти значения; `COMPLETED`/`FAILED` в перечислении схемы сохранены для совместимости и сервером не выдаются («выполнено» — статус директивы, а не ack).
 
 ## 5. Дедупликация
 
@@ -510,9 +709,11 @@ UI обязан показывать «доставлено», «принято 
 | ACP | `message_deliveries UNIQUE(message_id, consumer_id)` + `acked_at` |
 | SSE сервер | `run_event_log PK(run_id, seq)`, `event_id UNIQUE`; идемпотентная проекция (3.3) |
 | SSE клиент | хранит последний `seq`; событие с `seq ≤ last_seq` отбрасывается; `event_id` — для журналов |
+| SSE клиент, поток workspace (§3.2a) | хранит последний `id:` (курсор) для `Last-Event-ID`; дубли перекрытия отбрасываются по `event_id` (последние 2000), `seq` не сравнивается (события разных run) |
 | Chat | `UNIQUE(thread_id, source_event_id, projection_index)` |
 | Directives API | `Idempotency-Key` (`idempotency_keys`) + `expected_run_version` |
 | GitHub webhooks | `github_webhook_deliveries.delivery_guid UNIQUE` |
+| Уведомления (B8) | `processed_events(notifications.project, event_id)` в одной tx с записью + `notifications UNIQUE(workspace_id, user_id, source_event_id, kind)`; клиент потока — по `event_id` (= id уведомления) |
 
 ## 6. Порядок и retention
 
@@ -531,6 +732,7 @@ UI обязан показывать «доставлено», «принято 
 | `outbox_events` (опубликованные) | 7 дней | удаление |
 | `processed_events` | 30 дней | удаление |
 | `run_event_log` | 90 дней после терминального статуса run | архив NDJSON в объектное хранилище (sha256 в `artifacts`), удаление строк |
+| `notifications` (персональные уведомления, B8) | 90 дней от создания (прочитанные и нет) | удаление (`aicd_platform.retention`, `retention_notifications_days`) |
 | `agent_activity_events` (включая `cli.*`) | 180 дней | архив + удаление |
 | `agent_messages`, `chat_messages`, `user_directives`, `directive_*` | срок жизни проекта; архив через 1 год | архив |
 | raw CLI logs (artifacts `raw_log`) | 30 дней | удаление объекта, метаданные остаются |
@@ -544,7 +746,7 @@ UI обязан показывать «доставлено», «принято 
 | Перечисление `chat_message_kind`: `USER_TEXT`, `DIRECTIVE`, `AGENT_MESSAGE`, `CLI_HIGHLIGHT`, `STATUS`, `APPROVAL`, `DIRECTIVE_STATUS`, `SYSTEM_NOTICE` | ТЗ §7.2 `message_kind` без значений |
 | Перечисление `chat_sender_type`: `user`, `agent`, `system` | ТЗ §7.2 `sender_type` без значений |
 | Колонки `chat_messages`: `workspace_id`, `run_id`, `task_id`, `sender_role`, `target_role`, `provider`, `mentions text[]`, `projection_index`, `search_vector` | фильтры потоков, поиск, дедупликация |
-| Перечисление `directive_ack_status`: `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `COMPLETED`, `FAILED` | различение «доставлено/принято/выполнено» |
+| Перечисление `directive_ack_status`: `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `REJECTED`, `EXPIRED` (как CHECK `directive_acknowledgements.status`) | различение «доставлено/принято»; «выполнено» — статус директивы |
 | Колонки `outbox_events.workspace_id`, `run_id`, `aggregate_version`; `runs.last_event_seq` | RLS, порядок, назначение `seq` |
 | `run_event_log.source_event_id` | идемпотентная проекция |
 | SSE `run.completed` эмитируется для всех терминальных статусов run (`COMPLETED`, `FAILED`, `CANCELLED`) с полем `final_status` | имя типа из ТЗ; UI нужен единый сигнал завершения |

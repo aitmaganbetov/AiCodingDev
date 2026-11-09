@@ -38,7 +38,7 @@ from tests.support import db as testdb
 from tests.support import orchestration as orch
 from tests.support.contract import validate_response
 from tests.support.docs_http import DOCS_HOST, DocsHandler, docs_server, local_fetcher
-from tests.support.phase3 import Slice, create_run, drive, install_both
+from tests.support.phase3 import Slice, create_run, drive, install_both, local_profile
 
 __all__ = ["docs_server"]  # фикстура pytest
 
@@ -51,6 +51,11 @@ SHOP_FILES = {
     "pyproject.toml": (
         '[project]\nname = "shop"\nversion = "0.1.0"\ndependencies = ["fastapi>=0.110"]\n\n'
         '[tool.pytest.ini_options]\npythonpath = ["src"]\n'
+    ),
+    # Тест вызывает метод: покрытие ядра ≥ 85% (обязательный gate покрытия профиля strict, QUALITY_GATES §2.2).
+    "tests/test_cart.py": (
+        "from shop.cart import ShoppingCart\n\n\ndef test_checkout() -> None:\n"
+        "    assert ShoppingCart().checkoutOrder() == 3\n"
     ),
 }
 DOCS_MD = (
@@ -86,6 +91,8 @@ async def p5(
     validate_response("attachRepository", r)
     assert r.status_code == 201, r.text
     assert r.json()["latest_index_snapshot"] is None, "до индексации снимка нет"
+    for code in ("basic", "strict", "critical"):
+        local_profile(database, uuid.UUID(ws["id"]), code)
     worker = create_engine(database.url_for("aicd_worker"))
     yield Slice(user, ws["id"], project["id"], worker, tmp_path, settings, {"name": "agent_docs_required"})
     await worker.dispose()

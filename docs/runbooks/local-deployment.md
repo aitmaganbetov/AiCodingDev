@@ -17,7 +17,7 @@
    ```sh
    infrastructure/docker/init-secrets.sh
    ```
-3. Каталог репозиториев: `export AICD_REPOS_DIR=/srv/git` (по умолчанию `infrastructure/docker/repos`), монтируется в api только для чтения как корень `main`.
+3. Каталог репозиториев: `export AICD_REPOS_DIR=/srv/git` (по умолчанию `infrastructure/docker/repos`), монтируется в api, worker-orchestrator и worker-index только для чтения, в worker-exec — на запись (worktrees), как корень `main`.
 4. Запуск:
    ```sh
    docker compose -f infrastructure/docker/compose.yaml up -d --no-build --wait
@@ -37,4 +37,4 @@
 
 ## Известные ограничения Phase 1
 - Хранилище артефактов — локальный том (`AICD_ARTIFACT_BACKEND=fs`); S3/MinIO настраивается переменными `AICD_ARTIFACT_S3_*` (OQ-11).
-- Воркеры (orchestrator, outbox, exec, verify, index) появятся в Phase 2–5.
+- Воркеры — сервисы `worker-outbox`, `worker-orchestrator`, `worker-exec`, `worker-index` в `compose.yaml` (gates worker-exec — с оверлеем `compose.sandbox.yaml`); в production worker-exec не стартует до реальных адаптеров CLI (Fake CLI запрещён) — подробности и переменные каталогов — [installation.md §3](installation.md).

@@ -54,25 +54,34 @@ flowchart LR
 
 Принцип адресации: **плоские канонические URI для ресурсов с собственным UUID** (`/runs/{run_id}`, `/tasks/{task_id}`, `/evidence/{evidence_id}`) и вложенность только для подчинённых коллекций. Это совпадает с таблицей ТЗ §8 и позволяет определять tenant по самому ресурсу (§6).
 
-### 2.1 Каталог операций (55 = 37 из ТЗ §8 + 18 дополнений)
+### 2.1 Каталог операций (61 = 37 из ТЗ §8 + 24 дополнения)
 
 | Группа | Операции |
 |---|---|
 | Auth **(доп.)** | `POST /auth/login`, `POST /auth/logout`, `GET /auth/session` |
 | Health **(доп.)** | `GET /health/live`, `GET /health/ready` (без аутентификации) |
-| Workspaces | `GET/POST /workspaces`; **(доп.)** `GET/POST /workspaces/{workspace_id}/members`, `PATCH/DELETE /workspaces/{workspace_id}/members/{user_id}` |
-| Projects | `GET/POST /projects`, `GET/PATCH /projects/{project_id}`, `POST /projects/{project_id}/repositories`, **(доп.)** `GET /projects/{project_id}/repositories`, `GET /projects/{project_id}/technologies`, `GET/PATCH /projects/{project_id}/documentation-policy` |
+| Workspaces | `GET/POST /workspaces`; **(доп.)** `GET/POST /workspaces/{workspace_id}/members`, `PATCH/DELETE /workspaces/{workspace_id}/members/{user_id}`; **(доп., Phase 8, OQ-45 (c), (f))** `GET/PATCH /workspaces/{workspace_id}`, `GET /workspaces/{workspace_id}/events` (SSE уведомлений workspace, §13.1) |
+| Projects | `GET/POST /projects`, `GET/PATCH /projects/{project_id}`, `POST /projects/{project_id}/repositories`, **(доп.)** `GET /projects/{project_id}/repositories`, `GET /projects/{project_id}/repositories/{repository_id}/tree`, `GET /projects/{project_id}/repositories/{repository_id}/file`, **(Phase 8, OQ-45 (c))** `.../branches`, `.../commits` (Repository Explorer, FR-PRJ-05), `GET /projects/{project_id}/technologies`, `GET/PATCH /projects/{project_id}/documentation-policy`, `GET /projects/{project_id}/controls`, `POST /projects/{project_id}/controls/{control_id}/approval` |
 | Runs | **(доп.)** `GET /runs`; `POST /runs`, `GET /runs/{run_id}`, `GET /runs/{run_id}/tasks`, `POST /runs/{run_id}/pause|resume|cancel`, `GET /runs/{run_id}/events` (SSE), `GET /runs/{run_id}/activity` |
 | Chat/Directives | `GET /runs/{run_id}/chat`, `POST /runs/{run_id}/chat/messages`, `POST /runs/{run_id}/directives`, `GET /runs/{run_id}/directives/{directive_id}`; **(доп.)** `GET /runs/{run_id}/directives`, `POST .../directives/{directive_id}/confirm`, `POST .../directives/{directive_id}/cancel` |
 | Tasks | `GET /tasks/{task_id}`, `GET /tasks/{task_id}/messages`, `GET /tasks/{task_id}/evidence`; **(доп.)** `GET /tasks/{task_id}/attempts` |
-| Evidence **(доп.)** | `GET /evidence/{evidence_id}`, `GET /artifacts/{artifact_id}/download` |
-| Quality | `GET /runs/{run_id}/quality`, `GET /runs/{run_id}/compliance`, `GET /runs/{run_id}/report` |
-| Providers | `GET /providers`, `POST /providers/{provider_id}/probe`, `PATCH /providers/{provider_id}/settings` |
+| Evidence **(доп.)** | `GET /evidence/{evidence_id}`, `GET /artifacts/{artifact_id}/download`; **(Phase 8, OQ-45 (c))** `GET /runs/{run_id}/evidence` |
+| Quality | `GET /runs/{run_id}/quality`, `GET /runs/{run_id}/compliance`, `GET /runs/{run_id}/report`; **(доп., Phase 7, OQ-43 (d))** `GET /runs/{run_id}/findings`, `GET /findings/{finding_id}`, `POST /findings/{finding_id}/transitions`, `POST /runs/{run_id}/compliance/{control_id}/review` |
+| Providers | `GET /providers`, `POST /providers/{provider_id}/probe`, `PATCH /providers/{provider_id}/settings`; **(доп., Phase 8, OQ-45 (c))** `GET /providers/{provider_id}/probes/{probe_request_id}` (статус probe, §15) |
 | Approvals | `GET /approvals`, `POST /approvals/{approval_id}/decision`; **(доп.)** `GET /approvals/{approval_id}` |
-| Documentation | `GET/POST /documentation/sources`, `POST /documentation/sources/{source_id}/refresh` |
+| Documentation | `GET/POST /documentation/sources`, `POST /documentation/sources/{source_id}/refresh`; **(доп., Phase 8, OQ-45 (c))** `GET /technologies` (технологии workspace) |
 | Audit | `GET /audit-events` |
+| Analytics **(доп., P8-07)** | `GET /analytics/summary` (экран Analytics ТЗ §11, метрики ТЗ §16, FR-CI-08) |
+| Агрегаты workspace **(доп., UI redesign B1, UI_REDESIGN_PLAN §3.10 G-01…G-04)** | `GET /tasks` (`listTasks`: задачи workspace с последней попыткой — «Running AI Agents»), `GET /findings` (`listFindings`), `GET /providers/{provider_id}/executions` (`listProviderExecutions`: история `cli_executions` без вывода CLI), `GET /activity` (`listActivity`: лента `run_event_log` workspace, индекс миграции 0017). `Finding.remediation` (G-16) не добавлен: в `findings` нет такого поля/данных |
+| System **(доп., UI redesign B2, G-05)** | `GET /system/health` (`getSystemHealth`: api, database, redis, object_storage, outbox, workers, queues, backup — `ok/degraded/down/unknown` с измерениями; кэш 10 с, лимит 30/мин на пользователя; workers — по heartbeat процессов (`worker_hosts`, ok ≤ 3 интервалов, degraded ≤ 10, иначе down; `worker_kinds` по видам, отсутствующий вид — down только если перечислен в `AICD_EXPECTED_WORKER_KINDS`)) |
+| Agents **(доп., UI redesign B7, G-13)** | `GET /agent-profiles` (`listAgentProfiles`: профили 12 ролей — права, инструменты, ACP, шаблон; только чтение) |
+| Code Intelligence **(доп., UI redesign B3, G-06…G-09)** | `GET /projects/{project_id}/repositories/{repository_id}/symbols` (`listRepositorySymbols`: поиск символов READY-снимка — имя/префикс/подстрока/pg_trgm/FTS, ранжирование, курсор по снимку), `.../dependencies` (`getRepositoryDependencies`: подграф файлов вокруг `path`/`symbol`, `depth` ≤ 3, `direction`, ≤ 200 узлов / 500 рёбер, `truncated`), `.../indexing-jobs` (`listIndexingJobs`: статус, тайминги, безопасная ошибка), `GET /tasks/{task_id}/attempts/{attempt_id}/context-pack` (`getAttemptContextPack`: manifest без текста фрагментов) |
+| Worktrees **(доп., UI redesign B4, G-10)** | `GET /projects/{project_id}/worktrees` (`listProjectWorktrees`: ветка, base/head commit, run/задача, статус, время; пути хоста не отдаются) |
+| Search **(доп., UI redesign B6, G-12)** | `GET /search` (`searchWorkspace`: проекты, runs, задачи, находки, approvals, источники документации, сообщения чата — только типы, на которые есть право; trigram-индексы миграции 0018, FTS чата) |
+| Notifications **(доп., UI redesign B8, G-15)** | `GET /notifications` (`listNotifications`: персональные уведомления, непрочитанные, курсор), `GET /notifications/unread-count` (`getNotificationUnreadCount`), `POST /notifications/mark-read` (`markNotificationsRead`: по id, до уведомления включительно или все); live — кадры `notification.created` потока `GET /workspaces/{id}/events` (§13.1–13.2) |
+| Reviews **(доп., UI redesign B5, G-11; ADR-0015)** | `GET/POST /projects/{project_id}/repositories/{repository_id}/review-threads` (`listReviewThreads`/`createReviewThread`: треды inline-комментариев — якорь commit/сторона diff/файл/строки, опционально run/задача/находка; `outdated` относительно `head_sha` или последнего worktree), `GET /review-threads/{thread_id}` (`getReviewThread`, ETag), `POST /review-threads/{thread_id}/comments` (`replyReviewThread`), `POST /review-threads/{thread_id}/resolve|unresolve`, `PATCH /review-comments/{comment_id}` (`editReviewComment`: только автор, история правок), `GET /review-comments/{comment_id}/revisions`, `GET/POST /runs/{run_id}/reviews` (`listReviews`/`submitReview`: APPROVE — решение существующего approval, REQUEST_CHANGES — поручение `CHANGE_REQUEST`, COMMENT; §5.6). Комментарии агентам не доставляются |
 
-Обоснование дополнений: auth — без них невозможна cookie-сессия (ADR-0009); members — RBAC требует управления ролями (AC-12); `GET /runs`, `GET .../repositories`, `GET .../directives`, `GET /tasks/{id}/attempts`, `GET /approvals/{id}`, `GET /evidence/{id}` — экраны Dashboard/Run Graph/Task Detail/Evidence (ТЗ §11) без них не строятся; `confirm`/`cancel` директивы — шаг «confirm» из ТЗ §8.2 не имеет эндпоинта в таблице; artifacts download — evidence ссылается на artifact (AC-14); health — эксплуатация (ТЗ §16).
+Обоснование дополнений: auth — без них невозможна cookie-сессия (ADR-0009); members — RBAC требует управления ролями (AC-12); `GET /runs`, `GET .../repositories`, `GET .../directives`, `GET /tasks/{id}/attempts`, `GET /approvals/{id}`, `GET /evidence/{id}` — экраны Dashboard/Run Graph/Task Detail/Evidence (ТЗ §11) без них не строятся; `confirm`/`cancel` директивы — шаг «confirm» из ТЗ §8.2 не имеет эндпоинта в таблице; artifacts download — evidence ссылается на artifact (AC-14); health — эксплуатация (ТЗ §16); findings/transitions, review контроля и применимость контролей проекта — экраны Quality/Standards & Compliance Phase 7: жизненный цикл находок и вердикт человека по контролю (QUALITY_GATES §5.3, §8.2) и утверждение применимости admin (ТЗ §13) без них невыполнимы (OQ-43 (d)).
 
 ## 3. Аутентификация и CSRF (ADR-0009)
 
@@ -89,10 +98,11 @@ flowchart LR
 
 | Случай | Источник workspace |
 |---|---|
-| `/projects/{id}`, `/runs/{id}`, `/tasks/{id}`, `/evidence/{id}`, `/artifacts/{id}`, `/approvals/{id}`, `/documentation/sources/{id}`, вложенные коллекции | Колонка `workspace_id` ресурса (денормализована, ADR-0008) |
+| `/projects/{id}`, `/runs/{id}`, `/tasks/{id}`, `/evidence/{id}`, `/artifacts/{id}`, `/approvals/{id}`, `/documentation/sources/{id}`, `/review-threads/{id}`, `/review-comments/{id}` (резолверы миграции 0019), вложенные коллекции | Колонка `workspace_id` ресурса (денормализована, ADR-0008) |
 | `POST /runs` | `projects.workspace_id` по `project_id` из тела |
 | `/workspaces/{workspace_id}/members` | Путь |
-| `GET/POST /projects`, `GET /runs`, `GET /approvals`, `GET/POST /documentation/sources`, `GET /providers`, `POST /providers/{id}/probe`, `PATCH /providers/{id}/settings`, `GET /audit-events` | Заголовок `X-Workspace-Id` (обязателен) |
+| `GET/POST /projects`, `GET /runs`, `GET /approvals`, `GET/POST /documentation/sources`, `GET /technologies`, `GET /providers`, `POST /providers/{id}/probe`, `GET /providers/{id}/probes/{probe_request_id}`, `PATCH /providers/{id}/settings`, `GET /audit-events`, `GET /tasks`, `GET /findings`, `GET /providers/{id}/executions`, `GET /activity`, `GET /system/health`, `GET /agent-profiles` (UI redesign B1/B2/B7), `GET /search` (B6) | Заголовок `X-Workspace-Id` (обязателен) |
+| `GET/PATCH /workspaces/{workspace_id}`, `GET /workspaces/{workspace_id}/events` | Путь |
 | `GET/POST /workspaces`, `/auth/*` | Не требуется (список собственных workspace — через SECURITY DEFINER функцию членства) |
 
 **Обоснование выбора заголовка вместо `/workspaces/{id}/projects`:** таблица ТЗ §8 фиксирует плоские пути `/projects`, `/approvals`, `/audit-events`; заголовок сохраняет их без изменения и даёт единое место (middleware) для резолва tenant. Query-параметр отвергнут, т.к. он попадает в access-логи и кэши как часть URL и смешивается с фильтрами.
@@ -119,6 +129,8 @@ flowchart LR
 | `workspace:create`¹ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `member:read` | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `member:manage` | ✔ | — | — | — | — |
+| `workspace:update` (название workspace, OQ-45 (f)) | ✔ | ✔ | — | — | — |
+| `workspace:policy` (политики workspace — `settings`, `x-permission-depends-on: settings`) | ✔ | — | — | — | — |
 | `project:read` | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `project:create`, `project:update`, `repository:attach` | ✔ | ✔ | — | — | — |
 | `run:read`, `chat:read`, `evidence:read`, `quality:read`, `approval:read`, `provider:read`, `documentation:read`, `artifact:download` | ✔ | ✔ | ✔ | ✔ | ✔ |
@@ -128,10 +140,20 @@ flowchart LR
 | `directive:create` | ✔ все типы | ✔ все типы | ✔ все типы | ✔ только `ASK`, `REVIEW`, `APPROVE`/`REJECT`² | — |
 | `directive:confirm` | ✔ | ✔ | ✔ свои | ✔ свои | — |
 | `approval:decide` | см. §5.3 | см. §5.3 | см. §5.3 | см. §5.3 | — |
+| `finding:triage` | ✔ | ✔ | ✔ без `ACCEPTED_RISK` | ✔ без `ACCEPTED_RISK` | — |
+| `compliance:review` | ✔ | ✔ | ✔ | ✔ | — |
 | `provider:probe`, `provider:settings` | ✔ | ✔ | — | — | — |
 | `documentation:register` | ✔ | ✔ | — | — | — |
 | `documentation:refresh` | ✔ | ✔ | ✔ | — | — |
 | `audit:read` | ✔ | ✔ | — | — | — |
+| `system:health` (состояние платформы, UI redesign B2) | ✔ | ✔ | — | — | — |
+| `github:read` | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `github:manage` | ✔ | ✔ | — | — | — |
+| `pull_request:create`, `pull_request:merge` (запрос merge; решение — approval `MERGE`, §5.3) | ✔ | ✔ | ✔ | — | — |
+| `notification:read`, `notification:update` (только свои уведомления, UI redesign B8, §13.2) | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `review:read` (inline-комментарии ревью, UI redesign B5, ADR-0015) | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `review:write` (тред, ответ, правка **своего**, resolve/unresolve) | ✔ | ✔ | ✔ | ✔ | — |
+| `review:submit` (`x-permission-depends-on: verdict`, §5.6) | ✔ | ✔ | ✔ | ✔ без `REQUEST_CHANGES` | — |
 
 ¹ Любой аутентифицированный пользователь; инсталляционная настройка `allow_workspace_creation` (по умолчанию `true` для single-team self-hosted) может ограничить создание.
 ² `APPROVE`/`REJECT` через чат — только для approvals, которые пользователь вправе решать (§5.3).
@@ -147,11 +169,13 @@ flowchart LR
 | `GET /health/live`, `GET /health/ready` | public | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /workspaces` | authenticated | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /workspaces` | workspace:create | ✔ | ✔ | ✔ | ✔ | ✔ |
-| `GET /workspaces/{id}/members` | member:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /workspaces/{id}/members`, `GET /workspaces/{id}` | member:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `PATCH /workspaces/{id}` (`name`; `settings` — дополнительно workspace:policy) | workspace:update | ✔ | ✔ (без `settings`) | — | — | — |
+| `GET /workspaces/{id}/events` (SSE уведомлений, §13.1) | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST/PATCH/DELETE .../members[/{user_id}]` | member:manage | ✔ | — | — | — | — |
 | `GET /projects`, `GET /projects/{id}` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /projects`, `PATCH /projects/{id}` | project:create / update | ✔ | ✔ | — | — | — |
-| `GET /projects/{id}/repositories`, `/technologies`, `GET .../documentation-policy` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /projects/{id}/repositories`, `.../repositories/{repository_id}/tree|file|branches|commits|symbols|dependencies|indexing-jobs` (B3), `GET /projects/{id}/worktrees` (B4), `/technologies`, `GET .../documentation-policy` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /projects/{id}/repositories` | repository:attach | ✔ | ✔ | — | — | — |
 | `PATCH /projects/{id}/documentation-policy` | project:update | ✔ | ✔ | — | — | — |
 | `GET /runs`, `GET /runs/{id}`, `/tasks`, `/events`, `/activity` | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
@@ -161,18 +185,39 @@ flowchart LR
 | `POST /runs/{id}/chat/messages` | chat:write | ✔ | ✔ | ✔ | ✔ | — |
 | `POST /runs/{id}/directives` | directive:create | ✔ | ✔ | ✔ | частично (§5.4) | — |
 | `POST .../directives/{id}/confirm|cancel` | directive:confirm | ✔ | ✔ | своё | своё | — |
-| `GET /tasks/{id}`, `/attempts`, `/messages` | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
-| `GET /tasks/{id}/evidence`, `GET /evidence/{id}` | evidence:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /tasks/{id}`, `/attempts`, `/messages`, `/attempts/{attempt_id}/context-pack` (B3) | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /tasks/{id}/evidence`, `GET /runs/{id}/evidence`, `GET /evidence/{id}` | evidence:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /artifacts/{id}/download` | artifact:download (+`download_raw` для `raw_cli_log`) | ✔ | ✔ | ✔ (не raw) | ✔ (не raw) | ✔ (не raw) |
-| `GET /runs/{id}/quality|compliance|report` | quality:read | ✔ | ✔ | ✔ | ✔ | ✔ |
-| `GET /providers` | provider:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /runs/{id}/quality|compliance|report`, `GET /runs/{id}/findings`, `GET /findings/{id}` | quality:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST /findings/{id}/transitions` | finding:triage (§5.5) | ✔ | ✔ | ✔ кроме `ACCEPTED_RISK` | ✔ кроме `ACCEPTED_RISK` | — |
+| `POST /runs/{id}/compliance/{control_id}/review` | compliance:review | ✔ | ✔ | ✔ | ✔ | — |
+| `GET /projects/{id}/controls` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST /projects/{id}/controls/{control_id}/approval` | project:update | ✔ | ✔ | — | — | — |
+| `GET /providers`, `GET /providers/{id}/probes/{probe_request_id}` | provider:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /providers/{id}/probe`, `PATCH .../settings` | provider:probe / settings | ✔ | ✔ | — | — | — |
 | `GET /approvals`, `GET /approvals/{id}` | approval:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /approvals/{id}/decision` | approval:decide | §5.3 | §5.3 | §5.3 | §5.3 | — |
-| `GET /documentation/sources` | documentation:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /documentation/sources`, `GET /technologies` | documentation:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /documentation/sources` | documentation:register | ✔ | ✔ | — | — | — |
 | `POST /documentation/sources/{id}/refresh` | documentation:refresh | ✔ | ✔ | ✔ | — | — |
 | `GET /audit-events` | audit:read | ✔ | ✔ | — | — | — |
+| `GET /analytics/summary` (P8-07; агрегаты run workspace — то же право, что у списка run) | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /tasks`, `GET /activity`, `GET /agent-profiles` (UI redesign B1/B7) | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /findings` (UI redesign B1) | quality:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /providers/{id}/executions` (UI redesign B1) | provider:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /system/health` (UI redesign B2) | system:health | ✔ | ✔ | — | — | — |
+| `GET /notifications`, `GET /notifications/unread-count` (UI redesign B8; только свои) | notification:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST /notifications/mark-read` (UI redesign B8; только свои) | notification:update | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET …/repositories/{repository_id}/review-threads`, `GET /review-threads/{id}`, `GET /review-comments/{id}/revisions`, `GET /runs/{id}/reviews` (UI redesign B5) | review:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST …/review-threads`, `POST /review-threads/{id}/comments|resolve|unresolve` (B5) | review:write | ✔ | ✔ | ✔ | ✔ | — |
+| `PATCH /review-comments/{id}` (B5) | review:write | своё | своё | своё | своё | — |
+| `POST /runs/{id}/reviews` (B5) | review:submit (§5.6) | ✔ | ✔ | ✔ | частично | — |
+| `GET /search` (UI redesign B6; дополнительно право на каждый тип результата: run:read, quality:read, approval:read, documentation:read, chat:read — типы без права пропускаются, `skipped_types`) | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /integrations/github/installations`, `GET /projects/{id}/pull-requests` (P8) | github:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST /integrations/github/installations[/setup]`, `DELETE …/installations/{id}` (P8) | github:manage | ✔ | ✔ | — | — | — |
+| `POST /runs/{id}/pull-requests` (P8) | pull_request:create | ✔ | ✔ | ✔ | — | — |
+| `POST /projects/{id}/pull-requests/{pr_id}/merge-request` (P8) | pull_request:merge | ✔ | ✔ | ✔ | — | — |
+| `POST /integrations/github/webhook` (P8) | public (HMAC) | — | — | — | — | — |
 
 ### 5.3 Решение по approvals (`approval:decide`, `x-permission-depends-on: action_type`)
 
@@ -180,12 +225,12 @@ flowchart LR
 |---|---|
 | `MANUAL_REVIEW`, `SELF_REVIEW_FALLBACK` | `reviewer` |
 | `PLAN_APPROVAL`, `DOCS_DOWNLOAD` | `developer` |
-| `MERGE`, `DESTRUCTIVE_MIGRATION`, `CRITICAL_DIRECTIVE` | `admin` |
+| `MERGE`, `DESTRUCTIVE_MIGRATION`, `CRITICAL_DIRECTIVE`, `VULN_DB_UPDATE` (миграция 0016) | `admin` |
 | `PRODUCTION_DEPLOY`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `DATA_DELETION`, `LOCAL_EXECUTION_FALLBACK` | `owner` |
 
 Иерархия ролей: `owner ⊃ admin ⊃ developer ⊃ reviewer ⊃ viewer` для решений по approvals (reviewer-типы могут решать и вышестоящие роли).
 
-**Four-eyes:** для `MERGE`, `PRODUCTION_DEPLOY`, `DESTRUCTIVE_MIGRATION`, `DATA_DELETION`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `CRITICAL_DIRECTIVE`, `LOCAL_EXECUTION_FALLBACK` пользователь, инициировавший действие (автор run/директивы), не может его утвердить ⇒ `403 four_eyes_violation`. Исключение — workspace с единственным участником и политикой `allow_single_member_self_approval=true`; такое решение помечается в `audit_events.metadata.self_approved=true`. Агент никогда не является решающей стороной (ТЗ §10 «no self-authorized critical actions»). Поле `Approval.can_decide` вычисляется сервером, чтобы UI не дублировал правила.
+**Four-eyes:** для `MERGE`, `PRODUCTION_DEPLOY`, `DESTRUCTIVE_MIGRATION`, `DATA_DELETION`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `CRITICAL_DIRECTIVE`, `LOCAL_EXECUTION_FALLBACK`, `VULN_DB_UPDATE` пользователь, инициировавший действие (автор run/директивы), не может его утвердить ⇒ `403 four_eyes_violation`. Исключение — workspace с единственным участником и политикой `allow_single_member_self_approval=true`; такое решение помечается в `audit_events.metadata.self_approved=true`. Агент никогда не является решающей стороной (ТЗ §10 «no self-authorized critical actions»). Поле `Approval.can_decide` вычисляется сервером, чтобы UI не дублировал правила.
 
 ### 5.4 Право на директивы по `directive_type`
 
@@ -200,6 +245,28 @@ flowchart LR
 | `APPROVE`, `REJECT` | ✔ если §5.3 разрешает | ✔ если §5.3 разрешает | `approval` |
 
 Недопустимое сочетание типа и цели ⇒ `422 validation_error` (pointer `/target/type`). Политика проекта может дополнительно запретить тип (`403 policy_denied`).
+
+### 5.5 Решения по находкам (`finding:triage`, `x-permission-depends-on: to_status`) и вердикт по контролю
+
+| `to_status` | Минимальная роль | Условия |
+|---|---|---|
+| `ACKNOWLEDGED`, `FALSE_POSITIVE` | `reviewer` | из `OPEN` (`FALSE_POSITIVE` — также из `ACKNOWLEDGED`) |
+| `OPEN` (повторное открытие) | `reviewer` | из `FALSE_POSITIVE`/`ACCEPTED_RISK`; решение (`resolved_by`) снимается |
+| `ACCEPTED_RISK` | `admin` | из `OPEN`/`ACKNOWLEDGED`; не выше допустимого профилем run уровня (`critical`-профиль: `critical` нельзя) ⇒ иначе `422` |
+
+Причина (`reason`) обязательна для любого перехода; `FIXED`/`VERIFIED_FIXED` выставляет только Verification Engine (QUALITY_GATES §5.3). Переход вне FSM ⇒ `409 invalid_state_transition` (`current_status`). Решение записывает пользователь сессии (`resolved_by`, триггер БД 0008), ETag находки — `findings.version` (миграция 0010), `If-Match` обязателен. Отказ по роли аудируется (`authz.denied`, `permission = finding:triage:<to_status>`).
+
+`compliance:review` (reviewer+; роль проверяется и в БД — `sys_record_compliance_review`, ≥ `approval_min_role('MANUAL_REVIEW')`): вердикт `PASS`/`FAIL` с обоснованием и evidence этого run для контроля `manual`/`document_check`/`agent_review` в `MANUAL_REVIEW`/`UNVERIFIED` или переопределение `UNVERIFIED` автоматического контроля. Контроль, вердикт которого выставил gate (`PASS`/`FAIL`), `NOT_APPLICABLE`, неутверждённая применимость или терминальный run ⇒ `409 invalid_state_transition`; evidence не этого run / не `VERIFIED` для `PASS` ⇒ `422`. Применимость и `blocking` контроля утверждает `admin` (`project:update`, ТЗ §13).
+
+### 5.6 Ревью кода (`review:submit`, `x-permission-depends-on: verdict`; UI redesign B5, ADR-0015)
+
+| `verdict` | reviewer | developer / admin / owner | Действие |
+|---|:-:|:-:|---|
+| `COMMENT` | ✔ | ✔ | только запись ревью (`review_submissions`) |
+| `APPROVE` | ✔ если §5.3 разрешает | ✔ если §5.3 разрешает | решение существующего `PENDING` approval этого run (`approval_id` обязателен) тем же путём, что `POST /approvals/{id}/decision`: роль по `action_type`, four-eyes, step-up |
+| `REQUEST_CHANGES` | — | ✔ | поручение `CHANGE_REQUEST` (как §5.4; цель — `task_id` или run) с замечаниями открытых тредов как недоверенным текстом |
+
+Комментарии (`review:write`) агентам **не доставляются**: воздействие на исполнение — только `submitReview` через конвейер поручений/approvals (impact analysis, подтверждение, ограждение `fence_untrusted`). Правка комментария — только автор (`403`, аудит `authz.denied` `review:write:own`); удаления нет, прежние редакции — `GET /review-comments/{id}/revisions`. Отказ по вердикту — `403`, аудит `authz.denied` (`review:submit:<verdict>`).
 
 ## 6. Ошибки: RFC 7807 `application/problem+json`
 
@@ -216,6 +283,8 @@ flowchart LR
 | `csrf_failed` | 403 | Нет/неверный `X-CSRF-Token` или чужой `Origin` |
 | `forbidden` | 403 | Член workspace без нужного права |
 | `four_eyes_violation` | 403 | Самоутверждение критического действия |
+| `step_up_required` | 403 | Операция критического набора (политика workspace/провайдера, управление участниками, утверждение approval из набора four-eyes), а пароль в сессии вводился > 10 мин назад; `max_age_seconds` в ответе; подтверждение — `POST /auth/reauthenticate` (SC-IAM-08, Phase 9) |
+| `reauthentication_failed` | 403 | `POST /auth/reauthenticate`: неверный пароль (не 401: сессия остаётся действительной; неудача учитывается счётчиком блокировки) |
 | `policy_denied` | 403 | Запрещено политикой проекта/workspace (например, тип директивы, `LOCAL_EXECUTION_FALLBACK`) |
 | `not_found` | 404 | Нет ресурса **или** ресурс в чужом workspace (единый ответ) |
 | `conflict` | 409 | Нарушение уникальности (slug, повторная привязка репозитория, участник уже есть) |
@@ -247,11 +316,11 @@ flowchart LR
 - Cursor — base64url от `{v:1, k:[значения ключа сортировки], o:"asc|desc", f:<hash фильтров>}` + HMAC-SHA256 (усечённый до 16 байт) секретом инстанса. Изменение фильтров при том же cursor или подделка ⇒ `422 invalid_cursor`. Срок жизни cursor не ограничен (keyset-пагинация устойчива к вставкам).
 - Сортировка по умолчанию — keyset по `(created_at, id)` desc (UUIDv7 монотонен); лента чата и activity поддерживают `order=asc` и `after_seq` для догрузки после SSE.
 - Общего количества (`total`) нет — дорого на больших таблицах; агрегаты отдаются специализированными полями (`findings_total`, `task_counts`).
-- `GET /providers` не пагинируется (≤ 2 элемента); `GET /runs/{id}/tasks` возвращает граф с `next_cursor` для run > 200 задач.
+- `GET /providers` не пагинируется (≤ 2 элемента), `GET /agent-profiles` — тоже (12 ролей); `GET /runs/{id}/tasks` возвращает граф с `next_cursor` для run > 200 задач.
 
 ## 8. Idempotency-Key
 
-- **Обязателен** на всех POST-командах: `/workspaces`, `/workspaces/{id}/members`, `/projects`, `/projects/{id}/repositories`, `/runs`, `/runs/{id}/pause|resume|cancel`, `/runs/{id}/chat/messages`, `/runs/{id}/directives`, `.../directives/{id}/confirm|cancel`, `/providers/{id}/probe`, `/approvals/{id}/decision`, `/documentation/sources`, `/documentation/sources/{id}/refresh`. Не требуется: `/auth/login`, `/auth/logout`, все `GET`, `PATCH` (защищены `If-Match`), `DELETE` (идемпотентен по семантике + `If-Match`).
+- **Обязателен** на всех POST-командах: `/workspaces`, `/workspaces/{id}/members`, `/projects`, `/projects/{id}/repositories`, `/runs`, `/runs/{id}/pause|resume|cancel`, `/runs/{id}/chat/messages`, `/runs/{id}/directives`, `.../directives/{id}/confirm|cancel`, `/providers/{id}/probe`, `/approvals/{id}/decision`, `/documentation/sources`, `/documentation/sources/{id}/refresh`, `/findings/{id}/transitions`, `/runs/{id}/compliance/{control_id}/review`, `/projects/{id}/controls/{control_id}/approval`, `…/repositories/{repository_id}/review-threads`, `/review-threads/{id}/comments|resolve|unresolve`, `/runs/{id}/reviews` (B5). Не требуется: `/auth/login`, `/auth/logout`, все `GET`, `PATCH` (защищены `If-Match`), `DELETE` (идемпотентен по семантике + `If-Match`).
 - Формат: 8–255 символов `[A-Za-z0-9._:-]`; рекомендуется UUIDv4/v7, генерируемый клиентом на «намерение пользователя» (одна кнопка — один ключ, переиспользуется при повторах после сетевой ошибки).
 - **Scope и хранение:** таблица `idempotency_keys`, `UNIQUE (workspace_id, user_id, key)` — для `POST /workspaces` `workspace_id IS NULL`, поэтому ограничение объявляется `UNIQUE NULLS NOT DISTINCT` (PostgreSQL ≥ 15). `request_hash` = SHA-256 от `method + path-template + resolved path params + canonical JSON тела (RFC 8785) + If-Match`. Хранение **24 ч** (`expires_at`), очистка retention-джобом.
 - **Алгоритм:**
@@ -266,12 +335,13 @@ flowchart LR
 
 ## 9. Оптимистичная конкурентность: ETag / If-Match / version
 
-- Ресурсы с версией отдают **сильный** `ETag: "v<version>"`: `Project` (`projects.version` — см. §19), `DocumentationPolicy` и `ProviderSettings` (`settings_version`), `Run`, `Task`, `Directive`, `Approval`, `Member`.
+- Ресурсы с версией отдают **сильный** `ETag: "v<version>"`: `Workspace` (`workspaces.version`, getWorkspace/updateWorkspace; поле `Workspace.version` в этих ответах, OQ-45 (f)), `Project` (`projects.version` — см. §19), `DocumentationPolicy` и `ProviderSettings` (`settings_version`), `Run`, `Task`, `Directive`, `Approval`, `Member`, `Finding` (`findings.version`, миграция 0010), `ReviewThread` (`review_threads.version`) и `ReviewComment` (`review_comments.revision`) — миграция 0019; `POST /review-threads/{id}/resolve|unresolve` и `PATCH /review-comments/{id}` требуют `If-Match`.
 - `PATCH` и `DELETE` **требуют** `If-Match` (нет ⇒ `428 precondition_required`, не совпал ⇒ `412 precondition_failed` с актуальным `ETag`).
-- `POST /approvals/{id}/decision`, `.../directives/{id}/confirm|cancel` также требуют `If-Match` — решение принимается по той версии, которую видел человек.
+- `POST /approvals/{id}/decision`, `.../directives/{id}/confirm|cancel`, `POST /findings/{id}/transitions` также требуют `If-Match` — решение принимается по той версии, которую видел человек.
 - `POST /runs/{id}/pause|resume|cancel` — `If-Match` необязателен (команда «остановить всё» должна работать и из устаревшего UI); если передан и не совпал — `412`.
 - Директивы используют поле тела `expected_run_version` (ТЗ §8.2) вместо заголовка: несовпадение ⇒ `409 version_mismatch` с `current_version`. `runs.version` инкрементируется при каждом переходе статуса run и изменении плана (`plan_version`), но не при переходах отдельных задач, чтобы не делать директивы непрактичными во время выполнения.
 - `GET` одиночных ресурсов поддерживает `If-None-Match` ⇒ `304`.
+- Клиент строит `If-Match` из `ETag` последнего ответа (SPA читает заголовок ответа через `fetch`, тот же origin — `Access-Control-Expose-Headers` не нужен); поле `version` тела — запасной вариант, если прокси удалил заголовок.
 
 ## 10. Rate limiting
 
@@ -285,7 +355,12 @@ flowchart LR
 | Директивы и chat messages | user + run | 30/мин |
 | Probe провайдера | workspace + provider | 6/час |
 | Refresh документации | workspace | 20/час |
+| Probe провайдера (реализовано, Phase 8) | workspace + provider | 6/час — окно 1 ч (`RateLimiter.hit(window_seconds=3600)`); попытка до проверки `Idempotency-Key` тоже расходует лимит |
 | Неаутентифицированные (кроме health) | IP | 60/мин |
+| `GET /system/health` (UI redesign B2; поверх лимита чтения; ответ кэшируется на сервере 10 с) | user | 30/мин |
+| `GET /search` (UI redesign B6; поверх лимита чтения; `rate_limit_search_per_minute`) | user | 60/мин |
+| Inline-комментарии ревью (UI redesign B5: создание треда, ответ, правка, resolve/unresolve) | user | 60/мин |
+| Отправка ревью `POST /runs/{id}/reviews` (B5) | user + run | 30/мин |
 | SSE-подключения | user | 5 одновременных; 30 подключений/мин |
 
 ## 11. Асинхронные команды и `202 Accepted`
@@ -357,6 +432,8 @@ stateDiagram-v2
 
 UI обязан показывать «принято сервером» (202), «доставлено» (ACKNOWLEDGED) и «выполнено» (COMPLETED) разными состояниями. `exit_code=0` CLI не переводит поручение в `COMPLETED` (ТЗ §9.3, AC-11).
 
+`delivery.acknowledgements[]` — по получателю: `status` (`PENDING` → `DELIVERED` на старте попытки задачи-получателя → `ACKNOWLEDGED` по принятому итогу агента (`directive_acks`, без записи — неявное `accepted`) | `REJECTED` (`cannot_comply`) | `EXPIRED` (не доставлено/не подтверждено до завершения задачи или run)), `task_id`, `delivered_at`, `acknowledged_at`. Правила продвижения и отказа — EVENT_SCHEMAS §4, DATA_FLOW §3.4; изменения приходят SSE-событием `directive.state_changed` (переход статуса либо `recipients` при изменении ack).
+
 ## 13. SSE: `GET /runs/{run_id}/events` (ТЗ §8.3, ADR-0011)
 
 **Источник:** durable-таблица `run_event_log` (`PK(run_id, seq)`, `event_id UNIQUE`); Redis pub/sub — только сигнал «есть новые события» (wake-up). Данные всегда читаются из PostgreSQL, поэтому нет пропусков и нарушений порядка при рестарте Redis.
@@ -381,7 +458,45 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 
 **Доступ:** проверка `run:read` при подключении (cookie-сессия; same-origin `EventSource` отправляет cookie); повторная проверка сессии и членства **каждые 60 с** и немедленно по внутреннему сигналу (logout, revoke, удаление участника, понижение роли). При потере доступа сервер прекращает отправку и закрывает соединение; переподключение получит `401`/`404`. Подключение аудируется (`sse.connect`) с агрегированием — один audit-event на сессию+run в час.
 
-**Серверные ограничения:** ≤ 5 одновременных потоков на пользователя (6-й ⇒ `429`); общий лимит на процесс API (по умолчанию 1000, ⇒ `503`); максимальная длительность соединения 30 мин (сервер закрывает, клиент переподключается с `Last-Event-ID` — заодно ротация проверки доступа); буфер медленного клиента 1000 событий / 1 MiB — при переполнении соединение закрывается (данные не теряются благодаря durable replay); `cli.output` — не более 20 событий/с на run в SSE (избыток коалесцируется, `dropped_chunks` > 0, полный санитизированный вывод доступен как artifact `cli_output`). Заголовки ответа: `Cache-Control: no-store`, `X-Accel-Buffering: no`; reverse proxy настраивается без буферизации и с read-timeout > 30 мин.
+**Серверные ограничения:** ≤ 5 одновременных потоков на пользователя (6-й ⇒ `429`); общий лимит на процесс API (по умолчанию 250 — утверждённый SLO P9-04, ⇒ `503 service_unavailable` + `Retry-After: 5`; сбой учёта слотов в Redis — тоже `503`, не `500`); сигналы Redis pub/sub всех потоков процесса принимает **одно** соединение (`aicd_api.sse_hub`, P9-04: раньше поток держал своё соединение, и пул Redis ограничивал процесс ~100 потоками); максимальная длительность соединения 30 мин (сервер закрывает, клиент переподключается с `Last-Event-ID` — заодно ротация проверки доступа); буфер медленного клиента 1000 событий / 1 MiB — при переполнении соединение закрывается (данные не теряются благодаря durable replay); `cli.output` — не более 20 событий/с на run в SSE (избыток коалесцируется, `dropped_chunks` > 0, полный санитизированный вывод доступен как artifact `cli_output`). Заголовки ответа: `Cache-Control: no-store`, `X-Accel-Buffering: no`; reverse proxy настраивается без буферизации и с read-timeout > 30 мин.
+
+### 13.1 SSE уведомлений workspace: `GET /workspaces/{workspace_id}/events` (доп., Phase 8, OQ-45 (c))
+
+Назначение — живые обновления экранов уровня workspace (список approvals без фильтра run, Dashboard) вместо периодического опроса. Поток — **уведомления**, а не источник состояния: экран берёт состояние из REST и перечитывает его по событию.
+
+- **Источник:** тот же `run_event_log` (все run workspace, RLS), только типы `approval.requested`, `approval.decided`, `run.state_changed`, `run.completed` (фильтр `types` — подмножество). Миграция не требуется. Approvals вне run (`DOCS_DOWNLOAD` без `run_id`) в журнал run не попадают и в поток не входят (остаток).
+- **Кадр:** `id: <cursor>`, `event: <type>`, `data: SseEnvelope` (тот же конверт, что у потока run; `seq` — номер события **в его run**, не в потоке). `cursor` — время записи строки в `run_event_log` (`created_at`, микросекунды Unix epoch, целое).
+- **Возобновление:** `Last-Event-ID` = последний принятый `cursor`. `seq` разных run не упорядочен, а `created_at` строки (= начало транзакции worker-outbox) может оказаться меньше уже отданного, пока транзакция не зафиксирована, поэтому сервер повторяет события с **перекрытием 60 с** (`created_at ≥ cursor − 60 с`, keyset `(created_at, event_id)`): в пределах соединения дубли отсекаются по `event_id`, между соединениями клиент **обязан** дедуплицировать по `event_id`. Гарантия — at-least-once при задержке фиксации транзакции worker-outbox < 60 с. Без `Last-Event-ID` — от текущего момента минус перекрытие. Курсор старше **24 ч** ⇒ `410 replay_window_exceeded` (до начала потока): клиент перечитывает REST и подключается без `Last-Event-ID`; неверный формат ⇒ `422`.
+- **Пробуждение:** Redis pub/sub `aicd:ws:<workspace_id>` (worker-outbox публикует после commit пачки, `dispatch_batch(notify_workspace=…)`); потеря сигнала компенсируется опросом раз в 5 с. Данные — только из PostgreSQL.
+- **Доступ и лимиты:** `run:read` в workspace пути (не член ⇒ `404`); повторная проверка членства каждые 60 с и по сигналу `aicd:access:<user_id>` (удаление участника закрывает поток); heartbeat каждые 15 с — `event: heartbeat`, `data: {"type":"heartbeat","workspace_id":…,"timestamp":…}` без `id:`; общий с потоками run лимит 5 соединений на пользователя (6-й ⇒ `429`) и 250 на процесс; max lifetime 30 мин; `sse.connect` (resource `workspace`) агрегируется — одно событие на сессию+workspace в час.
+- **Индекс:** выборка идёт по `workspace_id` (префикс `ix_run_event_log_ws_run`) с фильтром `created_at`; отдельный индекс `(workspace_id, created_at)` — кандидат в миграцию при росте журнала (без новой миграции в Phase 8). Миграция 0017 добавила `ix_run_event_log_ws_created (workspace_id, created_at, event_id)`.
+- **Персональные уведомления (UI redesign B8, §13.2):** тип `notification.created` (входит в поток по умолчанию, принимается фильтром `types`) — новые строки `notifications` **текущего пользователя** (RLS; другие участники их не получают). Источники выбираются одним запросом `UNION ALL` в порядке `(created_at, event_id)`, поэтому курсор, перекрытие 60 с и окно 24 ч общие; `data` — `SseNotificationCreated` (`seq = null`, `event_id` = id уведомления, `payload` = `Notification`). Пробуждение — тот же канал `aicd:ws:<workspace_id>`: worker-outbox подаёт его после публикации outbox-события `notification.created`.
+
+### 13.2 Персональные уведомления: `/notifications` (доп., UI redesign B8, G-15; ADR-0016)
+
+Серверная история уведомлений с отметкой «прочитано» (раньше — только курсор в `localStorage` устройства). Уведомление принадлежит одному пользователю в одном workspace; видит и отмечает его только он (RLS `notifications`: `user_id = app_current_user()`).
+
+**Генерация** — только воркер: потребитель outbox `notifications.project` (очередь `notifications`, воркер orchestrator; `aicd_orchestration.notifications`) перечитывает состояние агрегата и пишет по строке на получателя + outbox `notification.created` в одной транзакции с отметкой `processed_events` (at-least-once; второй барьер — `UNIQUE (workspace_id, user_id, source_event_id, kind)`). Минимальный набор:
+
+| Событие outbox | Условие | `kind` (`severity`) | Получатели |
+|---|---|---|---|
+| `approval.requested` | approval ещё `PENDING` и не истёк | `approval.requested` (`warning`; `error` при `risk_level = critical`) | участники, которые **могут решить** его (§5.3: роль ≥ `required_role`, four-eyes — без инициатора, исключение single-member) — то же правило, что `listApprovals?decidable_by_me`; включая approvals без run (`DOCS_DOWNLOAD`, `VULN_DB_UPDATE`) |
+| `approval.decided` | `APPROVED` / `REJECTED` / `EXPIRED` | `approval.decided` (`success` / `warning`) | инициатор-пользователь (`requested_by_type = user`), если решал не он сам |
+| `run.completed` | `final_status = COMPLETED` / `FAILED` | `run.completed` (`success`) / `run.failed` (`error`) | автор run (`runs.requested_by`) |
+| `run.state_changed` | переход в `BLOCKED` (не `BLOCKED → BLOCKED`) | `run.blocked` (`warning`, `data.blocked_reason`) | автор run |
+| `directive.state_changed` | `AWAITING_CONFIRMATION` / `ACKNOWLEDGED` / `COMPLETED` / `FAILED`, `REJECTED` | `directive.awaiting_confirmation` / `.acknowledged` / `.completed` / `.failed` | автор поручения (`submitted_by`) |
+| `external_action.state_changed` | `pr_merge → CONFIRMED`; `pr_create`/`pr_merge → FAILED` | `pull_request.merged` (`success`) / `pull_request.failed` (`error`) | автор run |
+| `gate.completed` | `findings.critical > 0` | `finding.critical` (`error`, `data.critical`, `data.gate_type`) | автор run |
+
+Не уведомляют: отмена run (`CANCELLED` — инициирует сам пользователь или каскад), прочие переходы; наблюдателей run и упоминаний пользователей в v1 нет (упоминания чата адресованы ролям агентов) — расширение набора = новое значение `NotificationKind` + миграция CHECK. Персональные настройки (отключение видов) в v1 не реализованы.
+
+**Содержимое:** шаблонный `title`, `body` — редактированная (`redact_text`) однострочная выжимка ≤ 300 символов (цель run или описание запроса approval), идентификаторы для ссылок (`project_id`, `run_id`, `task_id`, `resource_type` + `resource_id`) и `data` — ≤ 12 скаляров (`action_type`, `status`, `final_status`, `blocked_reason`, `directive_type`, `critical`, `gate_type`, `external_ref`). Payload доменных событий, вывод CLI, тексты агентов и секреты не копируются. Хранение — 90 дней от создания (`retention_notifications_days`); при удалении участника его уведомления в workspace удаляются (FK `ON DELETE CASCADE`).
+
+**API** (заголовок `X-Workspace-Id`; не член ⇒ `404`):
+
+- `GET /notifications` (`notification:read`) — новые сверху, keyset `(created_at, id)` desc, `unread_only`, `kind[]` (≤ 12), `cursor`/`limit`; ответ `NotificationPage` с `unread_count`;
+- `GET /notifications/unread-count` (`notification:read`) — `{unread_count, latest_unread_at}`;
+- `POST /notifications/mark-read` (`notification:update`, `Idempotency-Key`) — ровно одно из `notification_ids` (≤ 100; чужие/несуществующие игнорируются), `up_to` (все до уведомления включительно по `(created_at, id)`; чужое/несуществующее ⇒ `404`, неотличимо), `all: true`; уже прочитанные не меняются (`read_at` — первое прочтение), «непрочитано» не поддерживается; ответ `{marked, unread_count}`; аудит `notification.marked_read` (metadata: режим и число, без id).
 
 ## 14. Санитизация вывода и artifacts
 
@@ -392,15 +507,32 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 4. Нарезка на чанки **≤ 8 KiB** (8192 байт UTF-8, по границе символа) после редактирования; `chunk_index`, `truncated`.
 5. Полный санитизированный вывод — artifact `cli_output`; сырой лог — artifact `raw_cli_log` в отдельном bucket/prefix, доступ только `artifact:download_raw` (admin/owner) и с аудитом (ТЗ §9.3 «raw logs — отдельный защищённый artifact»). Сырой лог тоже проходит шаги 3 (редактирование) — «raw» означает «без нормализации», а не «с секретами».
 
+**Реализация (v1):** шаги 1–4 — `aicd_cli_adapters.output` (`clean_text`, `LineBuffer`, `sanitize_chunks`) в адаптере CLI внутри worker-exec; чанки ≤ 4096 байт (схема SSE `cli_output.text` ≤ 4096 символов) вместо 8 KiB; шаг 3(б) не нужен — запрещённые переменные окружения не передаются процессу CLI (`profiles.FORBIDDEN_ENV`), шаг 3(в) (энтропия) не реализован; скрытые рассуждения модели (сообщения парсера с типом `reasoning`/`thinking` или флагом `hidden`) отбрасываются до санитизации и не попадают ни в события, ни в artifacts. Шаг 5: полный санитизированный вывод — artifact `cli_output` (`text/plain`, строки `[поток] текст`, в ExecutionResult — `output_excerpt`; ссылка — `artifact_id` события `cli.output` с `cli_event_type = finished`), raw log — `cli_raw_log`. Публикация — `aicd_orchestration.cli_output.CliOutputPublisher`: payload SSE `cli_output` → outbox → `run_event_log` → SSE; лимит 20 событий/с на run — token bucket в процессе воркера, избыток — одно событие с `coalesced_count`/`dropped_chunks`; `finished` не сливается с выводом. Выдержки в ленту чата (`cli_excerpt`) — EVENT_SCHEMAS §4.3.
+
 Тот же санитайзер применяется к `agent.message.summary`, `ChatItem.body`, ACP payload при отображении, `Problem.detail` и `audit_events.metadata`. Ложные срабатывания допустимы, пропуски — дефект безопасности (тест-канарейки, §18).
 
-**Скачивание artifacts** (`GET /artifacts/{artifact_id}/download`, доп.): после RBAC-проверки — `302` на подписанный URL MinIO с TTL **60 с**, `response-content-disposition=attachment`, `Cache-Control: no-store`; для file-адаптера — потоковая отдача через API. Каждое скачивание аудируется (`artifact.download`). URL подписывается для одного объекта и не раскрывает учётные данные хранилища.
+**Скачивание artifacts** (`GET /artifacts/{artifact_id}/download`, доп.): после RBAC-проверки (`cli_raw_log` — дополнительно `artifact:download_raw`) содержимое отдаётся **потоком через API** для любого адаптера хранилища: `200 application/octet-stream`, `Content-Disposition: attachment`, `Cache-Control: no-store`, проверка sha256 на лету. Редирект `302` на подписанный URL MinIO не используется: SPA читает artifacts через `fetch`, а CSP разрешает только `connect-src 'self'` (решение Phase 7, OQ-44). Чужой, истёкший или отсутствующий в хранилище artifact — `404`. Каждое скачивание аудируется (`artifact.download`).
 
 ## 15. Провайдеры CLI (ТЗ §8, ADR-0003, ADR-0010)
 
 - `GET /providers` отдаёт **только** `auth_status`, `availability`, `detected_version`, `compatibility` (по compatibility matrix), `capabilities` (результат feature detection), `last_error_category` (`cli_error_code`), время проверки и workspace-настройки. Никогда — токены, cookies, содержимое или пути credential volume, env, командные строки с аргументами.
-- `POST /providers/{id}/probe` — асинхронная перепроверка на `worker-exec` (`202`). **API не выполняет login и не принимает credentials:** авторизация CLI выполняется оператором штатной командой CLI на хосте (runbook), API лишь отражает результат (`AUTH_REQUIRED`/`EXPIRED`). Это исключает обход официальной подписочной авторизации (ТЗ §1, AC-16).
-- `PATCH /providers/{id}/settings` — **workspace-scoped** безопасные настройки (`enabled`, `max_parallel_sessions`, `default_timeout_seconds`, `allowed_roles`), хранятся в `policies` (`policy_type=provider_settings`); `additionalProperties: false` отклоняет `binary_path`, `credentials`, `env` и т.п. Глобальные свойства установки (`cli_installations`) через API не изменяются.
+- `POST /providers/{id}/probe` — асинхронная перепроверка на `worker-exec` (`202 ProbeAccepted`, `status_url` = `/api/v1/providers/{id}/probes/{probe_request_id}`). Реализация (Phase 8, OQ-45 (c)): в одной транзакции — outbox-событие `provider.probe_requested` (очередь `exec`, актор `exec.probe_provider`) и audit `provider.probe_requested` с `metadata.probe_request_id`; worker-exec вызывает `probe()` адаптера (`AICD_EXEC_ADAPTER`) на своём хосте, записывает установку и `provider_health` (`registry.record_probe`) и audit `provider.probe_completed` (`installation_id`, `error_category`) в workspace запроса. Повторная доставка — no-op (`processed_events`). Сообщение получает один воркер exec: при нескольких хостах проверяется хост, взявший сообщение (v1 — один хост исполнения, OQ-03).
+- `GET /providers/{id}/probes/{probe_request_id}` — статус запроса (`ProviderProbeStatus`), выводится из audit-записей workspace (RLS) без отдельной таблицы: `PENDING` (нет `probe_completed`), `COMPLETED` (установка записана — `installation` в виде `ProviderInstallation`), `FAILED` (установка не записана: `error_category`, например `CLI_NOT_INSTALLED`/`PROCESS_FAILED`), `EXPIRED` (нет результата дольше 15 мин — нет живого worker-exec). Запрос другого workspace/провайдера ⇒ `404`. UI опрашивает статус раз в 2 с до финального состояния и затем перечитывает `GET /providers`.
+- Probe: **API не выполняет login и не принимает credentials:** авторизация CLI выполняется оператором штатной командой CLI на хосте (runbook), API лишь отражает результат (`AUTH_REQUIRED`/`EXPIRED`). Это исключает обход официальной подписочной авторизации (ТЗ §1, AC-16).
+- `PATCH /providers/{id}/settings` — **workspace-scoped** безопасные настройки (`enabled`, `max_parallel_sessions`, `default_timeout_seconds`, `allowed_roles`), хранятся в `policies` (`policy_type=provider_settings`); `additionalProperties: false` отклоняет `binary_path`, `credentials`, `env` и т.п. Глобальные свойства установки (`cli_installations`) через API не изменяются. Реализация (Phase 8): строка `policies(workspace_id, project_id NULL, policy_type='provider_settings', name=<код провайдера>)`; строки неизменяемы — изменение = `active=false` у текущей и новая строка `version+1`; `settings_version` = `policies.version` активной строки (`0` — строки нет, значения по умолчанию: enabled, 1 сессия, 1800 с, все роли); `If-Match` обязателен (`428`/`412` с актуальным `ETag`, гонка двух изменений — `412` по уникальному индексу активной версии); merge-patch, `null` и пустое тело ⇒ `422`, повтор без отличий — no-op без новой версии; аудит `provider.settings.update` (metadata `provider`, `settings_version`, `changes[] {field, from, to}`), отказ по роли — `authz.denied`. Применение (ROUTING_POLICY §4.1a): Router исключает провайдера при `enabled=false` (`workspace_disabled`) и роли задачи вне `allowed_roles` (`role_not_allowed`), `max_parallel_sessions` ограничивает одновременные сессии провайдера в workspace вместе с лимитом установки (строже выигрывает; при достижении — WAIT), `default_timeout_seconds` — тайм-аут исполнения CLI, если у задачи нет явного (`tasks.timeout_seconds` = значение по умолчанию столбца 1800).
+
+## 15a. GitHub-интеграция (P8, SECURITY_ARCHITECTURE §10)
+
+- **Установка GitHub App.** `POST /integrations/github/installations/setup` (github:manage) выдаёт `state` (HMAC ключом инстанса; workspace, пользователь сессии, nonce, срок 10 мин) и URL установки App. Setup URL App ведёт на страницу UI, которая вызывает `POST /integrations/github/installations {installation_id, state}` (сессия + CSRF + Idempotency-Key): `state` проверяется (подпись, срок, пользователь/workspace, однократность nonce в Redis), установка читается через GitHub API (JWT App), установки с правами шире минимального набора App или с `workflows`/`administration`/`secrets`/`environments`/`actions` отклоняются (`422`, SC-GH-04); установка другого workspace — `409`. `DELETE …/installations/{id}` — статус `REVOKED`.
+- **Привязка репозитория (FR-PRJ-03).** `POST /projects/{id}/repositories` с `provider=github`: `remote_url` (`<github_web_url>/<owner>/<repo>`), `local_path` — локальная рабочая копия в allowlist-корнях (по ней работают worktrees, код не клонируется платформой), доступ установки к репозиторию проверяется installation token только на чтение.
+- **Вебхук.** `POST /integrations/github/webhook` — без сессии/CSRF; HMAC по сырому телу до разбора JSON, constant-time, два секрета при ротации; неверная подпись — `401` + строка `REJECTED`; повтор GUID — `200 {"status":"duplicate"}`; событие вне allowlist — `202 ignored`; принятое — `202 accepted` и событие outbox (обработка воркером, состояние перечитывается через API). Payload не сохраняется (только sha256). Окна по времени нет: GitHub не подписывает время отправки (SC-GH-03).
+- **PR.** `POST /runs/{id}/pull-requests` (только `COMPLETED` run, проверенный коммит задачи) → `202`; push ветки `aicd/*`, PR, ревью-комментарий с итогами gates и commit status `aicd/verification` исполняет воркер через ledger `external_actions` (ADR-0012). Изменения CI-конфигурации без APPROVED `MANUAL_REVIEW` → `403 policy_denied` + `approval_id`.
+- **Merge.** `POST /projects/{id}/pull-requests/{pr_id}/merge-request` → `202` + approval `MERGE` (admin, four-eyes) на предмет {PR, head SHA, base, метод}. После `APPROVED` воркер перечитывает PR/защиту ветки и выполняет merge с `sha = head SHA` approval только при выполненных required checks и разрешённом `mergeable_state`; обхода branch protection и admin merge нет.
+
+## 15b. Analytics и `/metrics` (P8-06/P8-07)
+
+- **`GET /analytics/summary`** (`X-Workspace-Id`, право `run:read`, `x-audit-action: none`): сводка за окно `[from, to)` (по умолчанию 30 дней, не больше 366; время только с часовым поясом, иначе `422`), фильтр `project_id` (проект другого workspace ⇒ `404`, AC-12). Все агрегаты считаются из БД в RLS-контексте workspace; межтенантной агрегации нет. Определения метрик — `packages/analytics/aicd_analytics/summary.py` (docstring) и описание операции в `openapi.yaml`; доли с нулевым знаменателем — `null` («нет данных»), не `0`; `SKIPPED` gates не входят в pass rate; токены — только `cli_reported`, иначе `null`.
+- **`GET /metrics`** — не часть REST API v1: путь вне `/api/v1`, в OpenAPI не публикуется, reverse-proxy его не проксирует (только сеть `backend`); `Authorization: Bearer <AICD_METRICS_TOKEN_FILE>`, в production без токена — `404`. Воркеры отдают `/metrics` на `AICD_METRICS_PORT` с той же политикой. Каталог метрик — `aicd_platform.metrics`, эксплуатация — `docs/runbooks/observability.md`.
 
 ## 16. Версионирование и обратная совместимость
 
@@ -424,13 +556,22 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 | `repository.attach` | repositories | `repository` |
 | `run.create`, `run.pause_requested`, `run.resume_requested`, `run.cancel_requested` | runs | `run` |
 | `chat.message.create` | chat/messages | `chat_message` |
+| `review.thread.create`, `review.thread.resolve`, `review.thread.unresolve` (metadata — якорь, `from`/`to`; без тела) | review-threads (B5) | `review_thread` |
+| `review.comment.create`, `review.comment.edit` (metadata `thread_id`, `revision`; без тела) | review-threads/comments, review-comments (B5) | `review_comment` |
+| `review.submit` (metadata `verdict`, `thread_ids`, `approval_id`/`directive_id`; вложенные `approval.decide`/`directive.submit`) | `POST /runs/{id}/reviews` (B5) | `review_submission` |
 | `directive.submit`, `directive.confirm`, `directive.cancel` | directives | `user_directive` |
 | `approval.decide` | decision | `approval` |
+| `finding.transition` | findings/transitions (metadata `from`/`to`/`severity`) | `finding` |
+| `compliance.review` | compliance review (metadata `control_code`, `from`/`to`, `evidence_ids`) | `compliance_result` |
+| `project_control.approve` | controls approval (metadata `project_id`, `control_code`, `from`/`to`) | `project_control` |
 | `provider.probe_requested`, `provider.settings.update` | providers | `cli_provider` |
+| `provider.probe_completed` (actor `system`, worker-exec; metadata `probe_request_id`, `installation_id`, `error_category`) | результат probe | `cli_provider` |
+| `workspace.update` (metadata `changed`, `version`), `policy.changed` (metadata `policy`, `from`, `to`) | `PATCH /workspaces/{id}` | `workspace` |
 | `documentation_source.register`, `documentation_source.refresh_requested` | documentation | `documentation_source` |
 | `artifact.download` | artifacts | `artifact` |
 | `audit.query` | `GET /audit-events` | `audit_log` |
-| `sse.connect` (агрегировано) | events | `run` |
+| `sse.connect` (агрегировано) | events | `run`; поток workspace — `workspace` |
+| `notification.marked_read` (metadata `mode` = `ids`/`up_to`/`all`, `marked`) | `POST /notifications/mark-read` | `workspace` |
 | `authz.denied` | любой `403` на небезопасном методе | целевой ресурс |
 
 Чтения (`x-audit-action: none`) не аудируются, кроме чувствительных (artifact download, audit query). `404` на чужие ресурсы и `403` на `GET` идут в метрики безопасности (`authz_denied_total`), а не в audit, чтобы исключить флуд. Действия воркеров (FSM-переходы, запуск CLI, gates, external actions) пишут audit сами (ТЗ §23 «Аудит»), API их не дублирует.
@@ -468,13 +609,15 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 | `directive_target_type` | `run`, `role`, `task`, `approval` | `user_directives.target` |
 | `directive_impact_status` | `PENDING`, `READY`, `NOT_REQUIRED`, `FAILED` | `user_directives.impact_status` |
 | `directive_ack_status` | `PENDING`, `DELIVERED`, `ACKNOWLEDGED`, `FAILED` | `directive_acknowledgements.status` |
-| `artifact_kind` | `git_diff`, `test_report`, `scan_report`, `sbom`, `context_pack`, `cli_output`, `raw_cli_log`, `run_report`, `other` | `artifacts.kind` |
+| `artifact_kind` | `git_diff`, `test_report`, `scan_report`, `sbom`, `context_pack`, `cli_output`, `raw_cli_log`, `run_report`, `other`, `coverage_report`, `gate_log`, `applicability_report`, `signature` | `artifacts.kind` (`cli_raw_log` → `raw_cli_log`; виды без пары — `other`) |
 | `documentation_source_type` / `trust_level` / `refresh_policy` | `url`,`file`,`git` / `official`,`internal`,`community` / `manual`,`scheduled` | `documentation_sources` |
 | `project_status` | `ACTIVE`, `ARCHIVED` | `projects.status` |
 | `compatibility_status` | `SUPPORTED`, `UNTESTED`, `UNSUPPORTED` | compatibility matrix CLI |
 | `applicability_status` | `APPLICABLE`, `NOT_APPLICABLE`, `PENDING_REVIEW` | `project_controls.applicability` |
+| `control_approval_state` | `approved`, `draft`, `missing` | `ProjectControl.approval_state` (утверждено человеком / черновик системы / строки нет) |
 | `approval_policy` (run) | `risk_based`, `always`, `critical_only` | `RunCreateRequest.approval_policy` (в ТЗ §8.1 только пример `risk_based`) |
 | `routing.strategy` | `adaptive`, `fixed` | `RunCreateRequest.routing` |
+| `probe_request_status` | `PENDING`, `COMPLETED`, `FAILED`, `EXPIRED` | `ProviderProbeStatus.status` (OQ-45 (c), выводится из audit, без таблицы) |
 
 **Схема БД / решения:**
 1. `projects.version bigint` — для ETag/If-Match метаданных проекта (в ТЗ §7.2 нет).

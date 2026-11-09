@@ -19,7 +19,10 @@ export function UnauthorizedBridge() {
       setUnauthorizedHandler(() => {
         const next = current.current;
         clearSession(queryClient);
-        navigate(next.startsWith('/login') ? '/login' : `/login?next=${encodeURIComponent(next)}`, { replace: true });
+        // Уже на странице входа (поздний 401 фонового запроса оболочки: опрос CLI, поток уведомлений) —
+        // не перезаписывать адрес: `next=` первого перехода должен сохраниться.
+        if (next.startsWith('/login')) return;
+        navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true });
       }),
     [navigate, queryClient],
   );

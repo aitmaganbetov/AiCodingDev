@@ -163,7 +163,42 @@ class WorktreeManager:
         real = Path(os.path.realpath(path))
         if real.parent != self._root:
             raise WorktreeError("путь не принадлежит корню worktree")
+        _verify_gitlink(real, self._root)
         return real
+
+
+def _verify_gitlink(worktree: Path, root: Path) -> None:
+    """SC-SBX-11, TH-11: файл `.git` worktree доступен агенту на запись — подмена на `gitdir: <каталог агента>`
+    подсунула бы платформенному git (вне sandbox) конфигурацию агента (`core.*`, filter-драйверы, `info/attributes`).
+    Допустим только gitlink, созданный `git worktree add`: обычный файл, указывающий на `<common-dir>/worktrees/<id>`
+    вне корня worktrees платформы (каталоги агентов), чей `gitdir` указывает обратно на этот worktree. Несуществующий каталог/`.git` — не проверяется здесь
+    (git сам завершится ошибкой)."""
+    link = worktree / ".git"
+    if not os.path.lexists(link):
+        return
+    if link.is_symlink() or not link.is_file():
+        raise WorktreeError("gitlink worktree подменён")
+    try:
+        content = link.read_text(encoding="utf-8", errors="strict").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise WorktreeError("gitlink worktree подменён") from exc
+    if not content.startswith("gitdir: ") or "\n" in content:
+        raise WorktreeError("gitlink worktree подменён")
+    gitdir = Path(os.path.realpath(content.removeprefix("gitdir: ")))
+    common = gitdir.parent.parent
+    if (
+        gitdir.is_relative_to(root)
+        or gitdir.parent.name != "worktrees"
+        or not (common / "objects").is_dir()
+        or not (common / "HEAD").is_file()
+    ):
+        raise WorktreeError("gitlink worktree подменён")
+    try:
+        back = (gitdir / "gitdir").read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise WorktreeError("gitlink worktree подменён") from exc
+    if os.path.realpath(back) != str(link):
+        raise WorktreeError("gitlink worktree подменён")
 
 
 # --- учёт в БД (таблица worktrees; контекст workspace уже установлен) ------------------

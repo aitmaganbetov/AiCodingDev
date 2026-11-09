@@ -1,0 +1,25 @@
+# Утверждаемые исключения из метрики «coverage core ≥ 85%» (FR-QG-06, ТЗ §14; OQ-15: «исключения фиксируются в
+# coverage-exceptions.yaml с обоснованием»). Читает scripts/coverage_report.py (P9-10); отчёт показывает покрытие
+# и С исключениями, и БЕЗ них. Исключение допустимо только для кода, который по устройству исполняется вне
+# процесса тестов (в дочернем процессе / verification-контейнере как исходный текст) и проверяется тестами
+# поведения своего вызывающего кода. Статус каждого исключения — proposed до утверждения владельцем.
+
+core_packages:  # OQ-15 вариант (a) — рекомендация, используемая до решения владельца
+  - packages/orchestration
+  - packages/collaboration
+  - packages/cli_adapters
+  - packages/verification
+  - packages/security
+  - packages/identity
+
+threshold_percent: 85
+metric: line  # QUALITY_GATES §6: line coverage core; branch — отображается
+
+exceptions:
+  - path: packages/cli_adapters/aicd_cli_adapters/fake/fake_cli.py
+    status: approved  # уже в [tool.coverage.run] omit (pyproject.toml)
+    reason: >-
+      Исполняемый файл Fake CLI — запускается дочерним процессом адаптера; сценарии проверяются тестами
+      адаптера через настоящий процесс (tests/integration/test_fake_adapter.py, test_gateway.py, e2e).
+# coverage_driver.py и tools/bench_runner.py (исполняются в verification-контейнере как исходный текст) больше не
+# исключаются: их логика покрыта в процессе тестов — tests/unit/test_container_scripts.py (P9-10).

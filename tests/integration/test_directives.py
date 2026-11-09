@@ -11,14 +11,18 @@ import httpx
 import psycopg
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_orchestration import directives
 from aicd_platform.config import Settings
 from aicd_platform.db import DbContext, transaction
+from aicd_platform.ids import uuid7
+from aicd_platform.sse import OutboxRecord, envelope, project
 from tests.conftest import UserSession
 from tests.support import db as testdb
 from tests.support.contract import validate_response
+from tests.support.events import validate_sse
 from tests.support.orch_api import HookRecorder, add_task, key, make_team, orch_app, outsider, running_run
 from tests.support.orchestration import connect_admin, update
 
@@ -102,8 +106,33 @@ def body(admin: psycopg.Connection, run: uuid.UUID, dtype: str, target: dict[str
             "expected_run_version": run_version(admin, run), **extra}  # fmt: skip
 
 
+async def impact_ready_sse(engine: AsyncEngine, directive_id: str) -> dict[str, Any]:
+    """Outbox `directive.impact_ready` проецируется в валидное SSE-событие (sse-event.schema.json)."""
+    async with transaction(engine, DbContext(actor_type="system")) as conn:
+        row = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT id, created_at, workspace_id, run_id, aggregate_type, aggregate_id, event_type,"
+                        " schema_version, payload, correlation_id, causation_id FROM outbox_events"
+                        " WHERE aggregate_id = :a AND event_type = 'directive.impact_ready'"
+                    ),
+                    {"a": uuid.UUID(directive_id)},
+                )
+            )
+            .mappings()
+            .one()
+        )
+    async with transaction(engine, DbContext(workspace_id=row["workspace_id"], actor_type="system")) as conn:
+        projection = await project(conn, OutboxRecord(**dict(row)))
+    assert projection is not None and projection.event_type == "directive.impact_ready"
+    validate_sse(envelope({"event_id": uuid7(), "run_id": row["run_id"], "seq": 1, "event_type": projection.event_type,
+                           "occurred_at": row["created_at"], "payload": projection.payload}))  # fmt: skip
+    return projection.payload
+
+
 async def test_ac06_change_request_checkpoint_replan_dispatch(
-    oapp: FastAPI, app_engine: AsyncEngine, admin: psycopg.Connection, worker: HookRecorder
+    oapp: FastAPI, app_engine: AsyncEngine, worker_engine: AsyncEngine, admin: psycopg.Connection, worker: HookRecorder
 ) -> None:
     team = await make_team(oapp, app_engine, admin, ("developer",))
     run = running_run(admin, team.tenant)
@@ -125,6 +154,11 @@ async def test_ac06_change_request_checkpoint_replan_dispatch(
         (str(main), "REPLAN_REQUIRED"), (str(review), "REPLAN_REQUIRED")}  # fmt: skip
     assert view["delivery"]["state"] == "NOT_DISPATCHED" and view["completion"]["state"] == "NOT_STARTED"
     assert view["approval_id"] is None and view["message"] == msg
+    # Сводка анализа: REST (Directive.impact_summary) = событие directive.impact_ready.summary (P7 contract fix).
+    assert view["impact_summary"] and "REPLAN_REQUIRED" in view["impact_summary"] and "2" in view["impact_summary"]
+    sse_payload = await impact_ready_sse(worker_engine, did)
+    assert sse_payload["summary"] == view["impact_summary"] and sse_payload["requires_confirmation"] is True
+    assert sse_payload["approval_id"] is None and len(sse_payload["impacts"]) == 2
     chat = admin.execute(
         "SELECT m.message_kind, m.sender_type, t.scope FROM chat_messages m JOIN chat_threads t ON t.id = m.thread_id"
         " WHERE m.id = %s", (uuid.UUID(accepted["chat_message_id"]),),
@@ -220,7 +254,7 @@ async def test_running_task_gets_safe_point_not_silent_change(
 
 
 async def test_critical_directive_requires_admin_approval_with_four_eyes(
-    oapp: FastAPI, app_engine: AsyncEngine, admin: psycopg.Connection, worker: HookRecorder
+    oapp: FastAPI, app_engine: AsyncEngine, worker_engine: AsyncEngine, admin: psycopg.Connection, worker: HookRecorder
 ) -> None:
     team = await make_team(oapp, app_engine, admin, ("admin", "developer"))
     run = running_run(admin, team.tenant)
@@ -231,6 +265,8 @@ async def test_critical_directive_requires_admin_approval_with_four_eyes(
     did = r.json()["directive_id"]
     view = (await get(author, run, did)).json()
     assert view["status"] == "AWAITING_CONFIRMATION" and view["approval_id"] and view["requires_confirmation"]
+    sse_payload = await impact_ready_sse(worker_engine, did)
+    assert sse_payload["approval_id"] == view["approval_id"] and sse_payload["requires_confirmation"] is True
     r = await command(author, run, did, "confirm", (await get(author, run, did)).headers["etag"])
     assert r.status_code == 409, "критическое подтверждается только approval"
     approval_id = view["approval_id"]
@@ -341,7 +377,10 @@ async def test_stop_pending_task_removes_it_from_dag(
     r = await submit(dev, run, body(admin, run, "STOP", {"type": "task", "task_id": str(first)},
                                     requires_impact_preview=False))  # fmt: skip
     view = (await get(dev, run, r.json()["directive_id"])).json()
-    assert view["status"] == "DISPATCHED" and [i["impact_type"] for i in view["impacts"]] == ["TASK_CANCEL"]
+    # STOP — команда: задача ещё не начата и отменена сразу ⇒ цель достигнута, поручение выполнено (без ack агентов).
+    assert view["status"] == "COMPLETED" and [i["impact_type"] for i in view["impacts"]] == ["TASK_CANCEL"]
+    assert view["delivery"] == {"state": "ACKNOWLEDGED", "acknowledgements": []}
+    assert view["completion"]["state"] == "COMPLETED"
     assert view["impacts"][0]["resolution"] == "APPLIED" and cancelled == []
     rows: dict[uuid.UUID, str] = dict(
         admin.execute("SELECT id, status FROM tasks WHERE id = ANY(%s)", ([first, second],)).fetchall()

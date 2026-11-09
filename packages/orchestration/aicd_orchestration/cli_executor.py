@@ -24,6 +24,7 @@ from typing import Any, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from aicd_cli_adapters import registry
 from aicd_cli_adapters.gateway import ExecutionGateway
 from aicd_cli_adapters.models import ExecutionRequest
 from aicd_cli_adapters.subprocess_adapter import SubprocessCLIAdapter
@@ -31,11 +32,13 @@ from aicd_code_intelligence.context.retrieval import ContextPack, RetrievalReque
 from aicd_code_intelligence.context.snapshot import DEFAULT_ENSURE_TIMEOUT_SECONDS, ensure_snapshot
 from aicd_code_intelligence.context.store import StoredPack, record_retrieval, store_context_pack
 from aicd_collaboration.acp import AcpBroker
-from aicd_orchestration import agent_io
+from aicd_orchestration import agent_io, directives
 from aicd_orchestration import worktrees as wt
 from aicd_orchestration.agent_io import AgentContext, AgentIoSummary, InboxMessage
 from aicd_orchestration.agents.prompt import AssembledPrompt
+from aicd_orchestration.cli_output import CliOutputContext, CliOutputPublisher
 from aicd_orchestration.engine import TaskExecution
+from aicd_platform import metrics as prom
 from aicd_platform.artifacts import ArtifactStore
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
@@ -136,8 +139,13 @@ class CliTaskExecutor:
                 )
             ).one()
             inbox = await agent_io.load_inbox(conn, run_id=run["id"], task_id=task["id"], role=role)
+            # Поручения, доставляемые этой попыткой (ack DELIVERED на старте): раздел directives с directive_id.
+            directive_context = await directives.prompt_fragments(conn, task["id"])
         pack = await self._context_pack(task=task, run=run, project_id=repo_row.project_id, inbox=inbox)
-        context = agent_io.pack_fragments(pack.fragments, base_commit=run["base_commit_sha"]) if pack else []
+        context = [
+            *directive_context,
+            *(agent_io.pack_fragments(pack.fragments, base_commit=run["base_commit_sha"]) if pack else []),
+        ]
         # Промпт собирается до worktree: ошибка сборки (недопустимые поля задачи) не оставляет мусора.
         prompt = agent_io.assemble_prompt(task, run, inbox, context)
         template_ref = str(prompt.manifest["instruction_template_version"])
@@ -175,6 +183,14 @@ class CliTaskExecutor:
             stored_pack, pack_metrics = await self._store_pack(
                 conn, pack, task=task, run=run, attempt_id=attempt_id, prompt=prompt, prompt_artifact=stored_prompt
             )
+            # default_timeout_seconds провайдера в workspace — если у задачи нет явного тайм-аута (§15).
+            ws_settings = (await registry.workspace_settings_by_code(conn)).get(
+                provider
+            ) or registry.default_workspace_settings()
+            raw_timeout = task["timeout_seconds"]
+            timeout_seconds = registry.effective_timeout(
+                None if raw_timeout is None else int(raw_timeout), int(ws_settings["default_timeout_seconds"])
+            )
         permissions = agent_io.role_permissions(role)
         request = ExecutionRequest.model_validate(
             {
@@ -204,7 +220,7 @@ class CliTaskExecutor:
                     "instruction_template_version": template_ref,
                 },
                 "limits": {
-                    "timeout_seconds": max(30, min(task["timeout_seconds"], 14400)),
+                    "timeout_seconds": timeout_seconds,
                     "max_attempts": task["max_attempts"],
                 },
                 "permissions": {
@@ -248,8 +264,19 @@ class CliTaskExecutor:
             context_pack_id=stored_pack.context_pack_id if stored_pack else None,
             context_pack=pack_metrics,
         )
+        # Живой вывод CLI (API_DESIGN §14): санитизированные события → outbox `cli.output` (≤ 20/с на run).
+        live = CliOutputPublisher(
+            self.engine,
+            CliOutputContext(
+                workspace_id=ws, run_id=run["id"], task_id=task["id"], execution_id=request.execution_id,
+                provider=provider, agent_role=role,
+            ),
+        )  # fmt: skip
         try:
-            outcome = await self.gateway.run(request, adapter, installation_id=installation_id)
+            try:
+                outcome = await self.gateway.run(request, adapter, installation_id=installation_id, on_event=live)
+            finally:
+                await live.close()
             result = outcome.result
             # Итог агента лежит вне worktree; остатки `.aicd/`/`output/` в дереве — не изменения кода задачи.
             self.worktrees.clear_agent_io(info.path)
@@ -324,6 +351,13 @@ class CliTaskExecutor:
             reason = "no_base_commit" if not run.get("base_commit_sha") else "context_pack_unavailable"
             return None, {"context_pack_id": None, "warnings": [reason if self.context_enabled else "disabled"]}
         metrics: dict[str, Any] = {**pack.stats(), "warnings": pack.warnings, "content_hash": pack.content_hash}
+        stats = pack.stats()
+        prom.observe_context_pack(
+            size_bytes=int(stats["size_bytes"]),
+            fragments=int(stats["fragment_count"]),
+            stale=int(stats["stale_count"]),
+            snapshot_id=pack.snapshot_id,
+        )
         try:
             async with conn.begin_nested():
                 await record_retrieval(conn, pack, run_id=run["id"], task_id=task["id"], task_attempt_id=attempt_id)

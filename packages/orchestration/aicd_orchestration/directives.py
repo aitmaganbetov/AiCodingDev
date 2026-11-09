@@ -6,14 +6,44 @@ IMPACT_READY → AWAITING_CONFIRMATION | CONFIRMED) → `confirm`/`cancel` (по
 approval `CRITICAL_DIRECTIVE` → `apply` (CHECKPOINTING: checkpoint + artifact `checkpoint_state`;
 REPLANNING: новая plan_version; DISPATCHED: строки `directive_acknowledgements` PENDING).
 
-Phase 3: **DISPATCHED — конечное состояние**. Доставку агентам и подтверждение (ACP TASK_ASSIGN/QUESTION,
-`DELIVERED`/`ACKNOWLEDGED`) реализует Phase 4 (P4-04/P4-05), переход в COMPLETED — после завершения и
-верификации порождённых задач. UI различает «принято» (202), «доставлено» (DISPATCHED/ACKNOWLEDGED)
-и «выполнено» (COMPLETED) — поля `delivery` и `completion` представления (API_DESIGN §12.4).
+После DISPATCHED (строки `directive_acknowledgements` PENDING) поручение доводится до конца событийно,
+без опроса (EVENT_SCHEMAS §4 «Доставлено/Принято агентом/Выполнено», DATA_FLOW §3.4/§6, ACP §1, API_DESIGN §12.4):
+
+* **DELIVERED** (`mark_delivered`) — в транзакции перехода задачи-получателя LEASED → RUNNING (старт попытки,
+  `Orchestrator.execute_task`): исполнение этой попытки получает поручение — текст огорожен в инструкциях
+  задачи замены/новой задачи и, с `directive_id`, в разделе `directives` Context Pack (`prompt_fragments`,
+  CLI-исполнитель). Отдельного ACP-сообщения нет (оркестратор не формирует TASK_ASSIGN), поэтому
+  `acp_message_id` остаётся NULL. Получатель уровня run (без задачи) привязывается к первой задаче своей роли
+  в run, чья попытка стартует. Попытка, начавшаяся до dispatch, поручение не получила: строка остаётся PENDING.
+* **ACKNOWLEDGED / REJECTED** (`acknowledge`) — итог агента (`.aicd/result.json`) разобран и принят
+  (не OUTPUT_PARSE_ERROR/POLICY_DENIED) для попытки, которой поручение доставлено: `directive_acks[].status`
+  `accepted`/`not_applicable` → ACKNOWLEDGED, `cannot_comply` → REJECTED. Если агент поручение в итоге
+  не упомянул, принятый итог попытки, исполнявшей задачу с поручением, считается неявным `accepted`
+  (выбранное простейшее правило: явный ack авторитетен, но его отсутствие не «вешает» поручение).
+* **Статус поручения** (`reconcile_run`, вызывается в транзакции `tick` — после любого перехода задач/run
+  и в `on_run_paused_or_cancelled`) выводится только из состояния БД, поэтому повторная обработка событий
+  (at-least-once) идемпотентна; строки поручений берутся `FOR UPDATE SKIP LOCKED` (занятую строку доведёт
+  следующий tick, порождённый тем же событием). Рабочее множество поручения — задачи-получатели и их
+  производные по `origin_task_id` (замены следующих поручений, fix-задачи ревью) без вытесненных
+  (superseded или CANCELLED с применённым REPLAN_REQUIRED/TASK_CANCEL). Правила по порядку:
+  REJECTED-ack → FAILED; run CANCELLED → FAILED; задача рабочего множества FAILED/CANCELLED → FAILED;
+  ack EXPIRED → FAILED; все ack ACKNOWLEDGED → ACKNOWLEDGED; затем все задачи множества SUCCEEDED
+  (т.е. прошли обязательные gates — состояние верификации задачи, gates не перезапускаются) → COMPLETED;
+  иначе run завершён → FAILED; получатели есть, но живых задач не осталось → FAILED. При FAILED открытые
+  ack (PENDING/DELIVERED) → EXPIRED. Открытый ack задачи, вытесненной заменой, переносится на замену
+  (снова PENDING); задачи, завершившейся без доставки/подтверждения, — EXPIRED.
+* **STOP** — команда, а не работа агентов: ack-строк нет; COMPLETED, когда run CANCELLED (цель run) или все
+  задачи с TASK_CANCEL отменены (цель task), «доставлено/подтверждено» — как у PAUSE (`command_applied`).
+
+Каждое изменение ack — outbox `directive.ack_changed` (SSE `directive.state_changed` с `recipients`),
+каждый переход — `directive.state_changed`. UI различает «принято» (202), «доставлено/подтверждено»
+(`delivery`) и «выполнено» (`completion`) — API_DESIGN §12.4.
 
 Работающий CLI-процесс никогда не модифицируется незаметно (ТЗ §8.2): текст поручения не попадает в
-stdin; для затронутых RUNNING задач запрашивается safe point через хук `cancel_task(task_id, reason)`,
-а изменения вносятся новыми задачами новой plan_version. Текст поручения — недоверенные данные:
+stdin; для затронутых RUNNING задач запрашивается safe point: применённое влияние REPLAN_REQUIRED/TASK_CANCEL
+— флаг в БД, который наблюдает исполнитель задачи в своём процессе (`execution_cancel_reason`,
+`Orchestrator._watch_cancel`); хук `cancel_task(task_id, reason)` — ускорение для того же процесса.
+Изменения вносятся новыми задачами новой plan_version. Текст поручения — недоверенные данные:
 в инструкции задач он вставляется только внутри ограждения `fence_untrusted`.
 
 Права (API_DESIGN §5.2/§5.4): тип поручения — `can_submit_directive`; confirm/cancel — автор
@@ -35,6 +65,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from aicd_collaboration import chat
 from aicd_identity.rbac import Role, can_submit_directive
 from aicd_orchestration import checkpoints, fsm, runs, store
+from aicd_orchestration.agents.prompt import UntrustedFragment
 from aicd_orchestration.agents.prompt import fence_untrusted as fence_untrusted  # реэкспорт (P3-13 API)
 from aicd_orchestration.approvals import Approvals
 from aicd_platform import audit, outbox
@@ -191,6 +222,107 @@ def completion_state(status: str) -> str:
     return "NOT_STARTED"
 
 
+LIVE: Final = ("DISPATCHED", "ACKNOWLEDGED")  # поручение отправлено, ещё не завершено
+OPEN_ACK: Final = frozenset({"PENDING", "DELIVERED"})
+# directive_acks[].status итога агента (agent-result.schema.json) → directive_acknowledgements.status.
+AGENT_ACK_STATUS: Final = {"accepted": "ACKNOWLEDGED", "not_applicable": "ACKNOWLEDGED", "cannot_comply": "REJECTED"}
+DISRUPTIVE_APPLIED: Final = ("REPLAN_REQUIRED", "TASK_CANCEL", "RESTART_REQUIRED")
+
+
+def agent_ack_status(explicit: str | None) -> str:
+    """Статус ack по итогу агента; отсутствие записи о поручении в принятом итоге — неявный `accepted`."""
+    return AGENT_ACK_STATUS.get(explicit or "accepted", "ACKNOWLEDGED")
+
+
+def execution_cancel_reason(run_status: str, task_status: str, directive_applied: bool) -> str | None:
+    """Причина остановки исполняющейся попытки (наблюдает исполнитель, DATA_FLOW §6.2); None — продолжать."""
+    if run_status == "PAUSED":
+        return "pause"
+    if run_status == "CANCELLED":
+        return "run_cancel"
+    if directive_applied:
+        return "directive"
+    if task_status == "CANCELLED":
+        return "user"
+    return None
+
+
+@dataclass(frozen=True)
+class Progress:
+    """Решение по отправленному поручению: переходы (по порядку) либо FAILED с сообщением."""
+
+    targets: tuple[str, ...] = ()
+    reason: str | None = None
+    failure: str | None = None
+
+
+def progress(
+    status: str,
+    run_status: str,
+    acks: Sequence[tuple[str, str]],
+    work: Sequence[tuple[str, str]],
+    *,
+    recipients_bound: bool,
+) -> Progress:
+    """Чистое правило продвижения DISPATCHED/ACKNOWLEDGED (см. docstring модуля).
+
+    `acks` — (роль, статус ack); `work` — (task_key, статус) живых задач рабочего множества.
+    """
+    for role, st in acks:
+        if st == "REJECTED":
+            return Progress(failure=f"агент {role} отказался выполнить поручение (cannot_comply)")
+    if run_status == "CANCELLED":
+        return Progress(failure="run отменён до выполнения поручения")
+    for key_, st in work:
+        if st in ("FAILED", "CANCELLED"):
+            return Progress(failure=f"задача {key_} завершилась со статусом {st}")
+    for role, st in acks:
+        if st == "EXPIRED":
+            return Progress(failure=f"получатель {role} не получил или не подтвердил поручение")
+    acked = bool(acks) and all(st == "ACKNOWLEDGED" for _, st in acks)
+    done = bool(work) and all(st == "SUCCEEDED" for _, st in work)
+    targets: list[str] = []
+    if status == "DISPATCHED" and acked:
+        targets.append("ACKNOWLEDGED")
+    if acked and done:
+        targets.append("COMPLETED")
+    if targets:
+        return Progress(tuple(targets), reason="tasks_verified" if done else "agents_acknowledged")
+    if run_status in fsm.TERMINAL["run"]:
+        return Progress(failure=f"run завершён ({run_status}) до выполнения поручения")
+    if recipients_bound and not work:
+        return Progress(failure="задачи поручения отменены")
+    return Progress()
+
+
+_IMPACT_LABELS: Final = {
+    "NONE": "без влияния",
+    "CONTEXT_ONLY": "только контекст",
+    "TASK_ADD": "новая задача",
+    "REPLAN_REQUIRED": "перепланирование",
+    "TASK_CANCEL": "отмена задачи",
+    "RESTART_REQUIRED": "перезапуск задачи",
+}
+
+
+def impact_summary(directive_type: str, impact_status: str | None, impact_types: Sequence[str]) -> str | None:
+    """Сводка анализа влияния (событие `directive.impact_ready.summary` и `Directive.impact_summary`).
+
+    Детерминированно выводится из сохранённых данных: тип поручения, агрегат `user_directives.impact_status`
+    и влияния анализа (`directive_impacts` без строк TASK_ADD, которые добавляет перепланирование после
+    подтверждения). Поэтому REST и событие совпадают и не требуют отдельного хранения. None — анализа не было.
+    """
+    if impact_status is None:
+        return None
+    analysed = [i for i in impact_types if i != "TASK_ADD"]
+    head = f"{directive_type}: итоговое влияние — {_IMPACT_LABELS.get(impact_status, impact_status)} ({impact_status})."
+    if not analysed:
+        return head + " Текущие задачи не затронуты."
+    counts = {i: analysed.count(i) for i in IMPACT_ORDER if i in analysed}
+    parts = ", ".join(f"{_IMPACT_LABELS.get(i, i)} — {n}" for i, n in reversed(counts.items()))
+    return head + f" Затронуто задач: {len(analysed)} ({parts})."
+
+
 def impact_status_view(status: str, impact_status: str | None) -> str:
     """DirectiveImpactStatus контракта: PENDING | READY | NOT_REQUIRED | FAILED."""
     if status in ("RECEIVED", "IMPACT_ANALYSIS_PENDING"):
@@ -254,14 +386,389 @@ async def _transition(
         run_id=d["run_id"],
         payload={
             "directive_id": str(d["id"]),
+            "directive_type": d["directive_type"],
+            # from/to — для обработчиков воркера; from_status/to_status — форма SSE (sse-event.schema.json).
             "from": d["status"],
             "to": target,
+            "from_status": d["status"],
+            "to_status": target,
             "version": d["version"] + 1,
             "reason": reason,
         },
     )
     updated = {**d, **cols, "status": target, "version": d["version"] + 1}
     return updated
+
+
+async def _emit_ack(
+    conn: AsyncConnection,
+    ack: dict[str, Any],
+    status: str,
+    *,
+    execution_id: uuid.UUID | None = None,
+) -> None:
+    """Outbox `directive.ack_changed` (EVENT_SCHEMAS §2): SSE `directive.state_changed` с полем `recipients`.
+
+    `ack` — строка ack + `workspace_id`, `run_id`, `directive_type`, `directive_status` поручения.
+    """
+    await outbox.emit(
+        conn,
+        event_type="directive.ack_changed",
+        aggregate_type="directive",
+        aggregate_id=ack["directive_id"],
+        workspace_id=ack["workspace_id"],
+        run_id=ack["run_id"],
+        payload={
+            "directive_id": str(ack["directive_id"]),
+            "directive_type": ack["directive_type"],
+            "status": ack["directive_status"],
+            "recipient_role": ack["recipient_role"],
+            "recipient_task_id": str(ack["recipient_task_id"]) if ack["recipient_task_id"] else None,
+            "ack_status": status,
+            "execution_id": str(execution_id) if execution_id else None,
+            "at": utcnow().isoformat(),
+        },
+    )
+
+
+_ACK_RETURNING = (
+    " RETURNING a.id, a.directive_id, a.recipient_role, a.recipient_task_id, d.workspace_id, d.run_id,"
+    " d.directive_type, d.status AS directive_status"
+)
+# Задача вытеснена из плана: superseded либо отменена на safe point по применённому влиянию поручения
+# (finalize_superseded пометит её на ближайшем tick) — её работу продолжает замена.
+_SUPERSEDED_SQL = (
+    "(t.superseded_at IS NOT NULL OR (t.status = 'CANCELLED' AND EXISTS (SELECT 1 FROM directive_impacts i"
+    " WHERE i.task_id = t.id AND i.impact_type IN ('REPLAN_REQUIRED','TASK_CANCEL','RESTART_REQUIRED')"
+    " AND i.resolution = 'APPLIED')))"
+)
+
+
+async def mark_delivered(conn: AsyncConnection, task_id: uuid.UUID) -> int:
+    """Старт попытки задачи-получателя: PENDING → DELIVERED (+ привязка получателя уровня run). Идемпотентно."""
+    task = (
+        (await conn.execute(text("SELECT run_id, agent_role FROM tasks WHERE id = :t"), {"t": task_id}))
+        .mappings()
+        .first()
+    )
+    if task is None:
+        return 0
+    rows = [
+        dict(r)
+        for r in (
+            await conn.execute(
+                text(
+                    "UPDATE directive_acknowledgements a SET status = 'DELIVERED', delivered_at = now()"  # noqa: S608 — только константы модуля
+                    " FROM user_directives d WHERE d.id = a.directive_id AND a.recipient_task_id = :t"
+                    " AND a.status = 'PENDING' AND d.status IN ('DISPATCHED','ACKNOWLEDGED')" + _ACK_RETURNING
+                ),
+                {"t": task_id},
+            )
+        )
+        .mappings()
+        .all()
+    ]
+    rows += [
+        dict(r)
+        for r in (
+            await conn.execute(
+                text(
+                    "UPDATE directive_acknowledgements a SET recipient_task_id = :t, status = 'DELIVERED',"  # noqa: S608 — только константы модуля
+                    " delivered_at = now() FROM user_directives d WHERE d.id = a.directive_id AND d.run_id = :r"
+                    " AND d.status IN ('DISPATCHED','ACKNOWLEDGED') AND a.recipient_task_id IS NULL"
+                    " AND a.recipient_role = :role AND a.status = 'PENDING' AND NOT EXISTS (SELECT 1"
+                    "  FROM directive_acknowledgements x WHERE x.directive_id = a.directive_id"
+                    "  AND x.recipient_role = a.recipient_role AND x.recipient_task_id = :t)" + _ACK_RETURNING
+                ),
+                {"t": task_id, "r": task["run_id"], "role": task["agent_role"]},
+            )
+        )
+        .mappings()
+        .all()
+    ]
+    for row in rows:
+        await _emit_ack(conn, row, "DELIVERED")
+    return len(rows)
+
+
+@dataclass(frozen=True)
+class AgentAck:
+    directive_id: str
+    status: str
+    note: str | None = None
+
+
+async def acknowledge(
+    conn: AsyncConnection,
+    task_id: uuid.UUID,
+    agent_acks: Sequence[AgentAck] | Sequence[Any],
+    *,
+    execution_id: uuid.UUID | None = None,
+) -> int:
+    """Принятый итог попытки: DELIVERED → ACKNOWLEDGED | REJECTED по `directive_acks` (неявно — accepted).
+
+    Подтверждаются только доставленные этой задаче поручения (попытка, начатая до dispatch, их не видела).
+    """
+    explicit: dict[str, str] = {}
+    for ack in agent_acks:
+        try:
+            explicit[str(uuid.UUID(str(ack.directive_id)))] = str(ack.status)
+        except ValueError:
+            continue
+    rows = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT a.id, a.directive_id FROM directive_acknowledgements a JOIN user_directives d"
+                    " ON d.id = a.directive_id WHERE a.recipient_task_id = :t AND a.status = 'DELIVERED'"
+                    " AND d.status IN ('DISPATCHED','ACKNOWLEDGED') ORDER BY a.created_at, a.id FOR UPDATE OF a"
+                ),
+                {"t": task_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    changed = 0
+    for row in rows:
+        status = agent_ack_status(explicit.get(str(row["directive_id"])))
+        updated = (
+            (
+                await conn.execute(
+                    text(
+                        "UPDATE directive_acknowledgements a SET status = :s,"  # noqa: S608 — только константы модуля
+                        " acknowledged_at = CASE WHEN :s = 'ACKNOWLEDGED' THEN now() END"
+                        " FROM user_directives d WHERE d.id = a.directive_id AND a.id = :id"
+                        " AND a.status = 'DELIVERED'" + _ACK_RETURNING
+                    ),
+                    {"s": status, "id": row["id"]},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if updated is not None:
+            await _emit_ack(conn, dict(updated), status, execution_id=execution_id)
+            changed += 1
+    return changed
+
+
+async def prompt_fragments(conn: AsyncConnection, task_id: uuid.UUID) -> list[UntrustedFragment]:
+    """Раздел `directives` Context Pack (AGENT_ROLES §1.1): поручения, адресованные задаче, с `directive_id`
+    для `directive_acks` итога. Текст — недоверенные данные (огораживается при сборке промпта)."""
+    rows = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT d.id, d.directive_type, d.created_at, m.body FROM directive_acknowledgements a"
+                    " JOIN user_directives d ON d.id = a.directive_id"
+                    " JOIN chat_messages m ON m.workspace_id = d.workspace_id AND m.id = d.chat_message_id"
+                    " WHERE a.recipient_task_id = :t AND a.status IN ('PENDING','DELIVERED','ACKNOWLEDGED')"
+                    " AND d.status IN ('DISPATCHED','ACKNOWLEDGED') ORDER BY d.created_at, d.id"
+                ),
+                {"t": task_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        UntrustedFragment(
+            kind="directives",
+            content=json.dumps(
+                {
+                    "directive_id": str(r["id"]),
+                    "directive_type": r["directive_type"],
+                    "created_at": r["created_at"].isoformat(),
+                    "message": r["body"],
+                },
+                ensure_ascii=False,
+            ),
+            ref=f"directive:{r['id']}",
+            rank=int(r["created_at"].timestamp()),
+        )
+        for r in rows
+    ]
+
+
+async def task_cancel_reason(conn: AsyncConnection, task_id: uuid.UUID) -> str | None:
+    """Флаг остановки исполняющейся попытки по состоянию БД (межпроцессный safe point, DATA_FLOW §6.2)."""
+    row = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT r.status AS run_status, t.status AS task_status, EXISTS (SELECT 1 FROM directive_impacts i"
+                    "  WHERE i.task_id = t.id AND i.impact_type IN ('REPLAN_REQUIRED','TASK_CANCEL','RESTART_REQUIRED')"
+                    "  AND i.resolution = 'APPLIED') AS applied FROM tasks t JOIN runs r ON r.id = t.run_id"
+                    " WHERE t.id = :t"
+                ),
+                {"t": task_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    return execution_cancel_reason(row["run_status"], row["task_status"], bool(row["applied"]))
+
+
+async def reconcile_run(conn: AsyncConnection, run_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Продвигает отправленные поручения run по состоянию задач/run/ack (идемпотентно, без ожиданий блокировок)."""
+    ids = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT id FROM user_directives WHERE run_id = :r AND status IN ('DISPATCHED','ACKNOWLEDGED')"
+                    " ORDER BY created_at, id FOR UPDATE SKIP LOCKED"
+                ),
+                {"r": run_id},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    changed: list[dict[str, Any]] = []
+    for directive_id in ids:
+        d = await _load(conn, directive_id)
+        if d is None:  # pragma: no cover — строка заблокирована выше
+            continue
+        after = await _reconcile(conn, d)
+        if after["status"] != d["status"]:
+            changed.append(after)
+    return changed
+
+
+async def _acks(conn: AsyncConnection, directive_id: uuid.UUID) -> list[dict[str, Any]]:
+    rows = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT a.id, a.directive_id, a.recipient_role, a.recipient_task_id, a.status, d.workspace_id,"  # noqa: S608 — только константы модуля
+                    " d.run_id, d.directive_type, d.status AS directive_status, t.status AS task_status,"
+                    " t.task_key, COALESCE(" + _SUPERSEDED_SQL + ", false) AS superseded"
+                    " FROM directive_acknowledgements a JOIN user_directives d ON d.id = a.directive_id"
+                    " LEFT JOIN tasks t ON t.id = a.recipient_task_id WHERE a.directive_id = :d"
+                    " ORDER BY a.created_at, a.id FOR UPDATE OF a"
+                ),
+                {"d": directive_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(r) for r in rows]
+
+
+async def _set_ack(conn: AsyncConnection, ack: dict[str, Any], status: str, **cols: Any) -> None:
+    sets = "".join(f", {k} = :{k}" for k in cols)  # ключи — только константы этого модуля
+    await conn.execute(
+        text(f"UPDATE directive_acknowledgements SET status = :s{sets} WHERE id = :id"),  # noqa: S608
+        {"s": status, "id": ack["id"], **cols},
+    )
+    await _emit_ack(conn, {**ack, **cols}, status)
+
+
+async def _rebind_or_expire(conn: AsyncConnection, acks: list[dict[str, Any]]) -> None:
+    """Открытые ack: задача вытеснена → на её замену (PENDING); задача завершилась без ack → EXPIRED."""
+    for ack in acks:
+        if ack["status"] not in OPEN_ACK or ack["recipient_task_id"] is None:
+            continue
+        if ack["superseded"]:
+            replacement = (
+                await conn.execute(
+                    text(
+                        "SELECT t.id FROM tasks t WHERE t.origin_task_id = :t AND t.agent_role = :role"
+                        " AND t.superseded_at IS NULL AND t.status <> 'CANCELLED' AND NOT EXISTS (SELECT 1"
+                        "  FROM directive_acknowledgements x WHERE x.directive_id = :d AND x.recipient_role = :role"
+                        "  AND x.recipient_task_id = t.id) ORDER BY t.created_at DESC, t.id DESC LIMIT 1"
+                    ),
+                    {"t": ack["recipient_task_id"], "role": ack["recipient_role"], "d": ack["directive_id"]},
+                )
+            ).scalar_one_or_none()
+            if replacement is not None:
+                await _set_ack(conn, ack, "PENDING", recipient_task_id=replacement, delivered_at=None)
+                ack.update(status="PENDING", recipient_task_id=replacement, superseded=False, task_status=None)
+                continue
+            await _set_ack(conn, ack, "EXPIRED")
+            ack["status"] = "EXPIRED"
+        elif ack["task_status"] in fsm.TERMINAL["task"]:
+            await _set_ack(conn, ack, "EXPIRED")
+            ack["status"] = "EXPIRED"
+
+
+async def _work(conn: AsyncConnection, task_ids: list[uuid.UUID]) -> list[tuple[str, str]]:
+    """Живые задачи рабочего множества: получатели и их производные по origin_task_id, без вытесненных."""
+    if not task_ids:
+        return []
+    rows = (
+        await conn.execute(
+            text(
+                "WITH RECURSIVE w(id) AS (SELECT id FROM tasks WHERE id = ANY(:ids)"  # noqa: S608 — только константы модуля
+                " UNION SELECT c.id FROM tasks c JOIN w ON c.origin_task_id = w.id)"
+                " SELECT t.task_key, t.status FROM tasks t JOIN w ON w.id = t.id"
+                " WHERE NOT " + _SUPERSEDED_SQL + " ORDER BY t.created_at, t.id"
+            ),
+            {"ids": task_ids},
+        )
+    ).all()
+    return [(str(k), str(s)) for k, s in rows]
+
+
+async def _stop_progress(conn: AsyncConnection, d: dict[str, Any], run_status: str) -> Progress:
+    """STOP — команда: COMPLETED, когда цель остановлена (EVENT_SCHEMAS §4: run достиг целевого статуса)."""
+    if d["target_type"] == "run":
+        if run_status == "CANCELLED":
+            return Progress(("ACKNOWLEDGED", "COMPLETED"), reason="command_applied")
+        if run_status in fsm.TERMINAL["run"]:
+            return Progress(failure=f"run завершился ({run_status}) до остановки")
+        return Progress()
+    statuses = (
+        await conn.execute(
+            text(
+                "SELECT t.task_key, t.status FROM directive_impacts i JOIN tasks t ON t.id = i.task_id"
+                " WHERE i.directive_id = :d AND i.impact_type = 'TASK_CANCEL' ORDER BY t.created_at, t.id"
+            ),
+            {"d": d["id"]},
+        )
+    ).all()
+    for key_, st in statuses:
+        if st in ("SUCCEEDED", "FAILED"):
+            return Progress(failure=f"задача {key_} завершилась ({st}) до остановки")
+    if all(st == "CANCELLED" for _, st in statuses):
+        return Progress(("ACKNOWLEDGED", "COMPLETED"), reason="command_applied")
+    if run_status in fsm.TERMINAL["run"]:
+        return Progress(failure=f"run завершён ({run_status}) до остановки задачи")
+    return Progress()
+
+
+async def _reconcile(conn: AsyncConnection, d: dict[str, Any]) -> dict[str, Any]:
+    if d["status"] not in LIVE:
+        return d
+    run_status = (await conn.execute(text("SELECT status FROM runs WHERE id = :r"), {"r": d["run_id"]})).scalar_one()
+    acks = await _acks(conn, d["id"])
+    if d["directive_type"] == "STOP":
+        decision = await _stop_progress(conn, d, run_status)
+    else:
+        await _rebind_or_expire(conn, acks)
+        recipients = [a["recipient_task_id"] for a in acks if a["recipient_task_id"] is not None]
+        decision = progress(
+            d["status"],
+            run_status,
+            [(a["recipient_role"], a["status"]) for a in acks],
+            await _work(conn, recipients),
+            recipients_bound=bool(recipients),
+        )
+    if decision.failure is not None:
+        for ack in acks:
+            if ack["status"] in OPEN_ACK:
+                await _set_ack(conn, ack, "EXPIRED")
+        return await _transition(conn, d, "FAILED", failure_message=decision.failure[:4000], reason="not_completed")
+    for target in decision.targets:
+        if d["status"] == target:
+            continue
+        d = await _transition(conn, d, target, reason=decision.reason)
+    return d
 
 
 async def _active_tasks(conn: AsyncConnection, run_id: uuid.UUID) -> list[TaskInfo]:
@@ -568,20 +1075,9 @@ class Directives:
             )
         aggregate = aggregate_impact(d["directive_type"], impacts)
         d = await _transition(conn, d, "IMPACT_READY", impact_status=aggregate)
-        await outbox.emit(
-            conn,
-            event_type="directive.impact_ready",
-            aggregate_type="directive",
-            aggregate_id=directive_id,
-            workspace_id=d["workspace_id"],
-            run_id=d["run_id"],
-            payload={
-                "directive_id": str(directive_id),
-                "impact_status": aggregate,
-                "impacts": [{"task_id": str(t), "impact_type": i} for t, i in impacts],
-            },
-        )
-        if is_critical(impacts, tasks):
+        approval_id: uuid.UUID | None = None
+        critical = is_critical(impacts, tasks)
+        if critical:
             risk = max(
                 (by_id[t].risk_level for t, _ in impacts),
                 key=["low", "medium", "high", "critical"].index,
@@ -606,6 +1102,25 @@ class Directives:
                 requested_by_type="user",
                 requested_by=d["submitted_by"],
             )
+        # Форма SSE directive_impact_ready (sse-event.schema.json): событие после решения о подтверждении,
+        # чтобы requires_confirmation/approval_id были известны.
+        await outbox.emit(
+            conn,
+            event_type="directive.impact_ready",
+            aggregate_type="directive",
+            aggregate_id=directive_id,
+            workspace_id=d["workspace_id"],
+            run_id=d["run_id"],
+            payload={
+                "directive_id": str(directive_id),
+                "summary": impact_summary(d["directive_type"], aggregate, [i for _, i in impacts]),
+                "impacts": [{"task_id": str(t), "impact_type": i} for t, i in impacts],
+                "requires_confirmation": bool(critical or d["requires_impact_preview"]),
+                "approval_id": str(approval_id) if approval_id else None,
+                "expected_run_version": max(int(d["expected_run_version"] or 0), 0),
+            },
+        )
+        if approval_id is not None:
             return await _transition(conn, d, "AWAITING_CONFIRMATION", approval_id=approval_id, reason="critical")
         if d["requires_impact_preview"]:
             return await _transition(conn, d, "AWAITING_CONFIRMATION", reason="impact_preview")
@@ -738,14 +1253,15 @@ class Directives:
             await self._resolve_impacts(conn, directive_id)
             d = await _transition(conn, d, "DISPATCHED", checkpoint_id=checkpoint_id, reason="run_cancel_requested")
             await self._acknowledgements(conn, d, impacts, [])
-            return ApplyResult(d, cancel_ids)
+            return ApplyResult(await _reconcile(conn, d), cancel_ids)
 
         d = await _transition(conn, d, "REPLANNING", checkpoint_id=checkpoint_id)
         plan_version, new_tasks, cancel_ids = await self._replan(conn, d, run, impacts)
         await self._resolve_impacts(conn, directive_id)
         d = await _transition(conn, d, "DISPATCHED", resulting_plan_version=plan_version, reason="replanned")
         await self._acknowledgements(conn, d, impacts, new_tasks)
-        return ApplyResult(d, cancel_ids)
+        # STOP задачи, ещё не начатой, выполнен сразу; прочие поручения ждут доставки (no-op).
+        return ApplyResult(await _reconcile(conn, d), cancel_ids)
 
     async def _impacts(self, conn: AsyncConnection, directive_id: uuid.UUID) -> list[dict[str, Any]]:
         rows = (
@@ -802,34 +1318,8 @@ class Directives:
             if task["status"] in fsm.TERMINAL["task"] or imp["impact_type"] not in ("REPLAN_REQUIRED", "TASK_CANCEL"):
                 continue
             if imp["impact_type"] == "REPLAN_REQUIRED":
-                new_id = uuid7()
                 instructions = (task["instructions"] + "\n\n" + fence)[-MAX_INSTRUCTIONS:]
-                await conn.execute(
-                    text(
-                        "INSERT INTO tasks (id, workspace_id, run_id, plan_version, task_key, origin_task_id,"
-                        " agent_role, title, instructions, complexity, risk_level, acceptance_criteria, max_attempts,"
-                        " timeout_seconds, retry_budget_seconds, max_review_loops) VALUES (:id, :ws, :run, :pv, :key,"
-                        " :origin, :role, :title, :instr, :cx, :risk, CAST(:ac AS jsonb), :ma, :to, :rb, :mrl)"
-                    ),
-                    {
-                        "id": new_id,
-                        "ws": task["workspace_id"],
-                        "run": run.id,
-                        "pv": pv,
-                        "key": task["task_key"],
-                        "origin": task["id"],
-                        "role": task["agent_role"],
-                        "title": task["title"],
-                        "instr": instructions,
-                        "cx": task["complexity"],
-                        "risk": task["risk_level"],
-                        "ac": json.dumps(task["acceptance_criteria"], ensure_ascii=False),
-                        "ma": task["max_attempts"],
-                        "to": task["timeout_seconds"],
-                        "rb": task["retry_budget_seconds"],
-                        "mrl": task["max_review_loops"],
-                    },
-                )
+                new_id = await _copy_task(conn, task, plan_version=pv, instructions=instructions)
                 replacements[task["id"]] = new_id
                 new_tasks.append({"id": new_id, "agent_role": task["agent_role"], "replaces": task["id"]})
             if task["status"] in NOT_STARTED:
@@ -843,6 +1333,7 @@ class Directives:
                 await conn.execute(
                     text("DELETE FROM task_dependencies WHERE depends_on_task_id = :t"), {"t": task["id"]}
                 )
+        cascaded = await self._replace_dependents(conn, d, pv, replacements, now)
         for old, new in replacements.items():
             deps = (
                 (
@@ -861,13 +1352,6 @@ class Directives:
                     ),
                     {"ws": d["workspace_id"], "run": run.id, "t": new, "dep": replacements.get(dep, dep)},
                 )
-            await conn.execute(
-                text(
-                    "UPDATE task_dependencies SET depends_on_task_id = :new WHERE depends_on_task_id = :old"
-                    " AND NOT (task_id = ANY(:replaced))"
-                ),
-                {"new": new, "old": old, "replaced": list(replacements)},
-            )
         if d["impact_status"] == "TASK_ADD" and not replacements:
             new_id = uuid7()
             role = d["target_role"] or "developer"
@@ -904,19 +1388,16 @@ class Directives:
                 },
             )
             new_tasks.append({"id": new_id, "agent_role": role, "replaces": None})
-        for t in new_tasks:
+        for t in [*new_tasks, *cascaded]:
+            details = {"replaces": str(t["replaces"]) if t["replaces"] else None, "plan_version": pv}
+            if t.get("dependency"):
+                details["reason"] = "dependent_of_replaced"
             await conn.execute(
                 text(
                     "INSERT INTO directive_impacts (workspace_id, run_id, directive_id, task_id, impact_type, resolution,"
                     " details, resolved_at) VALUES (:ws, :run, :d, :t, 'TASK_ADD', 'APPLIED', CAST(:det AS jsonb), now())"
                 ),
-                {
-                    "ws": d["workspace_id"],
-                    "run": run.id,
-                    "d": d["id"],
-                    "t": t["id"],
-                    "det": json.dumps({"replaces": str(t["replaces"]) if t["replaces"] else None, "plan_version": pv}),
-                },
+                {"ws": d["workspace_id"], "run": run.id, "d": d["id"], "t": t["id"], "det": json.dumps(details)},
             )
         approved = pv if current.approved_plan_version is not None else None
         await conn.execute(
@@ -976,9 +1457,56 @@ class Directives:
         )
         return pv, new_tasks, cancel_ids
 
+    async def _replace_dependents(
+        self,
+        conn: AsyncConnection,
+        d: dict[str, Any],
+        pv: int,
+        replacements: dict[uuid.UUID, uuid.UUID],
+        now: Any,
+    ) -> list[dict[str, Any]]:
+        """Не начатые задачи, (транзитивно) зависящие от заменённых, пересоздаются в новой plan_version.
+
+        Рёбра утверждённой версии плана неизменяемы (триггер БД, DATA_FLOW §4.3: replan — новая plan_version),
+        поэтому зависимая задача не может «переключиться» на замену — пересоздаётся вместе с ней (без текста
+        поручения: это не получатель, а структурная копия). Зависимые незавершённой задачи сами ещё не начаты.
+        """
+        if not replacements:
+            return []
+        rows = (
+            (
+                await conn.execute(
+                    text(
+                        "WITH RECURSIVE dep(id) AS (SELECT task_id FROM task_dependencies"
+                        "  WHERE depends_on_task_id = ANY(:ids)"
+                        " UNION SELECT x.task_id FROM task_dependencies x JOIN dep ON x.depends_on_task_id = dep.id)"
+                        " SELECT t.* FROM tasks t JOIN dep ON dep.id = t.id WHERE t.superseded_at IS NULL"
+                        " AND t.status = ANY(:not_started) AND NOT (t.id = ANY(:ids))"
+                        " ORDER BY t.created_at, t.id FOR UPDATE OF t"
+                    ),
+                    {"ids": list(replacements), "not_started": sorted(NOT_STARTED)},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        cascaded: list[dict[str, Any]] = []
+        for task in rows:
+            new_id = await _copy_task(conn, task, plan_version=pv, instructions=task["instructions"])
+            replacements[task["id"]] = new_id
+            cascaded.append(
+                {"id": new_id, "agent_role": task["agent_role"], "replaces": task["id"], "dependency": True}
+            )
+            await store.transition_task(
+                conn, task["id"], "CANCELLED", reason=f"directive:{d['id']}", extra={"superseded_at": now}
+            )
+        return cascaded
+
     async def _acknowledgements(
         self, conn: AsyncConnection, d: dict[str, Any], impacts: list[dict[str, Any]], new_tasks: list[dict[str, Any]]
     ) -> None:
+        if d["directive_type"] == "STOP":
+            return  # команда: агенты не участвуют, выполнение — по статусу цели (_stop_progress)
         replaced = {t["replaces"] for t in new_tasks if t["replaces"]}
         recipients: list[tuple[str, uuid.UUID | None]] = []
         for imp in impacts:
@@ -1048,7 +1576,7 @@ class Directives:
             (
                 await conn.execute(
                     text(
-                        "SELECT directive_id, recipient_role, recipient_task_id, status, acknowledged_at"
+                        "SELECT directive_id, recipient_role, recipient_task_id, status, delivered_at, acknowledged_at"
                         " FROM directive_acknowledgements WHERE directive_id = ANY(:ids) ORDER BY created_at, id"
                     ),
                     {"ids": ids},
@@ -1061,6 +1589,38 @@ class Directives:
             r["impacts"] = [dict(i) for i in impacts if i["directive_id"] == r["id"]]
             r["acknowledgements"] = [dict(a) for a in acks if a["directive_id"] == r["id"]]
         return rows
+
+
+async def _copy_task(conn: AsyncConnection, task: Any, *, plan_version: int, instructions: str) -> uuid.UUID:
+    """Копия задачи в новой plan_version (замена: `origin_task_id` = исходная)."""
+    new_id = uuid7()
+    await conn.execute(
+        text(
+            "INSERT INTO tasks (id, workspace_id, run_id, plan_version, task_key, origin_task_id,"
+            " agent_role, title, instructions, complexity, risk_level, acceptance_criteria, max_attempts,"
+            " timeout_seconds, retry_budget_seconds, max_review_loops) VALUES (:id, :ws, :run, :pv, :key,"
+            " :origin, :role, :title, :instr, :cx, :risk, CAST(:ac AS jsonb), :ma, :to, :rb, :mrl)"
+        ),
+        {
+            "id": new_id,
+            "ws": task["workspace_id"],
+            "run": task["run_id"],
+            "pv": plan_version,
+            "key": task["task_key"],
+            "origin": task["id"],
+            "role": task["agent_role"],
+            "title": task["title"],
+            "instr": instructions,
+            "cx": task["complexity"],
+            "risk": task["risk_level"],
+            "ac": json.dumps(task["acceptance_criteria"], ensure_ascii=False),
+            "ma": task["max_attempts"],
+            "to": task["timeout_seconds"],
+            "rb": task["retry_budget_seconds"],
+            "mrl": task["max_review_loops"],
+        },
+    )
+    return new_id
 
 
 async def _project_of(conn: AsyncConnection, run_id: uuid.UUID) -> uuid.UUID:

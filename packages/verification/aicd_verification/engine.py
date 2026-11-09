@@ -16,6 +16,14 @@
 
 PASS — только exit code 0, согласованный с отчётом, и VERIFIED evidence (триггер БД это дублирует).
 `passed` = все обязательные gates PASS/NOT_APPLICABLE и хотя бы один PASS.
+
+Phase 6 (P6-02…P6-08): набор gates — реестр провайдеров (`registry.GATE_SPECS`); план задачи —
+`profiles.plan_gates` (профиль run × строки `quality_gates` × применимость по commit и
+`project_technologies`); обязательность — эффективная по плану (advisory gates не блокируют).
+Вердикт gate — `GateSpec.evaluate` с нормализованными findings, которые в той же транзакции
+сохраняются в `findings` (upsert по отпечатку; исчезнувшие на новом commit → VERIFIED_FIXED с
+evidence повторного прогона), `test_results` и `evidence_links` (produced_by/verifies/supports).
+Деструктивная миграция: PASS только при APPROVED approval DESTRUCTIVE_MIGRATION (порт `approvals`).
 """
 
 from __future__ import annotations
@@ -27,16 +35,17 @@ import json
 import logging
 import os
 import platform
+import re
 import shlex
 import shutil
 import tempfile
 import time
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -50,22 +59,26 @@ from aicd_platform.redaction import redact_text
 from aicd_security.docker_runner import DockerError, DockerSandboxRunner
 from aicd_security.git import GitRepositoryError, run_git
 from aicd_security.sandbox import ContainerSpec, Mount, ResourceLimits, SandboxProcess, SandboxRunner
+from aicd_verification.findings import Finding, dedupe, severity_counts
 from aicd_verification.gates import (
     CONTAINER_INPUT_DIR,
     CONTAINER_WORKDIR,
-    GATE_SPECS,
     Applicability,
     ErrorCode,
     GateContext,
     GateSpec,
     RepoFacts,
+    StackInfo,
     Verdict,
     changed_python_files,
     collect_repo_facts,
-    detect_applicability,
-    finding_counts,
     write_scope_input,
 )
+from aicd_verification.images import image_key_for
+from aicd_verification.migrations import APPROVAL_ACTION, ApprovalsPort, approval_state
+from aicd_verification.profiles import GateRow, plan_gates, tool_missing_effect
+from aicd_verification.registry import GATE_SPECS, detect_all
+from aicd_verification.security_gates import SECURITY_GATES
 
 log = logging.getLogger("aicd.verification")
 
@@ -74,6 +87,36 @@ PROBE_TIMEOUT_SECONDS = 60
 TERMINAL = frozenset({"PASS", "FAIL", "ERROR", "SKIPPED", "NOT_APPLICABLE"})
 REUSABLE = frozenset({"PASS", "FAIL", "NOT_APPLICABLE"})  # детерминированный результат на том же SHA
 OK_FOR_COMPLETION = frozenset({"PASS", "NOT_APPLICABLE"})
+# Коды, допустимые CHECK gate_executions.error_code (0008); остальные — только в error_message.
+# Коды ошибок gate = CHECK ck_gate_executions_error_code (0008); единый источник — gates.ErrorCode.
+DB_ERROR_CODES = frozenset(get_args(ErrorCode))
+MAX_FINDINGS_PER_GATE = 500
+# Переменные, которые задаёт сам движок (изоляция процесса gate): декларации gate их не переопределяют.
+RESERVED_GATE_ENV = frozenset(
+    {"CI", "TZ", "LANG", "HOME", "PATH", "PYTHONDONTWRITEBYTECODE", "LD_PRELOAD", "LD_LIBRARY_PATH"}
+)
+_GATE_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+_SECRET_LIKE = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PRIVATE", re.I)
+
+
+class GateEnvError(ValueError):
+    """Недопустимая декларация окружения gate (ошибка кода платформы, не данных пользователя)."""
+
+
+def declared_gate_env(spec: GateSpec) -> dict[str, str]:
+    """Окружение, объявленное определением gate (флаги офлайн-режима инструмента: без проверки версий, телеметрии).
+
+    Источник — только статические декларации платформы (`SecurityGateDef.env`); окружение хоста не передаётся.
+    Имена — `[A-Z][A-Z0-9_]*`, без зарезервированных движком и без похожих на секреты; значения — короткие литералы.
+    """
+    security = SECURITY_GATES.get(spec.name)
+    declared = dict(security.env) if security is not None else {}
+    for name, value in declared.items():
+        if not _GATE_ENV_NAME.match(name) or name in RESERVED_GATE_ENV or _SECRET_LIKE.search(name):
+            raise GateEnvError(f"gate {spec.name}: недопустимая переменная окружения {name!r}")
+        if not isinstance(value, str) or len(value) > 256 or "\n" in value or "\x00" in value:
+            raise GateEnvError(f"gate {spec.name}: недопустимое значение переменной {name}")
+    return declared
 
 
 @dataclass(frozen=True)
@@ -112,6 +155,7 @@ class _GateRun:
     status: str | None = None
     reused: bool = False
     detail: str = ""
+    config: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -127,6 +171,8 @@ class _TaskContext:
     dirty: bool = False
     facts: RepoFacts | None = None
     base_sha: str | None = None
+    profile: str = "strict"
+    stack: StackInfo = field(default_factory=StackInfo)
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -147,6 +193,7 @@ class VerificationEngine:
         timeout_cap_seconds: int | None = None,
         max_output_bytes: int = 8 * 1024 * 1024,
         limits: ResourceLimits | None = None,
+        approvals: ApprovalsPort | None = None,
     ) -> None:
         self._engine = engine
         self._store = store
@@ -160,6 +207,7 @@ class VerificationEngine:
         self._timeout_cap = timeout_cap_seconds
         self._max_output = max_output_bytes
         self._limits = limits or ResourceLimits(cpus=2.0, memory_mb=2048, pids=256, timeout_seconds=600)
+        self._approvals = approvals
 
     @staticmethod
     def _ctx(ws: uuid.UUID) -> DbContext:
@@ -197,10 +245,24 @@ class VerificationEngine:
                 (
                     await conn.execute(
                         text(
-                            "SELECT id, name, gate_type, required, timeout_seconds FROM quality_gates"
+                            "SELECT id, name, gate_type, required, timeout_seconds, config FROM quality_gates"
                             " WHERE profile_id = :p ORDER BY name"
                         ),
                         {"p": run["quality_profile_id"]},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            technologies = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT t.ecosystem, t.name FROM project_technologies pt"
+                            " JOIN technology_versions tv ON tv.id = pt.technology_version_id"
+                            " JOIN technologies t ON t.id = tv.technology_id WHERE pt.project_id = :p"
+                        ),
+                        {"p": run["project_id"]},
                     )
                 )
                 .mappings()
@@ -218,20 +280,40 @@ class VerificationEngine:
             commit_sha.lower(),
             Path(str(worktree_path)),
             base_sha=run["base_commit_sha"],
+            profile=quality_profile,
+            stack=StackInfo.from_rows(technologies),
         )
         await asyncio.to_thread(self._prepare, task)
-        applicability = detect_applicability(task.facts) if task.facts is not None else {}
+        applicability = detect_all(task.facts, task.stack) if task.facts is not None else {}
+        plan = plan_gates(
+            quality_profile,
+            [
+                GateRow(
+                    r["id"],
+                    r["name"],
+                    r["gate_type"],
+                    bool(r["required"]),
+                    int(r["timeout_seconds"]),
+                    dict(r["config"] or {}),
+                )
+                for r in rows
+            ],
+            applicability,
+            known_gates=GATE_SPECS,
+        )
         gates = [
             _GateRun(
-                r["id"],
-                r["name"],
-                r["gate_type"],
-                True if r["gate_type"] == "SCOPE" else bool(r["required"]),
-                self._timeout(int(r["timeout_seconds"])),
-                GATE_SPECS.get(r["name"]),
-                applicability.get(r["name"]),
+                p.row.gate_id,
+                p.row.name,
+                p.row.gate_type,
+                p.required,
+                self._timeout(p.row.timeout_seconds),
+                GATE_SPECS.get(p.row.name),
+                # План (а не сырой детектор): «-» профиля и неприменимость дают NOT_APPLICABLE с причиной.
+                Applicability(p.disposition == "run", p.reason, p.markers),
+                config=p.row.config,
             )
-            for r in rows
+            for p in plan.gates
         ]
         try:
             for gate in gates:
@@ -283,7 +365,7 @@ class VerificationEngine:
                 (
                     await conn.execute(
                         text(
-                            "SELECT id, status, commit_sha FROM gate_executions WHERE run_id = :r AND task_id = :t"
+                            "SELECT id, status, commit_sha, error_message FROM gate_executions WHERE run_id = :r AND task_id = :t"
                             " AND gate_id = :g AND superseded_at IS NULL FOR UPDATE"
                         ),
                         {"r": task.run_id, "t": task.task_id, "g": gate.gate_id},
@@ -293,7 +375,8 @@ class VerificationEngine:
                 .first()
             )
             if current is not None:
-                if current["commit_sha"] == task.commit_sha and current["status"] in REUSABLE:
+                awaiting_approval = str(current["error_message"] or "").startswith("APPROVAL_REQUIRED")
+                if current["commit_sha"] == task.commit_sha and current["status"] in REUSABLE and not awaiting_approval:
                     gate.execution_id, gate.status, gate.reused = current["id"], current["status"], True
                     return
                 if current["status"] in TERMINAL:
@@ -352,17 +435,21 @@ class VerificationEngine:
         error: str | None = None,
         reason: str | None = None,
         evidence: dict[str, Any] | None = None,
-        findings: dict[str, int] | None = None,
+        verdict: Verdict | None = None,
         duration_ms: int = 0,
     ) -> None:
         assert gate.execution_id is not None  # noqa: S101 — инвариант: строка создана _open_execution
         evidence_id: uuid.UUID | None = None
+        # Находки сохраняются только для разобранного результата процесса (PASS/FAIL): вывод упавшего
+        # инструмента (ERROR) не является надёжным отчётом.
+        findings = dedupe(verdict.findings)[:MAX_FINDINGS_PER_GATE] if verdict and status in ("PASS", "FAIL") else []
+        code = error.split(":", 1)[0].strip() if error and ":" in error else None
         async with transaction(self._engine, self._ctx(task.workspace_id)) as conn:
             if evidence is not None:
                 evidence_id = await self._insert_evidence(conn, task, evidence)
             await conn.execute(
                 text(
-                    "UPDATE gate_executions SET status = :s, evidence_id = :e, error_message = :err,"
+                    "UPDATE gate_executions SET status = :s, evidence_id = :e, error_message = :err, error_code = :code,"
                     " not_applicable_reason = :na, started_at = coalesce(started_at, now()), finished_at = now()"
                     " WHERE id = :id"
                 ),
@@ -370,10 +457,17 @@ class VerificationEngine:
                     "s": status,
                     "e": evidence_id,
                     "err": error[:4000] if error else None,
+                    "code": code if code in DB_ERROR_CODES and status in ("ERROR", "FAIL") else None,
                     "na": reason[:2000] if reason else None,
                     "id": gate.execution_id,
                 },
             )
+            if evidence_id is not None and evidence is not None:
+                await self._link(conn, task, evidence_id, "gate_execution", gate.execution_id, "produced_by")
+                await self._link(conn, task, evidence_id, "task", task.task_id, "verifies")
+                if verdict is not None and status in ("PASS", "FAIL"):
+                    await self._insert_test_results(conn, task, gate, verdict, evidence, duration_ms)
+                    await self._persist_findings(conn, task, gate, findings, evidence_id)
             await outbox.emit(
                 conn,
                 event_type="gate.completed",
@@ -389,13 +483,137 @@ class VerificationEngine:
                     "required": gate.required,
                     "commit_sha": task.commit_sha,
                     "evidence_id": str(evidence_id) if evidence_id else None,
-                    "findings": findings or {"info": 0, "low": 0, "medium": 0, "high": 0, "critical": 0},
+                    "findings": severity_counts(findings),
                     "duration_ms": max(0, duration_ms),
                     "tool": (gate.spec.tool if gate.spec else gate.name)[:100],
                 },
             )
         gate.status = status
         gate.detail = error or reason or ""
+
+    @staticmethod
+    async def _link(
+        conn: AsyncConnection,
+        task: _TaskContext,
+        evidence_id: uuid.UUID,
+        target_type: str,
+        target_id: uuid.UUID,
+        relation: str,
+    ) -> None:
+        await conn.execute(
+            text(
+                "INSERT INTO evidence_links (id, workspace_id, evidence_id, target_type, target_id, relation)"
+                " VALUES (:id, :ws, :e, :tt, :tid, :rel) ON CONFLICT ON CONSTRAINT uq_evidence_links DO NOTHING"
+            ),
+            {
+                "id": uuid7(),
+                "ws": task.workspace_id,
+                "e": evidence_id,
+                "tt": target_type,
+                "tid": target_id,
+                "rel": relation,
+            },
+        )
+
+    @staticmethod
+    async def _insert_test_results(
+        conn: AsyncConnection,
+        task: _TaskContext,
+        gate: _GateRun,
+        verdict: Verdict,
+        evidence: dict[str, Any],
+        duration_ms: int,
+    ) -> None:
+        if verdict.tests is None and verdict.coverage_percent is None:
+            return
+        tests = verdict.tests or {}
+        await conn.execute(
+            text(
+                "INSERT INTO test_results (id, workspace_id, gate_execution_id, suite, passed, failed, skipped, errors,"
+                " duration_ms, coverage_percent, report_artifact_id)"
+                " VALUES (:id, :ws, :g, :suite, :p, :f, :s, :e, :d, :cov, :a)"
+            ),
+            {
+                "id": uuid7(),
+                "ws": task.workspace_id,
+                "g": gate.execution_id,
+                "suite": gate.name[:500],
+                "p": max(0, int(tests.get("passed", 0))),
+                "f": max(0, int(tests.get("failed", 0))),
+                "s": max(0, int(tests.get("skipped", 0))),
+                "e": max(0, int(tests.get("errors", 0))),
+                "d": max(0, duration_ms),
+                "cov": verdict.coverage_percent,
+                "a": evidence["artifact_id"],
+            },
+        )
+
+    async def _persist_findings(
+        self,
+        conn: AsyncConnection,
+        task: _TaskContext,
+        gate: _GateRun,
+        findings: list[Finding],
+        evidence_id: uuid.UUID,
+    ) -> None:
+        """Upsert по (run, fingerprint): повтор находки на новом commit переоткрывает FIXED/VERIFIED_FIXED;
+        решения человека (FALSE_POSITIVE/ACCEPTED_RISK) сохраняются. Находки этого gate задачи, которых
+        нет в новом результате, закрываются VERIFIED_FIXED со ссылкой на evidence повторного прогона."""
+        fingerprints: list[str] = []
+        for f in findings:
+            finding_id = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO findings (id, workspace_id, run_id, task_id, source, source_gate_id,"
+                        " gate_execution_id, severity, rule_id, cwe_id, title, file_path, line, status, fingerprint,"
+                        " evidence_id) VALUES (:id, :ws, :r, :t, 'gate', :g, :ge, :sev, :rule, :cwe, :title, :path,"
+                        " :line, 'OPEN', :fp, :ev)"
+                        " ON CONFLICT ON CONSTRAINT uq_findings_run_fingerprint DO UPDATE SET"
+                        " task_id = EXCLUDED.task_id, source_gate_id = EXCLUDED.source_gate_id,"
+                        " gate_execution_id = EXCLUDED.gate_execution_id, severity = EXCLUDED.severity,"
+                        " title = EXCLUDED.title, line = EXCLUDED.line, evidence_id = EXCLUDED.evidence_id,"
+                        " fixed_in_commit_sha = CASE WHEN findings.status IN ('FIXED','VERIFIED_FIXED') THEN NULL"
+                        "   ELSE findings.fixed_in_commit_sha END,"
+                        " status = CASE WHEN findings.status IN ('FIXED','VERIFIED_FIXED') THEN 'OPEN'"
+                        "   ELSE findings.status END"
+                        " WHERE findings.source = 'gate' RETURNING id"
+                    ),
+                    {
+                        "id": uuid7(),
+                        "ws": task.workspace_id,
+                        "r": task.run_id,
+                        "t": task.task_id,
+                        "g": gate.gate_id,
+                        "ge": gate.execution_id,
+                        "sev": f.severity,
+                        "rule": f.rule_id,
+                        "cwe": f.cwe_id,
+                        "title": f.title,
+                        "path": f.file_path,
+                        "line": f.line,
+                        "fp": f.fingerprint,
+                        "ev": evidence_id,
+                    },
+                )
+            ).scalar_one_or_none()
+            fingerprints.append(f.fingerprint)
+            if finding_id is not None:
+                await self._link(conn, task, evidence_id, "finding", finding_id, "supports")
+        await conn.execute(
+            text(
+                "UPDATE findings SET status = 'VERIFIED_FIXED', evidence_id = :ev, fixed_in_commit_sha = :sha"
+                " WHERE run_id = :r AND task_id = :t AND source = 'gate' AND source_gate_id = :g"
+                " AND status IN ('OPEN','ACKNOWLEDGED','FIXED') AND NOT (fingerprint = ANY(:fps))"
+            ),
+            {
+                "ev": evidence_id,
+                "sha": task.commit_sha,
+                "r": task.run_id,
+                "t": task.task_id,
+                "g": gate.gate_id,
+                "fps": fingerprints,
+            },
+        )
 
     async def _insert_evidence(self, conn: AsyncConnection, task: _TaskContext, ev: dict[str, Any]) -> uuid.UUID:
         await conn.execute(
@@ -487,15 +705,35 @@ class VerificationEngine:
 
         async with self._semaphore:
             await self._set_running(task, gate)
-            ctx = self._gate_context(task)
-            probe = await self._execute(task, spec, spec.probe_argv, PROBE_TIMEOUT_SECONDS, gate)
+            ctx = self._gate_context(task, gate)
+            security = SECURITY_GATES.get(spec.name)
+            if security is not None:
+                if security.db is not None:
+                    # Офлайн-БД уязвимостей подключается отдельным утверждённым и аудируемым шагом обновления;
+                    # пока она не смонтирована, gate не может дать честный вердикт (ERROR ≠ PASS).
+                    await self._finish(
+                        task,
+                        gate,
+                        status="ERROR",
+                        error=f"TOOL_UNAVAILABLE: offline {security.db} vulnerability DB is not configured",
+                    )
+                    return
+                if task.staging is not None:  # файлы платформы (правила/конфиги) для /aicd-input (ro)
+                    for name, content in security.input_files(ctx).items():
+                        target = task.staging / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(content)
+                        target.chmod(0o644)
+            probe = await self._execute(task, spec, spec.probe(ctx), PROBE_TIMEOUT_SECONDS, gate)
             if probe.exit_code != 0 or probe.timed_out:
+                effect = tool_missing_effect(task.profile, gate.gate_type)
                 await self._finish(
                     task,
                     gate,
                     status="ERROR",
                     error=f"TOOL_UNAVAILABLE: '{spec.tool}' is not available in the verification "
-                    f"environment ({probe.start_error or f'probe exit {probe.exit_code}'})",
+                    f"environment ({probe.start_error or f'probe exit {probe.exit_code}'});"
+                    f" profile {task.profile}: {effect}",
                 )
                 return
             tool_version = redact_text(
@@ -522,9 +760,14 @@ class VerificationEngine:
         elif result.exit_code < 0:
             verdict = Verdict("ERROR", "INFRA", f"gate process killed by signal {-result.exit_code}")
         else:
-            verdict = spec.interpret(result.exit_code, stdout)
+            try:
+                verdict = spec.run_evaluate(result.exit_code, stdout, ctx)
+            except Exception as exc:  # noqa: BLE001 — сбой разбора отчёта ≠ PASS
+                verdict = Verdict("ERROR", "REPORT_UNPARSABLE", f"report interpretation failed: {type(exc).__name__}")
         if result.truncated and verdict.status == "PASS":
             verdict = Verdict("ERROR", "REPORT_UNPARSABLE", "gate output exceeded the capture limit")
+        if verdict.approval is not None and verdict.status == "PASS":
+            verdict = await self._approval_verdict(task, gate, verdict)
 
         display = shlex.join(spec.display_argv(ctx))
         environment = self._environment(spec, tool_version, result)
@@ -541,20 +784,71 @@ class VerificationEngine:
             status=status,
             error=error if status in ("ERROR", "FAIL") else None,
             evidence=stored,
-            findings=finding_counts(gate.name, status, stdout),
+            verdict=verdict,
             duration_ms=duration_ms,
         )
 
-    def _gate_context(self, task: _TaskContext) -> GateContext:
+    async def _approval_verdict(self, task: _TaskContext, gate: _GateRun, verdict: Verdict) -> Verdict:
+        """PASS gate с предметом approval (деструктивная миграция) — только при APPROVED решении."""
+        assert verdict.approval is not None  # noqa: S101 — вызывается только с предметом
+        subject = {**verdict.approval, "project_id": str(task.project_id)}
+        async with transaction(self._engine, self._ctx(task.workspace_id)) as conn:
+            state = await approval_state(conn, project_id=task.project_id, action_type=APPROVAL_ACTION, subject=subject)
+            if state.status == "APPROVED":
+                accepted = tuple(
+                    replace(f, severity="info", title=f"approved ({state.approval_id}): {f.title}"[:1000])
+                    if f.rule_id.startswith("migration/destructive-")
+                    else f
+                    for f in verdict.findings
+                )
+                return replace(verdict, findings=accepted, message=f"{verdict.message}; destructive changes approved")
+            if state.status == "REJECTED":
+                return replace(verdict, status="FAIL", message=f"{APPROVAL_ACTION} was rejected ({state.approval_id})")
+            if self._approvals is None:
+                return replace(
+                    verdict,
+                    status="FAIL",
+                    message=f"APPROVAL_REQUIRED: {APPROVAL_ACTION} needed, approvals port is not configured",
+                )
+            approval_id = state.approval_id
+            if state.status != "PENDING":
+                approval_id = await self._approvals.request(
+                    conn,
+                    workspace_id=task.workspace_id,
+                    project_id=task.project_id,
+                    run_id=task.run_id,
+                    task_id=task.task_id,
+                    action_type=APPROVAL_ACTION,
+                    risk_level="high",
+                    subject=subject,
+                    requested_by_type="system",
+                )
+        return replace(
+            verdict, status="FAIL", message=f"APPROVAL_REQUIRED: {APPROVAL_ACTION} pending (approval {approval_id})"
+        )
+
+    def _gate_context(self, task: _TaskContext, gate: _GateRun | None = None) -> GateContext:
         changed = changed_python_files(task.facts) if task.facts is not None else ()
+        changed_all = task.facts.changed_paths if task.facts is not None else ()
+        common: dict[str, Any] = {
+            "profile": task.profile,
+            "config": dict(gate.config) if gate is not None else {},
+            "facts": task.facts,
+            "changed_files": changed_all,
+            "nonce": uuid.uuid4().hex,
+        }
         if self._is_docker:
-            return GateContext(CONTAINER_WORKDIR, CONTAINER_INPUT_DIR, changed)
-        return GateContext(str(task.worktree), str(task.staging or task.worktree), changed)
+            return GateContext(CONTAINER_WORKDIR, CONTAINER_INPUT_DIR, changed, **common)
+        return GateContext(str(task.worktree), str(task.staging or task.worktree), changed, **common)
+
+    def _image_for(self, spec: GateSpec) -> str:
+        """Образ gate: явное переопределение по имени gate → по ключу инструмента → образ по умолчанию."""
+        return self._images.get(spec.name) or self._images.get(image_key_for(spec.tool, spec.image_key)) or self._image
 
     def _spec_for(
         self, task: _TaskContext, spec: GateSpec, argv: Sequence[str], limit_seconds: int, gate: _GateRun
     ) -> ContainerSpec:
-        image = self._images.get(spec.name, self._image)
+        image = self._image_for(spec)
         labels = {
             "aicd.execution_id": f"verify-{gate.execution_id}",
             "aicd.kind": "verification",
@@ -569,7 +863,7 @@ class VerificationEngine:
         )
         if self._is_docker:
             mounts = [Mount(task.worktree, CONTAINER_WORKDIR, read_only=True)]
-            if spec.needs_scope_input and task.staging is not None:
+            if (spec.needs_scope_input or spec.needs_input_dir) and task.staging is not None:
                 mounts.append(Mount(task.staging, CONTAINER_INPUT_DIR, read_only=True))
             env = {
                 "CI": "true",
@@ -580,7 +874,9 @@ class VerificationEngine:
                 "RUFF_CACHE_DIR": "/tmp/ruff-cache",  # noqa: S108 — tmpfs
                 "npm_config_cache": "/tmp/npm-cache",  # noqa: S108 — tmpfs контейнера
                 "npm_config_update_notifier": "false",
+                **declared_gate_env(spec),  # офлайн-флаги инструмента (semgrep без проверки версии и т. п.)
             }
+            spec_kwargs: dict[str, Any] = {"user": spec.container_user} if spec.container_user else {}
             return ContainerSpec(
                 image=image,
                 argv=tuple(argv),
@@ -590,6 +886,7 @@ class VerificationEngine:
                 limits=limits,
                 network="none",
                 labels=labels,
+                **spec_kwargs,
             )
         home = task.extra.setdefault("home", tempfile.mkdtemp(prefix="aicd-verify-home-", dir=self._staging_root))
         env = {
@@ -599,6 +896,7 @@ class VerificationEngine:
             "HOME": home,
             "PYTHONDONTWRITEBYTECODE": "1",
             "npm_config_update_notifier": "false",
+            **declared_gate_env(spec),
             **self._local_env,
         }
         return ContainerSpec(
@@ -676,7 +974,7 @@ class VerificationEngine:
         if self._is_docker:
             env.update(
                 {
-                    "image": self._images.get(spec.name, self._image),
+                    "image": self._image_for(spec),
                     "image_id": result.image_id,
                     "network": "none",
                     "workdir": CONTAINER_WORKDIR,

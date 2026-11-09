@@ -126,3 +126,54 @@ def view(row: dict[str, Any]) -> dict[str, Any]:
         "detected_from": row["detected_from"],
         "confirmed_by": {"id": confirmed, "display_name": row.get("confirmed_by_name") or ""} if confirmed else None,
     }
+
+
+async def list_workspace_technologies(
+    conn: AsyncConnection,
+    *,
+    after: tuple[str, str, uuid.UUID] | None,
+    query: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Версии технологий workspace текущего RLS-контекста (OQ-45 (c)): определённые в проектах и указанные в
+    источниках документации. Глобальный каталог других workspace не раскрывается — выборка только из T-таблиц.
+
+    Упорядочено по (ecosystem, name, technology_version_id) — стабильный курсор.
+    """
+    clauses = ["true"]
+    params: dict[str, Any] = {"lim": limit}
+    if after:
+        clauses.append("(t.ecosystem, t.name, tv.id) > (:e, :n, :v)")
+        params.update(e=after[0], n=after[1], v=after[2])
+    if query:
+        clauses.append("t.name ILIKE :q ESCAPE '\\'")
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params["q"] = f"%{escaped}%"
+    sql = (
+        "WITH used AS ("  # noqa: S608 — условия из фиксированных фрагментов, значения — параметры
+        "  SELECT technology_version_id AS v, count(DISTINCT project_id) AS projects, 0 AS sources"
+        "  FROM project_technologies WHERE workspace_id = app_current_workspace() GROUP BY technology_version_id"
+        "  UNION ALL"
+        "  SELECT technology_version_id, 0, count(*) FROM documentation_sources"
+        "  WHERE workspace_id = app_current_workspace() AND technology_version_id IS NOT NULL"
+        "  GROUP BY technology_version_id"
+        "), agg AS (SELECT v, sum(projects)::int AS project_count, sum(sources)::int AS source_count FROM used GROUP BY v)"
+        " SELECT t.id AS technology_id, t.name, t.ecosystem, tv.id AS technology_version_id, tv.version_label,"
+        " tv.support_status, agg.project_count, agg.source_count"
+        " FROM agg JOIN technology_versions tv ON tv.id = agg.v JOIN technologies t ON t.id = tv.technology_id"
+        " WHERE " + " AND ".join(clauses) + " ORDER BY t.ecosystem, t.name, tv.id LIMIT :lim"
+    )
+    return [dict(r) for r in (await conn.execute(text(sql), params)).mappings().all()]
+
+
+def workspace_view(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "technology_id": row["technology_id"],
+        "name": row["name"],
+        "ecosystem": row["ecosystem"],
+        "technology_version_id": row["technology_version_id"],
+        "version_label": row["version_label"],
+        "support_status": row["support_status"],
+        "project_count": int(row["project_count"] or 0),
+        "source_count": int(row["source_count"] or 0),
+    }

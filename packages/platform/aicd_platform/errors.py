@@ -14,6 +14,8 @@ PROBLEM_TITLES: dict[str, tuple[int, str]] = {
     "forbidden": (403, "Недостаточно прав"),
     "four_eyes_violation": (403, "Требуется решение другого пользователя"),
     "policy_denied": (403, "Запрещено политикой"),
+    "step_up_required": (403, "Требуется повторный ввод пароля"),
+    "reauthentication_failed": (403, "Пароль не подтверждён"),
     "not_found": (404, "Ресурс не найден"),
     "conflict": (409, "Конфликт"),
     "version_mismatch": (409, "Версия не совпадает"),

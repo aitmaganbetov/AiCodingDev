@@ -211,6 +211,24 @@ def test_unknown_auth_allowed_after_recent_success_and_untested_by_policy() -> N
     assert router.route(req(allow_untested=True), [cand("codex", compatibility="untested")]).outcome == "SELECTED"
 
 
+def test_untested_versions_follow_policy_with_recorded_warning() -> None:
+    untested = cand("codex", compatibility="untested")
+    allowed = router.route(req(allow_untested=True), [untested])
+    assert allowed.outcome == "SELECTED" and allowed.selected == untested
+    assert allowed.breakdown["warnings"] == [router.UNTESTED_WARNING]
+    assert allowed.breakdown["allow_untested_cli_versions"] is True
+    assert allowed.breakdown["candidates"][0]["compatibility"] == "untested"
+    assert router.UNTESTED_WARNING in allowed.reason
+    # Проверенная установка выбирается без предупреждения; untested при запрете политики исключается с причиной.
+    supported = router.route(req(allow_untested=True), [cand("claude")])
+    assert "warnings" not in supported.breakdown and router.UNTESTED_WARNING not in supported.reason
+    blocked = router.route(req(profile="critical", allow_untested=False), [untested])
+    assert blocked.outcome == "BLOCKED" and blocked.breakdown["allow_untested_cli_versions"] is False
+    assert blocked.breakdown["excluded"] == [
+        {"installation_id": str(untested.installation_id), "provider": "codex", "reason": "untested_version"}
+    ]
+
+
 def test_policy_and_resume_session_filters() -> None:
     assert (
         router.route(req(allowed_providers=frozenset({"claude"})), [cand("codex")]).breakdown["excluded"][0]["reason"]
@@ -366,3 +384,57 @@ def test_diversity_for_qa_l4() -> None:
     assert d.selected is not None and d.selected.provider == "claude"
     comps = {c["provider"]: c["components"]["D"] for c in d.breakdown["candidates"]}
     assert comps == {"codex": 0.0, "claude": 1.0}
+
+
+# ------------------------------------------------------------------ настройки провайдера в workspace (§4.1a)
+def test_workspace_disabled_and_role_not_allowed_exclude_with_reason() -> None:
+    d = router.route(
+        req(role="developer"),
+        [cand("codex", workspace_enabled=False), cand("claude", allowed_roles=frozenset({"developer", "qa"}))],
+    )
+    assert d.outcome == "SELECTED" and d.selected is not None and d.selected.provider == "claude"
+    assert {e["provider"]: e["reason"] for e in d.breakdown["excluded"]} == {"codex": "workspace_disabled"}
+    d = router.route(req(role="security"), [cand("claude", allowed_roles=frozenset({"developer"}))])
+    assert d.outcome == "BLOCKED" and d.blocked_reason == "PROVIDER_UNAVAILABLE"
+    assert d.breakdown["excluded"][0]["reason"] == "role_not_allowed"
+    assert "настройкам workspace" in d.reason and "role_not_allowed" in d.reason
+
+
+def test_zero_sessions_is_a_policy_exclusion_not_a_wait() -> None:
+    d = router.route(req(), [cand("codex", workspace_max_sessions=0)])
+    assert d.outcome == "BLOCKED" and d.breakdown["excluded"][0]["reason"] == "workspace_sessions_zero"
+
+
+@pytest.mark.parametrize(
+    ("active", "max_concurrent", "ws_active", "ws_max", "outcome", "reason"),
+    [
+        (0, 2, 1, 1, "WAIT", "workspace_concurrency_full"),  # установка свободна, лимит workspace — строже
+        (2, 2, 0, 5, "WAIT", "concurrency_full"),  # лимит workspace свободен, установка — строже
+        (0, 2, 1, 2, "SELECTED", None),
+        (0, 2, 7, None, "SELECTED", None),  # без лимита workspace
+    ],
+)
+def test_stricter_of_installation_and_workspace_session_caps(
+    active: int, max_concurrent: int, ws_active: int, ws_max: int | None, outcome: str, reason: str | None
+) -> None:
+    c = cand(
+        "codex", active=active, max_concurrent=max_concurrent, workspace_active=ws_active, workspace_max_sessions=ws_max
+    )
+    d = router.route(req(), [c])
+    assert d.outcome == outcome
+    if reason:
+        assert d.breakdown["excluded"][-1]["reason"] == reason and d.selected is None
+
+
+def test_workspace_cap_falls_back_to_other_provider() -> None:
+    d = router.route(req(), [cand("codex", workspace_active=1, workspace_max_sessions=1), cand("claude")])
+    assert d.outcome == "SELECTED" and d.selected is not None and d.selected.provider == "claude"
+
+
+def test_effective_timeout_precedence() -> None:
+    from aicd_cli_adapters.registry import effective_timeout
+
+    assert effective_timeout(None, 600) == 600  # у задачи тайм-аут не задан (NULL) ⇒ настройка workspace
+    assert effective_timeout(900, 600) == 900  # явный тайм-аут задачи важнее
+    assert effective_timeout(1800, 600) == 1800  # OQ-45: явное 1800 отличимо от «не задано» (миграция 0014)
+    assert effective_timeout(20000, 600) == 14400 and effective_timeout(10, 600) == 30

@@ -12,10 +12,19 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import Response
 
-from aicd_api.deps import Access, _audit_denied, _remember_rate, app_state, authorize, current_principal
+from aicd_api.deps import (
+    Access,
+    _audit_denied,
+    _remember_rate,
+    app_state,
+    authorize,
+    current_principal,
+    require_step_up,
+)
 from aicd_api.deps import workspace_access as _workspace_access
 from aicd_api.hooks import get_hooks
 from aicd_api.idempotency import CommandResult, run_idempotent
@@ -23,8 +32,9 @@ from aicd_api.responses import etag, json_response, require_if_match
 from aicd_api.routers import op
 from aicd_api.routers.approvals import APPROVALS, DIRECTIVES
 from aicd_identity import api as identity
-from aicd_identity.rbac import can_submit_directive
+from aicd_identity.rbac import FOUR_EYES_ACTIONS, can_submit_directive
 from aicd_orchestration import directives as service
+from aicd_platform import metrics
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
@@ -71,7 +81,7 @@ class CommandBody(BaseModel):
 
 
 def _ack_status(value: str) -> str:
-    return value if value in ("PENDING", "DELIVERED", "ACKNOWLEDGED") else "FAILED"
+    return value if value in ("PENDING", "DELIVERED", "ACKNOWLEDGED", "REJECTED", "EXPIRED") else "FAILED"
 
 
 def directive_view(d: dict[str, Any]) -> dict[str, Any]:
@@ -97,12 +107,15 @@ def directive_view(d: dict[str, Any]) -> dict[str, Any]:
         "impact_status": service.impact_status_view(d["status"], d["impact_status"]),
         "impacts": [{"task_id": i["task_id"], "impact_type": i["impact_type"], "resolution": i["resolution"]}
                     for i in impacts],
+        "impact_summary": service.impact_summary(d["directive_type"], d["impact_status"],
+                                                 [i["impact_type"] for i in impacts]),
         "requires_confirmation": bool(d["requires_impact_preview"] or
                                       (d["approval_id"] is not None and d["directive_type"] not in ("APPROVE", "REJECT"))),
         "approval_id": d["approval_id"] if d["directive_type"] not in ("APPROVE", "REJECT") else None,
         "delivery": {
             "state": service.delivery_state(d["status"], [a["status"] for a in acks]),
             "acknowledgements": [{"recipient_role": a["recipient_role"], "status": _ack_status(a["status"]),
+                                  "task_id": a["recipient_task_id"], "delivered_at": a["delivered_at"],
                                   "acknowledged_at": a["acknowledged_at"]} for a in acks],
         },
         "completion": {"state": service.completion_state(d["status"]), "resulting_task_ids": resulting,
@@ -120,6 +133,7 @@ async def run_access(request: Request, principal: identity.Principal, run_id: uu
     async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
         ws = await service.resolve_run_workspace(conn, run_id)
     if ws is None:
+        metrics.AUTHZ_DENIED.labels("tenant").inc()  # 404 на чужой/несуществующий ресурс — метрика безопасности (AC-12)
         raise ProblemError("not_found")
     header = request.headers.get("x-workspace-id")
     if header is not None and header != str(ws):
@@ -151,6 +165,16 @@ async def create_directive(
     _remember_rate(
         request, await state.limiter.hit(f"directive:user:{principal.user_id}:run:{run_id}", DIRECTIVES_PER_MINUTE)
     )
+    if body.directive_type == "APPROVE" and body.target.approval_id is not None:
+        # APPROVE — тот же путь, что POST /approvals/{id}/decision: критический набор требует step-up (SC-IAM-08).
+        async with transaction(state.engine, access.db()) as conn:
+            action_type = (
+                await conn.execute(
+                    text("SELECT action_type FROM approvals WHERE id = :id"), {"id": body.target.approval_id}
+                )
+            ).scalar_one_or_none()
+        if action_type in FOUR_EYES_ACTIONS:
+            await require_step_up(request, principal, f"approval:decide:{action_type}")
     target = service.Target(body.target.type, body.target.role, body.target.task_id, body.target.approval_id)
     submitted: dict[str, Any] = {}
 

@@ -32,7 +32,7 @@ from aicd_cli_adapters.models import (
     NormalizedCliEvent,
     ProbeResult,
 )
-from aicd_cli_adapters.output import RawLog, sanitize_excerpt
+from aicd_cli_adapters.output import LineBuffer, RawLog, SanitizedTranscript, sanitize_chunks, sanitize_excerpt
 from aicd_cli_adapters.profiles import CommandProfile, ProfileError, build_argv, build_env
 from aicd_platform.clock import utcnow
 from aicd_security.sandbox import ContainerSpec, Mount, ResourceLimits, SandboxProcess, SandboxRunner
@@ -41,6 +41,9 @@ STDERR_TAIL = 64 * 1024
 PROMPT_TEXT_FILE = "prompt.md"
 # Каталоги ввода-вывода агента (AGENT_ROLES §3.4): относительно cwd CLI, физически — вне worktree.
 AGENT_IO_DIRS = (".aicd", "output")
+# Скрытые рассуждения модели (reasoning/thinking) не показываются и не сохраняются (API_DESIGN §13 п.5, ТЗ §11):
+# сообщение парсера с таким типом или флагом `hidden` отбрасывается до санитизации.
+HIDDEN_MESSAGE_TYPES = frozenset({"reasoning", "thinking", "analysis", "chain_of_thought"})
 
 
 @dataclass(frozen=True)
@@ -295,10 +298,30 @@ class SubprocessCLIAdapter:
         )
         ex.new_event.set()
 
+    def _emit_text(self, ex: _Execution, transcript: SanitizedTranscript, stream: str, text: str, *, cut: bool) -> None:
+        """Строка вывода → санитизированные чанки ≤ 4 KiB (`output`, по событию на чанк) + полный вывод."""
+        transcript.write(stream, text)
+        chunks, redactions = sanitize_chunks(text)
+        for i, chunk in enumerate(chunks):
+            last = i == len(chunks) - 1
+            self._emit(
+                ex,
+                "output",
+                {
+                    "stream": stream,
+                    "text": chunk,
+                    # редакции считаются по строке целиком — относятся к её первому чанку
+                    "redactions": redactions if i == 0 else 0,
+                    "truncated": cut and last,
+                },
+            )
+
     async def _run(self, ex: _Execution) -> None:
         req = ex.request
         limits = req.limits
         raw = RawLog(max_bytes=limits.max_output_bytes or 32 * 1024 * 1024)
+        transcript = SanitizedTranscript(max_bytes=limits.max_output_bytes or 32 * 1024 * 1024)
+        stderr_lines = LineBuffer()
         stderr_tail = bytearray()
         stdout_buf = b""
         parse_errors = 0
@@ -426,19 +449,17 @@ class SubprocessCLIAdapter:
                 except StopAsyncIteration:
                     break
                 last_activity = time.monotonic()
-                raw.write(chunk.stream, chunk.data)
+                if chunk.stream == "stderr":
+                    raw.write("stderr", chunk.data)
                 if raw.truncated and not truncated_warned:
                     truncated_warned = True
                     self._emit(ex, "warning", {"code": "OUTPUT_TRUNCATED", "message": "raw log достиг лимита"})
                 if chunk.stream == "stderr":
                     stderr_tail.extend(chunk.data)
                     del stderr_tail[:-STDERR_TAIL]
-                    text, redactions, truncated = sanitize_excerpt(chunk.data.decode(errors="replace"))
-                    self._emit(
-                        ex,
-                        "output",
-                        {"stream": "stderr", "text": text, "redactions": redactions, "truncated": truncated},
-                    )
+                    for line, cut in stderr_lines.feed(chunk.data):
+                        if line.strip():
+                            self._emit_text(ex, transcript, "stderr", line, cut=cut)
                     continue
                 stdout_buf += chunk.data
                 *lines, stdout_buf = stdout_buf.split(b"\n")
@@ -447,19 +468,22 @@ class SubprocessCLIAdapter:
                     if not line:
                         continue
                     parsed = self._parser.parse(line)
+                    # stdout в raw log — построчно; скрытые рассуждения модели не сохраняются нигде.
+                    if not (parsed.kind == "message" and _hidden(parsed.data)):
+                        raw.write_line("stdout", line)
                     if parsed.kind == "unparsed":
                         parse_errors += 1
+                        self._emit_text(ex, transcript, "stdout", line, cut=False)
                         continue
                     parsed_lines += 1
                     if parsed.kind == "message":
-                        text, redactions, truncated = sanitize_excerpt(str(parsed.data.get("text", "")))
-                        self._emit(
-                            ex,
-                            "output",
-                            {"stream": "agent_message", "text": text, "redactions": redactions, "truncated": truncated},
-                        )
+                        if _hidden(parsed.data):
+                            continue
+                        self._emit_text(ex, transcript, "agent_message", str(parsed.data.get("text", "")), cut=False)
                     elif parsed.kind == "tool":
-                        self._emit(ex, "tool_event", _tool_payload(parsed.data))
+                        tool = _tool_payload(parsed.data)
+                        transcript.write("tool", f"{tool['tool_kind']} {tool['phase']} {tool['target'] or ''}".rstrip())
+                        self._emit(ex, "tool_event", tool)
                     elif parsed.kind == "result":
                         result_line = parsed.data
             if timed_out or ex.cancel_reason:
@@ -469,12 +493,18 @@ class SubprocessCLIAdapter:
                 pending.cancel()
                 with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
                     await pending
+            for line, cut in stderr_lines.flush():
+                self._emit_text(ex, transcript, "stderr", line, cut=cut)
             if stdout_buf.strip():
-                parsed = self._parser.parse(stdout_buf.decode(errors="replace").strip())
+                tail = stdout_buf.decode(errors="replace").strip()
+                parsed = self._parser.parse(tail)
+                if not (parsed.kind == "message" and _hidden(parsed.data)):
+                    raw.write_line("stdout", tail)
                 if parsed.kind == "result":
                     result_line = parsed.data
                 elif parsed.kind == "unparsed":
                     parse_errors += 1
+                    self._emit_text(ex, transcript, "stdout", tail, cut=False)
 
             if self._cancel_requested(ex):
                 error = ("CANCELLED", f"отменено: {ex.cancel_reason}", None)
@@ -501,8 +531,9 @@ class SubprocessCLIAdapter:
                     os.chmod(f, 0o600)
                     f.unlink()
                 os.rmdir(prompt_dir)
-            ex.result = await self._finish(ex, raw, exit_code, result_line, error)
+            ex.result = await self._finish(ex, raw, exit_code, result_line, error, transcript)
             raw.close()
+            transcript.close()
             ex.done.set()
             ex.started_or_done.set()
             ex.new_event.set()
@@ -514,9 +545,22 @@ class SubprocessCLIAdapter:
         exit_code: int | None,
         result_line: dict[str, Any] | None,
         error: tuple[CliErrorCode, str, int | None] | None,
+        transcript: SanitizedTranscript | None = None,
     ) -> ExecutionResult:
         req = ex.request
         artifacts: list[dict[str, Any]] = []
+        raw.finish()
+        if transcript is not None and transcript.written:
+            # Полный санитизированный вывод (API_DESIGN §14 п.5): доступен по artifact_id события `finished`.
+            try:
+                out = await self._sink(
+                    req, kind="cli_output", data=transcript.stream(), mime_type="text/plain", sensitive=False
+                )
+                ref = {"ref": f"artifact:{out.artifact_id}", "sha256": out.sha256, "size_bytes": out.size_bytes}
+                artifacts.append({"type": "output_excerpt", **ref})
+                self._emit(ex, "artifact", {"artifact_type": "output_excerpt", **ref})
+            except Exception:  # noqa: BLE001 — потеря копии вывода не должна скрыть результат
+                self._emit(ex, "warning", {"code": "OTHER", "message": "санитизированный вывод не сохранён"})
         if raw.written:
             try:
                 stored = await self._sink(
@@ -640,6 +684,11 @@ _CLAIM_TYPES = frozenset(
 )
 _TOOL_KINDS = frozenset({"file_read", "file_write", "file_patch", "command", "search", "network", "other"})
 _PHASES = frozenset({"requested", "started", "completed", "denied", "failed"})
+
+
+def _hidden(data: dict[str, Any]) -> bool:
+    kind = data.get("type") or data.get("kind")
+    return bool(data.get("hidden")) or (isinstance(kind, str) and kind.lower() in HIDDEN_MESSAGE_TYPES)
 
 
 def _tool_payload(data: dict[str, Any]) -> dict[str, Any]:

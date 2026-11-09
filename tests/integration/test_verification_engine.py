@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -26,9 +27,13 @@ from aicd_platform.db import create_engine
 from aicd_platform.ids import uuid7
 from aicd_security.docker_runner import DockerSandboxRunner
 from aicd_security.local_runner import LocalProcessRunner
-from aicd_security.sandbox import SandboxRunner
-from aicd_verification.engine import VerificationEngine, VerificationOutcome
+from aicd_security.sandbox import ContainerSpec, SandboxRunner
+from aicd_verification.engine import PROBE_TIMEOUT_SECONDS, VerificationEngine, VerificationOutcome, declared_gate_env
 from aicd_verification.gates import V0_GATE_DEFINITIONS
+from aicd_verification.images import default_gate_images
+from aicd_verification.registry import GATE_SPECS
+from aicd_verification.security_gates import SECURITY_GATE_IMAGES
+from aicd_verification.tools.images import SEMGREP
 from tests.conftest import init_git_repo
 from tests.support import db as testdb
 from tests.support.orchestration import Tenant, connect_admin, drive_run, new_task, seed_tenant
@@ -45,6 +50,10 @@ GIT_ENV = {
 VENV_BIN = str(Path(sys.executable).parent)
 DOCKER_SOCK = "/var/run/docker.sock"
 PY_IMAGE = "python:3.12-slim-bookworm"
+ROOT = Path(__file__).resolve().parents[2]
+# Окружение контейнера gate, которое задаёт сам движок (VerificationEngine._spec_for).
+ENGINE_ENV = {"CI", "TZ", "LANG", "HOME", "PYTHONDONTWRITEBYTECODE", "RUFF_CACHE_DIR", "npm_config_cache",
+              "npm_config_update_notifier"}  # fmt: skip
 
 
 @dataclass
@@ -348,3 +357,55 @@ async def test_scope_gate_in_verification_container(env: Env) -> None:
     assert ev["environment"]["workspace_mount"] == "read-only"
     data = artifact_bytes(env, ev)
     assert b"secret-scan/aws-access-key-id" in data and FAKE_AWS_KEY.encode() not in data
+
+
+class _RecordingDockerRunner(DockerSandboxRunner):
+    """DockerSandboxRunner, запоминающий спецификации контейнеров (env, сеть) для проверки."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.specs: list[ContainerSpec] = []
+
+    async def start(self, spec: ContainerSpec) -> Any:
+        self.specs.append(spec)
+        return await super().start(spec)
+
+
+def _semgrep_image_present() -> bool:
+    if not _docker_available():
+        return False
+    with httpx.Client(transport=httpx.HTTPTransport(uds=DOCKER_SOCK), base_url="http://docker", timeout=3) as c:
+        return c.get(f"/images/{SEMGREP.ref}/json").status_code == 200
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not _semgrep_image_present(), reason=f"Docker daemon / образ {SEMGREP.ref} недоступны")
+async def test_semgrep_sast_in_container_offline_gets_declared_env(env: Env) -> None:
+    """Объявленные gate переменные (офлайн-флаги semgrep) доходят до контейнера: без них `semgrep --version` в
+    сети `none` ждёт проверку версии дольше PROBE_TIMEOUT_SECONDS (60 с) и SAST даёт ERROR TOOL_UNAVAILABLE."""
+    with connect_admin(env.database) as conn:
+        profile = conn.execute("SELECT id FROM quality_profiles WHERE workspace_id = %s", (env.tenant.workspace_id,))
+        conn.execute(
+            "INSERT INTO quality_gates (id, workspace_id, profile_id, name, gate_type, required, timeout_seconds)"
+            " VALUES (%s, %s, %s, 'semgrep-sast', 'SAST', true, 300)",
+            (uuid7(), env.tenant.workspace_id, profile.fetchone()[0]),  # type: ignore[index]
+        )
+    clean = (ROOT / "tests" / "fixtures" / "security" / "semgrep" / "clean" / "safe_tasks.py").read_text()
+    sha = commit(env.repo, {"src/safe_tasks.py": clean})
+    started = time.monotonic()
+    recorder = _RecordingDockerRunner(
+        f"unix://{DOCKER_SOCK}", allowed_bind_roots=[str(env.tmp)], timeout_grace_seconds=1
+    )
+    async with recorder as runner:
+        await env.verify(env.verifier(runner, image=PY_IMAGE, images=default_gate_images(SECURITY_GATE_IMAGES)), sha)
+    elapsed = time.monotonic() - started
+    rows = gate_rows(env)
+    assert rows["semgrep-sast"]["status"] == "PASS", rows["semgrep-sast"]["error_message"]
+    semgrep_specs = [s for s in recorder.specs if s.labels.get("aicd.gate") == "semgrep-sast"]
+    assert len(semgrep_specs) == 2  # probe + запуск
+    for spec in semgrep_specs:
+        assert spec.network == "none"
+        assert spec.env["SEMGREP_ENABLE_VERSION_CHECK"] == "0" and spec.env["SEMGREP_SEND_METRICS"] == "off"
+        assert spec.env["HOME"] == "/home/verify"  # зарезервированные значения движка не переопределены
+        assert not set(spec.env) - {*declared_gate_env(GATE_SPECS["semgrep-sast"]), *ENGINE_ENV}
+    assert elapsed < PROBE_TIMEOUT_SECONDS, f"SAST офлайн занял {elapsed:.0f} с"

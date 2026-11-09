@@ -12,7 +12,7 @@ async function login(page: Page, api: MockApi) {
 }
 
 /** Только клавиатура: Tab (или Shift+Tab), пока фокус не окажется на целевом элементе. */
-async function tabTo(page: Page, target: Locator, { backwards = false, max = 20 } = {}) {
+async function tabTo(page: Page, target: Locator, { backwards = false, max = 40 } = {}) {
   for (let i = 0; i < max; i++) {
     if (await target.evaluate((el) => el === document.activeElement)) return;
     await page.keyboard.press(backwards ? 'Shift+Tab' : 'Tab');
@@ -37,6 +37,9 @@ test('login → workspace → projects list (pagination) → create project', as
   await page.getByLabel('Пароль').fill(PASSWORD);
   await page.getByRole('button', { name: 'Войти' }).click();
 
+  // После входа — Dashboard (P7-03); проекты открываются из боковой навигации.
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда Альфа' })).toBeFocused();
+  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Проекты', exact: true }).click();
   const heading = page.getByRole('heading', { level: 1, name: 'Проекты · Команда Альфа' });
   await expect(heading).toBeFocused();
   const list = page.getByRole('list', { name: 'Список проектов' });
@@ -117,8 +120,11 @@ test('no workspaces → create workspace (client + server validation) → empty 
 test('error state with retry; session expiry redirects to login', async ({ page, api }) => {
   const ws = api.addWorkspace('Команда', 'team', 'owner');
   api.addProject(ws.id, 'Сервис');
-  api.failProjectsTimes = 1;
   await login(page, api);
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Активные процессы' })).toBeVisible();
+  api.failProjectsTimes = 1;
+  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Проекты', exact: true }).click();
 
   const error = page.getByTestId('error-state');
   await expect(error).toContainText('Внутренняя ошибка сервера');
@@ -127,19 +133,23 @@ test('error state with retry; session expiry redirects to login', async ({ page,
   await error.getByRole('button', { name: 'Повторить' }).click();
   await expect(page.getByRole('list', { name: 'Список проектов' }).getByRole('listitem')).toHaveCount(1);
 
-  api.expireSessionOnNextRequest = true;
+  // Истёкшая сессия: 401 отвечает запрос списка workspace (а не случайный фоновый запрос оболочки —
+  // иначе переход уводил на /login посреди клика). После входа пользователь возвращается на тот же экран.
+  api.expireSessionOnNextRequest = 'listWorkspaces';
   await page.getByRole('link', { name: 'Рабочие пространства' }).click();
   await expect(page).toHaveURL(/\/login\?next=%2Fworkspaces$/);
   await page.getByLabel('Электронная почта').fill(api.user.email);
   await page.getByLabel('Пароль').fill(PASSWORD);
   await page.getByRole('button', { name: 'Войти' }).click();
   await expect(page).toHaveURL(/\/workspaces$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Рабочие пространства' })).toBeVisible();
 });
 
 test('role-aware UI: viewer does not see "Создать проект"', async ({ page, api }) => {
   const ws = api.addWorkspace('Только чтение', 'ro', 'viewer');
   api.addProject(ws.id, 'Проект');
   await login(page, api);
+  await page.goto(`/w/${ws.id}/projects`);
   await expect(page.getByRole('list', { name: 'Список проектов' }).getByRole('listitem')).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'Создать проект' })).toHaveCount(0);
   await page.goto(`/w/${ws.id}/projects/new`);
@@ -163,7 +173,7 @@ test('keyboard-only: login, skip link, switch workspace, create project, logout'
   await page.keyboard.type(PASSWORD);
   await page.keyboard.press('Enter');
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Проекты · Альфа' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Альфа' })).toBeFocused();
 
   // Skip link — первый элемент в порядке табуляции.
   // Точка начала последовательной навигации — начало документа (как после загрузки страницы).
@@ -188,8 +198,13 @@ test('keyboard-only: login, skip link, switch workspace, create project, logout'
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: /Бета/ })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('heading', { level: 1, name: 'Проекты · Бета' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Бета' })).toBeFocused();
   await expect(switcher).toHaveAttribute('aria-expanded', 'false');
+
+  // К проектам — сочетанием «g, затем p».
+  await page.keyboard.press('g');
+  await page.keyboard.press('p');
+  await expect(page.getByRole('heading', { level: 1, name: 'Проекты · Бета' })).toBeFocused();
 
   // Создание проекта: только Tab/стрелки/Enter.
   const createLink = page.getByRole('link', { name: 'Создать проект' }).first();
@@ -220,8 +235,10 @@ test('keyboard-only: login, skip link, switch workspace, create project, logout'
   const userMenu = page.getByRole('button', { name: /Меню пользователя/ });
   await tabTo(page, userMenu, { backwards: true });
   await page.keyboard.press('Enter');
-  await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: 'Выйти' })).toBeFocused();
+  // Меню (APG Menu Button): фокус на первом пункте, End — последний пункт.
+  await expect(page.getByRole('menuitemradio', { name: 'Тёмная' })).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(page.getByRole('menuitem', { name: 'Выйти' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByText('Вы вышли из системы.')).toBeVisible();
   expect(api.loggedIn).toBe(false);
@@ -237,12 +254,16 @@ test('responsive at 360px: no horizontal scroll, controls reachable', async ({ p
   await page.getByLabel('Электронная почта').fill(api.user.email);
   await page.getByLabel('Пароль').fill(PASSWORD);
   await page.getByRole('button', { name: 'Войти' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /^Обзор/ })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await expectNoSeriousA11yViolations(page, 'dashboard 360px');
+  await page.goto(`/w/${ws.id}/projects`);
   await expect(page.getByRole('list', { name: 'Список проектов' }).getByRole('listitem')).toHaveCount(1);
   await expectNoHorizontalScroll(page);
   await expectNoSeriousA11yViolations(page, 'projects 360px');
 
   await page.getByRole('button', { name: /Меню пользователя/ }).click();
-  await expect(page.getByRole('button', { name: 'Выйти' })).toBeInViewport();
+  await expect(page.getByRole('menuitem', { name: 'Выйти' })).toBeInViewport();
   await page.keyboard.press('Escape');
 
   await page.getByRole('link', { name: 'Создать проект' }).click();

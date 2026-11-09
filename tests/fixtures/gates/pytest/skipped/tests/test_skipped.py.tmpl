@@ -1,0 +1,11 @@
+import pytest
+
+
+@pytest.mark.skip(reason="fixture")
+def test_a() -> None:
+    assert False
+
+
+@pytest.mark.skip(reason="fixture")
+def test_b() -> None:
+    assert False

@@ -93,8 +93,8 @@ async def insert_session(
 ) -> None:
     await conn.execute(
         text(
-            "INSERT INTO user_sessions (id, user_id, token_hash, csrf_token_hash, ip, user_agent, expires_at)"
-            " VALUES (:id, :uid, :th, :ch, CAST(:ip AS inet), :ua, :exp)"
+            "INSERT INTO user_sessions (id, user_id, token_hash, csrf_token_hash, ip, user_agent, expires_at,"
+            " reauthenticated_at) VALUES (:id, :uid, :th, :ch, CAST(:ip AS inet), :ua, :exp, now())"
         ),
         {
             "id": session_id,
@@ -114,10 +114,29 @@ async def get_session_by_token_hash(conn: AsyncConnection, token_hash: str) -> d
             await conn.execute(
                 text(
                     "SELECT s.id, s.user_id, s.csrf_token_hash, s.created_at, s.last_seen_at, s.expires_at,"
-                    " s.revoked_at, u.email, u.display_name, u.status AS user_status"
+                    " s.revoked_at, COALESCE(s.reauthenticated_at, s.created_at) AS reauthenticated_at,"
+                    " u.email, u.display_name, u.status AS user_status"
                     " FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = :th"
                 ),
                 {"th": token_hash},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row else None
+
+
+async def get_credentials(conn: AsyncConnection, user_id: uuid.UUID) -> dict[str, Any] | None:
+    """Хэш пароля и состояние блокировки пользователя (step-up re-auth, SC-IAM-08)."""
+    row = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT u.id, u.status, c.password_hash, c.locked_until FROM users u"
+                    " LEFT JOIN user_credentials c ON c.user_id = u.id WHERE u.id = :id"
+                ),
+                {"id": user_id},
             )
         )
         .mappings()

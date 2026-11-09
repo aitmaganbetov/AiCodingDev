@@ -2,13 +2,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
+import { IdempotentIntent } from '../api/client';
 import {
-  api,
-  IdempotentIntent,
+  projectKeys,
+  projectsApi,
   type DocumentationMode,
   type ProjectCreateRequest,
   type QualityProfile,
-} from '../api/client';
+} from '../api/projects';
 import { FormAlert, RadioGroup, TextAreaField, TextField, focusFirstInvalid } from '../components/form';
 import { PageHeading } from '../components/PageHeading';
 import { can } from '../lib/permissions';
@@ -16,7 +17,6 @@ import { mapProblemToFields } from '../lib/problem';
 import { PROJECT_DESCRIPTION_MAX, PROJECT_NAME_MAX } from '../lib/validation';
 import { useCurrentWorkspace } from '../workspace';
 import { WorkspaceNotFound } from './NotFoundPage';
-import { projectsQueryKey } from './ProjectsPage';
 
 type Field = 'name' | 'description' | 'documentation_mode' | 'quality_profile';
 const FIELDS = ['name', 'description', 'documentation_mode', 'quality_profile'] as const;
@@ -39,10 +39,10 @@ export function ProjectCreatePage() {
 
   const create = useMutation({
     mutationFn: ({ ws, body }: { ws: string; body: ProjectCreateRequest }) =>
-      api.createProject(ws, body, intent.current.keyFor({ ws, body })),
+      projectsApi.create(ws, body, intent.current.keyFor({ ws, body })),
     onSuccess: async (project, { ws }) => {
       intent.current.complete();
-      await queryClient.invalidateQueries({ queryKey: projectsQueryKey(ws) });
+      await queryClient.invalidateQueries({ queryKey: projectKeys.list(ws) });
       navigate(`/w/${ws}/projects`, { state: { createdProject: project.name } });
     },
     onError: (error) => {
@@ -60,7 +60,7 @@ export function ProjectCreatePage() {
     return (
       <section aria-labelledby="page-title" className="max-w-xl">
         <PageHeading title={t('projects.createTitle')} />
-        <p className="mb-4 text-slate-700">{t('projects.noPermission')}</p>
+        <p className="mb-4 text-fg-muted">{t('projects.noPermission')}</p>
         <Link to={listPath} className="btn-secondary">
           {t('projects.backToList')}
         </Link>

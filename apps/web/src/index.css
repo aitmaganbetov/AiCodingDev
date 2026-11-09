@@ -1,40 +1,180 @@
+@import './styles/fonts.css';
+@import './styles/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   html {
-    @apply bg-slate-50 text-slate-900 antialiased;
+    @apply bg-canvas font-sans text-fg antialiased;
+    /*
+     * WCAG 2.4.11 Focus Not Obscured: прокрутка к элементу с фокусом (Tab, якоря, scrollIntoView)
+     * оставляет его ниже sticky верхней панели (h-topbar) и выше области уведомлений.
+     */
+    scroll-padding-top: calc(theme(spacing.topbar) + 0.75rem);
+    scroll-padding-bottom: 1rem;
+    /* Inter: однозначные цифры и «l» (cv11, ss01); числа и время — tabular-nums там, где выравниваются. */
+    font-feature-settings: 'cv11', 'ss01';
   }
   body {
-    @apply min-h-screen bg-slate-50;
-    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    @apply min-h-screen bg-canvas;
   }
-  /* Видимый фокус для клавиатуры на всех интерактивных элементах (WCAG 2.4.7). */
+  /* Видимый фокус для клавиатуры на всех интерактивных элементах (WCAG 2.4.7/2.4.13, контраст ≥ 3:1). */
   :focus-visible {
-    outline: 3px solid theme('colors.blue.700');
+    outline: 2px solid rgb(var(--color-focus));
     outline-offset: 2px;
   }
+  /* Программный фокус на заголовок/контейнер после навигации — без рамки. */
   h1:focus,
-  main:focus {
+  main:focus,
+  [data-focus-target]:focus {
     outline: none;
+  }
+  a {
+    @apply text-link;
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    @apply font-mono;
+    font-feature-settings: normal;
+  }
+  ::selection {
+    background: rgb(var(--color-accent) / 0.3);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+  /* Режим высокой контрастности (Windows): системные цвета, границы видимы, без теней и градиентов. */
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline-color: Highlight;
+    }
+    /* Знак логотипа — монохромный. */
+    .logo-mark .logo-fill {
+      fill: CanvasText;
+    }
+    .logo-mark .logo-stroke {
+      stroke: CanvasText;
+    }
   }
 }
 
 @layer components {
   .btn {
-    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-h-touch items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium no-underline transition-[background-color,border-color,color,box-shadow,opacity] duration-instant ease-standard disabled:cursor-not-allowed disabled:opacity-60;
   }
+  /* Primary: тёмный текст на cyan в тёмной теме (белый — 1,85:1), белый на #006E8C в светлой (5,8:1). */
   .btn-primary {
-    @apply btn bg-blue-700 text-white hover:bg-blue-800;
+    @apply btn bg-accent font-semibold text-accent-fg shadow-e1 hover:bg-accent-hover;
   }
   .btn-secondary {
-    @apply btn border border-slate-300 bg-white text-slate-900 hover:bg-slate-100;
+    @apply btn border border-border-strong bg-surface text-fg hover:border-input hover:bg-surface-muted;
+  }
+  .btn-outline {
+    @apply btn border border-accent bg-transparent text-link hover:bg-accent-soft;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-fg hover:bg-surface-muted;
+  }
+  .btn-danger {
+    @apply btn border border-danger-border bg-danger-soft text-danger-fg hover:border-danger;
+  }
+  .btn-sm {
+    @apply min-h-[36px] px-3 py-1;
+  }
+  .btn-lg {
+    @apply min-h-[48px] px-5 text-base;
   }
   .input {
-    @apply block w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-base text-slate-900 placeholder:text-slate-500 aria-[invalid=true]:border-red-700;
+    @apply block w-full rounded-md border border-input bg-surface px-3 py-2 text-base text-fg transition-[border-color,box-shadow] duration-instant placeholder:text-fg-subtle hover:border-fg-subtle disabled:cursor-not-allowed disabled:text-fg-disabled aria-[invalid=true]:border-danger-text;
+  }
+  /* Нативный select с собственной стрелкой (currentColor через mask — работает в обеих темах). */
+  .select {
+    @apply input;
+  }
+  select.input,
+  .select {
+    @apply appearance-none bg-no-repeat pr-9;
+    background-image: linear-gradient(45deg, transparent 50%, rgb(var(--color-fg-muted)) 50%),
+      linear-gradient(135deg, rgb(var(--color-fg-muted)) 50%, transparent 50%);
+    background-position:
+      calc(100% - 18px) 50%,
+      calc(100% - 13px) 50%;
+    background-size:
+      5px 5px,
+      5px 5px;
+  }
+  select[multiple].input {
+    @apply pr-3;
+    background-image: none;
+  }
+  .checkbox {
+    @apply h-5 w-5 shrink-0 cursor-pointer rounded border-input disabled:cursor-not-allowed;
+    accent-color: rgb(var(--color-accent));
   }
   .card {
-    @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+    @apply rounded-lg border border-border bg-surface p-4 shadow-e1;
+  }
+  .link {
+    @apply text-link underline underline-offset-2 hover:no-underline;
+  }
+  /*
+   * Стекло (§4.7): только над плоским фоном (top bar, палитра, поповеры, меню). Без поддержки
+   * backdrop-filter, при prefers-reduced-transparency и в forced-colors — непрозрачная поверхность.
+   * На стекле — только text-fg / text-fg-muted (≥ 4,5:1 при α ≥ 0,88/0,92, tokens.test.ts).
+   */
+  .glass {
+    @apply border border-border bg-surface-raised;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass {
+      background-color: rgb(var(--color-glass) / var(--glass-alpha));
+      border-color: rgb(var(--color-glass-border) / var(--glass-border-alpha));
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+      backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .glass {
+      @apply border-border bg-surface-raised;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+  @media (forced-colors: active) {
+    .glass {
+      background-color: Canvas;
+      border-color: CanvasText;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+  /* Тонкая градиентная рамка ключевого элемента (декор; не на статусах, не под текстом). */
+  .ring-brand {
+    border: 1px solid transparent;
+    background:
+      linear-gradient(rgb(var(--color-surface)), rgb(var(--color-surface))) padding-box,
+      var(--gradient-brand) border-box;
+  }
+  /* Паттерны состояний верификации (§5.2): дублируют цвет, чтобы статус не передавался только цветом. */
+  .pattern-hatch {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      rgb(var(--color-verify-blocked) / 0.16) 0 3px,
+      transparent 3px 7px
+    );
+  }
+  .skeleton {
+    @apply rounded bg-surface-muted motion-safe:animate-pulse;
   }
 }

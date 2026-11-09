@@ -1,0 +1,6 @@
+{
+  "command": "uv run pytest -p no:cacheprovider -q -rs --cov --cov-report=json:reports/coverage/coverage.json --cov-report=term -o junit_family=xunit1 --junitxml=reports/coverage/junit-full.xml",
+  "exit_code": 0,
+  "started_at": "2026-11-08T19:18:57.251903Z",
+  "duration_seconds": 718.9
+}

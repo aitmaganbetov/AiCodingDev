@@ -1,0 +1,9 @@
+# AiCodingDev — конфигурация Gitleaks, поставляемая платформой (P6-04, gate `gitleaks-secrets`).
+#
+# Передаётся явно (`--config`), поэтому `.gitleaks.toml` из репозитория (allowlist, отключённые правила)
+# не применяется; `.gitleaksignore` репозитория не читается (`--gitleaks-ignore-path` указывает на
+# каталог входа платформы). Встроенные правила Gitleaks используются целиком.
+title = "aicd platform gitleaks config"
+
+[extend]
+useDefault = true

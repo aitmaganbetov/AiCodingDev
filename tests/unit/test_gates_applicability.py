@@ -104,7 +104,7 @@ def test_parse_raw_diff() -> None:
 
 
 def test_gate_specs_cover_v0_and_scope_runs_scanner_without_shell() -> None:
-    assert set(GATE_SPECS) == {"scope", "ruff-lint", "ruff-format", "pytest-unit", "npm-unit"}
+    assert {"scope", "ruff-lint", "ruff-format", "pytest-unit", "npm-unit"} <= set(GATE_SPECS)
     scope = GATE_SPECS["scope"]
     assert scope.gate_type == "SCOPE" and not scope.executes_repository
     from aicd_verification.gates import GateContext

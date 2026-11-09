@@ -41,6 +41,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/reauthenticate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Step-up — повторный ввод пароля в текущей сессии [дополнение к ТЗ]
+         * @description SC-IAM-08, SECURITY_ARCHITECTURE §3.2. Операции критического набора (политики workspace и провайдеров, управление участниками, утверждение approvals из набора four-eyes) требуют ввода пароля не старше 10 минут, иначе 403 step_up_required. Успех ⇒ ротация сессии (новые cookies и csrf_token, старая сессия отозвана, абсолютный срок не продлевается). Неверный пароль ⇒ 403 reauthentication_failed (сессия остаётся действительной; неудача учитывается счётчиком блокировки входа). Лимит — как у входа на IP и 5/мин на пользователя.
+         */
+        post: operations["reauthenticate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/session": {
         parameters: {
             query?: never;
@@ -104,6 +124,50 @@ export interface paths {
         put?: never;
         /** Создать workspace (создатель становится owner) */
         post: operations["createWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workspace с настройками и версией [дополнение к ТЗ]
+         * @description Название, slug, роль текущего пользователя, настройки (`WorkspaceSettings`) и `version` (ETag `"v<version>"`). Не член workspace ⇒ 404 (OQ-45 (f)).
+         */
+        get: operations["getWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Изменить название и политики workspace [дополнение к ТЗ]
+         * @description Merge-patch: отсутствующее поле не меняется. `name` — owner/admin (`workspace:update`); `settings.allow_single_member_self_approval` — только owner (SECURITY_ARCHITECTURE §11, иначе 403 и `authz.denied`). `If-Match` обязателен (428/412). Аудит `workspace.update` (metadata `changed` — имена полей, `from`/`to` для политик) и `policy.changed` при изменении политики.
+         */
+        patch: operations["updateWorkspace"];
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * SSE-поток уведомлений workspace (approvals, статусы run) [дополнение к ТЗ]
+         * @description Уведомления workspace (API_DESIGN §13.1, EVENT_SCHEMAS §5.1): события `approval.requested`, `approval.decided`, `run.state_changed`, `run.completed` всех run workspace из `run_event_log` и `notification.created` — новые персональные уведомления текущего пользователя (строки notifications, только свои; данные — SseNotificationCreated, без seq). Кадр: `id: <cursor>` (UTC-время записи события в журнал или создания уведомления, микросекунды epoch; общий порядок обоих источников), `event: <type>`, `data: SseEnvelope` (поле `seq` — номер события в его run). Возобновление — `Last-Event-ID`: сервер повторяет события с перекрытием 60 с, клиент обязан дедуплицировать по `event_id`. Без `Last-Event-ID` — с текущего момента (минус перекрытие); состояние экрана клиент берёт из REST. Курсор старше 24 ч ⇒ 410 (перечитать REST и подключиться без Last-Event-ID). Heartbeat каждые 15 с без `id:`. Доступ проверяется при подключении, каждые 60 с и по сигналу отзыва; лимиты — общие с потоками run (5 на пользователя, 30 мин). Approvals вне run (`DOCS_DOWNLOAD` без run) в поток не попадают как события run, но уведомление `approval.requested` тем, кто может решить, приходит.
+         */
+        get: operations["streamWorkspaceEvents"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -197,9 +261,328 @@ export interface paths {
         put?: never;
         /**
          * Привязать репозиторий
-         * @description Валидирует путь/URL, регистрирует репозиторий и ставит indexing_job (асинхронно).
+         * @description Валидирует путь/URL, регистрирует репозиторий и ставит indexing_job (асинхронно). provider=local ⇒ 201 Repository. provider=github ⇒ 202 GitHubVerification: локальная копия проверяется сразу (422), доступ установки GitHub App к репозиторию проверяет воркер (OQ-47 (2): ключ App — только у воркера), он же регистрирует репозиторий (result_id) — статус getGitHubVerification.
          */
         post: operations["attachRepository"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Дерево файлов репозитория по commit (FR-PRJ-05) [дополнение к ТЗ]
+         * @description Один уровень каталога `path` в commit (Repository Explorer, FR-PRJ-05). Источник — локальная копия репозитория (`local_root_ref`), чтение объектов git без checkout. Без `commit` — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Сортировка: каталоги, затем файлы/symlink, затем submodule; внутри группы — по имени (байтовый порядок UTF-8). Курсор привязан к разрешённому commit: страницы одного обхода не смешивают разные commit. Записи `.git` и имена с управляющими символами/не UTF-8 не отображаются. 409 — у репозитория нет локальной копии (provider github, Phase 8).
+         */
+        get: operations["listRepositoryTree"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Содержимое файла репозитория по commit (FR-PRJ-05) [дополнение к ТЗ]
+         * @description Файл `path` в commit как текст UTF-8 (без рендеринга HTML). Содержимое больше `max_bytes` усекается (`truncated: true`, отдаются первые `max_bytes` байт). Бинарный файл (NUL-байт или не UTF-8) — `is_binary: true`, `content: null`. Symlink отдаётся как текст цели ссылки (ссылка не разыменовывается). Каталог/submodule — 422 (`errors[].code=not_a_file`).
+         */
+        get: operations["getRepositoryFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ветки репозитория (Repository Explorer, FR-PRJ-05) [дополнение к ТЗ]
+         * @description Локальные ветки (`refs/heads/`) локальной копии репозитория: имя, commit, время commit. Ветка по умолчанию — первой, остальные — по времени commit (новые первыми), затем по имени. Имена, не проходящие проверку имени ветки, не отображаются. Не более 1000 веток (`truncated: true`, если больше). Курсор привязан к снимку списка. 409 — у репозитория нет локальной копии.
+         */
+        get: operations["listRepositoryBranches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/commits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Последние commit ветки или от commit (Repository Explorer, FR-PRJ-05) [дополнение к ТЗ]
+         * @description История от `commit` (ветка или SHA; без параметра — HEAD ветки по умолчанию, как у listRepositoryTree) в порядке git log (первым — сам commit). Поля: SHA, родители, имя автора (email не отдаётся), время автора/commit, первая строка сообщения (≤ 500 символов, секреты редактируются). Глубина обхода — не более 1000 commit от начала (`next_cursor: null` дальше). Курсор фиксирует разрешённый SHA: сдвиг ветки не смешивает страницы.
+         */
+        get: operations["listRepositoryCommits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/symbols": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Поиск символов по снимку индекса кода (Code Intelligence, B3) [дополнение к ТЗ]
+         * @description Символы READY-снимка индекса (`code_symbols`, tree-sitter) по запросу `q`. Ранжирование (лучшая оценка на символ): точное имя 1.0 > имя без учёта регистра 0.95 > префикс имени 0.8 > подстрока имени или qualified name 0.6 > сходство pg_trgm имени (×0.5) > полнотекстовый поиск по фрагментам символа (≤ 0.45, `match: text`). Порядок детерминирован (score, имя, путь, строка). Снимок: без `commit` — последний READY-снимок репозитория (нет снимка — `snapshot: null`, `items: []`), с `commit` — снимок commit с этим hex-префиксом (нет — 404, неоднозначный префикс — 422). Курсор привязан к снимку и фильтрам; глубина выдачи — не более 1000 результатов. `signature` — текст из кода (секреты редактируются), отображается только как текст.
+         */
+        get: operations["listRepositorySymbols"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Граф зависимостей файлов по снимку индекса (Code Intelligence, B3) [дополнение к ТЗ]
+         * @description Подграф `code_dependencies` (рёбра imports/tests между файлами; неразрешённые импорты — узлы `external`) вокруг корня: `path` (файл или каталог снимка, до 50 файлов-корней) или `symbol` (id символа — его файл); ровно один из двух (иначе 422). Обход в ширину на `depth` (1–3) в направлении `out` (зависимости корня), `in` (зависящие от корня) или `both`. Жёсткие пределы — 200 узлов и 500 рёбер; при их достижении (или > 50 корней) `truncated: true` — граф неполон. Корень отсутствует в снимке — 404. Снимок выбирается как у listRepositorySymbols (нет READY-снимка — `snapshot: null` и пустой граф).
+         */
+        get: operations["getRepositoryDependencies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/indexing-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Задания индексации репозитория (очередь и история, B3) [дополнение к ТЗ]
+         * @description Строки `indexing_jobs` репозитория, новые первыми: commit, вид (full/incremental), статус, число попыток, базовый и построенный снимок (с числом файлов/символов), время постановки/старта/завершения, ожидание в очереди и длительность (секунды, только если известны оба момента), безопасный текст ошибки (секреты и пути хоста удаляются).
+         */
+        get: operations["listIndexingJobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/review-threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Треды inline-комментариев ревью репозитория (B5, ADR-0015) [дополнение к ТЗ]
+         * @description Треды, привязанные к commit/стороне diff/файлу/строкам репозитория, с комментариями (тела редактированы, ADR-0015 §7). Фильтры — run, задача, commit, путь файла, статус. `head_sha` — commit просматриваемого diff: `outdated = anchor.commit_sha ≠ head_sha`; без него — относительно последнего worktree задачи (и её fix-задач) или run, иначе `outdated = null` (ADR-0015 §8). Порядок — по времени создания (старые первыми).
+         */
+        get: operations["listReviewThreads"];
+        put?: never;
+        /**
+         * Новый тред inline-комментария (B5, ADR-0015) [дополнение к ТЗ]
+         * @description Тред с первым комментарием, привязанный к commit/стороне diff/файлу/диапазону строк (≤ 1000 строк); опционально run (того же репозитория), задача этого run, находка этого run. Комментарий агентам НЕ доставляется — воздействие только через POST /runs/{run_id}/reviews (REQUEST_CHANGES → поручение CHANGE_REQUEST). run/задача/находка чужого workspace ⇒ 404; не того репозитория/run ⇒ 422. Тело редактируется (секреты). Событие SSE review.comment.
+         */
+        post: operations["createReviewThread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/review-threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Тред inline-комментариев (B5) [дополнение к ТЗ] */
+        get: operations["getReviewThread"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/review-threads/{thread_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ответ в треде (B5) [дополнение к ТЗ]
+         * @description Комментарий в треде (в т.ч. решённом — статус не меняется); ≤ 200 комментариев в треде (иначе 409). Агентам НЕ доставляется. ETag ответа — revision комментария.
+         */
+        post: operations["replyReviewThread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/review-threads/{thread_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отметить тред решённым (B5) [дополнение к ТЗ]
+         * @description OPEN → RESOLVED (FSM allowed_transitions review_thread). Уже решён ⇒ 409 invalid_state_transition. If-Match — ETag треда (version). Отметка обсуждения, не решение по коду: approvals и gates не затрагиваются.
+         */
+        post: operations["resolveReviewThread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/review-threads/{thread_id}/unresolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Переоткрыть тред (B5) [дополнение к ТЗ]
+         * @description RESOLVED → OPEN. Уже открыт ⇒ 409 invalid_state_transition. If-Match — ETag треда.
+         */
+        post: operations["unresolveReviewThread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/review-comments/{comment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Правка своего комментария (B5) [дополнение к ТЗ]
+         * @description Правит только автор (иначе 403, аудит authz.denied review:write:own). If-Match — ETag комментария ("v<revision>"). Прежнее тело сохраняется в истории правок (GET /review-comments/{comment_id}/revisions), revision растёт на 1; удаления нет. Текст, уже отправленный агентам поручением, правка не меняет (ADR-0015 §1).
+         */
+        patch: operations["editReviewComment"];
+        trace?: never;
+    };
+    "/review-comments/{comment_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** История правок комментария (B5) [дополнение к ТЗ] */
+        get: operations["listReviewCommentRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Отправленные ревью run (B5) [дополнение к ТЗ] */
+        get: operations["listReviews"];
+        put?: never;
+        /**
+         * Отправить ревью кода (Approve / Request changes / Comment, B5) [дополнение к ТЗ]
+         * @description Единственная точка воздействия комментариев на исполнение (ADR-0015 §3). APPROVE — решение существующего PENDING approval этого run (approval_id обязателен) по правилам POST /approvals/{id}/decision (роль по action_type, four-eyes, step-up). REQUEST_CHANGES — поручение CHANGE_REQUEST (цель — task_id или run) с замечаниями открытых тредов как недоверенным текстом (ограждается в инструкциях задач; > 8000 символов ⇒ 422); право — как у CHANGE_REQUEST (developer+). COMMENT — только запись ревью. Run терминален ⇒ 409; expected_run_version не совпал ⇒ 409 version_mismatch. 202 — ревью сохранено (поручение принято, не выполнено).
+         */
+        post: operations["submitReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/worktrees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Worktrees репозиториев проекта (только чтение, B4) [дополнение к ТЗ]
+         * @description Изолированные git worktree задач (`worktrees`): ветка, base/head commit, связь с run/задачей, статус, время создания/изменения/удаления. Пути на хосте (`path_ref`) и worker host не отдаются. Новые первыми; фильтры — репозиторий, run, статусы.
+         */
+        get: operations["listProjectWorktrees"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -242,6 +625,46 @@ export interface paths {
          * @description ETag основан на project_settings.settings_version. Действует для новых runs и следующих context packs; уже выданные context packs не меняются.
          */
         patch: operations["updateDocumentationPolicy"];
+        trace?: never;
+    };
+    "/projects/{project_id}/controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Применимость контролей проекта [дополнение к ТЗ]
+         * @description Экран Standards & Compliance: каждый активный контроль реестра с применимостью для проекта (черновик системы или утверждение admin, ТЗ §13), обоснованием, ответственной ролью и блокирующим статусом. effective_blocking — с учётом умолчания платформы для профиля качества проекта (контроли роли security блокируют в strict/critical). Порядок — стандарт, контроль.
+         */
+        get: operations["listProjectControls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/controls/{control_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Утвердить применимость контроля [дополнение к ТЗ]
+         * @description Черновик → утверждено (или пересмотр утверждения): applicability, rationale (обязателен, кроме applicable — иначе 422), ответственная роль и blocking (null — умолчание платформы). Утверждает пользователь сессии (ТЗ §13; триггер БД §13.3). Неактивный/неизвестный контроль ⇒ 404.
+         */
+        post: operations["approveProjectControl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/runs": {
@@ -386,10 +809,93 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** История событий */
+        /**
+         * История событий
+         * @description События run из run_event_log (те же, что SSE) строго по возрастанию `seq` (детерминированно, без пропусков внутри фильтра). `after_seq` — исключающая нижняя граница; `cursor` продолжает выборку после `seq` последнего элемента страницы (при наличии `cursor` параметр `after_seq` игнорируется). События, удалённые retention, не возвращаются.
+         */
         get: operations["getRunActivity"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Лента событий workspace [дополнение к ТЗ]
+         * @description События run_event_log всех run workspace (UI redesign B1, G-04 «AI Activity Timeline») — новые сверху: keyset по (created_at, id события) desc (created_at — время проекции события в журнал; occurred_at — время доменного события). Те же payload, что у getRunActivity/SSE. События, удалённые retention, не возвращаются. `run_id`/`project_id` чужого workspace дают пустую выборку.
+         */
+        get: operations["listActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Персональные уведомления в workspace [дополнение к ТЗ]
+         * @description Уведомления текущего пользователя в workspace (UI redesign B8, API_DESIGN §13.2): новые сверху, keyset по (created_at, id) desc. Создаёт их только воркер из доменных событий (набор видов и получателей — API_DESIGN §13.2); видны только собственные (RLS по пользователю), другие участники workspace их не видят. Содержимое — шаблонный заголовок, редактированная выжимка и идентификаторы для ссылок, без секретов. `unread_count` — счётчик непрочитанных на момент ответа. Хранятся 90 дней.
+         */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Счётчик непрочитанных уведомлений [дополнение к ТЗ]
+         * @description Число непрочитанных уведомлений текущего пользователя в workspace и время самого нового из них (бейдж колокольчика; live-обновление — кадры notification.created потока streamWorkspaceEvents).
+         */
+        get: operations["getNotificationUnreadCount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/mark-read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отметить уведомления прочитанными [дополнение к ТЗ]
+         * @description Ровно одно из: `notification_ids` (≤ 100; чужие и несуществующие id игнорируются), `up_to` (все уведомления до указанного включительно по (created_at, id) — «прочитано всё, что видел»; чужой или несуществующий id ⇒ 404), `all: true`. Уже прочитанные не меняются (read_at — время первого прочтения); отметку «непрочитано» API не даёт. Ответ — число отмеченных и новый счётчик непрочитанных. Аудит notification.marked_read (режим и число, без id).
+         */
+        post: operations["markNotificationsRead"];
         delete?: never;
         options?: never;
         head?: never;
@@ -508,6 +1014,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Задачи workspace [дополнение к ТЗ]
+         * @description Актуальные задачи плана всех run workspace (UI redesign B1, G-01 «Running AI Agents») с последней попыткой (роль × провайдер × run × задача, время начала, статус). Порядок — created_at desc, id desc (keyset). «Активные исполнения» — `status=LEASED&status=RUNNING`. Фильтр `provider` — по провайдеру последней попытки. `run_id`/`project_id` чужого workspace дают пустую выборку.
+         */
+        get: operations["listTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -534,6 +1060,26 @@ export interface paths {
         };
         /** Попытки задачи [дополнение к ТЗ] */
         get: operations["listTaskAttempts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/attempts/{attempt_id}/context-pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Manifest Context Pack попытки задачи (B3) [дополнение к ТЗ]
+         * @description Состав контекста, переданного агенту в попытке (`context_packs`): снимок индекса и commit, политика, бюджет, размер, хэш содержимого и manifest — фрагменты (раздел, источник, путь, строки, commit, sha256, байты, признак stale) и пропущенные фрагменты с причиной (stale_commit, fragment_too_large, max_files, max_bytes). Текст фрагментов не отдаётся (он — в artifact `context_pack`, `artifact_id`, скачивание по правилам downloadArtifact). Предупреждения сборки — только коды. Попытка не этой задачи или pack не собирался — 404.
+         */
+        get: operations["getAttemptContextPack"];
         put?: never;
         post?: never;
         delete?: never;
@@ -601,8 +1147,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Скачать artifact (редирект на подписанный URL) [дополнение к ТЗ]
-         * @description kind=raw_cli_log требует artifact:download_raw (admin/owner). Для file-адаптера — потоковая отдача через API (200 application/octet-stream).
+         * Скачать artifact потоком через API [дополнение к ТЗ]
+         * @description Содержимое отдаётся потоком через API для любого адаптера хранилища (200 application/octet-stream): CSP SPA разрешает только connect-src 'self', поэтому редирект на подписанный URL другого origin не используется. kind=cli_raw_log требует artifact:download_raw (admin/owner). Чужой, истёкший или отсутствующий в хранилище artifact — 404. Поток проверяется по sha256; при расхождении передача обрывается.
          */
         get: operations["downloadArtifact"];
         put?: never;
@@ -667,6 +1213,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Все evidence run [дополнение к ТЗ]
+         * @description Evidence run (`evidence.run_id`) в порядке создания (keyset по `created_at`, `id`), с фильтрами по статусу проверки, задаче и виду. Используется экранами качества и compliance для выбора доказательств (OQ-45 (c)). Чужой run ⇒ 404.
+         */
+        get: operations["listRunEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Находки run [дополнение к ТЗ]
+         * @description Полный список находок run с фильтрами (QualityReport.findings усечён до 200). Порядок — severity desc, затем created_at, id. Свободный текст редактируется (секреты).
+         */
+        get: operations["listRunFindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Находки workspace [дополнение к ТЗ]
+         * @description Находки всех run workspace (UI redesign B1, G-02: Security Center, плитка Security Findings) с фильтрами. Порядок и курсор — как у listRunFindings (severity desc, затем created_at, id). Свободный текст редактируется (секреты). `run_id`/`project_id` чужого workspace дают пустую выборку.
+         */
+        get: operations["listFindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings/{finding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Находка [дополнение к ТЗ] */
+        get: operations["getFinding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings/{finding_id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Решение человека по находке [дополнение к ТЗ]
+         * @description Жизненный цикл находки (DATABASE_DESIGN §18.3, QUALITY_GATES §5.3): OPEN → ACKNOWLEDGED | FALSE_POSITIVE | ACCEPTED_RISK, ACKNOWLEDGED → OPEN | FALSE_POSITIVE | ACCEPTED_RISK, FALSE_POSITIVE | ACCEPTED_RISK → OPEN (повторное открытие). FIXED/VERIFIED_FIXED выставляет только Verification Engine. Право зависит от to_status (API_DESIGN §5.5): ACCEPTED_RISK — admin и выше, остальные — reviewer и выше. ACCEPTED_RISK выше допустимого профилем run уровня (critical-профиль: не выше high) ⇒ 422. Недопустимый переход ⇒ 409 invalid_state_transition (current_status). If-Match — ETag находки.
+         */
+        post: operations["transitionFinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/compliance/{control_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Вердикт человека по контролю [дополнение к ТЗ]
+         * @description QUALITY_GATES §8.2: вердикт PASS/FAIL человека для контроля manual/document_check/agent_review (текущий статус MANUAL_REVIEW или UNVERIFIED) или переопределение UNVERIFIED автоматического контроля — с обоснованием (notes) и evidence этого run (первое — evidence вердикта; для PASS — VERIFIED). Прежний вердикт заменяется (superseded_at), история сохраняется. Применимость контроля должна быть утверждена (applicable/tailored), run — не терминален, иначе 409 invalid_state_transition. Evidence не этого run или не VERIFIED для PASS ⇒ 422.
+         */
+        post: operations["reviewComplianceControl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/providers": {
         parameters: {
             query?: never;
@@ -676,6 +1339,66 @@ export interface paths {
         };
         /** Codex/Claude: health и capabilities */
         get: operations["listProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Профили ролей агентов [дополнение к ТЗ]
+         * @description Профили 12 ролей (UI redesign B7, G-13; AGENT_ROLES §1.2, §2, §5), только чтение: права исполнения, классы инструментов, отправляемые типы ACP, уровни по умолчанию, требование независимой проверки, версия и sha256 шаблона инструкций (текст шаблона не отдаётся), строка справочника agent_profiles (null — не синхронизирован) и провайдеры, которым роль разрешена настройками workspace (выбор провайдера адаптивный — ROUTING_POLICY §4). Не пагинируется (12 ролей).
+         */
+        get: operations["listAgentProfiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Состояние платформы (admin) [дополнение к ТЗ]
+         * @description Компоненты платформы (UI redesign B2, G-05): api, database (ревизия схемы), redis, object_storage, outbox (backlog и возраст старейшего неопубликованного события), workers (worker_hosts), queues (глубина очередей Dramatiq и dead letters), backup (файл статуса бэкапа, если смонтирован в api, и pg_stat_archiver). Каждый компонент — ok/degraded/down/unknown с измеренными значениями и временем проверки; не измеренное — unknown с причиной (значения не выдумываются). Ответ кэшируется на сервере на cache_ttl_seconds (checked_at — время фактической проверки). Право — owner/admin workspace из X-Workspace-Id; отдельный лимит 30/мин на пользователя.
+         */
+        get: operations["getSystemHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/providers/{provider_id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * История исполнений CLI провайдера [дополнение к ТЗ]
+         * @description Исполнения CLI (cli_executions) провайдера в workspace (UI redesign B1, G-03): статус, код выхода, длительность, категория ошибки, ссылки на задачу/попытку/run. Без вывода CLI (только id санитизированного артефакта cli_output), команд, путей хоста и учётных данных. Порядок — created_at desc, id desc (keyset). Неизвестный провайдер ⇒ 404.
+         */
+        get: operations["listProviderExecutions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -698,6 +1421,26 @@ export interface paths {
          * @description Асинхронно на worker-exec. Не выполняет login и не принимает credentials. Лимит 6/час на workspace.
          */
         post: operations["probeProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/providers/{provider_id}/probes/{probe_request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Статус запроса проверки провайдера [дополнение к ТЗ]
+         * @description `ProbeAccepted.status_url`. `PENDING` — запрос принят, worker-exec ещё не записал результат; `COMPLETED` — установка проверена (результат — `installation`, тот же вид, что в `GET /providers`); `FAILED` — проверка не выполнена (`error_category`); `EXPIRED` — результата нет дольше 15 мин (нет живого worker-exec). Запрос другого workspace или другого провайдера ⇒ 404.
+         */
+        get: operations["getProviderProbe"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -775,6 +1518,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/technologies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Технологии workspace (стек проектов и источники документации) [дополнение к ТЗ]
+         * @description Версии технологий, определённые в любом проекте workspace или указанные в его источниках документации (без глобального каталога других workspace). `project_count`, `source_count` — число проектов и источников workspace с этой версией. Сортировка (ecosystem, name, technology_version_id), cursor-пагинация (OQ-45 (c)).
+         */
+        get: operations["listWorkspaceTechnologies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/documentation/sources": {
         parameters: {
             query?: never;
@@ -813,6 +1576,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Глобальный поиск по workspace (B6) [дополнение к ТЗ]
+         * @description Поиск по сущностям workspace, которые пользователь вправе читать: проекты (name, description; project:read), runs (objective; run:read), задачи (title; run:read), находки (title, rule_id, cwe_id; quality:read), approvals (action_type, decision_reason; approval:read), источники документации (URI; documentation:read), сообщения чата (FTS по тексту; chat:read). Типы без права пропускаются (`skipped_types`). UUID в запросе — точное совпадение id. Ранжирование: точное совпадение 1.0 > префикс > подстрока (+ сходство pg_trgm); сортировка — score, тип, новизна. Запрос не короче 2 символов без пробелов по краям (422). Отдельный rate limit на пользователя (по умолчанию 60/мин, 429). `snippet` — окно текста вокруг совпадения (секреты редактируются), только текст. `api_path` и id контекста — подсказки маршрута.
+         */
+        get: operations["searchWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit-events": {
         parameters: {
             query?: never;
@@ -830,10 +1613,484 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Сводка Analytics workspace за окно времени [дополнение к ТЗ]
+         * @description Экран Analytics (ТЗ §11, FR-OBS-05) и метрики ТЗ §16: run success rate, verified completion rate, retry count, task latency, gate failures, использование и ограничения провайдеров CLI, review loops, agent message count, approval wait time, размер Context Pack, доля stale-фрагментов и полезность контекста (FR-CI-08). Агрегаты считаются из БД под RLS workspace; межтенантной агрегации нет. Окно — по времени создания run (задачи/gates — по завершению, approvals — по запросу); по умолчанию последние 30 дней, не больше 366. Токены CLI — только достоверно сообщённые CLI (иначе tokens.total = null, UI показывает «unknown»).
+         */
+        get: operations["getAnalyticsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Установки GitHub App workspace (FR-GH-01) [дополнение к ТЗ] */
+        get: operations["listGitHubInstallations"];
+        put?: never;
+        /**
+         * Подключить установку GitHub App к workspace (P8-02) [дополнение к ТЗ]
+         * @description Вызывается UI со страницы Setup URL App с installation_id и state из startGitHubInstallation. Сервер проверяет state (HMAC, workspace и пользователь сессии, срок, однократность) и регистрирует установку в статусе PENDING (поля аккаунта и права — заглушки до проверки) с verification_id; проверку через GitHub API (JWT App) выполняет воркер (OQ-47 (2): процесс API не держит закрытый ключ App, SECURITY_ARCHITECTURE §6.1): права шире минимального набора App или workflows/administration/ secrets/environments/actions (SC-GH-04, error.code=permissions), установка другого App (foreign_app) или не найдена (not_found) ⇒ проверка FAILED, установка REVOKED; иначе ACTIVE (SUSPENDED) с данными аккаунта. Установка другого workspace ⇒ 409. Повторное подключение установки этого workspace — повторная проверка. Статус проверки — getGitHubVerification.
+         */
+        post: operations["connectGitHubInstallation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/installations/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Начать установку GitHub App (state + URL установки) [дополнение к ТЗ]
+         * @description state — HMAC-токен, привязанный к workspace и пользователю сессии, однократный, срок 10 мин (защита от CSRF/подмены установки). 503 — GitHub App не настроен.
+         */
+        post: operations["startGitHubInstallation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/installations/{github_installation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Отключить установку GitHub App от workspace [дополнение к ТЗ]
+         * @description Статус REVOKED (строка сохраняется для истории PR); новые PR и merge через неё невозможны. Вебхук не реактивирует отключённую установку.
+         */
+        delete: operations["disconnectGitHubInstallation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/verifications/{verification_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Статус проверки GitHub App на воркере (установка / доступ к репозиторию) [дополнение к ТЗ]
+         * @description OQ-47 (2): проверки через GitHub API выполняет воркер (единственный процесс с ключом App). PENDING → SUCCEEDED (result_id — github_installations.id или repositories.id) | FAILED (error.code: not_found, foreign_app, permissions, conflict, no_installation, not_accessible, invalid_repository, github_unavailable). Чужая или несуществующая проверка ⇒ 404.
+         */
+        get: operations["getGitHubVerification"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/github/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Приём вебхуков GitHub (FR-GH-02, SC-GH-01…03) [дополнение к ТЗ]
+         * @description Без сессии и CSRF. X-Hub-Signature-256 = HMAC-SHA256(webhook secret, сырое тело) проверяется до разбора JSON (constant-time, два секрета на время ротации); неверная/отсутствующая подпись ⇒ 401 и запись REJECTED без payload. Дедупликация по X-GitHub-Delivery ⇒ повтор 200 duplicate без обработки. Событие вне allowlist ⇒ 202 ignored. Тело ≤ 25 MiB (413). Payload — подсказка: обработчик перечитывает состояние через GitHub API. Обработка асинхронна (outbox).
+         */
+        post: operations["receiveGitHubWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/pull-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Открыть PR в GitHub из проверенного результата run (FR-GH-03, P8-04) [дополнение к ТЗ]
+         * @description Только COMPLETED run, репозиторий которого привязан к активной установке GitHub App; источник — последний worktree задачи SUCCEEDED с коммитом, на котором есть PASS gate (несколько задач с изменениями ⇒ task_id обязателен, 422). Изменения CI-конфигурации (.github/workflows/** и аналоги) без APPROVED MANUAL_REVIEW ⇒ 403 policy_denied + approval_id (approval создаётся). Внешние действия (push ветки aicd/*, создание PR, ревью-комментарий с итогами gates, commit status aicd/verification) исполняет воркер через ledger external_actions; повтор/сбой не создаёт второй PR.
+         */
+        post: operations["requestPullRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/pull-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** PR проекта в GitHub [дополнение к ТЗ] */
+        get: operations["listPullRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/pull-requests/{pull_request_id}/merge-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Запросить merge PR (approval MERGE, AC-13) [дополнение к ТЗ]
+         * @description Создаёт approval MERGE (admin, four-eyes: инициатор не может утвердить) на конкретный предмет — PR, head SHA, базовая ветка, метод. После APPROVED воркер перечитывает PR и защиту ветки через GitHub API и выполняет merge только при выполненных required checks и mergeable_state без обхода branch protection и без admin merge; head SHA сдвинулся ⇒ нужен новый approval. Повтор для того же предмета возвращает тот же PENDING approval.
+         */
+        post: operations["requestPullRequestMerge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        GitHubInstallation: {
+            /** Format: uuid */
+            id: string;
+            installation_id: number;
+            account_login: string;
+            /** @enum {string} */
+            account_type: "user" | "organization";
+            /** @enum {string} */
+            repository_selection: "all" | "selected";
+            /** @description Права установки (подмножество минимального набора App, SC-GH-04) */
+            permissions: {
+                [key: string]: string;
+            };
+            /**
+             * @description PENDING — установка зарегистрирована, проверка через GitHub API на воркере ещё не завершена (account_login, account_type, permissions — заглушки)
+             * @enum {string}
+             */
+            status: "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED";
+            /**
+             * Format: uuid
+             * @description Только в ответе connectGitHubInstallation — проверка установки воркером (getGitHubVerification)
+             */
+            verification_id?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description Проверка GitHub App на воркере (OQ-47 (2)) — подключение установки или доступ установки к репозиторию. */
+        GitHubVerification: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "installation" | "repository";
+            /** @enum {string} */
+            status: "PENDING" | "SUCCEEDED" | "FAILED";
+            /** Format: uuid */
+            project_id: string | null;
+            /**
+             * Format: uuid
+             * @description SUCCEEDED — id установки (kind=installation) или репозитория (kind=repository)
+             */
+            result_id: string | null;
+            error: null | {
+                code: string;
+                detail: string | null;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        GitHubInstallationList: {
+            items: components["schemas"]["GitHubInstallation"][];
+        };
+        GitHubInstallationSetup: {
+            /** @description URL установки App на GitHub со state */
+            install_url: string;
+            state: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        GitHubInstallationConnectRequest: {
+            installation_id: number;
+            state: string;
+            /** @enum {string} */
+            setup_action?: "install" | "update";
+        };
+        GitHubWebhookAck: {
+            /** @enum {string} */
+            status: "accepted" | "ignored" | "duplicate";
+        };
+        /** @enum {string} */
+        PullRequestState: "OPEN" | "CLOSED" | "MERGED";
+        PullRequest: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            repository_id: string;
+            repository_full_name: string;
+            /** Format: uuid */
+            run_id: string | null;
+            pr_number: number;
+            url: string;
+            state: components["schemas"]["PullRequestState"];
+            head_branch: string;
+            base_branch: string;
+            head_sha: string;
+            merged_commit_sha: string | null;
+            /** Format: uuid */
+            create_action_id: string | null;
+            /** Format: uuid */
+            merge_action_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            merged_at: string | null;
+            /** Format: date-time */
+            closed_at: string | null;
+        };
+        PullRequestPage: {
+            items: components["schemas"]["PullRequest"][];
+            next_cursor: string | null;
+        };
+        PullRequestCreateRequest: {
+            /**
+             * Format: uuid
+             * @description Обязателен
+             */
+            task_id?: string;
+            /** @description По умолчанию — ветка по умолчанию репозитория */
+            base_branch?: string;
+            /** @description Без управляющих символов */
+            title?: string;
+        };
+        PullRequestJob: {
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            task_id: string;
+            /** Format: uuid */
+            repository_id: string;
+            repository_full_name: string;
+            head_branch: string;
+            head_sha: string;
+            base_branch: string;
+            title: string;
+            /** @enum {string} */
+            status: "QUEUED";
+        };
+        PullRequestMergeRequest: {
+            /**
+             * @default merge
+             * @enum {string}
+             */
+            merge_method: "merge" | "squash" | "rebase";
+        };
+        PullRequestMergeAccepted: {
+            /** Format: uuid */
+            pull_request_id: string;
+            /** Format: uuid */
+            approval_id: string;
+            /** @enum {string} */
+            status: "AWAITING_APPROVAL";
+        };
+        /** @description Доля 0..1; null — знаменатель равен нулю (нет данных). */
+        AnalyticsRate: number | null;
+        /** @description Секунды; null — нет завершённых элементов в окне. */
+        AnalyticsDurationStats: {
+            p50: number | null;
+            p90: number | null;
+            avg: number | null;
+        };
+        AnalyticsSummary: {
+            window: {
+                /** Format: date-time */
+                from: string;
+                /** Format: date-time */
+                to: string;
+            };
+            /** Format: uuid */
+            project_id: string | null;
+            runs: {
+                total: number;
+                finished: number;
+                completed: number;
+                success_rate: components["schemas"]["AnalyticsRate"];
+                /** @description Ключи — RunStatus. */
+                by_status: {
+                    [key: string]: number;
+                };
+                duration_seconds: components["schemas"]["AnalyticsDurationStats"];
+                /** @description Время и исход по режиму run (cost/time per mode; стоимость в деньгах CLI не сообщают). */
+                by_mode: {
+                    mode: components["schemas"]["RunMode"];
+                    total: number;
+                    finished: number;
+                    completed: number;
+                    success_rate: components["schemas"]["AnalyticsRate"];
+                    avg_duration_seconds: number | null;
+                }[];
+            };
+            daily: {
+                /** Format: date */
+                date: string;
+                runs_created: number;
+                runs_completed: number;
+                runs_failed: number;
+                runs_cancelled: number;
+            }[];
+            tasks: {
+                attempts: number;
+                succeeded: number;
+                failed: number;
+                /** @description Попытки с attempt_no > 1 (retry count). */
+                retries: number;
+                verified_completion_rate: components["schemas"]["AnalyticsRate"];
+                tasks_finished: number;
+                latency_seconds: components["schemas"]["AnalyticsDurationStats"];
+                by_role: {
+                    role: string;
+                    attempts: number;
+                    succeeded: number;
+                    failed: number;
+                    retries: number;
+                    verified_completion_rate: components["schemas"]["AnalyticsRate"];
+                }[];
+            };
+            gates: {
+                gate_type: string;
+                total: number;
+                /** @description Статус PASS (без учёта верификации evidence). */
+                passed: number;
+                /** @description PASS с evidence в статусе VERIFIED — «Пройдено» (решение D-8, evidence-first ТЗ §14). */
+                passed_verified: number;
+                /** @description PASS без VERIFIED evidence — «Недостаточно доказательств» (D-8); passed = passed_verified + passed_unverified. */
+                passed_unverified: number;
+                failed: number;
+                errored: number;
+                /** @description SKIPPED/NOT_APPLICABLE — не входят в pass_rate (SKIPPED ≠ PASS). */
+                skipped: number;
+                pass_rate: components["schemas"]["AnalyticsRate"];
+                avg_duration_seconds: number | null;
+            }[];
+            providers: {
+                provider: string;
+                executions: number;
+                collected: number;
+                /** @description TIMED_OUT + CRASHED */
+                errors: number;
+                rate_limited: number;
+                auth_required: number;
+                cancelled: number;
+                in_progress: number;
+                success_rate: components["schemas"]["AnalyticsRate"];
+                avg_duration_seconds: number | null;
+                failures_by_category: {
+                    [key: string]: number;
+                };
+                tokens: {
+                    /** @description Сумма токенов, сообщённых CLI; null — CLI не сообщали. */
+                    total: number | null;
+                    /** @enum {string} */
+                    source: "cli_reported" | "not_exposed_by_cli" | "mixed";
+                    executions_reported: number;
+                };
+            }[];
+            review_loops: {
+                review_requests: number;
+                fix_requests: number;
+                /** @description Цепочки correlation_id с REVIEW_REQUEST. */
+                review_chains: number;
+                chains_with_fixes: number;
+                avg_fix_rounds: number | null;
+                max_fix_rounds: number;
+                /** @description Задачи в BLOCKED(REVIEW_LOOP_EXHAUSTED) */
+                loops_exhausted: number;
+            };
+            agent_messages: {
+                total: number;
+                /** @description Ключи — тип ACP-сообщения. */
+                by_type: {
+                    [key: string]: number;
+                };
+            };
+            approvals: {
+                requested: number;
+                pending: number;
+                by_status: {
+                    [key: string]: number;
+                };
+                wait_seconds: components["schemas"]["AnalyticsDurationStats"];
+            };
+            context: {
+                packs: number;
+                avg_size_bytes: number | null;
+                max_size_bytes: number | null;
+                fragments: number;
+                stale_fragment_ratio: components["schemas"]["AnalyticsRate"];
+                /** @description FR-CI-08: доля уникальных путей фрагментов Context Pack, на которые сослались заявления итога попыток, подтверждённых платформой (SUCCEEDED после обязательных gates). */
+                usefulness: {
+                    rate: components["schemas"]["AnalyticsRate"];
+                    packs_evaluated: number;
+                    fragments_referenced: number;
+                    fragments_total: number;
+                    /** @description Оценено не больше 2000 последних пакетов окна. */
+                    truncated: boolean;
+                };
+            };
+        };
         /**
          * @description Каноническое перечисление (docs/README.md §3).
          * @enum {string}
@@ -923,7 +2180,7 @@ export interface components {
          * @description Каноническое перечисление (docs/README.md §3).
          * @enum {string}
          */
-        ApprovalActionType: "PLAN_APPROVAL" | "MERGE" | "PRODUCTION_DEPLOY" | "DESTRUCTIVE_MIGRATION" | "DATA_DELETION" | "SECRET_CHANGE" | "UNRESTRICTED_NETWORK" | "DOCS_DOWNLOAD" | "CRITICAL_DIRECTIVE" | "MANUAL_REVIEW" | "SELF_REVIEW_FALLBACK" | "LOCAL_EXECUTION_FALLBACK";
+        ApprovalActionType: "PLAN_APPROVAL" | "MERGE" | "PRODUCTION_DEPLOY" | "DESTRUCTIVE_MIGRATION" | "DATA_DELETION" | "SECRET_CHANGE" | "UNRESTRICTED_NETWORK" | "DOCS_DOWNLOAD" | "CRITICAL_DIRECTIVE" | "MANUAL_REVIEW" | "SELF_REVIEW_FALLBACK" | "LOCAL_EXECUTION_FALLBACK" | "VULN_DB_UPDATE";
         /**
          * @description Каноническое перечисление (docs/README.md §3).
          * @enum {string}
@@ -983,7 +2240,7 @@ export interface components {
          * @description Каноническое перечисление (docs/README.md §3).
          * @enum {string}
          */
-        SseEventType: "run.state_changed" | "task.state_changed" | "agent.message" | "cli.output" | "directive.impact_ready" | "directive.state_changed" | "approval.requested" | "approval.decided" | "gate.completed" | "run.completed" | "chat.message" | "heartbeat";
+        SseEventType: "run.state_changed" | "task.state_changed" | "agent.message" | "cli.output" | "directive.impact_ready" | "directive.state_changed" | "approval.requested" | "approval.decided" | "gate.completed" | "run.completed" | "chat.message" | "review.comment" | "heartbeat";
         /**
          * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
          * @enum {string}
@@ -1015,15 +2272,15 @@ export interface components {
          */
         DirectiveImpactStatus: "PENDING" | "READY" | "NOT_REQUIRED" | "FAILED";
         /**
-         * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+         * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения. Значения — `directive_acknowledgements.status` (DATABASE_DESIGN §9.8): DELIVERED — попытка задачи-получателя стартовала с поручением; ACKNOWLEDGED — итог агента принят (accepted/not_applicable); REJECTED — агент ответил cannot_comply; EXPIRED — получатель не получил/не подтвердил поручение до завершения задачи или run. FAILED сохранено для совместимости и сервером не выдаётся.
          * @enum {string}
          */
-        DirectiveAckStatus: "PENDING" | "DELIVERED" | "ACKNOWLEDGED" | "FAILED";
+        DirectiveAckStatus: "PENDING" | "DELIVERED" | "ACKNOWLEDGED" | "REJECTED" | "EXPIRED" | "FAILED";
         /**
          * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
          * @enum {string}
          */
-        ArtifactKind: "git_diff" | "test_report" | "scan_report" | "sbom" | "context_pack" | "cli_output" | "raw_cli_log" | "run_report" | "other";
+        ArtifactKind: "git_diff" | "test_report" | "scan_report" | "sbom" | "context_pack" | "cli_output" | "raw_cli_log" | "run_report" | "other" | "coverage_report" | "gate_log" | "applicability_report" | "signature";
         /**
          * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
          * @enum {string}
@@ -1091,6 +2348,8 @@ export interface components {
              * @description Для replay_window_exceeded (410): наименьший seq, ещё доступный для replay
              */
             min_available_seq?: number;
+            /** @description Для step_up_required (403): допустимый возраст последнего ввода пароля (SC-IAM-08); подтверждение — POST /auth/reauthenticate */
+            max_age_seconds?: number;
         };
         FieldError: {
             /**
@@ -1122,6 +2381,9 @@ export interface components {
             email: string;
             password: string;
         };
+        ReauthenticateRequest: {
+            password: string;
+        };
         WorkspaceMembership: {
             /** Format: uuid */
             workspace_id: string;
@@ -1149,6 +2411,11 @@ export interface components {
              * @description UTC, ISO 8601 с Z
              */
             idle_expires_at?: string;
+            /**
+             * Format: date-time
+             * @description Последний ввод пароля в сессии (вход или step-up, SC-IAM-08); step-up действителен 10 минут
+             */
+            reauthenticated_at?: string | null;
             workspaces: components["schemas"]["WorkspaceMembership"][];
         };
         Workspace: {
@@ -1157,12 +2424,32 @@ export interface components {
             name: string;
             slug: string;
             role: components["schemas"]["WorkspaceRole"];
-            settings?: Record<string, never>;
+            settings?: components["schemas"]["WorkspaceSettings"];
+            /**
+             * Format: int64
+             * @description Версия для If-Match (ETag `"v<version>"`); присутствует в ответах getWorkspace/updateWorkspace/createWorkspace
+             */
+            version?: number;
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
              */
             created_at: string;
+        };
+        /** @description Настройки и политики workspace; неизвестные ключи клиент игнорирует (API_DESIGN §16). */
+        WorkspaceSettings: {
+            /** @description Исключение four-eyes для workspace с единственным участником (API_DESIGN §5.3); по умолчанию false. Меняет только owner. */
+            allow_single_member_self_approval?: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description Merge-patch workspace (OQ-45 (f)); slug неизменяем. */
+        WorkspaceUpdateRequest: {
+            name?: string;
+            settings?: components["schemas"]["WorkspaceSettingsUpdate"];
+        };
+        WorkspaceSettingsUpdate: {
+            allow_single_member_self_approval?: boolean;
         };
         WorkspaceCreateRequest: {
             name: string;
@@ -1283,13 +2570,420 @@ export interface components {
                 status: string;
             } | null;
         };
+        RepositoryTreeEntry: {
+            name: string;
+            /** @description Путь от корня репозитория */
+            path: string;
+            /** @enum {string} */
+            type: "directory" | "file" | "symlink" | "submodule";
+            /** @description Режим git (100644 */
+            mode: string;
+            /** @description Размер blob в байтах; null для каталога/submodule */
+            size: number | null;
+        };
+        RepositoryTreePage: {
+            /** Format: uuid */
+            repository_id: string;
+            commit_sha: string;
+            /** @description Нормализованный путь каталога ('' — корень) */
+            path: string;
+            items: components["schemas"]["RepositoryTreeEntry"][];
+            next_cursor: string | null;
+        };
+        RepositoryFile: {
+            /** Format: uuid */
+            repository_id: string;
+            commit_sha: string;
+            path: string;
+            /** @enum {string} */
+            type: "file" | "symlink";
+            mode: string;
+            /** @description Полный размер blob в байтах */
+            size: number;
+            /** @description Лимит отдаваемого содержимого */
+            max_bytes: number;
+            /** @description Содержимое усечено до max_bytes */
+            truncated: boolean;
+            is_binary: boolean;
+            /** @enum {string|null} */
+            encoding: "utf-8" | null;
+            /** @description Текст файла (усечённый при truncated); null для бинарного файла. Отображается только как текст. */
+            content: string | null;
+        };
+        RepositoryBranch: {
+            /** @description Имя ветки без refs/heads/ */
+            name: string;
+            commit_sha: string;
+            /** Format: date-time */
+            committed_at: string | null;
+            is_default: boolean;
+        };
+        RepositoryBranchPage: {
+            /** Format: uuid */
+            repository_id: string;
+            default_branch: string;
+            /** @description В репозитории больше веток */
+            truncated: boolean;
+            items: components["schemas"]["RepositoryBranch"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        RepositoryCommitSummary: {
+            sha: string;
+            parents: string[];
+            author_name: string;
+            /** Format: date-time */
+            authored_at: string | null;
+            /** Format: date-time */
+            committed_at: string | null;
+            /** @description Первая строка сообщения commit (секреты редактируются); только текст */
+            subject: string;
+        };
+        RepositoryCommitPage: {
+            /** Format: uuid */
+            repository_id: string;
+            /** @description Полный SHA */
+            commit_sha: string;
+            items: components["schemas"]["RepositoryCommitSummary"][];
+            /** @description Opaque base64url cursor; null — конец выборки (или лимит глубины 1000). */
+            next_cursor: string | null;
+        };
         /** @description Страница Repository (cursor pagination). */
         RepositoryPage: {
             items: components["schemas"]["Repository"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
         };
-        /** @description provider=local требует local_path; provider=github требует remote_url и установленный GitHub App. */
+        /** @description READY-снимок индекса кода, к которому относится ответ. */
+        IndexSnapshotRef: {
+            /** Format: uuid */
+            id: string;
+            commit_sha: string;
+            status: string;
+            index_version: number;
+            file_count: number | null;
+            symbol_count: number | null;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        /** @enum {string} */
+        CodeSymbolKind: "module" | "class" | "interface" | "function" | "method" | "variable" | "constant" | "type" | "enum" | "test" | "route" | "other";
+        CodeSymbol: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            qualified_name: string | null;
+            kind: components["schemas"]["CodeSymbolKind"];
+            /** @description Путь файла от корня репозитория */
+            path: string;
+            start_line: number;
+            end_line: number;
+            /** @description Сигнатура из кода (секреты редактируются); только текст */
+            signature: string | null;
+            score: number;
+            /**
+             * @description name — по имени символа, text — FTS по фрагменту
+             * @enum {string}
+             */
+            match: "name" | "text";
+        };
+        CodeSymbolPage: {
+            /** Format: uuid */
+            repository_id: string;
+            snapshot: components["schemas"]["IndexSnapshotRef"] | null;
+            items: components["schemas"]["CodeSymbol"][];
+            /** @description Opaque base64url cursor (привязан к снимку); null — конец выборки. */
+            next_cursor: string | null;
+        };
+        DependencyNode: {
+            /** @description Путь файла (kind=file) или external:<ссылка> */
+            id: string;
+            /** @enum {string} */
+            kind: "file" | "external";
+            path: string | null;
+            /** @description Сырая ссылка импорта (внешний пакет/неразрешённый модуль) для kind=external */
+            ref: string | null;
+            language: string | null;
+            is_test: boolean;
+            /** @description Расстояние от корня (0 — корень) */
+            depth: number;
+        };
+        DependencyEdge: {
+            /** @description id узла-источника */
+            source: string;
+            /** @description id узла-цели */
+            target: string;
+            /** @enum {string} */
+            edge_type: "imports" | "calls" | "inherits" | "implements" | "references" | "tests";
+        };
+        DependencyGraph: {
+            /** Format: uuid */
+            repository_id: string;
+            snapshot: components["schemas"]["IndexSnapshotRef"] | null;
+            depth: number;
+            /** @enum {string} */
+            direction: "out" | "in" | "both";
+            roots: string[];
+            nodes: components["schemas"]["DependencyNode"][];
+            edges: components["schemas"]["DependencyEdge"][];
+            /** @description Достигнут предел узлов/рёбер/корней — граф неполон */
+            truncated: boolean;
+            limits: {
+                max_nodes: number;
+                max_edges: number;
+            };
+        };
+        /** @enum {string} */
+        IndexingJobStatus: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+        IndexingJob: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            repository_id: string;
+            commit_sha: string;
+            /** @enum {string} */
+            kind: "full" | "incremental";
+            status: components["schemas"]["IndexingJobStatus"];
+            attempt_count: number;
+            /** Format: uuid */
+            base_snapshot_id: string | null;
+            /** Format: uuid */
+            snapshot_id: string | null;
+            file_count: number | null;
+            symbol_count: number | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @description От постановки до старта (null — ещё не стартовало) */
+            queue_seconds: number | null;
+            /** @description От старта до завершения (null — не завершено) */
+            duration_seconds: number | null;
+            /** @description Безопасный текст ошибки (секреты и пути хоста удалены) */
+            error: string | null;
+        };
+        IndexingJobPage: {
+            items: components["schemas"]["IndexingJob"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        /** @enum {string} */
+        WorktreeStatus: "ACTIVE" | "LOCKED" | "REMOVED" | "ORPHANED";
+        /** @description Git worktree задачи. Пути хоста не отдаются. */
+        Worktree: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            repository_id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            task_id: string | null;
+            branch_name: string;
+            base_commit_sha: string;
+            head_commit_sha: string | null;
+            status: components["schemas"]["WorktreeStatus"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            removed_at: string | null;
+        };
+        WorktreePage: {
+            items: components["schemas"]["Worktree"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        /**
+         * @description Статус треда inline-комментариев (FSM review_thread, ADR-0015)
+         * @enum {string}
+         */
+        ReviewThreadStatus: "OPEN" | "RESOLVED";
+        /** @enum {string} */
+        ReviewVerdict: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+        /** @description Якорь треда (неизменяем) */
+        ReviewAnchor: {
+            /** @description Head-commit diff (сторона head) / commit файла */
+            commit_sha: string;
+            /** @description База diff; обязательна для side=base */
+            base_commit_sha: string | null;
+            /** @enum {string} */
+            side: "base" | "head";
+            /** @description Путь относительно корня репозитория (без ., .., //, \ и управляющих символов) */
+            file_path: string;
+            start_line: number;
+            /** @description ≥ start_line, диапазон ≤ 1000 строк */
+            end_line: number;
+        };
+        /** @description Сегменты пути «.»/«..» и «//» отклоняются (422); end_line < start_line или > 1000 строк — 422. */
+        ReviewAnchorInput: {
+            commit_sha: string;
+            base_commit_sha?: string;
+            /**
+             * @default head
+             * @enum {string}
+             */
+            side: "base" | "head";
+            file_path: string;
+            start_line: number;
+            end_line: number;
+        };
+        ReviewComment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            thread_id: string;
+            author: components["schemas"]["UserRef"];
+            /** @description Санитизированный текст (секреты редактированы) */
+            body: string;
+            /** @description Номер редакции; ETag = "v<revision>" */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            edited_at: string | null;
+            /** @description Текущий пользователь — автор (правка разрешена) */
+            can_edit: boolean;
+        };
+        /** @description Тред inline-комментариев (ADR-0015). Комментарии агентам не доставляются. */
+        ReviewThread: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            repository_id: string;
+            /** Format: uuid */
+            run_id: string | null;
+            /** Format: uuid */
+            task_id: string | null;
+            /** Format: uuid */
+            finding_id: string | null;
+            anchor: components["schemas"]["ReviewAnchor"];
+            status: components["schemas"]["ReviewThreadStatus"];
+            /** @description Якорь не совпадает с текущим commit (head_sha или последний worktree задачи/run); null — текущий commit неизвестен */
+            outdated: boolean | null;
+            current_commit_sha: string | null;
+            resolved_by: components["schemas"]["UserRef"] | null;
+            /** Format: date-time */
+            resolved_at: string | null;
+            created_by: components["schemas"]["UserRef"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /**
+             * Format: int64
+             * @description ETag = "v<version>"
+             */
+            version: number;
+            comment_count: number;
+            comments: components["schemas"]["ReviewComment"][];
+        };
+        ReviewThreadPage: {
+            items: components["schemas"]["ReviewThread"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        ReviewThreadCreateRequest: {
+            anchor: components["schemas"]["ReviewAnchorInput"];
+            /** @description Первый комментарий */
+            body: string;
+            /**
+             * Format: uuid
+             * @description Run того же репозитория
+             */
+            run_id?: string;
+            /**
+             * Format: uuid
+             * @description Задача этого run (требует run_id)
+             */
+            task_id?: string;
+            /**
+             * Format: uuid
+             * @description Находка (этого run)
+             */
+            finding_id?: string;
+        };
+        ReviewCommentCreateRequest: {
+            body: string;
+        };
+        ReviewCommentUpdateRequest: {
+            body: string;
+        };
+        ReviewCommentRevision: {
+            revision: number;
+            /** @description Санитизированный текст прежней редакции */
+            body: string;
+            /** Format: date-time */
+            authored_at: string;
+            /** Format: date-time */
+            superseded_at: string;
+        };
+        ReviewCommentRevisionList: {
+            comment: components["schemas"]["ReviewComment"];
+            /** @description Прежние редакции по возрастанию revision (текущая — comment) */
+            items: components["schemas"]["ReviewCommentRevision"][];
+        };
+        ReviewSubmitRequest: {
+            verdict: components["schemas"]["ReviewVerdict"];
+            /** @description Общее замечание */
+            body?: string;
+            /** @description Треды этого run (для REQUEST_CHANGES — открытые) */
+            thread_ids?: string[];
+            /**
+             * Format: uuid
+             * @description Задача run: цель поручения REQUEST_CHANGES (иначе — run)
+             */
+            task_id?: string;
+            /**
+             * Format: uuid
+             * @description PENDING approval этого run (обязателен для APPROVE)
+             */
+            approval_id?: string;
+            /**
+             * Format: int64
+             * @description Несовпадение с runs.version ⇒ 409 version_mismatch
+             */
+            expected_run_version: number;
+            /**
+             * @description REQUEST_CHANGES — подтверждение impact preview
+             * @default true
+             */
+            requires_impact_preview: boolean;
+        };
+        ReviewSubmission: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            task_id: string | null;
+            verdict: components["schemas"]["ReviewVerdict"];
+            body: string | null;
+            thread_ids: string[];
+            /** Format: uuid */
+            approval_id: string | null;
+            approval_status: components["schemas"]["ApprovalStatus"] | null;
+            /**
+             * Format: uuid
+             * @description Поручение CHANGE_REQUEST (REQUEST_CHANGES) — GET /runs/{run_id}/directives/{directive_id}
+             */
+            directive_id: string | null;
+            directive_status: components["schemas"]["DirectiveStatus"] | null;
+            submitted_by: components["schemas"]["UserRef"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        ReviewSubmissionPage: {
+            items: components["schemas"]["ReviewSubmission"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        /** @description provider=local требует local_path; provider=github (P8-02, FR-PRJ-03) требует remote_url, local_path (локальная рабочая копия в allowlist-корнях) и активную установку GitHub App workspace с доступом к репозиторию (проверяется через GitHub API). */
         RepositoryAttachRequest: {
             provider: components["schemas"]["RepositoryProvider"];
             /** @description Для github: https://github.com/<owner>/<repo> */
@@ -1313,6 +3007,26 @@ export interface components {
         /** @description Страница Technology (cursor pagination). */
         TechnologyPage: {
             items: components["schemas"]["Technology"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        WorkspaceTechnology: {
+            /** Format: uuid */
+            technology_id: string;
+            name: string;
+            ecosystem: string;
+            /** Format: uuid */
+            technology_version_id: string;
+            version_label: string;
+            support_status: string | null;
+            /** @description Проекты workspace с этой версией в определённом стеке */
+            project_count: number;
+            /** @description Источники документации workspace для этой версии */
+            source_count: number;
+        };
+        /** @description Страница WorkspaceTechnology (cursor pagination). */
+        WorkspaceTechnologyPage: {
+            items: components["schemas"]["WorkspaceTechnology"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
         };
@@ -1481,7 +3195,8 @@ export interface components {
             review_loop_count?: number;
             /** Format: date-time */
             next_attempt_at?: string | null;
-            timeout_seconds?: number;
+            /** @description Явный тайм-аут задачи; null — не задан (действует default_timeout_seconds провайдера в workspace). */
+            timeout_seconds?: number | null;
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
@@ -1525,6 +3240,77 @@ export interface components {
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
         };
+        /** @enum {string} */
+        ContextPackSection: "code" | "symbols_graph" | "tests" | "repo_map" | "docs";
+        /** @enum {string} */
+        ContextPackSourceKind: "map" | "exact" | "dependency" | "task_relevance" | "recency" | "docs";
+        /** @description Фрагмент, вошедший в Context Pack (без текста). */
+        ContextPackFragment: {
+            section: components["schemas"]["ContextPackSection"];
+            kind: components["schemas"]["ContextPackSourceKind"];
+            /** @description Путь снимка; doc:<раздел> для документации, <repo_map> для карты */
+            path: string;
+            lines: number[] | null;
+            commit: string | null;
+            sha256: string | null;
+            bytes: number | null;
+            /** @description Фрагмент из commit */
+            stale: boolean;
+            source_ref: string | null;
+        };
+        /** @description Фрагмент, не вошедший в Context Pack, и причина. */
+        ContextPackOmission: {
+            section: components["schemas"]["ContextPackSection"];
+            kind: components["schemas"]["ContextPackSourceKind"];
+            path: string;
+            commit: string | null;
+            /** @description stale_commit | fragment_too_large | max_files | max_bytes */
+            reason: string;
+        };
+        AttemptContextPack: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            task_id: string;
+            /** Format: uuid */
+            attempt_id: string;
+            /** Format: uuid */
+            snapshot_id: string;
+            /** @description Commit задачи */
+            base_commit: string;
+            /** @description Commit снимка индекса (≠ base_commit — фрагменты устаревшие) */
+            snapshot_commit: string | null;
+            policy_version: number;
+            documentation_mode: components["schemas"]["DocumentationMode"];
+            token_budget: number;
+            size_bytes: number;
+            content_hash: string;
+            /**
+             * Format: uuid
+             * @description Artifact context_pack (текст фрагментов)
+             */
+            artifact_id: string;
+            /** Format: date-time */
+            created_at: string;
+            schema: number | null;
+            /** @enum {string|null} */
+            stale_policy: "exclude" | "mark" | null;
+            role: string | null;
+            /** @enum {string|null} */
+            docs: "allowed" | "off" | null;
+            budget: {
+                max_bytes: number | null;
+                max_files: number | null;
+                max_fragment_bytes: number | null;
+            } | null;
+            cache_hit: boolean | null;
+            fragments: components["schemas"]["ContextPackFragment"][];
+            omitted: components["schemas"]["ContextPackOmission"][];
+            /** @description Коды предупреждений сборки (без текста) */
+            warnings: string[];
+            fragments_total: number;
+            omitted_total: number;
+        };
         AcpMessage: {
             /** Format: uuid */
             message_id: string;
@@ -1563,7 +3349,9 @@ export interface components {
             reply_to_id?: string | null;
             schema_version: string;
             /** @description Типизированный payload ACP (AGENT_COMMUNICATION_PROTOCOL.md); ≤ 32 KiB */
-            payload: Record<string, never>;
+            payload: {
+                [key: string]: unknown;
+            };
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
@@ -1601,7 +3389,10 @@ export interface components {
             commit_sha?: string | null;
             command?: string | null;
             exit_code?: number | null;
-            environment?: Record<string, never>;
+            /** @description Окружение проверки (свободная форма: версии инструментов, ОС, образ) */
+            environment?: {
+                [key: string]: unknown;
+            };
             /** Format: date-time */
             started_at?: string | null;
             /** Format: date-time */
@@ -1637,6 +3428,12 @@ export interface components {
             status: components["schemas"]["GateExecutionStatus"];
             /** Format: uuid */
             evidence_id?: string | null;
+            /** @description Commit, на котором выполнен gate (вердикт по задаче/commit, QUALITY_GATES §5) */
+            commit_sha?: string;
+            /** @description Код ERROR/FAIL (TOOL_UNAVAILABLE, TIMEOUT, INFRA, SHA_MISMATCH, REPORT_UNPARSABLE, EMPTY_SUITE, ...) */
+            error_code?: string | null;
+            /** @description Причина NOT_APPLICABLE/SKIPPED (секреты редактируются) */
+            not_applicable_reason?: string | null;
             /** Format: date-time */
             started_at?: string | null;
             /** Format: date-time */
@@ -1651,11 +3448,31 @@ export interface components {
             gate_execution_id?: string | null;
             severity: components["schemas"]["FindingSeverity"];
             rule_id: string;
+            /** @description Краткое описание находки (секреты редактируются) */
+            title?: string;
+            cwe_id?: string | null;
             file_path?: string | null;
             line?: number | null;
             status: components["schemas"]["FindingStatus"];
             /** Format: uuid */
             evidence_id?: string | null;
+            /** Format: uuid */
+            run_id?: string;
+            /** @enum {string} */
+            source?: "gate" | "agent_review" | "manual" | "github";
+            fixed_in_commit_sha?: string | null;
+            /** @description Коды контролей (standard_controls.control_code), к которым относится находка */
+            control_refs?: string[];
+            /** @description Кто принял последнее решение (ACKNOWLEDGED/FALSE_POSITIVE/ACCEPTED_RISK); null — открыта/система */
+            resolved_by?: components["schemas"]["UserRef"] | null;
+            /** @description Обоснование последнего решения человека (секреты редактируются) */
+            resolution_reason?: string | null;
+            /** @description Версия для ETag/If-Match */
+            version?: number;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
         };
         /** @description findings усечены до 200 (сортировка по severity desc); полный список — в отчёте/artifact. */
         QualityReport: {
@@ -1672,6 +3489,10 @@ export interface components {
             findings_summary: {
                 [key: string]: number;
             };
+            /** @description finding_status → count (все находки run, жизненный цикл) */
+            findings_by_status?: {
+                [key: string]: number;
+            };
             findings: components["schemas"]["Finding"][];
             findings_total: number;
         };
@@ -1685,11 +3506,28 @@ export interface components {
             applicability: components["schemas"]["ApplicabilityStatus"];
             agent_role?: components["schemas"]["AgentRole"] | null;
             status: components["schemas"]["ComplianceStatus"];
+            /**
+             * @description Check контроля (трассировка standard → control → check → evidence → verdict)
+             * @enum {string}
+             */
+            verification_method?: "automated_gate" | "agent_review" | "manual" | "document_check";
+            gate_type?: string | null;
+            /** Format: uuid */
+            gate_execution_id?: string | null;
             /** Format: uuid */
             evidence_id?: string | null;
             reviewed_by?: components["schemas"]["UserRef"] | null;
             /** Format: date-time */
             checked_at?: string | null;
+            /**
+             * Format: uuid
+             * @description Актуальная строка compliance_results
+             */
+            result_id?: string | null;
+            /** @description Пояснение вердикта (обоснование человека или движка; секреты редактируются) */
+            notes?: string | null;
+            /** @description Блокирует завершение run при FAIL (project_controls.blocking или умолчание платформы) */
+            blocking?: boolean;
         };
         /** @description Страница ComplianceRow (cursor pagination). */
         CompliancePage: {
@@ -1703,6 +3541,83 @@ export interface components {
             /** @description Автоматические проверки не являются официальной сертификацией (ТЗ §13) */
             disclaimer?: string;
         };
+        /** @description Страница Finding (cursor pagination). */
+        FindingPage: {
+            items: components["schemas"]["Finding"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        FindingTransitionRequest: {
+            /** @enum {string} */
+            to_status: "OPEN" | "ACKNOWLEDGED" | "FALSE_POSITIVE" | "ACCEPTED_RISK";
+            /** @description Обоснование решения (обязательно) */
+            reason: string;
+        };
+        ComplianceReviewRequest: {
+            /** @enum {string} */
+            status: "PASS" | "FAIL";
+            /** @description Обоснование вердикта */
+            notes: string;
+            /** @description Evidence этого run; первое — evidence вердикта (для PASS — VERIFIED) */
+            evidence_ids: string[];
+        };
+        /**
+         * @description Состояние применимости контроля в проекте: approved — утверждена человеком; draft — черновик системы; missing — строки нет. Предлагаемое дополнение (API_DESIGN.md §19).
+         * @enum {string}
+         */
+        ControlApprovalState: "approved" | "draft" | "missing";
+        ProjectControl: {
+            /** Format: uuid */
+            control_id: string;
+            standard_code: string;
+            edition: string;
+            standard_title?: string;
+            clause_ref: string;
+            control_code: string;
+            /** @description Формулировка платформы (не текст стандарта) */
+            description: string;
+            /** @enum {string} */
+            verification_method: "automated_gate" | "agent_review" | "manual" | "document_check";
+            gate_type?: string | null;
+            default_agent_role?: components["schemas"]["AgentRole"] | null;
+            approval_state: components["schemas"]["ControlApprovalState"];
+            applicability: components["schemas"]["ApplicabilityStatus"];
+            /**
+             * @description Значение строки project_controls (черновик или утверждённое); null — строки нет
+             * @enum {string|null}
+             */
+            proposed_applicability?: "applicable" | "not_applicable" | "tailored" | null;
+            rationale?: string | null;
+            /** @description Ответственная роль (переопределение проекта или роль контроля по умолчанию) */
+            agent_role?: components["schemas"]["AgentRole"] | null;
+            /** @description Явное значение project_controls.blocking; null — умолчание платформы */
+            blocking: boolean | null;
+            /** @description С учётом умолчания платформы для профиля качества проекта */
+            effective_blocking: boolean;
+            approved_by?: components["schemas"]["UserRef"] | null;
+            /** Format: date-time */
+            approved_at?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        /** @description Страница ProjectControl (cursor pagination). */
+        ProjectControlPage: {
+            items: components["schemas"]["ProjectControl"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+            quality_profile?: components["schemas"]["QualityProfile"];
+            /** @description Автоматические проверки не являются официальной сертификацией (ТЗ §13) */
+            disclaimer?: string;
+        };
+        ProjectControlApprovalRequest: {
+            /** @enum {string} */
+            applicability: "applicable" | "not_applicable" | "tailored";
+            /** @description Обязателен для not_applicable и tailored */
+            rationale?: string;
+            agent_role?: components["schemas"]["AgentRole"];
+            /** @description null или отсутствует — умолчание платформы */
+            blocking?: boolean | null;
+        };
         RunReport: {
             run: components["schemas"]["Run"];
             quality: components["schemas"]["QualityReport"];
@@ -1712,6 +3627,11 @@ export interface components {
             tasks: components["schemas"]["TaskSummary"][];
             approvals: components["schemas"]["Approval"][];
             evidence: components["schemas"]["Evidence"][];
+            /** @description Полный список находок run (quality.findings усечён до 200) */
+            findings?: components["schemas"]["Finding"][];
+            compliance_matrix?: components["schemas"]["ComplianceTraceRow"][];
+            /** @description Автоматические проверки не являются официальной сертификацией (ТЗ §13) */
+            disclaimer?: string;
             external_actions?: {
                 /** Format: uuid */
                 id: string;
@@ -1727,6 +3647,43 @@ export interface components {
             generated_at: string;
             report_artifact?: components["schemas"]["ArtifactRef"] | null;
         };
+        /** @description Трассировка ТЗ §13: standard → control → applicability → роль → check → evidence → verdict. */
+        ComplianceTraceRow: {
+            standard: {
+                code: string;
+                edition: string;
+            };
+            control: {
+                code: string;
+                clause_ref: string;
+                description: string;
+            };
+            applicability: components["schemas"]["ApplicabilityStatus"];
+            agent_role?: components["schemas"]["AgentRole"] | null;
+            check: {
+                /** @enum {string} */
+                method: "automated_gate" | "agent_review" | "manual" | "document_check";
+                gate_type?: string | null;
+                /** Format: uuid */
+                gate_execution_id?: string | null;
+                gate_status?: components["schemas"]["GateExecutionStatus"] | null;
+                commit_sha?: string | null;
+            };
+            evidence: {
+                /** Format: uuid */
+                id: string;
+                kind: string;
+                verification_status: components["schemas"]["EvidenceVerificationStatus"];
+                artifact_sha256: string;
+            } | null;
+            verdict: {
+                status: components["schemas"]["ComplianceStatus"];
+                notes?: string | null;
+                reviewed_by?: components["schemas"]["UserRef"] | null;
+                /** Format: date-time */
+                checked_at: string;
+            };
+        };
         ActivityEvent: {
             /** Format: uuid */
             id: string;
@@ -1740,16 +3697,19 @@ export interface components {
              * Format: int64
              * @description Порядковый номер в run (как `seq` SSE)
              */
-            seq?: number;
+            seq: number;
             event_type: string;
-            payload: Record<string, never>;
+            /** @description payload SSE-события этого типа (sse-event.schema.json) */
+            payload: {
+                [key: string]: unknown;
+            };
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
              */
             occurred_at: string;
         };
-        /** @description Страница ActivityEvent (cursor pagination). */
+        /** @description Страница ActivityEvent (cursor pagination), упорядочена по seq по возрастанию. */
         ActivityPage: {
             items: components["schemas"]["ActivityEvent"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
@@ -1800,16 +3760,20 @@ export interface components {
             approval_id?: string | null;
             approval_status?: components["schemas"]["ApprovalStatus"] | null;
             mentions?: components["schemas"]["AgentRole"][];
+            /** @description Ссылки на объекты из ACP-сообщения (как `links` события chat.message) */
             refs?: {
-                /** @enum {string} */
-                type: "diff" | "evidence" | "test_report" | "artifact" | "finding" | "task";
+                /**
+                 * @description Совпадает с `links[].kind` SSE-события chat.message
+                 * @enum {string}
+                 */
+                type: "diff" | "evidence" | "test_report" | "artifact" | "finding" | "task" | "approval" | "gate_execution";
                 /** Format: uuid */
                 id: string;
                 href?: string;
             }[];
             /** Format: uuid */
             source_event_id?: string | null;
-            /** @description run_event_log seq, для связи с SSE */
+            /** @description seq события chat.message в run_event_log (для связи с SSE); null — событие ещё не спроецировано или удалено retention */
             seq?: number | null;
             /**
              * Format: date-time
@@ -1887,6 +3851,13 @@ export interface components {
         DirectiveAck: {
             recipient_role: components["schemas"]["AgentRole"];
             status: components["schemas"]["DirectiveAckStatus"];
+            /**
+             * Format: uuid
+             * @description задача-получатель (null — получатель уровня run, ещё не привязан к задаче)
+             */
+            task_id?: string | null;
+            /** Format: date-time */
+            delivered_at?: string | null;
             /** Format: date-time */
             acknowledged_at?: string | null;
         };
@@ -1910,6 +3881,8 @@ export interface components {
             status: components["schemas"]["DirectiveStatus"];
             impact_status: components["schemas"]["DirectiveImpactStatus"];
             impacts: components["schemas"]["DirectiveImpact"][];
+            /** @description Сводка анализа влияния (та же, что `summary` события directive.impact_ready); null до завершения анализа */
+            impact_summary?: string | null;
             requires_confirmation: boolean;
             /** Format: uuid */
             approval_id?: string | null;
@@ -1961,7 +3934,9 @@ export interface components {
             auth_status: components["schemas"]["AuthStatus"];
             availability: components["schemas"]["ProviderAvailability"];
             /** @description Результат feature detection (probe) */
-            capabilities: Record<string, never>;
+            capabilities: {
+                [key: string]: unknown;
+            };
             last_error_category?: components["schemas"]["CliErrorCode"] | null;
             /** Format: date-time */
             checked_at?: string | null;
@@ -1987,6 +3962,231 @@ export interface components {
             installations: components["schemas"]["ProviderInstallation"][];
             workspace_settings: components["schemas"]["ProviderSettings"];
         };
+        /** @description Последняя попытка задачи (task_attempts); provider null — попытка без CLI (детерминированный L1-инструмент). */
+        TaskAttemptRef: {
+            /** Format: uuid */
+            id: string;
+            attempt_no: number;
+            /** @enum {string} */
+            status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+            provider: components["schemas"]["CliProvider"] | null;
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            started_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
+        WorkspaceTask: components["schemas"]["TaskSummary"] & {
+            /** Format: uuid */
+            project_id: string;
+            run_status: components["schemas"]["RunStatus"];
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            created_at: string;
+            current_attempt: components["schemas"]["TaskAttemptRef"] | null;
+        };
+        /** @description Страница WorkspaceTask (cursor pagination), created_at desc. */
+        WorkspaceTaskPage: {
+            items: components["schemas"]["WorkspaceTask"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        ProviderExecution: {
+            /** Format: uuid */
+            id: string;
+            provider: components["schemas"]["CliProvider"];
+            /** Format: uuid */
+            installation_id: string;
+            /** Format: uuid */
+            task_attempt_id: string;
+            attempt_no: number;
+            /** Format: uuid */
+            task_id: string;
+            /** Format: uuid */
+            run_id: string;
+            agent_role: components["schemas"]["AgentRole"];
+            status: components["schemas"]["ExecutionStatus"];
+            exit_code: number | null;
+            failure_category: components["schemas"]["CliErrorCode"] | null;
+            timeout_seconds: number;
+            /**
+             * Format: uuid
+             * @description Санитизированный вывод (artifact cli_output, downloadArtifact); сырой лог не отдаётся
+             */
+            output_artifact_id: string | null;
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @description От started_at до выхода процесса (exited_at, иначе finished_at); null — не запускался или не завершён */
+            duration_ms: number | null;
+            links?: components["schemas"]["Links"];
+        };
+        /** @description Страница ProviderExecution (cursor pagination), created_at desc. */
+        ProviderExecutionPage: {
+            items: components["schemas"]["ProviderExecution"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        /**
+         * @description Типы событий, сохраняемые в run_event_log (SseEventType без heartbeat).
+         * @enum {string}
+         */
+        ActivityEventType: "run.state_changed" | "task.state_changed" | "agent.message" | "cli.output" | "directive.impact_ready" | "directive.state_changed" | "approval.requested" | "approval.decided" | "gate.completed" | "run.completed" | "chat.message" | "review.comment";
+        /** @description Страница ActivityEvent workspace (cursor pagination), новые сверху (created_at desc). */
+        WorkspaceActivityPage: {
+            items: components["schemas"]["ActivityEvent"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        /**
+         * @description unknown — не измерено (причина — detail); не трактуется как ok.
+         * @enum {string}
+         */
+        SystemHealthStatus: "ok" | "degraded" | "down" | "unknown";
+        SystemHealthComponent: {
+            /** @enum {string} */
+            name: "api" | "database" | "redis" | "object_storage" | "outbox" | "workers" | "queues" | "backup";
+            status: components["schemas"]["SystemHealthStatus"];
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            checked_at: string;
+            latency_ms: number | null;
+            /** @description Измеренные значения компонента (имена — snake_case); только фактически измеренное */
+            measurements: {
+                [key: string]: number | string | boolean | null;
+            };
+            /** @description Причина статуса без технических деталей зависимостей (хостов, учётных данных, текста ошибок) */
+            detail: string | null;
+        };
+        WorkerHostHealth: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            /** @enum {string} */
+            kind: "api" | "orchestrator" | "outbox" | "exec" | "verify" | "index";
+            /** @enum {string} */
+            status: "ONLINE" | "DRAINING" | "OFFLINE";
+            /**
+             * Format: date-time
+             * @description Последний heartbeat процесса (каждые heartbeat_interval_seconds)
+             */
+            last_heartbeat_at: string;
+            /** @description По часам БД */
+            heartbeat_age_seconds: number;
+            /** @description Интервал heartbeat процесса (worker_hosts.labels); null — процесс не пишет heartbeat */
+            heartbeat_interval_seconds: number | null;
+            /** @description ok — возраст ≤ 3 интервалов, degraded — ≤ 10, иначе down; unknown — интервал неизвестен или процесс остановлен штатно (OFFLINE) */
+            liveness: components["schemas"]["SystemHealthStatus"];
+            version: string | null;
+        };
+        WorkerKindHealth: {
+            /** @enum {string} */
+            kind: "api" | "orchestrator" | "outbox" | "exec" | "verify" | "index";
+            /** @description Живость по самому свежему heartbeat неостановленных процессов вида; нет таких процессов — down, если вид ожидается (expected), иначе unknown */
+            status: components["schemas"]["SystemHealthStatus"];
+            /** @description Вид перечислен в настройке установки AICD_EXPECTED_WORKER_KINDS */
+            expected: boolean;
+            hosts: number;
+            /** @description Процессы не в статусе OFFLINE */
+            active_hosts: number;
+            freshest_heartbeat_age_seconds: number | null;
+            heartbeat_interval_seconds: number | null;
+        };
+        QueueHealth: {
+            queue: string;
+            ready: number;
+            delayed: number;
+            dead_letters: number;
+        };
+        BackupComponentHealth: {
+            /** @enum {string} */
+            component: "postgres_base" | "postgres_wal" | "postgres_dump" | "artifacts" | "secrets";
+            /** @enum {string} */
+            last_status: "success" | "failure" | "unknown";
+            /** Format: date-time */
+            last_success_at: string | null;
+            /** @description Нет успешного бэкапа дольше порога (как алерты AicdBackup*) */
+            stale: boolean;
+        };
+        SystemHealth: {
+            /** @description down — отказ database или object_storage; degraded — любая деградация/отказ прочих; unknown компонентов итог не меняет */
+            status: components["schemas"]["SystemHealthStatus"];
+            /**
+             * Format: date-time
+             * @description Время фактической проверки (ответ может быть из кэша)
+             */
+            checked_at: string;
+            cache_ttl_seconds: number;
+            components: components["schemas"]["SystemHealthComponent"][];
+            /** @description null — не прочитано */
+            worker_hosts: components["schemas"]["WorkerHostHealth"][] | null;
+            /** @description Живость по видам воркеров; null — не прочитано */
+            worker_kinds: components["schemas"]["WorkerKindHealth"][] | null;
+            /** @description null — не измерено (Redis недоступен) */
+            queues: components["schemas"]["QueueHealth"][] | null;
+            /** @description null — файл статуса бэкапа не смонтирован в api или не прочитан */
+            backups: components["schemas"]["BackupComponentHealth"][] | null;
+        };
+        AgentPermissions: {
+            /** @enum {string} */
+            write_scope: "none" | "worktree";
+            /** @enum {string} */
+            network: "none" | "restricted" | "unrestricted";
+            /** @description Allowlist glob внутри worktree */
+            path_policy: string[];
+            path_deny: string[];
+            /** @description Дополнительно разрешены файлы */
+            task_paths_allowed: boolean;
+            comments_only_paths: string[];
+        };
+        AgentProfile: {
+            role: components["schemas"]["AgentRole"];
+            template_version: string;
+            /** @description <role>@<version> (ExecutionRequest.input.instruction_template_version) */
+            template_ref: string;
+            template_sha256: string;
+            permissions: components["schemas"]["AgentPermissions"];
+            /** @description Права прототипа L5 (architect), иначе null */
+            prototype_permissions: components["schemas"]["AgentPermissions"] | null;
+            allowed_tools: string[];
+            required_capabilities: string[];
+            /** @description Типы ACP, которые роль вправе отправлять (окончательная проверка — брокер) */
+            acp_send: components["schemas"]["AcpMessageType"][];
+            /** @description Уровни, на которых роль включается в конвейер по умолчанию */
+            complexity_band: {
+                min: components["schemas"]["ComplexityLevel"];
+                max: components["schemas"]["ComplexityLevel"];
+            };
+            /** @description С какого уровня результат роли требует проверки другим провайдером; null — не требуется */
+            independent_check_from: components["schemas"]["ComplexityLevel"] | null;
+            must_differ_from_author: boolean;
+            can_send_fix_request: boolean;
+            /** @description Провайдеры, включённые глобально и в workspace, с ролью в allowed_roles; выбор среди них адаптивный */
+            eligible_providers: components["schemas"]["CliProvider"][];
+            /** @description Строка справочника agent_profiles; null — справочник не синхронизирован */
+            catalog: {
+                template_version: string;
+                enabled: boolean;
+                /** Format: date-time */
+                updated_at: string;
+            } | null;
+        };
+        /** @description Не пагинируется: 12 ролей. */
+        AgentProfileList: {
+            items: components["schemas"]["AgentProfile"][];
+        };
         /** @description Не пагинируется: ровно ≤2 провайдера. */
         ProviderList: {
             items: components["schemas"]["Provider"][];
@@ -2008,7 +4208,29 @@ export interface components {
              * @description UTC, ISO 8601 с Z
              */
             accepted_at: string;
+            /** @description URL статуса запроса: /api/v1/providers/{provider_id}/probes/{probe_request_id} (getProviderProbe) */
             status_url: string;
+        };
+        ProviderProbeStatus: {
+            /** Format: uuid */
+            probe_request_id: string;
+            /** Format: uuid */
+            provider_id: string;
+            /**
+             * @description Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+             * @enum {string}
+             */
+            status: "PENDING" | "COMPLETED" | "FAILED" | "EXPIRED";
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            requested_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** @description Проверенная установка (COMPLETED/FAILED); без учётных данных и путей */
+            installation: components["schemas"]["ProviderInstallation"] | null;
+            error_category: components["schemas"]["CliErrorCode"] | null;
         };
         Approval: {
             /** Format: uuid */
@@ -2027,7 +4249,9 @@ export interface components {
             risk_level: components["schemas"]["RiskLevel"];
             summary: string;
             /** @description Детали действия (diff ref, migration plan, target branch...) без секретов */
-            context?: Record<string, never>;
+            context?: {
+                [key: string]: unknown;
+            };
             requested_by: {
                 /** @enum {string} */
                 actor_type: "user" | "agent" | "system";
@@ -2140,7 +4364,9 @@ export interface components {
             resource_type: string;
             resource_id: string;
             /** @description request_id, ip (усечённый), outcome, idempotency_key hash; без секретов */
-            metadata: Record<string, never>;
+            metadata: {
+                [key: string]: unknown;
+            };
             /**
              * Format: date-time
              * @description UTC, ISO 8601 с Z
@@ -2152,6 +4378,37 @@ export interface components {
             items: components["schemas"]["AuditEvent"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
+        };
+        /** @enum {string} */
+        SearchResultType: "project" | "run" | "task" | "finding" | "approval" | "documentation_source" | "chat_message";
+        SearchResult: {
+            type: components["schemas"]["SearchResultType"];
+            /** Format: uuid */
+            id: string;
+            title: string;
+            /** @description Окно текста вокруг совпадения (секреты редактируются); только текст */
+            snippet: string | null;
+            score: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            project_id: string | null;
+            /** Format: uuid */
+            run_id: string | null;
+            /** Format: uuid */
+            task_id: string | null;
+            /** @description Путь API ресурса (подсказка маршрута) */
+            api_path: string;
+        };
+        SearchResults: {
+            query: string;
+            /** @description Типы, по которым выполнен поиск */
+            types: components["schemas"]["SearchResultType"][];
+            /** @description Запрошенные типы, пропущенные из-за отсутствия права */
+            skipped_types: components["schemas"]["SearchResultType"][];
+            items: components["schemas"]["SearchResult"][];
+            /** @description Совпадений больше */
+            truncated: boolean;
         };
         HealthStatus: {
             /** @enum {string} */
@@ -2177,7 +4434,9 @@ export interface components {
             timestamp: string;
             /** @constant */
             schema_version: "1.0";
-            payload: Record<string, never>;
+            payload: {
+                [key: string]: unknown;
+            };
         };
         RunStateChangedPayload: {
             from_status: components["schemas"]["RunStatus"] | null;
@@ -2228,39 +4487,74 @@ export interface components {
             summary: string;
             truncated: boolean;
         };
+        /** @description Живой вывод CLI (API_DESIGN §14): санитизированное нормализованное событие исполнения. Нормативная схема — sse-event.schema.json `cli_output`. Не более 20 событий/с на run: избыток коалесцируется (`coalesced_count`, `dropped_chunks` > 0); полный санитизированный вывод — artifact `cli_output` (`artifact_id` события `finished`). */
         CliOutputPayload: {
             /** Format: uuid */
             execution_id: string;
             /** Format: uuid */
             task_id: string;
             provider: components["schemas"]["CliProvider"];
-            agent_role?: components["schemas"]["AgentRole"];
-            normalized_event: components["schemas"]["NormalizedCliEvent"];
+            agent_role: components["schemas"]["AgentRole"];
+            /** @description seq нормализованного события (последнего из коалесцированных) */
+            cli_seq: number;
+            cli_event_type: components["schemas"]["NormalizedCliEvent"];
             /** @enum {string} */
-            stream?: "stdout" | "stderr" | "normalized";
-            chunk_index: number;
-            /** @description ≤ 8 KiB UTF-8 после редактирования секретов */
-            text: string;
-            redactions: number;
-            truncated: boolean;
+            stream?: "stdout" | "stderr" | "agent_message";
+            /** @description Санитизированный текст (секреты отредактированы) */
+            text?: string;
+            redactions?: number;
+            truncated?: boolean;
+            coalesced_count?: number;
             dropped_chunks?: number;
+            /** @enum {string} */
+            tool_kind?: "file_read" | "file_write" | "file_patch" | "command" | "search" | "network" | "other";
+            /** @enum {string} */
+            tool_phase?: "requested" | "started" | "completed" | "denied" | "failed";
+            target?: string;
             /** Format: uuid */
-            artifact_id?: string | null;
+            artifact_id?: string;
+            warning_code?: string;
+            /** @enum {string} */
+            execution_status?: "EXITED" | "TIMED_OUT" | "CANCELLED" | "CRASHED" | "AUTH_REQUIRED" | "RATE_LIMITED";
         };
+        /** @description Payload SSE (sse-event.schema.json#/$defs/directive_impact_ready); итоговое влияние — Directive.impact_status. */
         DirectiveImpactReadyPayload: {
             /** Format: uuid */
             directive_id: string;
-            impacts: components["schemas"]["DirectiveImpact"][];
-            max_impact: components["schemas"]["DirectiveImpactType"];
+            /** @description Сводка анализа влияния (= Directive.impact_summary) */
+            summary?: string;
+            impacts: {
+                /**
+                 * Format: uuid
+                 * @description null для TASK_ADD (новая задача ещё не создана)
+                 */
+                task_id: string | null;
+                impact_type: components["schemas"]["DirectiveImpactType"];
+                resolution?: string;
+            }[];
             requires_confirmation: boolean;
             /** Format: uuid */
             approval_id?: string | null;
+            expected_run_version: number;
         };
+        /** @description Переход Directive FSM либо изменение ack получателя (доменное `directive.ack_changed`: from_status = to_status, поле `recipients`). Нормативная схема — sse-event.schema.json `directive_state_changed`. */
         DirectiveStateChangedPayload: {
             /** Format: uuid */
             directive_id: string;
-            from_status: components["schemas"]["DirectiveStatus"];
+            directive_type: components["schemas"]["DirectiveType"];
+            from_status: components["schemas"]["DirectiveStatus"] | null;
             to_status: components["schemas"]["DirectiveStatus"];
+            reason?: string;
+            recipients?: {
+                role: components["schemas"]["AgentRole"];
+                /** @enum {string} */
+                ack_status: "PENDING" | "DELIVERED" | "ACKNOWLEDGED" | "REJECTED" | "EXPIRED" | "COMPLETED" | "FAILED";
+                /** Format: uuid */
+                execution_id?: string | null;
+                /** Format: date-time */
+                at?: string | null;
+            }[];
+            /** @description устарело (не выдаётся сервером); используйте `recipients` */
             acknowledgement?: components["schemas"]["DirectiveAck"] | null;
         };
         ApprovalRequestedPayload: {
@@ -2274,12 +4568,19 @@ export interface components {
             /** Format: date-time */
             expires_at?: string | null;
         };
+        /** @description Компактный payload SSE (sse-event.schema.json#/$defs/approval_decided); полное представление — Approval. */
         ApprovalDecidedPayload: {
             /** Format: uuid */
             approval_id: string;
             action_type: components["schemas"]["ApprovalActionType"];
-            status: components["schemas"]["ApprovalStatus"];
-            decided_by?: components["schemas"]["UserRef"] | null;
+            /** @enum {string} */
+            status: "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
+            /**
+             * Format: uuid
+             * @description id пользователя, принявшего решение (null — истечение/отмена системой); имя — GET /approvals/{approval_id}
+             */
+            decided_by?: string | null;
+            decision_reason?: string | null;
         };
         GateCompletedPayload: {
             /** Format: uuid */
@@ -2301,8 +4602,51 @@ export interface components {
             verdict: "PENDING" | "RUNNING" | "PASS" | "FAIL" | "ERROR";
             report_url: string;
         };
+        /** @description Плоский payload SSE (sse-event.schema.json#/$defs/chat_message). Клиент сопоставляет его с ChatItem по id = chat_message_id; полное представление (UserRef, статусы поручения/approval) — GET /runs/{run_id}/chat. */
         ChatMessagePayload: {
-            item: components["schemas"]["ChatItem"];
+            /**
+             * Format: uuid
+             * @description = ChatItem.id
+             */
+            chat_message_id: string;
+            /** Format: uuid */
+            thread_id: string;
+            /** @enum {string} */
+            scope: "RUN" | "ROLE" | "TASK";
+            /**
+             * @description Вид события; соответствие ChatItem.item_type: USER_TEXT→chat_message, DIRECTIVE→directive, AGENT_MESSAGE→agent_message, CLI_HIGHLIGHT→cli_excerpt, APPROVAL→approval, прочие→system_event
+             * @enum {string}
+             */
+            message_kind: "USER_TEXT" | "DIRECTIVE" | "AGENT_MESSAGE" | "CLI_HIGHLIGHT" | "STATUS" | "APPROVAL" | "DIRECTIVE_STATUS" | "SYSTEM_NOTICE";
+            sender_type: components["schemas"]["ChatSenderType"];
+            sender_id?: string | null;
+            /** @description Роль агента или ACP-участник (orchestrator) */
+            sender_role?: string | null;
+            provider?: components["schemas"]["CliProvider"] | null;
+            /** Format: uuid */
+            task_id?: string | null;
+            target_role?: components["schemas"]["AgentRole"] | null;
+            mentions?: components["schemas"]["AgentRole"][];
+            body: string;
+            /** @description = ChatItem.acp_type (для AGENT_MESSAGE) */
+            acp_type?: components["schemas"]["AcpMessageType"] | null;
+            /** Format: uuid */
+            source_event_id?: string | null;
+            /** Format: uuid */
+            directive_id?: string | null;
+            /** Format: uuid */
+            approval_id?: string | null;
+            links?: {
+                /**
+                 * @description = ChatItem.refs[].type
+                 * @enum {string}
+                 */
+                kind: "diff" | "test_report" | "evidence" | "finding" | "artifact" | "task" | "approval" | "gate_execution";
+                /** Format: uuid */
+                id: string;
+            }[];
+            /** Format: date-time */
+            created_at: string;
         };
         SseRunStateChanged: Omit<components["schemas"]["SseEnvelope"], "type"> & {
             /** @constant */
@@ -2425,6 +4769,43 @@ export interface components {
              */
             type: "chat.message";
         };
+        /** @description Плоский payload SSE (sse-event.schema.json#/$defs/review_comment, ADR-0015 §6). Тела комментария нет — клиент перечитывает GET /review-threads/{thread_id}. */
+        ReviewCommentPayload: {
+            /** @enum {string} */
+            action: "thread_created" | "comment_created" | "comment_edited" | "thread_resolved" | "thread_unresolved" | "review_submitted";
+            /** Format: uuid */
+            thread_id: string;
+            /** Format: uuid */
+            comment_id?: string | null;
+            /** Format: uuid */
+            review_id?: string | null;
+            /** Format: uuid */
+            repository_id: string;
+            /** Format: uuid */
+            task_id?: string | null;
+            commit_sha: string;
+            /** @enum {string} */
+            side: "base" | "head";
+            file_path: string;
+            start_line: number;
+            end_line: number;
+            status: components["schemas"]["ReviewThreadStatus"];
+            /** Format: uuid */
+            actor_id: string;
+            /** Format: date-time */
+            occurred_at: string;
+        };
+        SseReviewComment: Omit<components["schemas"]["SseEnvelope"], "type"> & {
+            /** @constant */
+            type?: "review.comment";
+            payload?: components["schemas"]["ReviewCommentPayload"];
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "review.comment";
+        };
         /** @description Каждые 15 с; без id: (не сдвигает Last-Event-ID). */
         SseHeartbeat: {
             /** @constant */
@@ -2438,7 +4819,119 @@ export interface components {
             last_seq: number;
         };
         /** @description Значение поля data: SSE-кадра. event: = type. */
-        SseEvent: components["schemas"]["SseRunStateChanged"] | components["schemas"]["SseTaskStateChanged"] | components["schemas"]["SseAgentMessage"] | components["schemas"]["SseCliOutput"] | components["schemas"]["SseDirectiveImpactReady"] | components["schemas"]["SseDirectiveStateChanged"] | components["schemas"]["SseApprovalRequested"] | components["schemas"]["SseApprovalDecided"] | components["schemas"]["SseGateCompleted"] | components["schemas"]["SseRunCompleted"] | components["schemas"]["SseChatMessage"] | components["schemas"]["SseHeartbeat"];
+        SseEvent: components["schemas"]["SseRunStateChanged"] | components["schemas"]["SseTaskStateChanged"] | components["schemas"]["SseAgentMessage"] | components["schemas"]["SseCliOutput"] | components["schemas"]["SseDirectiveImpactReady"] | components["schemas"]["SseDirectiveStateChanged"] | components["schemas"]["SseApprovalRequested"] | components["schemas"]["SseApprovalDecided"] | components["schemas"]["SseGateCompleted"] | components["schemas"]["SseRunCompleted"] | components["schemas"]["SseChatMessage"] | components["schemas"]["SseReviewComment"] | components["schemas"]["SseHeartbeat"];
+        /**
+         * @description Типы потока уведомлений workspace (streamWorkspaceEvents): подмножество SseEventType и notification.created (персональные уведомления, не тип журнала run).
+         * @enum {string}
+         */
+        WorkspaceSseEventType: "run.state_changed" | "approval.requested" | "approval.decided" | "run.completed" | "notification.created";
+        /** @description Каждые 15 с простоя; без id: (не сдвигает Last-Event-ID). */
+        WorkspaceSseHeartbeat: {
+            /** @constant */
+            type: "heartbeat";
+            /** Format: uuid */
+            workspace_id: string;
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            timestamp: string;
+        };
+        /** @description Значение поля data: кадра потока workspace (streamWorkspaceEvents). event: = type; id: = курсор потока. */
+        WorkspaceSseEvent: components["schemas"]["SseRunStateChanged"] | components["schemas"]["SseApprovalRequested"] | components["schemas"]["SseApprovalDecided"] | components["schemas"]["SseRunCompleted"] | components["schemas"]["SseNotificationCreated"] | components["schemas"]["WorkspaceSseHeartbeat"];
+        /**
+         * @description Вид уведомления (CHECK notifications.kind, миграция 0020). Источники и получатели — API_DESIGN §13.2.
+         * @enum {string}
+         */
+        NotificationKind: "approval.requested" | "approval.decided" | "run.completed" | "run.failed" | "run.blocked" | "directive.awaiting_confirmation" | "directive.acknowledged" | "directive.completed" | "directive.failed" | "pull_request.merged" | "pull_request.failed" | "finding.critical";
+        /**
+         * @description Важность уведомления для UI.
+         * @enum {string}
+         */
+        NotificationSeverity: "info" | "success" | "warning" | "error";
+        /**
+         * @description Тип ресурса, на который ссылается уведомление (resource_id).
+         * @enum {string}
+         */
+        NotificationResourceType: "approval" | "run" | "directive" | "gate_execution" | "external_action";
+        Notification: {
+            /** Format: uuid */
+            id: string;
+            kind: components["schemas"]["NotificationKind"];
+            severity: components["schemas"]["NotificationSeverity"];
+            /** @description Шаблонный заголовок */
+            title: string;
+            /** @description Редактированная выжимка (цель run, описание запроса); без секретов */
+            body: string;
+            /** Format: uuid */
+            project_id: string | null;
+            /** Format: uuid */
+            run_id: string | null;
+            /** Format: uuid */
+            task_id: string | null;
+            resource_type: components["schemas"]["NotificationResourceType"];
+            /** Format: uuid */
+            resource_id: string;
+            /** @description Скалярные подробности вида (action_type, status, final_status, blocked_reason, directive_type, critical, gate_type, external_ref) */
+            data: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            read_at: string | null;
+            read: boolean;
+        };
+        /** @description Страница уведомлений (cursor pagination), новые сверху. */
+        NotificationPage: {
+            items: components["schemas"]["Notification"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+            unread_count: number;
+        };
+        NotificationUnreadCount: {
+            unread_count: number;
+            /** Format: date-time */
+            latest_unread_at: string | null;
+        };
+        /** @description Ровно одно из полей. */
+        NotificationMarkReadRequest: {
+            notification_ids?: string[];
+            /**
+             * Format: uuid
+             * @description Отметить все уведомления до этого включительно (created_at, id)
+             */
+            up_to?: string;
+            /** @constant */
+            all?: true;
+        };
+        NotificationMarkReadResult: {
+            /** @description Число уведомлений */
+            marked: number;
+            unread_count: number;
+        };
+        /** @description Кадр потока workspace с новым уведомлением текущего пользователя (схема packages/contracts/schemas/events/1.0/notification-event.schema.json). id: = курсор потока (время создания уведомления, микросекунды epoch). */
+        SseNotificationCreated: {
+            /**
+             * Format: uuid
+             * @description = Notification.id (дедупликация клиентом)
+             */
+            event_id: string;
+            /** Format: uuid */
+            run_id: string | null;
+            /** @description Уведомления не имеют seq run */
+            seq: null;
+            /** @constant */
+            type: "notification.created";
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z (= created_at)
+             */
+            timestamp: string;
+            /** @constant */
+            schema_version: "1.0";
+            payload: components["schemas"]["Notification"];
+        };
     };
     responses: {
         /** @description 400 malformed_request | idempotency_key_missing */
@@ -2561,6 +5054,12 @@ export interface components {
         Limit: number;
         RunId: string;
         TaskId: string;
+        RepositoryId: string;
+        /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
+        RepositoryCommit: string;
+        /** @description Проиндексированный commit: hex-префикс SHA (7–64 символа). Без параметра — последний READY-снимок индекса репозитория. Нет READY-снимка этого commit — 404, префикс совпадает с несколькими commit — 422. */
+        IndexCommit: string;
+        AttemptId: string;
         ProjectId: string;
         WorkspaceId: string;
         UserId: string;
@@ -2570,6 +5069,13 @@ export interface components {
         SourceId: string;
         EvidenceId: string;
         ArtifactId: string;
+        FindingId: string;
+        ControlId: string;
+        /** @description id строки установки в платформе (не числовой installation_id GitHub) */
+        GitHubInstallationRef: string;
+        PullRequestId: string;
+        ThreadId: string;
+        CommentId: string;
     };
     requestBodies: never;
     headers: {
@@ -2648,6 +5154,41 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    reauthenticate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReauthenticateRequest"];
+            };
+        };
+        responses: {
+            /** @description Пароль подтверждён, сессия ротирована */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Set-Cookie": components["headers"]["SetCookie"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInfo"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
@@ -2801,6 +5342,127 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateWorkspace: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Сильный ETag текущей версии. Отсутствует ⇒ 428, не совпадает ⇒ 412. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            422: components["responses"]["Unprocessable"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    streamWorkspaceEvents: {
+        parameters: {
+            query?: {
+                /** @description Фильтр типов (heartbeat всегда) */
+                types?: components["schemas"]["WorkspaceSseEventType"][];
+            };
+            header?: {
+                /** @description `id:` последнего полученного кадра (курсор потока workspace) */
+                "Last-Event-ID"?: string;
+            };
+            path: {
+                workspace_id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream. Кадры: `id: <cursor>`, `event: <type>`, `data: <SseEnvelope JSON>`; heartbeat каждые 15 с; `retry: 3000`. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    "X-Accel-Buffering"?: "no";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 410 replay_window_exceeded — курсор старше окна повтора; перечитать состояние REST и подключиться без Last-Event-ID */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
@@ -3190,11 +5852,763 @@ export interface operations {
                     "application/json": components["schemas"]["Repository"];
                 };
             };
+            /** @description provider=github — проверка доступа поставлена воркеру */
+            202: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    Location: components["headers"]["Location"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubVerification"];
+                };
+            };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listRepositoryTree: {
+        parameters: {
+            query?: {
+                /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
+                commit?: components["parameters"]["RepositoryCommit"];
+                /** @description Относительный путь каталога ('' или отсутствует — корень). Запрещены ведущий '/', обратная косая черта, '.', '..', пустые компоненты и '.git' (422). */
+                path?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryTreePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getRepositoryFile: {
+        parameters: {
+            query: {
+                /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
+                commit?: components["parameters"]["RepositoryCommit"];
+                /** @description Относительный путь файла (те же ограничения, что у listRepositoryTree). */
+                path: string;
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryFile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listRepositoryBranches: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryBranchPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listRepositoryCommits: {
+        parameters: {
+            query?: {
+                /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
+                commit?: components["parameters"]["RepositoryCommit"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepositoryCommitPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listRepositorySymbols: {
+        parameters: {
+            query: {
+                /** @description Запрос (имя символа, его часть или слова для FTS). Управляющие символы недопустимы (422). */
+                q: string;
+                /** @description Вид символа. */
+                kind?: components["schemas"]["CodeSymbolKind"];
+                /** @description Файл или каталог (относительный путь снимка); ограничения — как у listRepositoryTree (422). */
+                path?: string;
+                /** @description Проиндексированный commit: hex-префикс SHA (7–64 символа). Без параметра — последний READY-снимок индекса репозитория. Нет READY-снимка этого commit — 404, префикс совпадает с несколькими commit — 422. */
+                commit?: components["parameters"]["IndexCommit"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeSymbolPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getRepositoryDependencies: {
+        parameters: {
+            query?: {
+                /** @description Файл или каталог снимка (ограничения — как у listRepositoryTree). */
+                path?: string;
+                /** @description Id символа снимка (из listRepositorySymbols). */
+                symbol?: string;
+                depth?: number;
+                direction?: "out" | "in" | "both";
+                /** @description Проиндексированный commit: hex-префикс SHA (7–64 символа). Без параметра — последний READY-снимок индекса репозитория. Нет READY-снимка этого commit — 404, префикс совпадает с несколькими commit — 422. */
+                commit?: components["parameters"]["IndexCommit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyGraph"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listIndexingJobs: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["IndexingJobStatus"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexingJobPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listReviewThreads: {
+        parameters: {
+            query?: {
+                run_id?: string;
+                task_id?: string;
+                commit_sha?: string;
+                file_path?: string;
+                status?: components["schemas"]["ReviewThreadStatus"][];
+                /** @description Commit просматриваемого diff (для outdated) */
+                head_sha?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewThreadPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createReviewThread: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewThreadCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    Location: components["headers"]["Location"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewThread"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getReviewThread: {
+        parameters: {
+            query?: {
+                /** @description Commit просматриваемого diff (для outdated) */
+                head_sha?: string;
+            };
+            header?: never;
+            path: {
+                thread_id: components["parameters"]["ThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewThread"];
+                };
+            };
+            /** @description Не изменился (If-None-Match) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    replyReviewThread: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                thread_id: components["parameters"]["ThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewCommentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    Location: components["headers"]["Location"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewComment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    resolveReviewThread: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Сильный ETag текущей версии. Отсутствует ⇒ 428, не совпадает ⇒ 412. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                thread_id: components["parameters"]["ThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewThread"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["PreconditionFailed"];
+            422: components["responses"]["Unprocessable"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    unresolveReviewThread: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Сильный ETag текущей версии. Отсутствует ⇒ 428, не совпадает ⇒ 412. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                thread_id: components["parameters"]["ThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewThread"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["PreconditionFailed"];
+            422: components["responses"]["Unprocessable"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    editReviewComment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Сильный ETag текущей версии. Отсутствует ⇒ 428, не совпадает ⇒ 412. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                comment_id: components["parameters"]["CommentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewCommentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewComment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            422: components["responses"]["Unprocessable"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listReviewCommentRevisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                comment_id: components["parameters"]["CommentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewCommentRevisionList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listReviews: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                run_id: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSubmissionPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    submitReview: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                run_id: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSubmission"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listProjectWorktrees: {
+        parameters: {
+            query?: {
+                repository_id?: string;
+                run_id?: string;
+                status?: components["schemas"]["WorktreeStatus"][];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorktreePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
@@ -3307,6 +6721,87 @@ export interface operations {
             412: components["responses"]["PreconditionFailed"];
             422: components["responses"]["Unprocessable"];
             428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listProjectControls: {
+        parameters: {
+            query?: {
+                standard_code?: string;
+                approval_state?: components["schemas"]["ControlApprovalState"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectControlPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    approveProjectControl: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                control_id: components["parameters"]["ControlId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectControlApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectControl"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
@@ -3662,6 +7157,7 @@ export interface operations {
             query?: {
                 task_id?: string;
                 event_type?: string;
+                /** @description Вернуть события с seq > after_seq */
                 after_seq?: number;
                 /** @description Opaque cursor из next_cursor */
                 cursor?: components["parameters"]["Cursor"];
@@ -3690,6 +7186,164 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listActivity: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                event_type?: components["schemas"]["ActivityEventType"][];
+                run_id?: string;
+                project_id?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceActivityPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: {
+                /** @description Только непрочитанные */
+                unread_only?: boolean;
+                /** @description Повторяемый параметр */
+                kind?: components["schemas"]["NotificationKind"][];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getNotificationUnreadCount: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationUnreadCount"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    markNotificationsRead: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationMarkReadRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationMarkReadResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
@@ -3994,6 +7648,51 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listTasks: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                status?: components["schemas"]["TaskStatus"][];
+                /** @description Повторяемый параметр */
+                agent_role?: components["schemas"]["AgentRole"][];
+                /** @description Повторяемый параметр; провайдер последней попытки */
+                provider?: components["schemas"]["CliProvider"][];
+                run_id?: string;
+                project_id?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceTaskPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getTask: {
         parameters: {
             query?: never;
@@ -4052,6 +7751,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskAttemptPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAttemptContextPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+                attempt_id: components["parameters"]["AttemptId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttemptContextPack"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4181,14 +7913,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Location — подписанный URL объектного хранилища, TTL 60 с, одноразовый Content-Disposition=attachment */
-            302: {
+            /** @description Содержимое artifact потоком через API, Content-Disposition=attachment */
+            200: {
                 headers: {
-                    Location: components["headers"]["Location"];
+                    /** @description attachment; filename="<безопасное имя>" */
+                    "Content-Disposition"?: string;
                     "Cache-Control"?: "no-store";
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/octet-stream": string;
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -4302,6 +8040,265 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listRunEvidence: {
+        parameters: {
+            query?: {
+                verification_status?: components["schemas"]["EvidenceVerificationStatus"];
+                /** @description Только evidence этой задачи */
+                task_id?: string;
+                /** @description Вид evidence (`Evidence.kind`), точное совпадение */
+                kind?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                run_id: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidencePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listRunFindings: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                severity?: components["schemas"]["FindingSeverity"][];
+                /** @description Повторяемый параметр */
+                status?: components["schemas"]["FindingStatus"][];
+                task_id?: string;
+                /** @description Только находки, связанные с контролем (findings.control_refs) */
+                control_ref?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                run_id: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listFindings: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                severity?: components["schemas"]["FindingSeverity"][];
+                /** @description Повторяемый параметр */
+                status?: components["schemas"]["FindingStatus"][];
+                /** @description Повторяемый параметр (Finding.source) */
+                source?: ("gate" | "agent_review" | "manual" | "github")[];
+                project_id?: string;
+                run_id?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getFinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                finding_id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Finding"];
+                };
+            };
+            /** @description Не изменилась (If-None-Match) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    transitionFinding: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Сильный ETag текущей версии. Отсутствует ⇒ 428, не совпадает ⇒ 412. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                finding_id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindingTransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    ETag: components["headers"]["ETag"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Finding"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["PreconditionFailed"];
+            422: components["responses"]["Unprocessable"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    reviewComplianceControl: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                run_id: components["parameters"]["RunId"];
+                control_id: components["parameters"]["ControlId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComplianceReviewRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComplianceRow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listProviders: {
         parameters: {
             query?: never;
@@ -4324,6 +8321,119 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listAgentProfiles: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getSystemHealth: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemHealth"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listProviderExecutions: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                status?: components["schemas"]["ExecutionStatus"][];
+                run_id?: string;
+                task_id?: string;
+                /** @description Включительная нижняя граница created_at */
+                created_after?: string;
+                /** @description Исключающая верхняя граница created_at */
+                created_before?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path: {
+                provider_id: components["parameters"]["ProviderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderExecutionPage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4369,6 +8479,42 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getProviderProbe: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path: {
+                provider_id: components["parameters"]["ProviderId"];
+                probe_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderProbeStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
@@ -4541,6 +8687,45 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listWorkspaceTechnologies: {
+        parameters: {
+            query?: {
+                /** @description Подстрока имени технологии (без учёта регистра) */
+                q?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceTechnologyPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listDocumentationSources: {
         parameters: {
             query?: {
@@ -4662,6 +8847,44 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    searchWorkspace: {
+        parameters: {
+            query: {
+                q: string;
+                /** @description Типы результатов (по умолчанию — все доступные). */
+                types?: components["schemas"]["SearchResultType"][];
+                limit?: number;
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listAuditEvents: {
         parameters: {
             query?: {
@@ -4699,6 +8922,413 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAnalyticsSummary: {
+        parameters: {
+            query?: {
+                /** @description Начало окна (включительно), UTC ISO 8601. По умолчанию to − 30 дней. */
+                from?: string;
+                /** @description Конец окна (не включая), UTC ISO 8601. По умолчанию — текущее время. */
+                to?: string;
+                /** @description Только run этого проекта (проект другого workspace ⇒ 404). */
+                project_id?: string;
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listGitHubInstallations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallationList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    connectGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitHubInstallationConnectRequest"];
+            };
+        };
+        responses: {
+            /** @description Created (status PENDING до проверки воркером) */
+            201: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    startGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallationSetup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    disconnectGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path: {
+                /** @description id строки установки в платформе (не числовой installation_id GitHub) */
+                github_installation_id: components["parameters"]["GitHubInstallationRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Отключена */
+            204: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getGitHubVerification: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path: {
+                verification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubVerification"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    receiveGitHubWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-GitHub-Event": string;
+                "X-GitHub-Delivery": string;
+                "X-Hub-Signature-256"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Повторная доставка (дедупликация, без обработки) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubWebhookAck"];
+                };
+            };
+            /** @description Принято к обработке или проигнорировано (событие вне allowlist) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubWebhookAck"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 413 payload_too_large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description 415 unsupported_media_type (вебхук должен быть настроен с content type application/json) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    requestPullRequest: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                run_id: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PullRequestCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Запрос принят (исполняется воркером) */
+            202: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PullRequestJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listPullRequests: {
+        parameters: {
+            query?: {
+                run_id?: string;
+                state?: components["schemas"]["PullRequestState"];
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PullRequestPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    requestPullRequestMerge: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Обязателен для POST-команд. Хранится 24 ч в scope (workspace, user). */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                pull_request_id: components["parameters"]["PullRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PullRequestMergeRequest"];
+            };
+        };
+        responses: {
+            /** @description Approval MERGE запрошен */
+            202: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    Location: components["headers"]["Location"];
+                    "Idempotency-Replayed": components["headers"]["IdempotencyReplayed"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PullRequestMergeAccepted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];

@@ -1,0 +1,228 @@
+import type { components } from '../../src/api/schema';
+import { expectNoHorizontalScroll, expectNoSeriousA11yViolations } from '../support/a11y';
+import { problem, type MockApi } from '../support/mockApi';
+import { login, tabTo } from '../support/session';
+import { expect, test } from './fixtures';
+
+/** P7-13 Settings: рабочее пространство, участники и роли (owner управляет, остальные читают). */
+type S = components['schemas'];
+const ME = '01900000-0000-7000-8000-0000000000aa';
+const BORIS = '01900000-0000-7000-8000-0000000000bb';
+
+function mockMembers(api: MockApi, members: S['Member'][]) {
+  api.route('GET', '/api/v1/workspaces/{id}/members', 'listMembers', () => ({ status: 200, body: { items: members, next_cursor: null } }));
+  api.route('POST', '/api/v1/workspaces/{id}/members', 'addMember', ({ body }) => {
+    const b = body as S['MemberCreateRequest'];
+    if (members.some((m) => m.email === b.email)) return problem(409, 'conflict');
+    const m: S['Member'] = {
+      user: { id: '01900000-0000-7000-8000-0000000000cc', display_name: 'Вера Смирнова' },
+      email: b.email,
+      role: b.role,
+      joined_at: '2026-11-08T09:00:00Z',
+      version: 0,
+    };
+    members.push(m);
+    return { status: 201, body: m, headers: { ETag: '"v0"', Location: `/api/v1/workspaces/x/members/${m.user.id}` } };
+  });
+  api.route('PATCH', '/api/v1/workspaces/{id}/members/[^/]+', 'updateMember', ({ url, body, headers }) => {
+    const userId = url.pathname.split('/').at(-1);
+    const m = members.find((x) => x.user.id === userId);
+    if (!m) return problem(404, 'not_found');
+    if (headers['if-match'] !== `"v${m.version}"`) return problem(412, 'precondition_failed');
+    const b = body as S['MemberUpdateRequest'];
+    if (m.role === 'owner' && b.role !== 'owner' && members.filter((x) => x.role === 'owner').length === 1) return problem(409, 'last_owner');
+    Object.assign(m, { role: b.role, version: m.version + 1 });
+    return { status: 200, body: m, headers: { ETag: `"v${m.version}"` } };
+  });
+  api.route('DELETE', '/api/v1/workspaces/{id}/members/[^/]+', 'removeMember', ({ url, headers }) => {
+    const userId = url.pathname.split('/').at(-1);
+    const i = members.findIndex((x) => x.user.id === userId);
+    const m = members[i];
+    if (!m) return problem(404, 'not_found');
+    if (headers['if-match'] !== `"v${m.version}"`) return problem(412, 'precondition_failed');
+    members.splice(i, 1);
+    return { status: 204 };
+  });
+}
+
+/** OQ-45 (f): PATCH /workspaces/{id} — merge-patch с If-Match; политики меняет только owner. */
+function mockWorkspaceUpdate(api: MockApi) {
+  api.route('PATCH', '/api/v1/workspaces/{id}', 'updateWorkspace', ({ id, body, headers }) => {
+    const ws = api.workspaces.find((w) => w.id === id);
+    if (!ws) return problem(404, 'not_found');
+    if (ws.role !== 'owner' && ws.role !== 'admin') return problem(403, 'forbidden');
+    const b = body as S['WorkspaceUpdateRequest'];
+    if (b.settings && ws.role !== 'owner') return problem(403, 'forbidden');
+    const version = ws.version ?? 0;
+    if (headers['if-match'] !== `"v${version}"`) return { ...problem(412, 'precondition_failed'), headers: { ETag: `"v${version}"` } };
+    if (b.name !== undefined) ws.name = b.name;
+    if (b.settings) ws.settings = { ...(ws.settings ?? {}), ...b.settings };
+    ws.version = version + 1;
+    return { status: 200, body: { ...ws, settings: ws.settings ?? {} }, headers: { ETag: `"v${ws.version}"` } };
+  });
+}
+
+function seedMembers(): S['Member'][] {
+  return [
+    { user: { id: ME, display_name: 'Анна Петрова' }, email: 'anna@example.com', role: 'owner', joined_at: '2026-11-01T09:00:00Z', version: 0 },
+    { user: { id: BORIS, display_name: 'Борис Иванов' }, email: 'boris@example.com', role: 'developer', joined_at: '2026-11-02T09:00:00Z', version: 2 },
+  ];
+}
+
+test('settings (owner): members, change role (keyboard), last owner protected, add and remove member (light/dark axe)', async ({ page, api }) => {
+  const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
+  const members = seedMembers();
+  mockMembers(api, members);
+  mockWorkspaceUpdate(api);
+  await login(page, api);
+  await expect(page.getByRole('heading', { level: 1, name: 'Обзор · Команда Альфа' })).toBeFocused();
+  await page.keyboard.press('g');
+  await page.keyboard.press('o');
+  await expect(page).toHaveURL(`/w/${ws.id}/settings`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Настройки' })).toBeFocused();
+  await expect(page.locator('#workspace-info')).toContainText('alpha');
+  await expect(page.locator('#workspace-info')).not.toContainText('пока недоступно');
+
+  // OQ-45 (f): переименование и политика самоутверждения (owner); If-Match — из ETag ответа GET.
+  const wsForm = page.getByRole('form', { name: 'Параметры рабочего пространства' });
+  await wsForm.getByLabel('Название').fill('');
+  await wsForm.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(wsForm.getByLabel('Название')).toHaveAttribute('aria-invalid', 'true');
+  expect(api.requests.some((r) => r.operationId === 'updateWorkspace')).toBe(false);
+  await wsForm.getByLabel('Название').fill('Команда Бета');
+  await wsForm.getByRole('checkbox', { name: /утверждать собственные критические действия/ }).check();
+  await wsForm.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(wsForm.getByRole('status')).toHaveText('Параметры рабочего пространства сохранены.');
+  const wsPatch = api.requests.find((r) => r.operationId === 'updateWorkspace');
+  expect(wsPatch?.headers['if-match']).toBe('"v0"');
+  expect(wsPatch?.body).toEqual({ name: 'Команда Бета', settings: { allow_single_member_self_approval: true } });
+  // Название в переключателе пространств обновляется (сессия перечитана).
+  await expect(page.getByRole('banner')).toContainText('Команда Бета');
+  await wsForm.getByLabel('Название').fill('Команда Гамма');
+  await wsForm.getByRole('button', { name: 'Сохранить' }).click();
+  await expect.poll(() => api.requests.filter((r) => r.operationId === 'updateWorkspace').length).toBe(2);
+  expect(api.requests.filter((r) => r.operationId === 'updateWorkspace')[1]?.headers['if-match']).toBe('"v1"');
+  await expect(wsForm.getByRole('status')).toHaveText('Параметры рабочего пространства сохранены.');
+
+  const table = page.getByRole('table', { name: /Участники/ });
+  await expect(table.getByRole('row')).toHaveCount(3);
+  await expect(table.getByRole('row', { name: /Анна Петрова/ })).toContainText('Вы');
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expectNoSeriousA11yViolations(page, `settings (${scheme})`);
+  }
+
+  // Смена роли с клавиатуры.
+  const changeBoris = table.getByRole('button', { name: 'Изменить роль: Борис Иванов' });
+  await tabTo(page, changeBoris, { max: 60 });
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Роль участника «Борис Иванов»' });
+  await expect(dialog).toBeVisible();
+  await expectNoSeriousA11yViolations(page, 'change role dialog');
+  await dialog.getByRole('radio', { name: 'Ревьюер' }).check();
+  await dialog.getByRole('button', { name: 'Сохранить роль' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('Роль участника «Борис Иванов» изменена: Ревьюер.')).toBeVisible();
+  await expect(table.getByRole('row', { name: /Борис Иванов/ })).toContainText('Ревьюер');
+  const patch = api.requests.find((r) => r.operationId === 'updateMember');
+  expect(patch?.headers['if-match']).toBe('"v2"');
+  expect(patch?.body).toEqual({ role: 'reviewer' });
+
+  // Последний владелец.
+  await table.getByRole('button', { name: 'Изменить роль: Анна Петрова' }).click();
+  const own = page.getByRole('dialog', { name: 'Роль участника «Анна Петрова»' });
+  await own.getByRole('radio', { name: 'Администратор' }).check();
+  await own.getByRole('button', { name: 'Сохранить роль' }).click();
+  await expect(own.getByRole('alert')).toHaveText('Нельзя удалить или понизить последнего владельца.');
+  await page.keyboard.press('Escape');
+
+  // Добавление участника.
+  await page.getByRole('button', { name: 'Добавить участника' }).click();
+  const add = page.getByRole('dialog', { name: 'Новый участник' });
+  await add.getByLabel('Электронная почта').fill('vera@example.com');
+  await add.getByRole('radio', { name: 'Наблюдатель' }).check();
+  await add.getByRole('button', { name: 'Добавить' }).click();
+  await expect(page.getByText('Участник «Вера Смирнова» добавлен.')).toBeVisible();
+  await expect(table.getByRole('row')).toHaveCount(4);
+  expect(api.requests.find((r) => r.operationId === 'addMember')?.body).toEqual({ email: 'vera@example.com', role: 'viewer' });
+
+  // Удаление с подтверждением.
+  await table.getByRole('button', { name: 'Удалить участника Борис Иванов' }).click();
+  const remove = page.getByRole('dialog', { name: 'Удалить участника «Борис Иванов»?' });
+  await expectNoSeriousA11yViolations(page, 'remove member dialog');
+  await remove.getByRole('button', { name: 'Удалить участника' }).click();
+  await expect(page.getByText('Участник «Борис Иванов» удалён.')).toBeVisible();
+  await expect(table.getByRole('row')).toHaveCount(3);
+  expect(api.requests.find((r) => r.operationId === 'removeMember')?.headers['if-match']).toBe('"v3"');
+});
+
+test('settings (developer): read-only members, no audit link; 360px', async ({ page, api }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  const ws = api.addWorkspace('Разработка', 'dev', 'developer');
+  mockMembers(api, seedMembers());
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/settings`);
+  await expect(page.getByRole('table', { name: /Участники/ }).getByRole('row')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: /Изменить роль/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Добавить участника' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Журнал аудита' })).toHaveCount(0);
+  await expect(page.getByText('Добавлять участников и менять роли может владелец')).toBeVisible();
+  // Developer видит параметры пространства только для чтения (PATCH недоступен).
+  await expect(page.getByRole('form', { name: 'Параметры рабочего пространства' })).toHaveCount(0);
+  await expect(page.locator('#workspace-info')).toContainText('Изменять параметры могут владелец и администраторы');
+  await expectNoHorizontalScroll(page);
+  await expectNoSeriousA11yViolations(page, 'settings developer 360px');
+});
+
+test('settings (owner): step-up — stale session asks for the password, wrong password, then the policy change is retried (axe)', async ({ page, api }) => {
+  const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
+  mockMembers(api, seedMembers());
+  let patches = 0;
+  api.route('PATCH', '/api/v1/workspaces/{id}', 'updateWorkspace', ({ id, body, headers }) => {
+    const target = api.workspaces.find((w) => w.id === id);
+    if (!target) return problem(404, 'not_found');
+    patches += 1;
+    // Пароль вводился больше 10 минут назад: первая попытка — 403 step_up_required (SC-IAM-08).
+    if (patches === 1) return problem(403, 'step_up_required', { max_age_seconds: 600 });
+    const version = target.version ?? 0;
+    if (headers['if-match'] !== `"v${version}"`) return problem(412, 'precondition_failed');
+    target.settings = { ...(target.settings ?? {}), ...(body as S['WorkspaceUpdateRequest']).settings };
+    target.version = version + 1;
+    return { status: 200, body: { ...target, settings: target.settings ?? {} }, headers: { ETag: `"v${target.version}"` } };
+  });
+  api.route('POST', '/api/v1/auth/reauthenticate', 'reauthenticate', ({ body }) =>
+    (body as S['ReauthenticateRequest']).password === 'correct horse battery staple'
+      ? { status: 200, body: { ...api.session(), reauthenticated_at: '2026-11-08T09:00:00Z' } }
+      : problem(403, 'reauthentication_failed'),
+  );
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/settings`);
+  const wsForm = page.getByRole('form', { name: 'Параметры рабочего пространства' });
+  await wsForm.getByRole('checkbox', { name: /утверждать собственные критические действия/ }).check();
+  await wsForm.getByRole('button', { name: 'Сохранить' }).click();
+
+  const stepUp = page.getByRole('dialog', { name: 'Подтвердите пароль' });
+  await expect(stepUp).toBeVisible();
+  await expect(stepUp.getByLabel('Пароль')).toBeFocused();
+  // Кнопка «Сохранить» под диалогом показывает бесконечный индикатор (запрос ждёт подтверждения пароля) —
+  // бесконечные анимации останавливаются, чтобы проверка axe не ждала их завершения.
+  await page.evaluate(() => {
+    for (const a of document.getAnimations()) if (a.effect?.getComputedTiming().iterations === Infinity) a.cancel();
+  });
+  await expectNoSeriousA11yViolations(page, 'step-up dialog');
+  await stepUp.getByLabel('Пароль').fill('wrong password');
+  await page.keyboard.press('Enter');
+  await expect(stepUp.getByRole('alert')).toHaveText('Неверный пароль. Повторите ввод.');
+  expect(patches).toBe(1);
+  await stepUp.getByLabel('Пароль').fill('correct horse battery staple');
+  await stepUp.getByRole('button', { name: 'Подтвердить' }).click();
+  await expect(stepUp).toBeHidden();
+  await expect(wsForm.getByRole('status')).toHaveText('Параметры рабочего пространства сохранены.');
+  const sent = api.requests.filter((r) => r.operationId === 'updateWorkspace');
+  expect(sent).toHaveLength(2);
+  expect(sent[1]?.body).toEqual({ settings: { allow_single_member_self_approval: true } });
+  expect(sent[1]?.headers['if-match']).toBe(sent[0]?.headers['if-match']);
+  const reauth = api.requests.filter((r) => r.operationId === 'reauthenticate');
+  expect(reauth.map((r) => r.body)).toEqual([{ password: 'wrong password' }, { password: 'correct horse battery staple' }]);
+  expect(api.violations).toEqual([]);
+});

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -48,6 +48,19 @@ class Principal:
     csrf_token_hash: str
     expires_at: datetime
     idle_expires_at: datetime
+    # Последний ввод пароля в этой сессии (вход или step-up, SECURITY_ARCHITECTURE §3.2).
+    reauthenticated_at: datetime | None = None
+
+
+# Step-up re-auth (SC-IAM-08): операции критического набора требуют ввода пароля не старше 10 минут.
+STEP_UP_MAX_AGE: Final = timedelta(minutes=10)
+
+
+def step_up_fresh(principal: Principal, *, now: datetime | None = None, max_age: timedelta = STEP_UP_MAX_AGE) -> bool:
+    """True, если пароль в этой сессии вводился не раньше `max_age` назад."""
+    if principal.reauthenticated_at is None:
+        return False
+    return (now or utcnow()) - principal.reauthenticated_at <= max_age
 
 
 def normalize_email(email: str) -> str:
@@ -167,6 +180,78 @@ async def resolve_session(conn: AsyncConnection, token: str, policy: SessionPoli
         csrf_token_hash=row["csrf_token_hash"],
         expires_at=row["expires_at"],
         idle_expires_at=min(row["expires_at"], last_seen + policy.idle_ttl),
+        reauthenticated_at=row["reauthenticated_at"],
+    )
+
+
+async def reauthenticate(
+    conn: AsyncConnection,
+    principal: Principal,
+    *,
+    password: str,
+    ip: str | None,
+    user_agent: str | None,
+    policy: SessionPolicy,
+) -> IssuedSession | None:
+    """Step-up re-auth (SC-IAM-08, SECURITY_ARCHITECTURE §3.2): повторный ввод пароля текущего пользователя.
+
+    Успех ⇒ ротация сессии (SC-IAM-04): новая сессия с `reauthenticated_at = now()` и прежним абсолютным
+    сроком, старая — `revoked_at`, причина `rotated`. Неудача ⇒ `None`; неудача учитывается счётчиком
+    блокировки входа (подбор пароля через живую сессию ограничен тем же лимитом), вызывающий коммитит
+    транзакцию. Пароль не логируется и не попадает в аудит.
+    """
+    creds = await repository.get_credentials(conn, principal.user_id)
+    now = utcnow()
+    locked = bool(creds and creds["locked_until"] and creds["locked_until"] > now)
+    ok = passwords.verify_password(creds["password_hash"] if creds else None, password)
+    if creds is None or not ok or locked or creds["status"] != "ACTIVE":
+        if creds is not None and not locked and creds["password_hash"] is not None:
+            await repository.record_login_failure(conn, principal.user_id, policy.max_failures, policy.lockout_seconds)
+        await audit.record(
+            conn,
+            action="auth.reauth_failed",
+            resource_type="user_session",
+            resource_id=principal.session_id,
+            actor_type="user",
+            actor_id=principal.user_id,
+            workspace_id=None,
+            outcome="denied",
+            metadata={"reason": "locked" if locked else "invalid_credentials"},
+        )
+        return None
+    await repository.record_login_success(conn, principal.user_id, None)
+    token, csrf = tokens.new_token(), tokens.new_token()
+    session_id = uuid7()
+    await repository.insert_session(
+        conn,
+        session_id=session_id,
+        user_id=principal.user_id,
+        token_hash=tokens.token_hash(token),
+        csrf_hash=tokens.token_hash(csrf),
+        ip=ip,
+        user_agent=user_agent,
+        expires_at=principal.expires_at,  # ротация не продлевает абсолютный срок сессии
+    )
+    await repository.revoke_session(conn, principal.session_id, "rotated")
+    await audit.record(
+        conn,
+        action="auth.reauthenticated",
+        resource_type="user_session",
+        resource_id=session_id,
+        actor_type="user",
+        actor_id=principal.user_id,
+        workspace_id=None,
+        metadata={"rotated_from": str(principal.session_id)},
+    )
+    return IssuedSession(
+        session_id=session_id,
+        user_id=principal.user_id,
+        email=principal.email,
+        display_name=principal.display_name,
+        token=token,
+        csrf_token=csrf,
+        expires_at=principal.expires_at,
+        idle_expires_at=min(principal.expires_at, now + policy.idle_ttl),
     )
 
 

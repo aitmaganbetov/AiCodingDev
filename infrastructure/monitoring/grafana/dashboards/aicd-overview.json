@@ -1,0 +1,840 @@
+{
+  "uid": "aicd-overview",
+  "title": "AiCodingDev — метрики ТЗ §16",
+  "description": "Run success rate, verified completion, gates, approvals, провайдеры CLI, Code Intelligence (P8-08).",
+  "tags": [
+    "aicodingdev",
+    "tz-16"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Runs и задачи (ТЗ §16)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Run success rate (24 ч)",
+      "description": "Доля COMPLETED среди завершённых run за 24 ч (по outbox run.completed).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(increase(aicd_runs_finished_total{final_status=\"COMPLETED\"}[24h])) / sum(increase(aicd_runs_finished_total[24h]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Verified completion (24 ч)",
+      "description": "Доля задач, дошедших до SUCCEEDED (только после PASS обязательных gates), среди завершившихся SUCCEEDED/FAILED.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(increase(aicd_task_transitions_total{to_status=\"SUCCEEDED\"}[24h])) / sum(increase(aicd_task_transitions_total{to_status=~\"SUCCEEDED|FAILED\"}[24h]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Завершённые run по статусу",
+      "description": "Число завершённых run за час по итоговому статусу.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (final_status) (increase(aicd_runs_finished_total[1h]))",
+          "refId": "A",
+          "legendFormat": "{{final_status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Переходы задач (повторы, блокировки)",
+      "description": "Переходов в минуту; RETRY_WAIT — retry count.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (to_status) (rate(aicd_task_transitions_total{to_status=~\"RETRY_WAIT|BLOCKED|FAILED|SUCCEEDED\"}[5m])) * 60",
+          "refId": "A",
+          "legendFormat": "{{to_status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Agent messages (ACP) по типу",
+      "description": "Принятые ACP-сообщения в минуту (agent message count).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 7,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (message_type) (rate(aicd_agent_messages_total[5m])) * 60",
+          "refId": "A",
+          "legendFormat": "{{message_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Quality gates и approvals",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Gate failures по типу",
+      "description": "FAIL/ERROR завершённых gates за час.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (gate_type) (increase(aicd_gate_executions_total{status=~\"FAIL|ERROR\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{gate_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Длительность gates p90",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.9, sum by (le, gate_type) (rate(aicd_gate_duration_seconds_bucket[30m])))",
+          "refId": "A",
+          "legendFormat": "{{gate_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Approval wait time",
+      "description": "От запроса approval до решения человека.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(aicd_approval_wait_seconds_bucket[6h])))",
+          "refId": "A",
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(aicd_approval_wait_seconds_bucket[6h])))",
+          "refId": "B",
+          "legendFormat": "p90"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Approvals: запрошено / решено",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(increase(aicd_approvals_requested_total[1h]))",
+          "refId": "A",
+          "legendFormat": "запрошено"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (status) (increase(aicd_approvals_decided_total[1h]))",
+          "refId": "B",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "CLI-провайдеры",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Доступность провайдеров",
+      "description": "1 — есть установка AVAILABLE/DEGRADED (provider availability).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "max by (provider) (aicd_provider_available)",
+          "refId": "A",
+          "legendFormat": "{{provider}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bool_yes_no"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Исполнения CLI по статусу",
+      "description": "Исполнений в час; RATE_LIMITED/AUTH_REQUIRED — ограничения.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 33,
+        "w": 9,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (provider, status) (rate(aicd_cli_executions_total[15m])) * 3600",
+          "refId": "A",
+          "legendFormat": "{{provider}} {{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Длительность исполнения CLI p90",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 15,
+        "y": 33,
+        "w": 9,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.9, sum by (le, provider) (rate(aicd_cli_execution_duration_seconds_bucket[1h])))",
+          "refId": "A",
+          "legendFormat": "{{provider}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Активные исполнения и отказы лимита",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (provider) (aicd_cli_executions_active)",
+          "refId": "A",
+          "legendFormat": "активно {{provider}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (provider) (increase(aicd_cli_concurrency_rejections_total[15m]))",
+          "refId": "B",
+          "legendFormat": "отказы слота {{provider}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Токены (только сообщённые CLI)",
+      "description": "Только source=cli_reported; оценки платформы не выдаются за токены (ТЗ §9, §16).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 41,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (provider) (increase(aicd_cli_tokens_total[1h]))",
+          "refId": "A",
+          "legendFormat": "{{provider}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "row",
+      "title": "Code Intelligence",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Context pack size",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(aicd_context_pack_size_bytes_bucket[1h])))",
+          "refId": "A",
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(aicd_context_pack_size_bytes_bucket[1h])))",
+          "refId": "B",
+          "legendFormat": "p90"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Index freshness",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 50,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(aicd_index_snapshot_age_seconds_bucket[1h])))",
+          "refId": "A",
+          "legendFormat": "возраст снимка p90"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum(rate(aicd_context_pack_fragments_total{stale=\"true\"}[1h])) / sum(rate(aicd_context_pack_fragments_total[1h]))",
+          "refId": "B",
+          "legendFormat": "доля stale-фрагментов"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Задания индексации",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "aicd-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 58,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "aicd-prometheus"
+          },
+          "expr": "sum by (outcome) (increase(aicd_indexing_jobs_total[1h]))",
+          "refId": "A",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}

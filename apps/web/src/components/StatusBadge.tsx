@@ -1,43 +1,77 @@
 import { useTranslation } from 'react-i18next';
-import type { RunStatus, TaskStatus } from '../api/client';
-
-type Tone = 'neutral' | 'active' | 'success' | 'warning' | 'danger';
-
-// Контраст текста ≥ 4.5:1 на фоне бейджа (WCAG 1.4.3); цвет дублируется текстом статуса.
-const TONE_CLASS: Record<Tone, string> = {
-  neutral: 'border-slate-300 bg-slate-100 text-slate-800',
-  active: 'border-blue-300 bg-blue-50 text-blue-900',
-  success: 'border-green-300 bg-green-50 text-green-900',
-  warning: 'border-amber-300 bg-amber-50 text-amber-900',
-  danger: 'border-red-300 bg-red-50 text-red-900',
-};
+import type { RunStatus, TaskStatus } from '../api/runs';
+import { Badge, type Tone } from './ui/Badge';
+import type { IconName } from './ui/Icon';
 
 const TONES: Record<string, Tone> = {
-  RUNNING: 'active',
-  VERIFYING: 'active',
-  DISCOVERY: 'active',
-  LEASED: 'active',
-  READY: 'active',
+  RUNNING: 'info',
+  VERIFYING: 'info',
+  DISCOVERY: 'info',
+  LEASED: 'info',
+  READY: 'info',
   COMPLETED: 'success',
   SUCCEEDED: 'success',
+  PASS: 'success',
   PAUSED: 'warning',
   BLOCKED: 'warning',
   AWAITING_APPROVAL: 'warning',
   RETRY_WAIT: 'warning',
+  MANUAL_REVIEW: 'warning',
+  UNVERIFIED: 'warning',
   FAILED: 'danger',
+  FAIL: 'danger',
+  ERROR: 'danger',
   CANCELLED: 'neutral',
 };
 
-export function StatusBadge({ kind, status }: { kind: 'run' | 'task'; status: RunStatus | TaskStatus | string }) {
+/** Тон по значению статуса (общий для run/task/gate/compliance); неизвестный — neutral. */
+export function statusTone(status: string): Tone {
+  return TONES[status] ?? 'neutral';
+}
+
+/** Иконки статусов (§5.2): BLOCKED/AUTH_REQUIRED/UNAVAILABLE — «запрет», FAILED — крест, CRASHED — октагон. */
+const ICONS: Record<string, IconName> = {
+  BLOCKED: 'verifyBlocked',
+  AUTH_REQUIRED: 'verifyBlocked',
+  UNAVAILABLE: 'verifyBlocked',
+  PAUSED: 'statusPaused',
+  CRASHED: 'statusCrashed',
+  TIMED_OUT: 'statusCrashed',
+  SKIPPED: 'verifyNotRun',
+  PENDING: 'verifyNotRun',
+};
+const TONE_STATUS_ICON: Record<Tone, IconName> = {
+  neutral: 'statusNeutral',
+  info: 'statusRunning',
+  success: 'statusSuccess',
+  warning: 'alert',
+  danger: 'statusFailed',
+};
+
+/** Иконка по значению статуса (дублирует цвет — статус никогда не передаётся только цветом). */
+export function statusIcon(status: string): IconName {
+  return ICONS[status] ?? TONE_STATUS_ICON[statusTone(status)];
+}
+
+/**
+ * Бейдж статуса: текст — из `enums.<kind>_status.<STATUS>` (или `labelKey`), тон — statusTone.
+ * Новые сущности: `<StatusBadge kind="approval" status=…>` + ключи `enums.approval_status.*`
+ * в своём namespace (например approvals.json → approvals.enums… через labelKey).
+ */
+export function StatusBadge({
+  kind,
+  status,
+  labelKey,
+}: {
+  kind: 'run' | 'task' | (string & {});
+  status: RunStatus | TaskStatus | (string & {});
+  labelKey?: string;
+}) {
   const { t } = useTranslation();
-  const tone = TONES[status] ?? 'neutral';
   return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${TONE_CLASS[tone]}`}
-      data-status={status}
-    >
-      {t(`enums.${kind}_status.${status}`, { defaultValue: status })}
-    </span>
+    <Badge tone={statusTone(status)} icon={statusIcon(status)} data-status={status}>
+      {t(labelKey ?? `enums.${kind}_status.${status}`, { defaultValue: status })}
+    </Badge>
   );
 }
 

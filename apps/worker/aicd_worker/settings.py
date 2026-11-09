@@ -19,6 +19,9 @@ class WorkerSettings(Settings):
     # Verification Engine (P3-14): gates в изолированном контейнере; `local` (процессы хоста) — только dev/test.
     verification_runner: Literal["docker", "local"] = "docker"
     verification_image: str = "python:3.12-slim-bookworm"
+    # Переопределение образов gates поверх aicd_verification.images (JSON {ключ: ссылка@sha256:…}), напр. образы,
+    # собранные платформой: {"migrations-python": "aicd/migrations-python:17-3.12@sha256:…", "php": "aicd/phpstan:…"}.
+    verification_images: dict[str, str] = Field(default_factory=dict)
     verification_staging_root: Path = Path("/var/lib/aicd/verification")
     docker_url: str = "unix:///var/run/docker.sock"
 

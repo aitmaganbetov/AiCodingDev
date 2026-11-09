@@ -1,0 +1,386 @@
+<testsuites id="" name="" tests="149" failures="0" skipped="1" errors="0" time="325.85748700000005">
+<testsuite name="ac16-blocked-reason.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="2" failures="0" skipped="0" time="6.564" errors="0">
+<testcase name="AC-16: blocked reason AUTH_REQUIRED is visible in Workflows, Mission Control and Task Detail" classname="ac16-blocked-reason.spec.ts" time="3.328">
+</testcase>
+<testcase name="AC-16: blocked reason PROVIDER_UNAVAILABLE is visible in Workflows, Mission Control and Task Detail" classname="ac16-blocked-reason.spec.ts" time="3.236">
+</testcase>
+</testsuite>
+<testsuite name="agents.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="19.242" errors="0">
+<testcase name="agents: 12 role cards with real activity, zero-stat roles, grid/list persisted, role detail (light/dark axe)" classname="agents.spec.ts" time="8.482">
+</testcase>
+<testcase name="agents: viewer (RBAC) sees provider settings read-only link; profiles error with retry; unknown role" classname="agents.spec.ts" time="5.157">
+</testcase>
+<testcase name="agents: 375/768/1366/1920 without horizontal overflow in both themes (grid, list, role), reduced motion" classname="agents.spec.ts" time="5.603">
+</testcase>
+</testsuite>
+<testsuite name="analytics.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="2" failures="0" skipped="0" time="8.694" errors="0">
+<testcase name="analytics: KPIs, chart + table alternative, filters in URL, empty project (light/dark axe)" classname="analytics.spec.ts" time="6.411">
+</testcase>
+<testcase name="analytics: error state with retry and 360px without horizontal scroll" classname="analytics.spec.ts" time="2.283">
+</testcase>
+</testsuite>
+<testsuite name="app-shell.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="10" failures="0" skipped="0" time="50.14" errors="0">
+<testcase name="sidebar: 14 sections in 4 groups, collapse to an icon rail (tooltip, accessible names), state persists across reloads" classname="app-shell.spec.ts" time="4.528">
+</testcase>
+<testcase name="command palette: Ctrl+K, keyboard-only navigation, theme switch, recent runs/projects and search results; Esc returns focus" classname="app-shell.spec.ts" time="4.83">
+</testcase>
+<testcase name="global search: min length, grouped results, ↑/↓ + Enter opens the result, rate limit and skipped types are explained" classname="app-shell.spec.ts" time="5.031">
+</testcase>
+<testcase name="CLI status chips: real provider data (ready / AUTH_REQUIRED / unknown / not detected), tooltip with version and last check, link to Settings" classname="app-shell.spec.ts" time="4.59">
+</testcase>
+<testcase name="notifications (B8): server list and unread badge, live arrival via workspace SSE, mark one / all read (Idempotency-Key), survives reload; pending approvals link" classname="app-shell.spec.ts" time="4.434">
+</testcase>
+<testcase name="context panel on Mission Control: default &quot;no context&quot;, selected run summary, toggle + keyboard resize, persisted after reload; split view" classname="app-shell.spec.ts" time="8.378">
+</testcase>
+<testcase name="context panel overlays on narrow screens: Escape closes and returns focus to the toggle" classname="app-shell.spec.ts" time="0.941">
+</testcase>
+<testcase name="old URLs keep working: providers/audit → Settings sections (query preserved), mission-control?run= resolves a run by id; placeholders link to existing screens" classname="app-shell.spec.ts" time="2.855">
+</testcase>
+<testcase name="no horizontal page overflow at 375/768/1366/1920 (shell + Mission Control + settings), both themes; mobile drawer at 375" classname="app-shell.spec.ts" time="10.214">
+</testcase>
+<testcase name="reduced motion: page transition and sidebar collapse run without animation; shell axe in light and dark" classname="app-shell.spec.ts" time="4.339">
+</testcase>
+</testsuite>
+<testsuite name="approvals.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="6" failures="0" skipped="0" time="18.226" errors="0">
+<testcase name="AC-13: plan approval gates execution — run waits in AWAITING_APPROVAL until a human approves; live update via SSE" classname="approvals.spec.ts" time="5.671">
+</testcase>
+<testcase name="AC-13: requester cannot approve own merge (four-eyes); server four_eyes_violation and reject reason are handled" classname="approvals.spec.ts" time="3.161">
+</testcase>
+<testcase name="viewer sees approvals read-only" classname="approvals.spec.ts" time="1.778">
+</testcase>
+<testcase name="approvals: empty and error states" classname="approvals.spec.ts" time="1.763">
+</testcase>
+<testcase name="approvals: switching tabs and filters keeps keyboard focus on the control (query change is not a navigation)" classname="approvals.spec.ts" time="0.958">
+</testcase>
+<testcase name="approvals list updates live from the workspace notification stream (no 30 s polling, OQ-45 (c))" classname="approvals.spec.ts" time="4.895">
+</testcase>
+</testsuite>
+<testsuite name="audit.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="2" failures="0" skipped="0" time="9.087" errors="0">
+<testcase name="audit: list, pagination, filters reflected in the URL, metadata details (light/dark axe)" classname="audit.spec.ts" time="7.158">
+</testcase>
+<testcase name="audit: forbidden for developer (no nav item), error state with retry, 360px" classname="audit.spec.ts" time="1.929">
+</testcase>
+</testsuite>
+<testsuite name="chat.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="5" failures="0" skipped="0" time="19.129" errors="0">
+<testcase name="AC-05: live chat shows inter-agent messages and handoffs streaming in, with streams, filters, search and mentions" classname="chat.spec.ts" time="6.833">
+</testcase>
+<testcase name="AC-06: CHANGE_REQUEST with impact preview → confirmation → delivered / acknowledged / completed" classname="chat.spec.ts" time="5.624">
+</testcase>
+<testcase name="directives: stale run version (409) is reported and retried with the fresh version; cancel before dispatch" classname="chat.spec.ts" time="1.981">
+</testcase>
+<testcase name="chat permissions: viewer reads only; reviewer gets the restricted command set" classname="chat.spec.ts" time="3.196">
+</testcase>
+<testcase name="chat: reviewer command set and APPROVE target from pending approvals" classname="chat.spec.ts" time="1.495">
+</testcase>
+</testsuite>
+<testsuite name="code-intelligence.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="11" failures="0" skipped="0" time="53.14" errors="0">
+<testcase name="symbol search → open file at the symbol lines in Code Explorer; selectors and index status; axe light/dark" classname="code-intelligence.spec.ts" time="7.862">
+</testcase>
+<testcase name="dependency graph: React Flow canvas with distinct external nodes and truncated notice, accessible list view, list-only on 375" classname="code-intelligence.spec.ts" time="7.367">
+</testcase>
+<testcase name="context pack manifest: run → task → attempt; sections, lines, stale, omitted with reasons; links into the explorer" classname="code-intelligence.spec.ts" time="4.523">
+</testcase>
+<testcase name="indexing jobs: statuses, attempts, timings, redacted error as text, status filter" classname="code-intelligence.spec.ts" time="3.151">
+</testcase>
+<testcase name="no index yet: clear state with how to index (summary, symbols, graph), no zeros; axe light/dark" classname="code-intelligence.spec.ts" time="3.829">
+</testcase>
+<testcase name="knowledge, git history (view files at commit), workspace search; keyboard tabs" classname="code-intelligence.spec.ts" time="8.096">
+</testcase>
+<testcase name="no horizontal overflow at 375px on every tab, both themes" classname="code-intelligence.spec.ts" time="3.202">
+</testcase>
+<testcase name="no horizontal overflow at 768px on every tab, both themes" classname="code-intelligence.spec.ts" time="4.481">
+</testcase>
+<testcase name="no horizontal overflow at 1366px on every tab, both themes" classname="code-intelligence.spec.ts" time="4.981">
+</testcase>
+<testcase name="no horizontal overflow at 1920px on every tab, both themes" classname="code-intelligence.spec.ts" time="4.692">
+</testcase>
+<testcase name="reduced motion: graph renders without animations" classname="code-intelligence.spec.ts" time="0.956">
+</testcase>
+</testsuite>
+<testsuite name="code-review.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="12" failures="0" skipped="0" time="36.952" errors="0">
+<testcase name="code review: Monaco side-by-side loads lazily; files, inline/outdated threads (text only), findings and checks (D-8); axe light/dark" classname="code-review.spec.ts" time="8.379">
+</testcase>
+<testcase name="threads: add on a line, reply, edit own comment with history, resolve and unresolve (If-Match)" classname="code-review.spec.ts" time="4.715">
+</testcase>
+<testcase name="submit review: Approve decides the existing pending approval (shown) with step-up; Request changes → CHANGE_REQUEST impact preview" classname="code-review.spec.ts" time="4.539">
+</testcase>
+<testcase name="RBAC: reviewer cannot request changes; viewer is read-only; no git_diff → empty state" classname="code-review.spec.ts" time="1.356">
+</testcase>
+<testcase name="RBAC: viewer reads threads but cannot comment, reply, resolve or submit" classname="code-review.spec.ts" time="3.81">
+</testcase>
+<testcase name="no git_diff evidence → empty state with a link to Mission Control" classname="code-review.spec.ts" time="2.072">
+</testcase>
+<testcase name="live: review.comment from another reviewer updates the thread without reload" classname="code-review.spec.ts" time="1.097">
+</testcase>
+<testcase name="keyboard: files with arrows and ] / [, threads with n / p, comment on a line with Tab + Enter, Ctrl+Enter" classname="code-review.spec.ts" time="2.445">
+</testcase>
+<testcase name="code review layout at 375px: no horizontal overflow (both themes), files drawer on mobile" classname="code-review.spec.ts" time="2.329">
+</testcase>
+<testcase name="code review layout at 768px: no horizontal overflow (both themes), files drawer on mobile" classname="code-review.spec.ts" time="2.016">
+</testcase>
+<testcase name="code review layout at 1366px: no horizontal overflow (both themes), files drawer on mobile" classname="code-review.spec.ts" time="2.02">
+</testcase>
+<testcase name="code review layout at 1920px: no horizontal overflow (both themes), files drawer on mobile" classname="code-review.spec.ts" time="2.174">
+</testcase>
+</testsuite>
+<testsuite name="compliance.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="11.203" errors="0">
+<testcase name="compliance matrix: standard → control → applicability → role → check → evidence → verdict; manual review with evidence" classname="compliance.spec.ts" time="6.845">
+</testcase>
+<testcase name="project controls: blocking flag (effective + source), applicability approval with rationale" classname="compliance.spec.ts" time="3.23">
+</testcase>
+<testcase name="roles: viewer sees matrix without review, reviewer cannot approve controls" classname="compliance.spec.ts" time="1.128">
+</testcase>
+</testsuite>
+<testsuite name="dashboard.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="6" failures="0" skipped="0" time="15.897" errors="0">
+<testcase name="happy path: hero, 8 KPI from real operations with sources, sections, D-6/D-8, axe light/dark" classname="dashboard.spec.ts" time="4.743">
+</testcase>
+<testcase name="empty workspace: onboarding CTA, real zeros and «no data» instead of fake numbers; 375/768/1366/1920 without overflow" classname="dashboard.spec.ts" time="2.553">
+</testcase>
+<testcase name="partial API errors: failing tiles show retry, other tiles keep working" classname="dashboard.spec.ts" time="3.763">
+</testcase>
+<testcase name="viewer without system:health: no System Health section and no request" classname="dashboard.spec.ts" time="0.685">
+</testcase>
+<testcase name="live activity via workspace SSE: new events appear in the feed, tiles refresh; filters by type" classname="dashboard.spec.ts" time="3.05">
+</testcase>
+<testcase name="reduced motion: tiles do not move on hover; transitions are instant" classname="dashboard.spec.ts" time="1.103">
+</testcase>
+</testsuite>
+<testsuite name="design-system.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="5" failures="0" skipped="0" time="14.371" errors="0">
+<testcase name="theme default › dark by default; light/dark/system switch via the user menu, persists across reloads; Inter is the UI font" classname="design-system.spec.ts" time="1.627">
+</testcase>
+<testcase name="reduced motion: motion tokens collapse to 0 ms and overlays open without running animations" classname="design-system.spec.ts" time="1.224">
+</testcase>
+<testcase name="no horizontal page overflow at 375/768/1366/1920 on dashboard, projects and the design system page (both themes)" classname="design-system.spec.ts" time="5.491">
+</testcase>
+<testcase name="design system page: axe (light/dark), status never color-only, virtual list and resizable panels by keyboard with persisted size" classname="design-system.spec.ts" time="5.214">
+</testcase>
+<testcase name="forced-colors smoke: layout and design system render without horizontal overflow, focus ring stays visible" classname="design-system.spec.ts" time="0.815">
+</testcase>
+</testsuite>
+<testsuite name="integrations.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="16.09" errors="0">
+<testcase name="integrations (owner): connect GitHub App via GitHub redirect, PENDING → verified, disconnect (light/dark axe)" classname="integrations.spec.ts" time="7.274">
+</testcase>
+<testcase name="integrations: failed verification shows the reason; viewer read-only at 360px" classname="integrations.spec.ts" time="3.259">
+</testcase>
+<testcase name="pull requests: project tab (merge request → approval link) and completed run (CI approval, then queued) (axe)" classname="integrations.spec.ts" time="5.557">
+</testcase>
+</testsuite>
+<testsuite name="knowledge.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="2" failures="0" skipped="0" time="8.466" errors="0">
+<testcase name="knowledge: sources table, refresh needs explicit consent, register source, documentation policy (light/dark axe)" classname="knowledge.spec.ts" time="6.974">
+</testcase>
+<testcase name="knowledge: viewer read-only (no register/refresh, policy read-only), empty state, 360px" classname="knowledge.spec.ts" time="1.492">
+</testcase>
+</testsuite>
+<testsuite name="layout.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="5" failures="0" skipped="0" time="21.784" errors="0">
+<testcase name="a11y (light): layout and every Phase 7 placeholder route, 404 and 403 have no serious/critical axe violations" classname="layout.spec.ts" time="6.924">
+</testcase>
+<testcase name="a11y (dark): layout and every Phase 7 placeholder route, 404 and 403 have no serious/critical axe violations" classname="layout.spec.ts" time="6.969">
+</testcase>
+<testcase name="theme: user menu switches light/dark (data-theme) and the choice persists" classname="layout.spec.ts" time="2.241">
+</testcase>
+<testcase name="keyboard-only: skip link, sidebar in tab order, Enter opens a section, shortcuts dialog traps focus, g-sequences" classname="layout.spec.ts" time="2.517">
+</testcase>
+<testcase name="mobile (360px): navigation drawer is a keyboard-accessible dialog; no horizontal scroll" classname="layout.spec.ts" time="3.133">
+</testcase>
+</testsuite>
+<testsuite name="mission-control.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="6" failures="0" skipped="0" time="30.576" errors="0">
+<testcase name="run selection → three panes; DAG live update with verified progress (D-8); agent inspector with Context Pack; axe light/dark" classname="mission-control.spec.ts" time="5.542">
+</testcase>
+<testcase name="live chat views: conversation (text only) with filters, CLI output (virtualized, redaction markers), system events, evidence" classname="mission-control.spec.ts" time="5.853">
+</testcase>
+<testcase name="command center: rework → CHANGE_REQUEST to the selected task with impact preview → confirm → delivered / acknowledged / completed; PAUSE needs confirmation; draft survives reload" classname="mission-control.spec.ts" time="5.626">
+</testcase>
+<testcase name="keyboard only: list view, select a task, quick action and send a directive; focus returns after the dialog" classname="mission-control.spec.ts" time="2.9">
+</testcase>
+<testcase name="responsive: 1920/1366 three panes, 768 two panes with tabs, 375 one pane — no horizontal overflow in both themes; reduced motion" classname="mission-control.spec.ts" time="7.019">
+</testcase>
+<testcase name="run.completed: a chat message projected after the stream closed still appears (final REST re-reads, no reload)" classname="mission-control.spec.ts" time="3.636">
+</testcase>
+</testsuite>
+<testsuite name="project-workspace.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="7" failures="0" skipped="0" time="25.578" errors="0">
+<testcase name="projects list and project workspace: overview (modes, executors, quality policy, runs), keyboard tabs, axe light/dark" classname="project-workspace.spec.ts" time="6.894">
+</testcase>
+<testcase name="attach a GitHub repository: 202 → worker verification PENDING → SUCCEEDED → repository listed" classname="project-workspace.spec.ts" time="5.991">
+</testcase>
+<testcase name="worktrees (B4, no host paths), branches → files of a branch, status filter; viewer has no attach" classname="project-workspace.spec.ts" time="4.222">
+</testcase>
+<testcase name="project workspace: no horizontal overflow at 375px (both themes)" classname="project-workspace.spec.ts" time="1.803">
+</testcase>
+<testcase name="project workspace: no horizontal overflow at 768px (both themes)" classname="project-workspace.spec.ts" time="2.192">
+</testcase>
+<testcase name="project workspace: no horizontal overflow at 1366px (both themes)" classname="project-workspace.spec.ts" time="2.13">
+</testcase>
+<testcase name="project workspace: no horizontal overflow at 1920px (both themes)" classname="project-workspace.spec.ts" time="2.346">
+</testcase>
+</testsuite>
+<testsuite name="projects.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="16.892" errors="0">
+<testcase name="repository explorer: project overview, repository with index snapshot, no local copy notice, technologies tab; attach (keyboard)" classname="projects.spec.ts" time="6.43">
+</testcase>
+<testcase name="repository explorer: viewer is read-only, empty states, unknown project; 360px" classname="projects.spec.ts" time="2.406">
+</testcase>
+<testcase name="repository explorer: file tree by commit, text view with line numbers, truncated/binary notices (keyboard, axe)" classname="projects.spec.ts" time="8.056">
+</testcase>
+</testsuite>
+<testsuite name="providers.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="5" failures="0" skipped="0" time="23.723" errors="0">
+<testcase name="providers: status, login guidance without secrets, probe and safe settings (light/dark axe)" classname="providers.spec.ts" time="8.375">
+</testcase>
+<testcase name="providers: viewer read-only; probe rate limit; empty and error states; 360px" classname="providers.spec.ts" time="4.89">
+</testcase>
+<testcase name="providers: probe rate limit (429) is shown next to the button" classname="providers.spec.ts" time="0.913">
+</testcase>
+<testcase name="providers: execution history (virtualized, status filter), measured usage without quotas, UNTESTED warning; viewer read-only (axe light/dark)" classname="providers.spec.ts" time="8">
+</testcase>
+<testcase name="providers: 375/768/1366/1920 without horizontal overflow in both themes" classname="providers.spec.ts" time="1.545">
+</testcase>
+</testsuite>
+<testsuite name="quality-gates.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="4" failures="0" skipped="0" time="16.024" errors="0">
+<testcase name="quality gates overview: five verification states from analytics (INSUFFICIENT EVIDENCE for PASS without verified evidence), groups and types, filters, a11y" classname="quality-gates.spec.ts" time="3.915">
+</testcase>
+<testcase name="run quality report: groups lint…security in five states (INSUFFICIENT EVIDENCE, BLOCKED, NOT RUN), D-8 column, evidence detail; widths and themes" classname="quality-gates.spec.ts" time="7.389">
+</testcase>
+<testcase name="evidence detail: unverified evidence is flagged and never counted as proof" classname="quality-gates.spec.ts" time="2.682">
+</testcase>
+<testcase name="quality overview: analytics error has retry, empty window says no gates (not zero success)" classname="quality-gates.spec.ts" time="2.038">
+</testcase>
+</testsuite>
+<testsuite name="quality.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="5" failures="0" skipped="0" time="20.264" errors="0">
+<testcase name="quality: SKIPPED/ERROR are not PASS; gate results arrive via SSE, reconnect with Last-Event-ID without duplicates (AC-08, AC-11)" classname="quality.spec.ts" time="8.042">
+</testcase>
+<testcase name="quality: findings list with filters, finding detail renders untrusted text, FSM transition with If-Match" classname="quality.spec.ts" time="4.03">
+</testcase>
+<testcase name="quality: reviewer cannot accept risk; FIXED is engine-only; task evidence tab; incomplete evidence is flagged; report download" classname="quality.spec.ts" time="4.396">
+</testcase>
+<testcase name="quality: error state with retry and viewer has read-only findings" classname="quality.spec.ts" time="2.988">
+</testcase>
+<testcase name="quality: switching run quality tabs keeps keyboard focus on the tab (query change is not a navigation)" classname="quality.spec.ts" time="0.808">
+</testcase>
+</testsuite>
+<testsuite name="run-graph.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="11.978" errors="0">
+<testcase name="run graph: DAG with statuses and current executor, live update via SSE, axe" classname="run-graph.spec.ts" time="3.13">
+</testcase>
+<testcase name="run graph: accessible list view of the same DAG — keyboard only" classname="run-graph.spec.ts" time="6.142">
+</testcase>
+<testcase name="run graph: empty plan and load error states" classname="run-graph.spec.ts" time="2.706">
+</testcase>
+</testsuite>
+<testsuite name="run.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="12.687" errors="0">
+<testcase name="run view: SSE events are shown; reconnect after a dropped connection uses Last-Event-ID, no duplicates, no gaps" classname="run.spec.ts" time="6.258">
+</testcase>
+<testcase name="run view: 410 replay_window_exceeded → state reread, feed continues from last_seq" classname="run.spec.ts" time="3.06">
+</testcase>
+<testcase name="start run form: creates a run and opens its page; viewer cannot start or control" classname="run.spec.ts" time="3.369">
+</testcase>
+</testsuite>
+<testsuite name="runs.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="2" failures="0" skipped="0" time="6.841" errors="0">
+<testcase name="runs: workspace list with status/project filters in the URL, pagination, links to run screens (light/dark axe)" classname="runs.spec.ts" time="5.48">
+</testcase>
+<testcase name="runs: empty workspace, error with retry and 360px without horizontal scroll" classname="runs.spec.ts" time="1.361">
+</testcase>
+</testsuite>
+<testsuite name="security-center.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="6" failures="0" skipped="0" time="21.8" errors="0">
+<testcase name="security center: workspace findings, severity, CWE/controls from data, dependency &amp; secrets by gate type, evidence D-8, filters" classname="security-center.spec.ts" time="6.202">
+</testcase>
+<testcase name="security center: remediation from the detail panel — FSM transition with If-Match and step-up; critical profile blocks accepting a critical risk" classname="security-center.spec.ts" time="6.261">
+</testcase>
+<testcase name="security center RBAC: reviewer — no &quot;accept risk&quot;; viewer — no decisions" classname="security-center.spec.ts" time="1.453">
+</testcase>
+<testcase name="security center RBAC: viewer sees findings without decisions" classname="security-center.spec.ts" time="0.891">
+</testcase>
+<testcase name="security center: large list is virtualized with load more and keyboard; no overflow 375/768/1366/1920 in both themes; reduced motion" classname="security-center.spec.ts" time="3.146">
+</testcase>
+<testcase name="security center: findings API error shows retry; empty workspace shows empty state" classname="security-center.spec.ts" time="3.847">
+</testcase>
+</testsuite>
+<testsuite name="settings.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="12.376" errors="0">
+<testcase name="settings (owner): members, change role (keyboard), last owner protected, add and remove member (light/dark axe)" classname="settings.spec.ts" time="8.876">
+</testcase>
+<testcase name="settings (developer): read-only members, no audit link; 360px" classname="settings.spec.ts" time="1.432">
+</testcase>
+<testcase name="settings (owner): step-up — stale session asks for the password, wrong password, then the policy change is retried (axe)" classname="settings.spec.ts" time="2.068">
+</testcase>
+</testsuite>
+<testsuite name="shell.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="6" failures="0" skipped="0" time="18.998" errors="0">
+<testcase name="login → workspace → projects list (pagination) → create project" classname="shell.spec.ts" time="5.519">
+</testcase>
+<testcase name="no workspaces → create workspace (client + server validation) → empty projects" classname="shell.spec.ts" time="4.299">
+</testcase>
+<testcase name="error state with retry; session expiry redirects to login" classname="shell.spec.ts" time="2.335">
+</testcase>
+<testcase name="role-aware UI: viewer does not see &quot;Создать проект&quot;" classname="shell.spec.ts" time="1.041">
+</testcase>
+<testcase name="keyboard-only: login, skip link, switch workspace, create project, logout" classname="shell.spec.ts" time="2.701">
+</testcase>
+<testcase name="responsive at 360px: no horizontal scroll, controls reachable" classname="shell.spec.ts" time="3.103">
+</testcase>
+</testsuite>
+<testsuite name="sse.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="2" failures="0" skipped="0" time="3.223" errors="0">
+<testcase name="network drop (offline → online): stream pauses, resumes with Last-Event-ID, every event exactly once, no gaps" classname="sse.spec.ts" time="1.788">
+</testcase>
+<testcase name="connection cut mid-frame while online: reconnect without duplicates or gaps (no offline event)" classname="sse.spec.ts" time="1.435">
+</testcase>
+</testsuite>
+<testsuite name="standards.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="15.233" errors="0">
+<testcase name="standards &amp; compliance: certification disclaimer, standards registry from project controls, control filters" classname="standards.spec.ts" time="5.529">
+</testcase>
+<testcase name="compliance matrix: evidence mapping, missing evidence highlighted, PASS only with VERIFIED evidence, filters, reports" classname="standards.spec.ts" time="3.912">
+</testcase>
+<testcase name="standards &amp; compliance: no horizontal overflow 375/768/1366/1920 in both themes; reduced motion; controls API error with retry" classname="standards.spec.ts" time="5.792">
+</testcase>
+</testsuite>
+<testsuite name="tasks.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="3" failures="0" skipped="0" time="10.007" errors="0">
+<testcase name="task detail: summary, attempts, events/logs with live CLI output, ACP messages, axe" classname="tasks.spec.ts" time="4.537">
+</testcase>
+<testcase name="task detail: diff viewer (Monaco from the local bundle, lazy) and text view; evidence and gate links" classname="tasks.spec.ts" time="3.755">
+</testcase>
+<testcase name="task detail: not found shows an error state" classname="tasks.spec.ts" time="1.715">
+</testcase>
+</testsuite>
+<testsuite name="wcag22.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="9" failures="0" skipped="1" time="41.59" errors="0">
+<testcase name="2.5.8 target size ≥ 24×24 (or spacing / inline exception) on every main screen — 1366 px, light" classname="wcag22.spec.ts" time="8.842">
+<properties>
+<property name="slow" value="">
+</property>
+</properties>
+</testcase>
+<testcase name="2.5.8 target size ≥ 24×24 (or spacing / inline exception) on every main screen — 375 px, dark" classname="wcag22.spec.ts" time="7.816">
+<properties>
+<property name="slow" value="">
+</property>
+</properties>
+</testcase>
+<testcase name="2.4.11 focus not obscured: Shift+Tab from the end of a long screen never leaves the focused element under the sticky top bar" classname="wcag22.spec.ts" time="3.319">
+</testcase>
+<testcase name="2.4.11: the context panel overlay (&lt; 1280 px) closes when focus moves into the main area, so it never covers the focused element" classname="wcag22.spec.ts" time="1.031">
+</testcase>
+<testcase name="3.2.6 consistent help: keyboard help and user menu sit at the same place of the top bar on every screen" classname="wcag22.spec.ts" time="8.545">
+</testcase>
+<testcase name="3.3.8 accessible authentication: no cognitive test; paste and password managers allowed (autocomplete, no paste blocking)" classname="wcag22.spec.ts" time="0.443">
+</testcase>
+<testcase name="2.5.7 dragging: Mission Control panel sizes change from a menu (single pointer, no drag); reset restores the default" classname="wcag22.spec.ts" time="1.621">
+</testcase>
+<testcase name="performance: CLI Output with 10 000 lines stays virtualized and scrolls smoothly (AICD_E2E_PERF=1)" classname="wcag22.spec.ts" time="9.902">
+<properties>
+<property name="slow" value="">
+</property>
+</properties>
+<system-out>
+<![CDATA[CLI 10k perf: {"lines":10000,"loadMs":1344,"domLines":19,"scrollHeight":558979,"steady":{"fps":59.5,"p95FrameMs":16.8,"maxFrameMs":33.4},"sweep":{"fps":52.3,"p95FrameMs":33.4,"maxFrameMs":50.1},"domNodes":1178}
+]]>
+</system-out>
+</testcase>
+<testcase name="screen audit: every main screen at 1920/1366/768/375 in dark and light (AICD_E2E_AUDIT_DIR)" classname="wcag22.spec.ts">
+<properties>
+<property name="skip" value="скриншоты аудита — только при AICD_E2E_AUDIT_DIR">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="workflows.spec.ts" timestamp="2026-11-09T11:04:02.001Z" hostname="chromium" tests="2" failures="0" skipped="0" time="5.688" errors="0">
+<testcase name="workflows: mode, FSM stage, verified progress, duration, blocked reason, Mission Control links, mode filter (light/dark axe)" classname="workflows.spec.ts" time="4.614">
+</testcase>
+<testcase name="workflows: 375/768/1366/1920 without horizontal overflow in both themes" classname="workflows.spec.ts" time="1.074">
+</testcase>
+</testsuite>
+</testsuites>

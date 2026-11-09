@@ -7,6 +7,8 @@ from aicd_identity.rbac import (
     Role,
     can_decide_approval,
     can_submit_directive,
+    can_submit_review,
+    can_transition_finding,
     effective_role,
     has_permission,
 )
@@ -16,6 +18,8 @@ EXPECTED = {
     "workspace:create": {O, A, D, R, V},
     "member:read": {O, A, D, R, V},
     "member:manage": {O},
+    "workspace:update": {O, A},
+    "workspace:policy": {O},
     "project:read": {O, A, D, R, V},
     "project:create": {O, A},
     "project:update": {O, A},
@@ -35,11 +39,23 @@ EXPECTED = {
     "directive:create": {O, A, D, R},
     "directive:confirm": {O, A, D, R},
     "approval:decide": {O, A, D, R},
+    "finding:triage": {O, A, D, R},
+    "compliance:review": {O, A, D, R},
     "provider:probe": {O, A},
     "provider:settings": {O, A},
     "documentation:register": {O, A},
     "documentation:refresh": {O, A, D},
     "audit:read": {O, A},
+    "system:health": {O, A},
+    "github:read": {O, A, D, R, V},
+    "github:manage": {O, A},
+    "pull_request:create": {O, A, D},
+    "pull_request:merge": {O, A, D},
+    "review:read": {O, A, D, R, V},
+    "review:write": {O, A, D, R},
+    "review:submit": {O, A, D, R},
+    "notification:read": {O, A, D, R, V},
+    "notification:update": {O, A, D, R, V},
 }
 
 
@@ -87,3 +103,33 @@ def test_approval_rules(role: str, action: str, requester: bool, single: bool, e
 def test_directive_rules() -> None:
     assert can_submit_directive(R, "ASK") and not can_submit_directive(R, "CHANGE_REQUEST")
     assert can_submit_directive(D, "STOP") and not can_submit_directive(V, "ASK")
+
+
+def test_review_rules() -> None:
+    """ADR-0015 §2: комментировать/resolve — reviewer+; REQUEST_CHANGES — как CHANGE_REQUEST (developer+)."""
+    for role in (O, A, D, R):
+        assert has_permission(role, "review:write") and can_submit_review(role, "COMMENT")
+        assert can_submit_review(role, "APPROVE")  # дополнительно — правила решения approval (§5.3)
+    assert not has_permission(V, "review:write") and has_permission(V, "review:read")
+    assert not can_submit_review(V, "COMMENT") and not can_submit_review(V, "APPROVE")
+    assert not can_submit_review(R, "REQUEST_CHANGES")
+    assert all(can_submit_review(role, "REQUEST_CHANGES") for role in (O, A, D))
+    assert not can_submit_review(O, "MERGE")
+
+
+@pytest.mark.parametrize(
+    ("role", "to_status", "expected"),
+    [
+        (R, "ACKNOWLEDGED", True),
+        (R, "FALSE_POSITIVE", True),
+        (R, "OPEN", True),
+        (R, "ACCEPTED_RISK", False),
+        (D, "ACCEPTED_RISK", False),
+        (A, "ACCEPTED_RISK", True),
+        (O, "ACCEPTED_RISK", True),
+        (V, "ACKNOWLEDGED", False),
+        (O, "VERIFIED_FIXED", False),  # подтверждение исправления — только Verification Engine
+    ],
+)
+def test_finding_transition_rules(role: str, to_status: str, expected: bool) -> None:
+    assert can_transition_finding(role, to_status) is expected

@@ -8,7 +8,7 @@ Job выполняется **только** под ролью `aicd_maintenance`
   3. истёкшие партиции: `audit_events`/`agent_activity_events` — экспорт в NDJSON.gz (архив, sha256 в
      аудите) → `maint_drop_partition` (DETACH + DROP); `outbox_events` — drop, только если 0 неопубликованных;
   4. непартиционированные таблицы — пакетное удаление (`run_event_log` после терминального статуса run,
-     `processed_events`, `idempotency_keys`, `user_sessions`, `provider_health`) с паузами;
+     `processed_events`, `idempotency_keys`, `user_sessions`, `provider_health`, `notifications`) с паузами;
   5. архив run (§20.2–20.3): терминальный run старше `agent_messages_days` → один NDJSON.gz
      (`chat_threads`, `chat_messages`, `agent_messages`, `message_deliveries`, `user_directives`, `directive_*`)
      → строка `artifacts(kind='archive')` → удаление детальных строк: `chat_messages` (кроме сообщений поручений —
@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -40,9 +41,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from aicd_platform import audit
+from aicd_platform.artifacts import b64_sha256, ensure_s3_bucket, make_s3_client, s3_credentials
 from aicd_platform.clock import utcnow
 from aicd_platform.config import Settings
 from aicd_platform.ids import uuid7
@@ -74,6 +77,17 @@ class RetentionPeriods:
     processed_events_days: int
     user_sessions_days: int
     provider_health_days: int
+    # P3-18 (Phase 9), §20.3: webhook-доставки, метрики использования, снимки индекса/документации, артефакты.
+    webhook_deliveries_days: int = 30
+    usage_metrics_days: int = 365
+    index_snapshots_failed_days: int = 7
+    index_snapshots_keep_ready: int = 5
+    documentation_superseded_days: int = 90
+    artifacts_ephemeral_days: int = 7
+    artifacts_raw_log_days: int = 30
+    artifacts_standard_days: int = 180
+    # UI redesign B8 (миграция 0020): персональные уведомления — 90 дней от создания (прочитанные и нет).
+    notifications_days: int = 90
 
     @classmethod
     def from_settings(cls, settings: Settings) -> RetentionPeriods:
@@ -86,6 +100,15 @@ class RetentionPeriods:
             processed_events_days=settings.retention_processed_events_days,
             user_sessions_days=settings.retention_user_sessions_days,
             provider_health_days=settings.retention_provider_health_days,
+            webhook_deliveries_days=settings.retention_webhook_deliveries_days,
+            usage_metrics_days=settings.retention_usage_metrics_days,
+            index_snapshots_failed_days=settings.retention_index_snapshots_failed_days,
+            index_snapshots_keep_ready=settings.retention_index_snapshots_keep_ready,
+            documentation_superseded_days=settings.retention_documentation_superseded_days,
+            artifacts_ephemeral_days=settings.retention_artifacts_ephemeral_days,
+            artifacts_raw_log_days=settings.retention_artifacts_raw_log_days,
+            artifacts_standard_days=settings.retention_artifacts_standard_days,
+            notifications_days=settings.retention_notifications_days,
         )
 
     def merged(self, overrides: Mapping[str, Any]) -> tuple[RetentionPeriods, list[str]]:
@@ -143,6 +166,7 @@ class RetentionReport:
     rows_deleted: dict[str, int] = field(default_factory=dict)
     skipped_tables: dict[str, str] = field(default_factory=dict)
     outbox_unpublished_stale: int = 0
+    artifact_objects_deleted: int = 0
     warnings: list[str] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -156,6 +180,7 @@ class RetentionReport:
             "runs_archived": len(self.runs_archived),
             "skipped_tables": sorted(self.skipped_tables),
             "outbox_unpublished_stale": self.outbox_unpublished_stale,
+            "artifact_objects_deleted": self.artifact_objects_deleted,
             "warnings": self.warnings[:20],
         }
 
@@ -168,6 +193,28 @@ class ArchiveSink(Protocol):
         ...
 
 
+class ArtifactDeleter(Protocol):
+    """Удаление объектов артефактов (FileSystemArtifactStore/S3ArtifactStore.delete)."""
+
+    def delete(self, storage_ref: str) -> bool: ...
+
+
+class ArchiveIntegrityError(OSError):
+    """Архив в хранилище не совпадает с экспортом (sha256) или хранилище отвергло загрузку по контрольной сумме.
+
+    Партиция/run в этом случае не удаляются: job пропускает их с предупреждением и аудитом
+    `maintenance.archive_failed`; следующий проход перезапишет объект (содержимое детерминировано)."""
+
+
+_ARCHIVE_KEY_RE = re.compile(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*")
+
+
+def _validate_archive_key(key: str) -> str:
+    if not _ARCHIVE_KEY_RE.fullmatch(key) or ".." in key.split("/"):
+        raise ValueError("некорректный ключ архива")
+    return key
+
+
 class FileSystemArchiveSink:
     """Архив на файловой системе: атомарная запись (tmp + fsync + rename) и сверка sha256."""
 
@@ -175,9 +222,7 @@ class FileSystemArchiveSink:
         self.root = root
 
     def put_file(self, key: str, path: Path, sha256: str) -> str:
-        if not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", key) or ".." in key.split("/"):
-            raise ValueError("некорректный ключ архива")
-        target = self.root / key
+        target = self.root / _validate_archive_key(key)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix=".aicd-archive-", dir=target.parent)
         try:
@@ -186,7 +231,7 @@ class FileSystemArchiveSink:
                 out.flush()
                 os.fsync(out.fileno())
             if _sha256_file(Path(tmp)) != sha256:
-                raise OSError("архив повреждён при записи (sha256 не совпадает)")
+                raise ArchiveIntegrityError("архив повреждён при записи (sha256 не совпадает)")
             os.replace(tmp, target)
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
@@ -197,6 +242,87 @@ class FileSystemArchiveSink:
         finally:
             os.close(dir_fd)
         return f"file://archive/{key}"
+
+
+# Коды ответа S3/MinIO при несовпадении контрольной суммы загружаемого тела.
+_S3_CHECKSUM_ERRORS = frozenset(
+    {"BadDigest", "InvalidDigest", "XAmzContentChecksumMismatch", "XAmzContentSHA256Mismatch"}
+)
+
+
+class S3ArchiveSink:
+    """Архив в S3-совместимом хранилище (§20.2): `s3://<bucket>/<prefix>/<key>`.
+
+    Загрузка с `ChecksumSHA256` (сервер отвергает искажённое тело) и метаданными `sha256`; затем объект читается
+    обратно целиком и sha256 сверяется с экспортом — только после этого job вызывает DETACH + DROP.
+    Перезапись ключа допустима (экспорт детерминирован); для bucket с object lock повторная запись того же
+    содержимого создаёт версию."""
+
+    def __init__(self, client: Any, bucket: str, prefix: str = "archive") -> None:
+        self.client = client
+        self.bucket = bucket
+        self.prefix = _validate_archive_key(prefix)
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> S3ArchiveSink:
+        endpoint, access_key, secret_key = s3_credentials(settings)
+        client = make_s3_client(
+            endpoint_url=endpoint, access_key=access_key, secret_key=secret_key, region=settings.artifact_s3_region
+        )
+        return cls(
+            client,
+            settings.retention_archive_s3_bucket or settings.artifact_s3_bucket,
+            settings.retention_archive_s3_prefix,
+        )
+
+    def ensure_bucket(self) -> None:
+        ensure_s3_bucket(self.client, self.bucket)
+
+    def object_key(self, key: str) -> str:
+        return f"{self.prefix}/{_validate_archive_key(key)}"
+
+    def put_file(self, key: str, path: Path, sha256: str) -> str:
+        from botocore.exceptions import ClientError
+
+        object_key = self.object_key(key)
+        if _sha256_file(path) != sha256:
+            raise ArchiveIntegrityError("файл экспорта изменился до загрузки (sha256 не совпадает)")
+        try:
+            with path.open("rb") as fh:
+                self.client.put_object(
+                    Bucket=self.bucket,
+                    Key=object_key,
+                    Body=fh,
+                    ContentLength=path.stat().st_size,
+                    ContentType="application/gzip",
+                    ChecksumSHA256=b64_sha256(sha256),
+                    Metadata={"sha256": sha256},
+                )
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in _S3_CHECKSUM_ERRORS:
+                raise ArchiveIntegrityError(f"хранилище отвергло архив {object_key}: контрольная сумма") from exc
+            raise
+        stored = self._stored_sha256(object_key)
+        if not hmac.compare_digest(stored, sha256):
+            raise ArchiveIntegrityError(f"архив {object_key} в хранилище не совпадает с экспортом (sha256)")
+        return f"s3://{self.bucket}/{object_key}"
+
+    def _stored_sha256(self, object_key: str) -> str:
+        body = self.client.get_object(Bucket=self.bucket, Key=object_key)["Body"]
+        digest = hashlib.sha256()
+        try:
+            while chunk := body.read(1024 * 1024):
+                digest.update(chunk)
+        finally:
+            body.close()
+        return digest.hexdigest()
+
+
+def build_archive_sink(settings: Settings) -> ArchiveSink:
+    """Приёмник архива по `retention_archive_backend` (не задан — как `artifact_backend`)."""
+    if settings.archive_backend() == "s3":
+        return S3ArchiveSink.from_settings(settings)
+    return FileSystemArchiveSink(settings.archive_root())
 
 
 def _sha256_file(path: Path) -> str:
@@ -241,6 +367,16 @@ def partition_cutoff(table: str, periods: RetentionPeriods, now: datetime) -> da
 
 async def _table_exists(conn: AsyncConnection, table: str) -> bool:
     return bool((await conn.execute(text("SELECT to_regclass(:t) IS NOT NULL"), {"t": f"aicd.{table}"})).scalar_one())
+
+
+async def _can_delete(conn: AsyncConnection, table: str) -> bool:
+    return bool(
+        (
+            await conn.execute(
+                text("SELECT has_table_privilege(CAST(:t AS regclass), 'DELETE')"), {"t": f"aicd.{table}"}
+            )
+        ).scalar_one()
+    )
 
 
 async def _partitions(conn: AsyncConnection, table: str) -> list[str]:
@@ -344,7 +480,15 @@ async def _drop_expired_partitions(
                 continue
             archived: ArchivedPartition | None = None
             if table in ARCHIVED_BEFORE_DROP:
-                archived = await _export_partition(conn, table, partition, month, sink)
+                try:
+                    archived = await _export_partition(conn, table, partition, month, sink)
+                except ArchiveIntegrityError as exc:
+                    # Архив не подтверждён — партиция сохраняется (без архива удаление запрещено, §20.3).
+                    await conn.rollback()
+                    await _audit_archive_failed(conn, report, {"table": table, "partition": partition}, exc)
+                    report.partitions_skipped[partition] = "archive_integrity_failed"
+                    report.warnings.append(f"{partition}: архив не прошёл проверку целостности, партиция сохранена")
+                    continue
                 await conn.rollback()  # закрыть читающую транзакцию: архив уже в хранилище
                 report.archives.append(archived)
             result = (
@@ -381,6 +525,22 @@ async def _drop_expired_partitions(
             await conn.commit()
 
 
+async def _audit_archive_failed(
+    conn: AsyncConnection, report: RetentionReport, subject: dict[str, Any], exc: ArchiveIntegrityError
+) -> None:
+    await audit.record(
+        conn,
+        action="maintenance.archive_failed",
+        resource_type="maintenance",
+        resource_id=report.session_id,
+        actor_type="system",
+        actor_id=None,
+        workspace_id=None,
+        metadata={**subject, "error": str(exc)[:500]},
+    )
+    await conn.commit()
+
+
 def _batch_deletes(periods: RetentionPeriods, now: datetime) -> list[tuple[str, str, dict[str, Any]]]:
     """(таблица, условие отбора, параметры). Отбор пакета — по ctid (§20.2)."""
     return [
@@ -397,6 +557,15 @@ def _batch_deletes(periods: RetentionPeriods, now: datetime) -> list[tuple[str, 
             {"cutoff": now - timedelta(days=periods.user_sessions_days)},
         ),
         ("provider_health", "observed_at < :cutoff", {"cutoff": now - timedelta(days=periods.provider_health_days)}),
+        # OQ-47 (7): доставки webhook — 30 дней; RECEIVED (не обработанные) не удаляются — о них предупреждение.
+        # Полезная нагрузка не хранится (OQ-47 (4)); строки со ссылкой на объект пропускаются (удалять нечем).
+        (
+            "github_webhook_deliveries",
+            "received_at < :cutoff AND status <> 'RECEIVED' AND payload_storage_key IS NULL",
+            {"cutoff": now - timedelta(days=periods.webhook_deliveries_days)},
+        ),
+        ("usage_metrics", "observed_at < :cutoff", {"cutoff": now - timedelta(days=periods.usage_metrics_days)}),
+        ("notifications", "created_at < :cutoff", {"cutoff": now - timedelta(days=periods.notifications_days)}),
     ]
 
 
@@ -406,6 +575,9 @@ async def _delete_in_batches(
     for table, condition, params in _batch_deletes(periods, now):
         if not await _table_exists(conn, table):
             report.skipped_tables[table] = "таблица отсутствует"
+            continue
+        if not await _can_delete(conn, table):
+            report.skipped_tables[table] = "нет права DELETE у aicd_maintenance (миграция 0015 не применена?)"
             continue
         statement = text(
             f"DELETE FROM {table} WHERE ctid = ANY(ARRAY(SELECT ctid FROM {table} WHERE {condition} LIMIT :n))"  # noqa: S608 — фиксированный список
@@ -565,7 +737,19 @@ async def _archive_runs(
         ).all()
         await conn.commit()
         for workspace_id, run_id, project_id in candidates:
-            archived = await _export_run(conn, workspace_id, run_id, sink)
+            try:
+                archived = await _export_run(conn, workspace_id, run_id, sink)
+            except ArchiveIntegrityError as exc:
+                # Детальные строки run не удаляются; архив run прекращается до следующего прохода
+                # (иначе тот же кандидат выбирался бы снова).
+                await conn.rollback()
+                await _audit_archive_failed(
+                    conn, report, {"workspace_id": str(workspace_id), "run_id": str(run_id)}, exc
+                )
+                report.warnings.append(f"run {run_id}: архив не прошёл проверку целостности, строки сохранены")
+                for table, count in deleted.items():
+                    report.rows_deleted[table] = report.rows_deleted.get(table, 0) + count
+                return
             await conn.rollback()  # закрыть читающую транзакцию: архив уже в хранилище
             params = {"ws": workspace_id, "run": run_id}
             redacted = (
@@ -625,17 +809,249 @@ async def _archive_runs(
         report.rows_deleted[table] = report.rows_deleted.get(table, 0) + count
 
 
+# ------------------------------------------------- снимки индекса/документации, артефакты (OQ-41 (a), §20.3)
+_INDEX_SNAPSHOT_CANDIDATES = text(
+    "SELECT s.id, s.workspace_id, s.status FROM code_index_snapshots s WHERE ("
+    "  (s.status IN ('FAILED','SUPERSEDED') AND s.completed_at < :failed_cutoff)"
+    "  OR (s.status = 'READY' AND s.id IN (SELECT r.id FROM (SELECT id, row_number() OVER ("
+    "      PARTITION BY repository_id ORDER BY created_at DESC, id DESC) AS rn FROM code_index_snapshots"
+    "      WHERE status = 'READY') r WHERE r.rn > :keep)))"
+    " AND NOT EXISTS (SELECT 1 FROM context_packs c WHERE c.snapshot_id = s.id)"
+    " AND NOT EXISTS (SELECT 1 FROM indexing_jobs j WHERE (j.snapshot_id = s.id OR j.base_snapshot_id = s.id)"
+    "   AND j.status IN ('QUEUED','RUNNING'))"
+    " AND NOT EXISTS (SELECT 1 FROM code_index_snapshots b WHERE b.parent_snapshot_id = s.id AND b.status = 'BUILDING')"
+    " AND s.id > :after ORDER BY s.id LIMIT :n"
+)
+
+
+async def _delete_rows_individually(conn: AsyncConnection, rows: list[Any], delete_one: Any) -> tuple[list[Any], int]:
+    """Удаление по строке в savepoint: строка, на которую ещё ссылаются (FK RESTRICT, 23503), пропускается."""
+    deleted: list[Any] = []
+    referenced = 0
+    for row in rows:
+        try:
+            async with conn.begin_nested():
+                if await delete_one(row):
+                    deleted.append(row)
+        except DBAPIError as exc:
+            if getattr(exc.orig, "sqlstate", None) != "23503":
+                raise
+            referenced += 1
+    return deleted, referenced
+
+
+async def _audit_deleted(
+    conn: AsyncConnection, report: RetentionReport, table: str, rows: int, cutoff: datetime, **extra: Any
+) -> None:
+    await audit.record(
+        conn,
+        action="maintenance.rows_deleted",
+        resource_type="maintenance",
+        resource_id=report.session_id,
+        actor_type="system",
+        actor_id=None,
+        workspace_id=None,
+        metadata={"table": table, "rows": rows, "cutoff": cutoff.isoformat(), **extra},
+    )
+
+
+async def _prune_index_snapshots(
+    conn: AsyncConnection, report: RetentionReport, settings: Settings, periods: RetentionPeriods, now: datetime
+) -> None:
+    """`FAILED`/`SUPERSEDED` старше срока и `READY` сверх N последних на репозиторий; снимки Context Pack,
+    активных заданий индексации и баз строящихся снимков сохраняются. Содержимое — каскадом FK."""
+    table = "code_index_snapshots"
+    if not await _table_exists(conn, table) or not await _can_delete(conn, table):
+        report.skipped_tables[table] = "нет таблицы или права DELETE (миграция 0015)"
+        return
+    failed_cutoff = now - timedelta(days=periods.index_snapshots_failed_days)
+    after = uuid.UUID(int=0)
+    total = 0
+    while True:
+        rows = (
+            (
+                await conn.execute(
+                    _INDEX_SNAPSHOT_CANDIDATES,
+                    {
+                        "failed_cutoff": failed_cutoff,
+                        "keep": periods.index_snapshots_keep_ready,
+                        "after": after,
+                        "n": settings.retention_batch_size,
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        if not rows:
+            break
+        after = rows[-1]["id"]
+
+        async def delete_one(row: Any) -> bool:
+            # Завершённые задания индексации этого снимка: иначе SET NULL нарушит ck_indexing_jobs_kind.
+            await conn.execute(
+                text(
+                    "DELETE FROM indexing_jobs WHERE (snapshot_id = :id OR base_snapshot_id = :id)"
+                    " AND status IN ('SUCCEEDED','FAILED','CANCELLED')"
+                ),
+                {"id": row["id"]},
+            )
+            result = await conn.execute(text("DELETE FROM code_index_snapshots WHERE id = :id"), {"id": row["id"]})
+            return bool(result.rowcount)
+
+        deleted, referenced = await _delete_rows_individually(conn, list(rows), delete_one)
+        if referenced:
+            report.warnings.append(f"{table}: {referenced} снимков используются, сохранены")
+        if deleted:
+            await _audit_deleted(conn, report, table, len(deleted), failed_cutoff,
+                                 keep_ready=periods.index_snapshots_keep_ready,
+                                 statuses=sorted({str(r["status"]) for r in deleted}))  # fmt: skip
+        await conn.commit()
+        total += len(deleted)
+        if len(rows) < settings.retention_batch_size:
+            break
+    if total:
+        report.rows_deleted[table] = report.rows_deleted.get(table, 0) + total
+
+
+async def _prune_documentation_snapshots(
+    conn: AsyncConnection, report: RetentionReport, settings: Settings, periods: RetentionPeriods, now: datetime
+) -> None:
+    table = "documentation_snapshots"
+    if not await _table_exists(conn, table) or not await _can_delete(conn, table):
+        report.skipped_tables[table] = "нет таблицы или права DELETE (миграция 0015)"
+        return
+    cutoff = now - timedelta(days=periods.documentation_superseded_days)
+    after = uuid.UUID(int=0)
+    total = 0
+    while True:
+        rows = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT id FROM documentation_snapshots WHERE status = 'SUPERSEDED'"
+                        " AND COALESCE(fetched_at, created_at) < :cutoff AND id > :after ORDER BY id LIMIT :n"
+                    ),
+                    {"cutoff": cutoff, "after": after, "n": settings.retention_batch_size},
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not rows:
+            break
+        after = rows[-1]
+
+        async def delete_one(row: Any) -> bool:
+            result = await conn.execute(text("DELETE FROM documentation_snapshots WHERE id = :id"), {"id": row})
+            return bool(result.rowcount)
+
+        deleted, _ = await _delete_rows_individually(conn, list(rows), delete_one)
+        if deleted:
+            await _audit_deleted(conn, report, table, len(deleted), cutoff)
+        await conn.commit()
+        total += len(deleted)
+        if len(rows) < settings.retention_batch_size:
+            break
+    if total:
+        report.rows_deleted[table] = report.rows_deleted.get(table, 0) + total
+
+
+_ARTIFACT_CANDIDATES = text(
+    "SELECT a.id, a.storage_ref, a.kind FROM artifacts a WHERE a.retention_class IN ('ephemeral','standard') AND ("
+    "  (a.expires_at IS NOT NULL AND a.expires_at < :now)"
+    "  OR (a.retention_class = 'ephemeral' AND a.created_at < :ephemeral)"
+    "  OR (a.kind = 'cli_raw_log' AND a.created_at < :raw_log)"
+    "  OR (a.retention_class = 'standard' AND a.created_at < :standard))"
+    " AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = a.run_id AND r.status <> ALL(:terminal))"
+    " AND a.id > :after ORDER BY a.id LIMIT :n"
+)
+
+
+async def _purge_artifacts(
+    conn: AsyncConnection,
+    report: RetentionReport,
+    settings: Settings,
+    periods: RetentionPeriods,
+    now: datetime,
+    store: ArtifactDeleter | None,
+) -> None:
+    """Артефакты по `retention_class`/`expires_at` (§20.3): `evidence`/`archive` не трогаются никогда, артефакты
+    активных run — тоже; строка, на которую ссылаются (evidence, checkpoints, исполнения CLI, Context Pack …;
+    FK RESTRICT), остаётся. Строка удаляется в транзакции с аудитом, объект — после commit (сбой удаления
+    объекта ⇒ предупреждение, объект-сирота, повторно не отслеживается)."""
+    if store is None:
+        report.skipped_tables["artifacts"] = "хранилище артефактов не передано job"
+        return
+    standard_cutoff = now - timedelta(days=periods.artifacts_standard_days)
+    params: dict[str, Any] = {
+        "now": now,
+        "ephemeral": now - timedelta(days=periods.artifacts_ephemeral_days),
+        "raw_log": now - timedelta(days=periods.artifacts_raw_log_days),
+        "standard": standard_cutoff,
+        "terminal": list(TERMINAL_RUN_STATUSES),
+    }
+    after = uuid.UUID(int=0)
+    total = referenced_total = 0
+    while True:
+        rows = (
+            (await conn.execute(_ARTIFACT_CANDIDATES, {**params, "after": after, "n": settings.retention_batch_size}))
+            .mappings()
+            .all()
+        )
+        if not rows:
+            break
+        after = rows[-1]["id"]
+
+        async def delete_one(row: Any) -> bool:
+            result = await conn.execute(text("DELETE FROM artifacts WHERE id = :id"), {"id": row["id"]})
+            return bool(result.rowcount)
+
+        deleted, referenced = await _delete_rows_individually(conn, list(rows), delete_one)
+        referenced_total += referenced
+        if deleted:
+            await _audit_deleted(conn, report, "artifacts", len(deleted), standard_cutoff,
+                                 kinds=sorted({str(r["kind"]) for r in deleted}))  # fmt: skip
+        await conn.commit()
+        for row in deleted:
+            try:
+                if await asyncio.to_thread(store.delete, str(row["storage_ref"])):
+                    report.artifact_objects_deleted += 1
+            except Exception as exc:  # noqa: BLE001 — строка уже удалена; объект станет сиротой
+                report.warnings.append(f"artifacts: объект {row['id']} не удалён ({type(exc).__name__})")
+        total += len(deleted)
+        if len(rows) < settings.retention_batch_size:
+            break
+    if total:
+        report.rows_deleted["artifacts"] = report.rows_deleted.get("artifacts", 0) + total
+
+
+async def _warn_unprocessed_webhooks(conn: AsyncConnection, report: RetentionReport, periods: RetentionPeriods,
+                                     now: datetime) -> None:  # fmt: skip
+    if not await _table_exists(conn, "github_webhook_deliveries"):
+        return
+    stale = (
+        await conn.execute(
+            text("SELECT count(*) FROM github_webhook_deliveries WHERE status = 'RECEIVED' AND received_at < :t"),
+            {"t": now - timedelta(days=periods.webhook_deliveries_days)},
+        )
+    ).scalar_one()
+    if stale:
+        report.warnings.append(f"github_webhook_deliveries: {stale} необработанных доставок старше срока хранения")
+
+
 async def run_retention(
     engine: AsyncEngine,
     settings: Settings,
     *,
     now: datetime | None = None,
     sink: ArchiveSink | None = None,
+    artifacts: ArtifactDeleter | None = None,
     reason: str = "scheduled retention",
 ) -> RetentionReport:
     """Один проход retention. `engine` — подключение роли aicd_maintenance (иначе maint_begin откажет)."""
     now = now or utcnow()
-    sink = sink or FileSystemArchiveSink(settings.archive_root())
+    sink = sink or build_archive_sink(settings)
     report = RetentionReport(session_id=uuid7(), started_at=now)
     async with engine.connect() as conn:
         await conn.execute(text("SET lock_timeout = '5s'"))
@@ -657,6 +1073,10 @@ async def run_retention(
             await _delete_in_batches(conn, report, settings, periods, now)
 
             await _archive_runs(conn, report, settings, periods, now, sink)
+            await _prune_index_snapshots(conn, report, settings, periods, now)
+            await _prune_documentation_snapshots(conn, report, settings, periods, now)
+            await _purge_artifacts(conn, report, settings, periods, now, artifacts)
+            await _warn_unprocessed_webhooks(conn, report, periods, now)
             report.outbox_unpublished_stale = int(
                 (
                     await conn.execute(

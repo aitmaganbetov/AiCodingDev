@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
-import { api } from '../api/client';
+import { workspaceKeys, workspacesApi } from '../api/workspaces';
 import { LoadMore } from '../components/LoadMore';
 import { PageHeading } from '../components/PageHeading';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
@@ -12,9 +12,9 @@ export const WORKSPACES_PAGE_SIZE = 50;
 export function WorkspacesPage() {
   const { t, i18n } = useTranslation();
   const query = useInfiniteQuery({
-    queryKey: ['workspaces'],
+    queryKey: workspaceKeys.all,
     queryFn: ({ pageParam, signal }) =>
-      api.listWorkspaces({ limit: WORKSPACES_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
+      workspacesApi.list({ limit: WORKSPACES_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) }, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
@@ -40,16 +40,16 @@ export function WorkspacesPage() {
             {items.map((w) => (
               <li key={w.id} className="card flex flex-col gap-2">
                 <h2 className="text-lg font-semibold">
-                  <Link to={`/w/${w.id}/projects`} className="rounded text-blue-800 underline-offset-4 hover:underline">
+                  <Link to={`/w/${w.id}/projects`} className="rounded text-accent-soft-fg underline-offset-4 hover:underline">
                     {w.name}
                   </Link>
                 </h2>
                 <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-sm">
-                  <dt className="text-slate-600">{t('workspaces.slug')}</dt>
+                  <dt className="text-fg-muted">{t('workspaces.slug')}</dt>
                   <dd className="break-all">{w.slug}</dd>
-                  <dt className="text-slate-600">{t('workspaces.role')}</dt>
+                  <dt className="text-fg-muted">{t('workspaces.role')}</dt>
                   <dd>{t(`enums.workspace_role.${w.role}`, { defaultValue: w.role })}</dd>
-                  <dt className="text-slate-600">{t('common.createdAt')}</dt>
+                  <dt className="text-fg-muted">{t('common.createdAt')}</dt>
                   <dd>{formatDate(w.created_at, i18n.language)}</dd>
                 </dl>
               </li>

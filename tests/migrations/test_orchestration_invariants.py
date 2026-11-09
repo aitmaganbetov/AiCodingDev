@@ -48,12 +48,16 @@ def admin(database: testdb.TestDatabase) -> Iterator[psycopg.Connection]:
 @pytest.fixture(scope="module")
 def world(admin: psycopg.Connection) -> World:
     a, b = seed_tenant(admin), seed_tenant(admin)
-    gate = uuid7()
-    # Глобальный gate в seed-профиле strict (workspace_id = NULL, как у профиля).
+    gate, profile = uuid7(), uuid7()
+    # Gate в собственном профиле workspace A (не в глобальном seed: иначе он попал бы в планы run'ов
+    # других тестов и в сверку seed с реестром gates).
     admin.execute(
-        "INSERT INTO quality_gates (id, workspace_id, profile_id, name, gate_type)"
-        " VALUES (%s, NULL, '01a1c000-0000-7000-8000-000000000002', %s, 'UNIT')",
-        (gate, f"unit-{gate.hex[-8:]}"),
+        "INSERT INTO quality_profiles (id, workspace_id, code, version, definition) VALUES (%s, %s, %s, 1, '{}')",
+        (profile, a.workspace_id, "basic"),
+    )
+    admin.execute(
+        "INSERT INTO quality_gates (id, workspace_id, profile_id, name, gate_type) VALUES (%s, %s, %s, %s, 'UNIT')",
+        (gate, a.workspace_id, profile, f"unit-{gate.hex[-8:]}"),
     )
     artifact = uuid7()
     admin.execute(
@@ -143,7 +147,7 @@ def _doc_transitions() -> set[tuple[str, str, str]]:
     rows: set[tuple[str, str, str]] = set()
     for line in section.splitlines():
         m = re.match(
-            r"^\| (run|task|execution|directive|approval|external_action|indexing_job) \| `([A-Z_a-z]+)` \| (.+) \|$",
+            r"^\| (run|task|execution|directive|approval|external_action|indexing_job|finding|review_thread) \| `([A-Z_a-z]+)` \| (.+) \|$",
             line,
         )
         if m:
@@ -163,6 +167,8 @@ def test_allowed_transitions_match_design(admin: psycopg.Connection) -> None:
         "approval",
         "external_action",
         "indexing_job",
+        "finding",
+        "review_thread",
     }
     actual = {tuple(r) for r in admin.execute("SELECT entity, from_status, to_status FROM allowed_transitions")}
     assert actual == expected

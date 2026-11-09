@@ -8,6 +8,9 @@
  *  - §8: Idempotency-Key на POST-командах, один ключ на «намерение пользователя»,
  *        переиспользуется при повторах.
  * Типы запросов/ответов берутся только из сгенерированного schema.d.ts (ADR-0013).
+ *
+ * Здесь только ядро транспорта. Операции — в модулях областей `src/api/<area>.ts`
+ * (auth, workspaces, projects, runs, …): новая область = новый файл, client.ts не меняется.
  */
 import type { components, operations } from './schema';
 
@@ -15,45 +18,26 @@ export const API_BASE = '/api/v1';
 export const CSRF_COOKIE = 'aicd_csrf';
 
 export type Schemas = components['schemas'];
-export type SessionInfo = Schemas['SessionInfo'];
-export type WorkspaceMembership = Schemas['WorkspaceMembership'];
-export type Workspace = Schemas['Workspace'];
-export type WorkspacePage = Schemas['WorkspacePage'];
-export type WorkspaceRole = Schemas['WorkspaceRole'];
-export type Project = Schemas['Project'];
-export type ProjectPage = Schemas['ProjectPage'];
 export type Problem = Schemas['Problem'];
 export type FieldError = Schemas['FieldError'];
-export type DocumentationMode = Schemas['DocumentationMode'];
-export type QualityProfile = Schemas['QualityProfile'];
-export type RunMode = Schemas['RunMode'];
-export type RunStatus = Schemas['RunStatus'];
-export type RunSummary = Schemas['RunSummary'];
-export type Run = Schemas['Run'];
-export type RunPage = Schemas['RunPage'];
-export type TaskStatus = Schemas['TaskStatus'];
-export type TaskSummary = Schemas['TaskSummary'];
-export type TaskGraph = Schemas['TaskGraph'];
-export type RunCommand = Schemas['RunCommandAccepted']['command'];
-export type SseEventType = Schemas['SseEventType'];
 
-type JsonBody<Op extends keyof operations> = NonNullable<operations[Op]['requestBody']> extends {
+/**
+ * Помощники типов для модулей областей (src/api/<area>.ts): тело запроса, тело ответа
+ * и query-параметры операции по её operationId из сгенерированного schema.d.ts.
+ */
+export type JsonBody<Op extends keyof operations> = NonNullable<operations[Op]['requestBody']> extends {
   content: { 'application/json': infer B };
 }
   ? B
   : never;
-type JsonResponse<Op extends keyof operations, S extends keyof operations[Op]['responses']> =
+export type JsonResponse<Op extends keyof operations, S extends keyof operations[Op]['responses']> =
   operations[Op]['responses'][S] extends { content: { 'application/json': infer B } } ? B : never;
-type Query<Op extends keyof operations> = NonNullable<operations[Op]['parameters']['query']>;
+export type Query<Op extends keyof operations> = NonNullable<operations[Op]['parameters']['query']>;
 
-export type LoginRequest = JsonBody<'login'>;
-export type WorkspaceCreateRequest = JsonBody<'createWorkspace'>;
-export type ProjectCreateRequest = JsonBody<'createProject'>;
-export type ListWorkspacesQuery = Query<'listWorkspaces'>;
-export type ListProjectsQuery = Query<'listProjects'>;
-export type RunCreateRequest = JsonBody<'createRun'>;
-export type ListRunsQuery = Query<'listRuns'>;
-export type RunTasksQuery = Query<'getRunTasks'>;
+/** Сегмент пути из идентификатора (encodeURIComponent): `/runs/${seg(id)}`. */
+export function seg(id: string): string {
+  return encodeURIComponent(id);
+}
 
 /** Коды, которые клиент порождает сам (их нет в контракте). */
 export type ClientErrorCode = 'network_error' | 'unknown_error';
@@ -238,7 +222,7 @@ export const clientConfig = {
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
-interface RequestOptions {
+export interface RequestOptions {
   method: Method;
   path: string;
   query?: Record<string, string | number | readonly string[] | undefined | null> | undefined;
@@ -247,6 +231,10 @@ interface RequestOptions {
   workspaceId?: string | undefined;
   /** Optimistic locking (API_DESIGN §9): If-Match: "v<version>". */
   ifMatchVersion?: number | undefined;
+  /** Готовый ETag из ответа сервера (приоритетнее ifMatchVersion): If-Match: <etag>. */
+  ifMatch?: string | undefined;
+  /** Представление ответа (Accept), например text/markdown для отчёта run; по умолчанию JSON. */
+  accept?: string | undefined;
   /** false — не отправлять X-CSRF-Token (только POST /auth/login). */
   csrf?: boolean;
   /** false — 401 не вызывает переход на вход (login, session, logout). */
@@ -286,9 +274,53 @@ async function readBody(res: Response): Promise<unknown> {
   }
 }
 
+/** Ответ с метаданными: тело и сильный ETag (API_DESIGN §9) — для If-Match следующего изменения. */
+export interface ApiResponse<T> {
+  data: T;
+  /** Значение заголовка ETag (`"v<n>"`) или null, если сервер его не прислал / прокси его скрыл. */
+  etag: string | null;
+  headers: Headers;
+}
+
+/** Версия из сильного ETag `"v<n>"` (null — нет/иной формат). */
+export function versionFromEtag(etag: string | null | undefined): number | null {
+  const m = etag ? /^"v(\d+)"$/.exec(etag.trim()) : null;
+  return m ? Number(m[1]) : null;
+}
+
 export async function request<T>(opts: RequestOptions): Promise<T> {
+  return (await requestWithMeta<T>(opts)).data;
+}
+
+/** Не-JSON представление (например, text/markdown отчёта run): текст, Content-Type и имя файла из Content-Disposition. */
+export interface TextResponse {
+  text: string;
+  contentType: string;
+  filename: string | null;
+}
+
+export async function requestText(opts: RequestOptions & { accept: string }): Promise<TextResponse> {
+  const res = await send(opts);
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  return {
+    text: await res.text(),
+    contentType: res.headers.get('Content-Type') ?? opts.accept,
+    filename: match?.[1] ? decodeURIComponent(match[1]) : null,
+  };
+}
+
+export async function requestWithMeta<T>(opts: RequestOptions): Promise<ApiResponse<T>> {
+  const res = await send(opts);
+  const etag = res.headers.get('ETag');
+  if (res.status === 204) return { data: undefined as T, etag, headers: res.headers };
+  return { data: (await readBody(res)) as T, etag, headers: res.headers };
+}
+
+/** Транспорт: заголовки, повторы, разбор ошибок. Возвращает успешный Response с непрочитанным телом. */
+async function send(opts: RequestOptions): Promise<Response> {
   const unsafe = opts.method !== 'GET';
-  const headers: Record<string, string> = { Accept: 'application/json, application/problem+json' };
+  const headers: Record<string, string> = { Accept: opts.accept ? `${opts.accept}, application/problem+json` : 'application/json, application/problem+json' };
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (unsafe && opts.csrf !== false) {
     const token = currentCsrfToken();
@@ -296,7 +328,8 @@ export async function request<T>(opts: RequestOptions): Promise<T> {
   }
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
   if (opts.workspaceId) headers['X-Workspace-Id'] = opts.workspaceId;
-  if (opts.ifMatchVersion !== undefined) headers['If-Match'] = `"v${opts.ifMatchVersion}"`;
+  if (opts.ifMatch) headers['If-Match'] = opts.ifMatch;
+  else if (opts.ifMatchVersion !== undefined) headers['If-Match'] = `"v${opts.ifMatchVersion}"`;
 
   // Повторять можно только то, что безопасно: GET или POST с Idempotency-Key.
   const retryable = !unsafe || Boolean(opts.idempotencyKey);
@@ -322,10 +355,7 @@ export async function request<T>(opts: RequestOptions): Promise<T> {
       throw new ApiError({ status: 0, code: 'network_error', cause });
     }
 
-    if (res.ok) {
-      if (res.status === 204) return undefined as T;
-      return (await readBody(res)) as T;
-    }
+    if (res.ok) return res;
 
     const error = parseProblem(res.status, await readBody(res), res.headers.get('Retry-After'));
     if (
@@ -345,7 +375,7 @@ export async function request<T>(opts: RequestOptions): Promise<T> {
 /**
  * Открывает поток text/event-stream (GET /runs/{id}/events). Возвращает Response с телом-потоком;
  * не-2xx ответ разбирается в ApiError (401 — через общий обработчик). Повторы — забота вызывающего
- * (см. src/api/runEvents.ts): только он знает последний seq.
+ * (см. src/api/sse.ts): только он знает последний seq.
  */
 export async function openEventStream(opts: {
   path: string;
@@ -373,80 +403,3 @@ export async function openEventStream(opts: {
   if (res.status === 401) unauthorizedHandler(error);
   throw error;
 }
-
-// ---------------------------------------------------------------------------
-// Операции контракта, используемые web shell
-// ---------------------------------------------------------------------------
-
-export const api = {
-  login(body: LoginRequest): Promise<JsonResponse<'login', 200>> {
-    return request({ method: 'POST', path: '/auth/login', body, csrf: false, redirectOn401: false });
-  },
-
-  logout(): Promise<void> {
-    return request({ method: 'POST', path: '/auth/logout', redirectOn401: false });
-  },
-
-  getSession(signal?: AbortSignal): Promise<JsonResponse<'getSession', 200>> {
-    return request({ method: 'GET', path: '/auth/session', redirectOn401: false, signal });
-  },
-
-  listWorkspaces(query: ListWorkspacesQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listWorkspaces', 200>> {
-    return request({ method: 'GET', path: '/workspaces', query, signal });
-  },
-
-  createWorkspace(body: WorkspaceCreateRequest, idempotencyKey: string): Promise<JsonResponse<'createWorkspace', 201>> {
-    return request({ method: 'POST', path: '/workspaces', body, idempotencyKey });
-  },
-
-  listProjects(
-    workspaceId: string,
-    query: ListProjectsQuery = {},
-    signal?: AbortSignal,
-  ): Promise<JsonResponse<'listProjects', 200>> {
-    return request({ method: 'GET', path: '/projects', query, workspaceId, signal });
-  },
-
-  createProject(
-    workspaceId: string,
-    body: ProjectCreateRequest,
-    idempotencyKey: string,
-  ): Promise<JsonResponse<'createProject', 201>> {
-    return request({ method: 'POST', path: '/projects', body, workspaceId, idempotencyKey });
-  },
-
-  getProject(projectId: string, signal?: AbortSignal): Promise<JsonResponse<'getProject', 200>> {
-    return request({ method: 'GET', path: `/projects/${encodeURIComponent(projectId)}`, signal });
-  },
-
-  listRuns(workspaceId: string, query: ListRunsQuery = {}, signal?: AbortSignal): Promise<RunPage> {
-    return request({ method: 'GET', path: '/runs', query, workspaceId, signal });
-  },
-
-  createRun(body: RunCreateRequest, idempotencyKey: string): Promise<JsonResponse<'createRun', 201>> {
-    return request({ method: 'POST', path: '/runs', body, idempotencyKey });
-  },
-
-  getRun(runId: string, signal?: AbortSignal): Promise<Run> {
-    return request({ method: 'GET', path: `/runs/${encodeURIComponent(runId)}`, signal });
-  },
-
-  getRunTasks(runId: string, query: RunTasksQuery = {}, signal?: AbortSignal): Promise<TaskGraph> {
-    return request({ method: 'GET', path: `/runs/${encodeURIComponent(runId)}/tasks`, query, signal });
-  },
-
-  /** pause | resume | cancel (202: команда принята; переход публикуется событием run.state_changed). */
-  runCommand(
-    runId: string,
-    command: RunCommand,
-    idempotencyKey: string,
-    ifMatchVersion?: number,
-  ): Promise<JsonResponse<'pauseRun', 202>> {
-    return request({
-      method: 'POST',
-      path: `/runs/${encodeURIComponent(runId)}/${command}`,
-      idempotencyKey,
-      ifMatchVersion,
-    });
-  },
-};

@@ -28,7 +28,8 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
     # key=value для чувствительных имён
     re.compile(
         r"(?i)\b(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|cookie|session)"
-        r"(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;&]+)"
+        # значение без кавычек не захватывает кавычки: иначе в JSON/YAML терялась бы закрывающая кавычка
+        r"(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;&\"']+)"
     ),
 )
 

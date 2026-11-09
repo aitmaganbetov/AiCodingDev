@@ -1,12 +1,13 @@
 import { useQuery, type QueryClient } from '@tanstack/react-query';
-import { api, isApiError, setCsrfToken, type SessionInfo } from '../api/client';
+import { authApi, type SessionInfo } from '../api/auth';
+import { isApiError, setCsrfToken } from '../api/client';
 
 export const sessionQueryKey = ['session'] as const;
 
 /** null — пользователь не аутентифицирован (GET /auth/session → 401). */
 export async function fetchSession(signal?: AbortSignal): Promise<SessionInfo | null> {
   try {
-    const session = await api.getSession(signal);
+    const session = await authApi.getSession(signal);
     setCsrfToken(session.csrf_token);
     return session;
   } catch (e) {

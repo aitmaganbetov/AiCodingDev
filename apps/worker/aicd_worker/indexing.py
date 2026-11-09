@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_code_intelligence.context.snapshot import JobOutcome, run_job_with_stack
 from aicd_code_intelligence.index.search import prune_export_cache
+from aicd_platform import metrics
 from aicd_platform.db import DbContext, transaction
 from aicd_worker.settings import WorkerSettings
 
@@ -79,6 +80,7 @@ async def index_once(
                     "stack_error": outcome.stack_error,
                 },
             )
+            metrics.INDEXING_JOBS.labels(metrics.label(outcome.result.status)).inc()
             result.outcomes.append(outcome)
     now = time.monotonic()
     if state.last_prune is None or now - state.last_prune >= settings.index_prune_interval_seconds:

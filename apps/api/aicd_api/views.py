@@ -6,7 +6,7 @@ from typing import Any
 
 
 def workspace(row: dict[str, Any], role: str) -> dict[str, Any]:
-    return {
+    view: dict[str, Any] = {
         "id": row["id"],
         "name": row["name"],
         "slug": row["slug"],
@@ -14,6 +14,9 @@ def workspace(row: dict[str, Any], role: str) -> dict[str, Any]:
         "settings": row.get("settings") or {},
         "created_at": row["created_at"],
     }
+    if row.get("version") is not None:  # ETag/If-Match (getWorkspace/updateWorkspace/createWorkspace)
+        view["version"] = int(row["version"])
+    return view
 
 
 def member(row: dict[str, Any]) -> dict[str, Any]:

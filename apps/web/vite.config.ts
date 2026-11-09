@@ -26,6 +26,9 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
+    // Шрифты и прочие ресурсы — только отдельными файлами того же origin: CSP `default-src 'self'`
+    // запрещает data:-шрифты (font-src не задан). Изображения ≤ 4 KiB по-прежнему можно инлайнить.
+    assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined),
   },
   test: {
     environment: 'jsdom',
@@ -33,6 +36,12 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
+    // Таймаут теста > таймаута ожиданий Testing Library (10 с, src/test/setup.ts), чтобы падение
+    // ожидания показывало, какой элемент не найден, а не общий «Test timed out».
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     unstubGlobals: true,
+    // tokens.test.ts читает tokens.css как текст (?raw): остальной CSS в unit-тестах не нужен.
+    css: { include: [/styles\/tokens\.css/] },
   },
 });

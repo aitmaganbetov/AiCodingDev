@@ -13,14 +13,15 @@ import hashlib
 import hmac
 import os
 import re
+import stat
 import tempfile
 import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import Any, BinaryIO, Protocol
 
 from aicd_platform.clock import utcnow
 from aicd_platform.config import Settings
@@ -51,6 +52,23 @@ _KEY_RE = re.compile(
 
 def object_key(workspace_id: uuid.UUID, artifact_id: uuid.UUID, created: datetime) -> str:
     return f"{workspace_id}/{created:%Y}/{created:%m}/{artifact_id}"
+
+
+# Ключ объекта артефакта: `<workspace_id>/<YYYY>/<MM>/<artifact_id>` (object_key). Только такие объекты — кандидаты
+# сборки сирот: архивы retention (`archive/…`) и прочие префиксы хранилища не трогаются.
+_OBJECT_KEY_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/\d{4}/\d{2}/"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    """Объект хранилища артефактов (для сборки сирот, P9-03)."""
+
+    storage_ref: str
+    modified_at: datetime
+    size_bytes: int
 
 
 def _validate_key(key: str) -> str:
@@ -133,6 +151,27 @@ class FileSystemArtifactStore:
     def exists(self, storage_ref: str) -> bool:
         return self._path(self._key(storage_ref)).is_file()
 
+    def delete(self, storage_ref: str) -> bool:
+        """Удаление объекта (только retention, P3-18); False — объекта уже нет."""
+        try:
+            self._path(self._key(storage_ref)).unlink()
+        except FileNotFoundError:
+            return False
+        return True
+
+    def iter_objects(self) -> Iterator[StoredObject]:
+        """Объекты артефактов (ключи формата `object_key`); временные файлы и архивы не перечисляются."""
+        for path in self._root.glob("*/*/*/*"):
+            key = path.relative_to(self._root).as_posix()
+            if not _OBJECT_KEY_RE.fullmatch(key):
+                continue
+            try:
+                st = path.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                yield StoredObject(self.prefix + key, datetime.fromtimestamp(st.st_mtime, UTC), st.st_size)
+
     def healthy(self) -> bool:
         return self._root.is_dir() and os.access(self._root, os.W_OK)
 
@@ -149,6 +188,43 @@ class FileSystemArtifactStore:
         return _verified_chunks(chunks(), expected_sha256)
 
 
+def make_s3_client(*, endpoint_url: str, access_key: str, secret_key: str, region: str = "us-east-1") -> Any:
+    """Клиент S3-совместимого хранилища (MinIO): SigV4, path-style адресация."""
+    import boto3
+    from botocore.config import Config
+
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region,
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+
+
+def ensure_s3_bucket(client: Any, bucket: str) -> None:
+    from botocore.exceptions import ClientError
+
+    try:
+        client.head_bucket(Bucket=bucket)
+    except ClientError:
+        client.create_bucket(Bucket=bucket)
+
+
+def s3_credentials(settings: Settings) -> tuple[str, str, str]:
+    """endpoint, access key, secret key для S3 из настроек (ключи — из файлов секретов)."""
+    if not (
+        settings.artifact_s3_endpoint and settings.artifact_s3_access_key_file and settings.artifact_s3_secret_key_file
+    ):
+        raise RuntimeError("для S3 нужны AICD_ARTIFACT_S3_ENDPOINT и файлы ключей доступа")
+    return (
+        settings.artifact_s3_endpoint,
+        Path(settings.artifact_s3_access_key_file).read_text().strip(),
+        Path(settings.artifact_s3_secret_key_file).read_text().strip(),
+    )
+
+
 class S3ArtifactStore:
     """S3-совместимое хранилище (MinIO). Учётные данные — из файлов секретов."""
 
@@ -161,26 +237,13 @@ class S3ArtifactStore:
         secret_key: str,
         region: str = "us-east-1",
     ) -> None:
-        import boto3
-        from botocore.config import Config
-
         self._bucket = bucket
-        self._client = boto3.client(
-            "s3",
-            endpoint_url=endpoint_url,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name=region,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        self._client = make_s3_client(
+            endpoint_url=endpoint_url, access_key=access_key, secret_key=secret_key, region=region
         )
 
     def ensure_bucket(self) -> None:
-        from botocore.exceptions import ClientError
-
-        try:
-            self._client.head_bucket(Bucket=self._bucket)
-        except ClientError:
-            self._client.create_bucket(Bucket=self._bucket)
+        ensure_s3_bucket(self._client, self._bucket)
 
     @property
     def _prefix(self) -> str:
@@ -204,7 +267,7 @@ class S3ArtifactStore:
                     Key=key,
                     Body=fh,
                     ContentLength=size,
-                    ChecksumSHA256=_b64_sha(sha),
+                    ChecksumSHA256=b64_sha256(sha),
                     Metadata={"sha256": sha},
                 )
         finally:
@@ -224,6 +287,24 @@ class S3ArtifactStore:
 
     def exists(self, storage_ref: str) -> bool:
         return self._exists_key(self._key(storage_ref))
+
+    def delete(self, storage_ref: str) -> bool:
+        """Удаление объекта (только retention, P3-18); False — объекта уже нет."""
+        key = self._key(storage_ref)
+        if not self._exists_key(key):
+            return False
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+        return True
+
+    def iter_objects(self) -> Iterator[StoredObject]:
+        """Объекты артефактов bucket (ключи формата `object_key`), постранично."""
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket):
+            for item in page.get("Contents", []):
+                key = str(item["Key"])
+                if _OBJECT_KEY_RE.fullmatch(key):
+                    modified = item["LastModified"]
+                    yield StoredObject(self._prefix + key, modified.astimezone(UTC), int(item.get("Size", 0)))
 
     def healthy(self) -> bool:
         self._client.head_bucket(Bucket=self._bucket)
@@ -248,7 +329,7 @@ class S3ArtifactStore:
         return url
 
 
-def _b64_sha(hex_sha: str) -> str:
+def b64_sha256(hex_sha: str) -> str:
     import base64
 
     return base64.b64encode(bytes.fromhex(hex_sha)).decode()
@@ -282,17 +363,12 @@ def verify_download_token(key: bytes, token: str, artifact_id: uuid.UUID, user_i
 
 def build_artifact_store(settings: Settings) -> ArtifactStore:
     if settings.artifact_backend == "s3":
-        if not (
-            settings.artifact_s3_endpoint
-            and settings.artifact_s3_access_key_file
-            and settings.artifact_s3_secret_key_file
-        ):
-            raise RuntimeError("для artifact_backend=s3 нужны endpoint и файлы ключей доступа")
+        endpoint, access_key, secret_key = s3_credentials(settings)
         return S3ArtifactStore(
-            endpoint_url=settings.artifact_s3_endpoint,
+            endpoint_url=endpoint,
             bucket=settings.artifact_s3_bucket,
-            access_key=Path(settings.artifact_s3_access_key_file).read_text().strip(),
-            secret_key=Path(settings.artifact_s3_secret_key_file).read_text().strip(),
+            access_key=access_key,
+            secret_key=secret_key,
             region=settings.artifact_s3_region,
         )
     return FileSystemArtifactStore(settings.artifact_fs_root)

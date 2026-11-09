@@ -1,0 +1,163 @@
+{
+  "started_at": "2026-11-08T17:37:47+00:00",
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cpus": 4,
+    "memory": "16472400 kB",
+    "kernel": "6.18.44-fc-v310",
+    "python": "3.13.18",
+    "postgres": "17.11",
+    "redis": "Redis server v=7.0.15 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=d064f9f48c901a92"
+  },
+  "parameters": {
+    "duration": 20.0,
+    "read_concurrency": [
+      1,
+      16,
+      64
+    ],
+    "create_concurrency": [
+      1,
+      8
+    ],
+    "sse_clients": [
+      50,
+      90
+    ],
+    "sse_events": 50,
+    "sse_rate": 10.0,
+    "outbox_events": 5000,
+    "skip_indexing": false,
+    "out": "reports/perf/results.json"
+  },
+  "scenarios": [
+    {
+      "name": "run_create_c1",
+      "requests": 783,
+      "ok": 783,
+      "errors": 0,
+      "error_rate": 0.0,
+      "duration_s": 20.0,
+      "throughput_rps": 39.1,
+      "p50_ms": 24.1,
+      "p95_ms": 37.4,
+      "p99_ms": 53.6,
+      "max_ms": 110.9,
+      "statuses": {
+        "201": 783
+      }
+    },
+    {
+      "name": "run_create_c8",
+      "requests": 1035,
+      "ok": 1035,
+      "errors": 0,
+      "error_rate": 0.0,
+      "duration_s": 20.0,
+      "throughput_rps": 51.8,
+      "p50_ms": 151.0,
+      "p95_ms": 218.7,
+      "p99_ms": 254.4,
+      "max_ms": 302.0,
+      "statuses": {
+        "201": 1035
+      }
+    },
+    {
+      "name": "api_reads_c1",
+      "requests": 1125,
+      "ok": 1125,
+      "errors": 0,
+      "error_rate": 0.0,
+      "duration_s": 20.0,
+      "throughput_rps": 56.2,
+      "p50_ms": 16.0,
+      "p95_ms": 30.0,
+      "p99_ms": 47.8,
+      "max_ms": 77.3,
+      "statuses": {
+        "200": 1125
+      }
+    },
+    {
+      "name": "api_reads_c16",
+      "requests": 1779,
+      "ok": 1779,
+      "errors": 0,
+      "error_rate": 0.0,
+      "duration_s": 20.0,
+      "throughput_rps": 89.0,
+      "p50_ms": 175.5,
+      "p95_ms": 264.2,
+      "p99_ms": 334.3,
+      "max_ms": 401.4,
+      "statuses": {
+        "200": 1779
+      }
+    },
+    {
+      "name": "api_reads_c64",
+      "requests": 1512,
+      "ok": 1512,
+      "errors": 0,
+      "error_rate": 0.0,
+      "duration_s": 20.0,
+      "throughput_rps": 75.6,
+      "p50_ms": 716.2,
+      "p95_ms": 1888.4,
+      "p99_ms": 2945.3,
+      "max_ms": 5030.5,
+      "statuses": {
+        "200": 1512
+      }
+    },
+    {
+      "name": "outbox_throughput",
+      "events": 5000,
+      "runs": 20,
+      "drain_seconds": 34.37,
+      "events_per_second": 145.5,
+      "publish_lag_p50_ms": 17175.1,
+      "publish_lag_p95_ms": 33094.9,
+      "publish_lag_p99_ms": 34372.0
+    },
+    {
+      "name": "sse_fanout_50",
+      "clients": 50,
+      "events": 50,
+      "emit_rate_per_s": 10.0,
+      "expected_deliveries": 2500,
+      "delivered": 2500,
+      "delivery_ratio": 1.0,
+      "p50_ms": 483.0,
+      "p95_ms": 732.6,
+      "p99_ms": 767.5,
+      "max_ms": 790.2
+    },
+    {
+      "name": "sse_fanout_90",
+      "clients": 90,
+      "events": 50,
+      "emit_rate_per_s": 10.0,
+      "expected_deliveries": 4500,
+      "delivered": 4500,
+      "delivery_ratio": 1.0,
+      "p50_ms": 582.5,
+      "p95_ms": 850.6,
+      "p99_ms": 941.8,
+      "max_ms": 985.8
+    },
+    {
+      "name": "indexing_medium_repo",
+      "repository": "AiCodingDev@51ab125e70d8",
+      "tracked_files": 952,
+      "status": "SUCCEEDED",
+      "index_seconds": 3.89,
+      "queue_wait_seconds": 1.03,
+      "indexed_files": 940,
+      "symbols": 8653,
+      "error": null
+    }
+  ],
+  "finished_at": "2026-11-08T17:41:54+00:00"
+}

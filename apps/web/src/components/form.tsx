@@ -14,17 +14,17 @@ function FieldShell({ id, label, hint, error, children }: FieldShellProps) {
   const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined;
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium text-slate-900">
+      <label htmlFor={id} className="text-sm font-medium text-fg">
         {label}
       </label>
       {children({ 'aria-invalid': Boolean(error), ...(describedBy ? { 'aria-describedby': describedBy } : {}) })}
       {hint ? (
-        <p id={hintId} className="text-sm text-slate-600">
+        <p id={hintId} className="text-sm text-fg-muted">
           {hint}
         </p>
       ) : null}
       {error ? (
-        <p id={errorId} className="text-sm font-medium text-red-700">
+        <p id={errorId} className="text-sm font-medium text-danger-text">
           {error}
         </p>
       ) : null}
@@ -75,7 +75,7 @@ export function RadioGroup<V extends string>({ name, legend, value, options, onC
   const errorId = error ? `${name}-error` : undefined;
   return (
     <fieldset className="flex flex-col gap-2" aria-describedby={errorId} aria-invalid={error ? true : undefined}>
-      <legend className="mb-1 text-sm font-medium text-slate-900">{legend}</legend>
+      <legend className="mb-1 text-sm font-medium text-fg">{legend}</legend>
       {options.map((opt) => {
         const id = `${name}-${opt.value}`;
         return (
@@ -87,15 +87,15 @@ export function RadioGroup<V extends string>({ name, legend, value, options, onC
               value={opt.value}
               checked={value === opt.value}
               onChange={() => onChange(opt.value)}
-              className="mt-1 h-4 w-4 accent-blue-700"
+              className="mt-1 h-4 w-4 accent-[rgb(var(--color-accent))]"
               aria-describedby={opt.description ? `${id}-desc` : undefined}
             />
             <div>
-              <label htmlFor={id} className="text-sm text-slate-900">
+              <label htmlFor={id} className="text-sm text-fg">
                 {opt.label}
               </label>
               {opt.description ? (
-                <p id={`${id}-desc`} className="text-sm text-slate-600">
+                <p id={`${id}-desc`} className="text-sm text-fg-muted">
                   {opt.description}
                 </p>
               ) : null}
@@ -104,7 +104,7 @@ export function RadioGroup<V extends string>({ name, legend, value, options, onC
         );
       })}
       {error ? (
-        <p id={errorId} className="text-sm font-medium text-red-700">
+        <p id={errorId} className="text-sm font-medium text-danger-text">
           {error}
         </p>
       ) : null}
@@ -115,7 +115,7 @@ export function RadioGroup<V extends string>({ name, legend, value, options, onC
 export function FormAlert({ messages }: { messages: string[] }) {
   if (messages.length === 0) return null;
   return (
-    <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900" data-testid="form-alert">
+    <div role="alert" className="rounded-md border border-danger-border bg-danger-soft p-3 text-sm text-danger-fg" data-testid="form-alert">
       {messages.length === 1 ? (
         <p>{messages[0]}</p>
       ) : (

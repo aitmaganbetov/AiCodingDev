@@ -12,7 +12,7 @@ from aicd_api.ratelimit import RateDecision
 from aicd_api.state import AppState
 from aicd_identity import api as identity
 from aicd_identity.rbac import Role, has_permission
-from aicd_platform import audit, context
+from aicd_platform import audit, context, metrics
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import ProblemError
 
@@ -65,6 +65,7 @@ async def current_principal(request: Request) -> identity.Principal:
     async with transaction(state.engine, DbContext()) as conn:
         resolved = await identity.resolve_session(conn, token, state.session_policy)
     if isinstance(resolved, str):
+        metrics.AUTH_FAILURES.labels("session_invalid").inc()
         raise ProblemError(resolved)
     principal = resolved
     context.bind(user_id=principal.user_id)
@@ -72,6 +73,7 @@ async def current_principal(request: Request) -> identity.Principal:
     if request.method in UNSAFE_METHODS:
         check_origin(request)
         if not identity.csrf_valid(principal, request.headers.get("x-csrf-token")):
+            metrics.AUTH_FAILURES.labels("csrf_failed").inc()
             raise ProblemError("csrf_failed")
     s = state.settings
     if request.method in UNSAFE_METHODS:
@@ -80,6 +82,33 @@ async def current_principal(request: Request) -> identity.Principal:
         decision = await state.limiter.hit(f"read:user:{principal.user_id}", s.rate_limit_read_per_minute)
     _remember_rate(request, decision)
     return principal
+
+
+async def require_step_up(request: Request, principal: identity.Principal, operation: str) -> None:
+    """Step-up re-auth (SC-IAM-08, SECURITY_ARCHITECTURE §3.2): пароль в этой сессии вводился > 10 мин назад ⇒
+    403 `step_up_required` (+ `max_age_seconds`); клиент подтверждает пароль `POST /auth/reauthenticate` и
+    повторяет запрос. Отказ аудируется (`auth.step_up_required`)."""
+    if identity.step_up_fresh(principal):
+        return
+    metrics.AUTHZ_DENIED.labels("step_up").inc()
+    state = app_state(request)
+    async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
+        await audit.record(
+            conn,
+            action="auth.step_up_required",
+            resource_type="user_session",
+            resource_id=principal.session_id,
+            actor_type="user",
+            actor_id=principal.user_id,
+            workspace_id=None,
+            outcome="denied",
+            metadata={"operation": operation, "method": request.method},
+        )
+    raise ProblemError(
+        "step_up_required",
+        detail="Подтвердите пароль: операция требует повторной аутентификации",
+        extensions={"max_age_seconds": int(identity.STEP_UP_MAX_AGE.total_seconds())},
+    )
 
 
 @dataclass(frozen=True)
@@ -111,6 +140,7 @@ async def workspace_access(request: Request, principal: identity.Principal, work
     async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
         role = await identity.workspace_role(conn, workspace_id)
     if role is None:
+        metrics.AUTHZ_DENIED.labels("tenant").inc()
         raise ProblemError("not_found")
     context.bind(workspace_id=workspace_id)
     return Access(principal, workspace_id, role)
@@ -121,6 +151,7 @@ async def project_access(request: Request, principal: identity.Principal, projec
     async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
         found = await identity.project_access(conn, project_id)
     if found is None:
+        metrics.AUTHZ_DENIED.labels("tenant").inc()
         raise ProblemError("not_found")
     header = request.headers.get("x-workspace-id")
     if header is not None and header != str(found[0]):
@@ -133,6 +164,7 @@ async def authorize(request: Request, access: Access, permission: str) -> None:
     """Проверка права; отказ на небезопасном методе аудируется (`authz.denied`, API_DESIGN §17)."""
     if has_permission(access.role, permission):
         return
+    metrics.AUTHZ_DENIED.labels("permission").inc()
     if request.method in UNSAFE_METHODS:
         state = app_state(request)
         async with transaction(state.engine, access.db()) as conn:

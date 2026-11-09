@@ -20,6 +20,11 @@ from aicd_platform.ids import uuid7
 ALL_PROVIDERS = ("codex", "claude")
 
 
+def allow_untested_cli_versions(quality_profile: str) -> bool:
+    """Значение политики по умолчанию (CLI_ADAPTER_CONTRACT §5.3, ROUTING_POLICY H2): `false` только для critical."""
+    return quality_profile != "critical"
+
+
 async def create_run(
     conn: AsyncConnection,
     *,
@@ -84,7 +89,13 @@ async def create_run(
     providers = sorted(set(allowed_providers or ALL_PROVIDERS))
     snapshot = {
         "schema": 1,
-        "routing": {"strategy": routing_strategy, "allowed_providers": providers},
+        "routing": {
+            "strategy": routing_strategy,
+            "allowed_providers": providers,
+            # CLI_ADAPTER_CONTRACT §5.3: версия CLI вне матрицы совместимости (UNTESTED) допускается в basic/strict
+            # (с предупреждением UNTESTED_CLI_VERSION в routing_decisions), в critical — нет.
+            "allow_untested_cli_versions": allow_untested_cli_versions(profile_code),
+        },
         "approval_policy": approval_policy,
         "quality_profile": {"code": profile_code, "id": str(profile_id)},
         "documentation_mode": settings["documentation_mode"],

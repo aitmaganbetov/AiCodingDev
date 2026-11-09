@@ -15,7 +15,8 @@
 | | [SECURITY_ARCHITECTURE.md](architecture/SECURITY_ARCHITECTURE.md) | Зоны доверия, AuthN/AuthZ, RBAC, sandbox, секреты, RLS |
 | | [adr/](architecture/adr/) | Architecture Decision Records (ADR-0001…) |
 | | [data-model.md](architecture/data-model.md), [state-machines.md](architecture/state-machines.md), [permissions-matrix.md](architecture/permissions-matrix.md) | Указатели путей ТЗ §21 на нормативные разделы |
-| `runbooks/` | [README.md](runbooks/README.md) | Эксплуатационные инструкции (local deployment; остальные — P9) |
+| `runbooks/` | [README.md](runbooks/README.md) | Эксплуатационные инструкции: установка, восстановление, бэкапы, CLI auth, инциденты, GitHub App, ротация секретов, обновления, релиз (P9-06) |
+| `release/` | [RELEASE_CHECKLIST.md](release/RELEASE_CHECKLIST.md) | Release checklist v1.0 (ТЗ §23, RG-01…RG-15) со ссылками на доказательства (P9-09, черновик) |
 | `database/` | [DATABASE_DESIGN.md](database/DATABASE_DESIGN.md) | Полная логическая схема PostgreSQL: таблицы, ограничения, индексы, RLS, retention |
 | | [ER_DIAGRAM.md](database/ER_DIAGRAM.md) | ER-диаграммы по доменам (Mermaid), кардинальности, инварианты |
 | `api/` | [API_DESIGN.md](api/API_DESIGN.md) | Правила REST API v1: ошибки, пагинация, idempotency, ETag, SSE, RBAC |
@@ -74,7 +75,7 @@
 | `directive_type` (чат-команды) | `ASK`, `NEW_TASK`, `CHANGE_REQUEST`, `STOP`, `PAUSE`, `RESUME`, `REVIEW`, `APPROVE`, `REJECT` |
 | `directive_status` | `RECEIVED`, `IMPACT_ANALYSIS_PENDING`, `IMPACT_READY`, `AWAITING_CONFIRMATION`, `CONFIRMED`, `CHECKPOINTING`, `REPLANNING`, `DISPATCHED`, `ACKNOWLEDGED`, `COMPLETED`, `REJECTED`, `CANCELLED`, `FAILED` |
 | `directive_impact_type` | `NONE`, `CONTEXT_ONLY`, `REPLAN_REQUIRED`, `TASK_CANCEL`, `TASK_ADD`, `RESTART_REQUIRED` |
-| `approval_action_type` | `PLAN_APPROVAL`, `MERGE`, `PRODUCTION_DEPLOY`, `DESTRUCTIVE_MIGRATION`, `DATA_DELETION`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `DOCS_DOWNLOAD`, `CRITICAL_DIRECTIVE`, `MANUAL_REVIEW`, `SELF_REVIEW_FALLBACK`, `LOCAL_EXECUTION_FALLBACK` |
+| `approval_action_type` | `PLAN_APPROVAL`, `MERGE`, `PRODUCTION_DEPLOY`, `DESTRUCTIVE_MIGRATION`, `DATA_DELETION`, `SECRET_CHANGE`, `UNRESTRICTED_NETWORK`, `DOCS_DOWNLOAD`, `CRITICAL_DIRECTIVE`, `MANUAL_REVIEW`, `SELF_REVIEW_FALLBACK`, `LOCAL_EXECUTION_FALLBACK`, `VULN_DB_UPDATE` (0016) |
 | `approval_status` | `PENDING`, `APPROVED`, `REJECTED`, `EXPIRED`, `CANCELLED` |
 | `documentation_mode` | `OFF`, `SMART` (default), `STRICT` |
 | `quality_profile` | `basic`, `strict`, `critical` |
@@ -86,7 +87,7 @@
 | `auth_status` (CLI) | `UNKNOWN`, `AUTHENTICATED`, `AUTH_REQUIRED`, `EXPIRED`, `ERROR` |
 | `provider_availability` | `AVAILABLE`, `DEGRADED`, `RATE_LIMITED`, `UNAVAILABLE` |
 | `normalized_cli_event` | `started`, `output`, `tool_event`, `artifact`, `warning`, `finished` |
-| `sse_event_type` | `run.state_changed`, `task.state_changed`, `agent.message`, `cli.output`, `directive.impact_ready`, `directive.state_changed`, `approval.requested`, `approval.decided`, `gate.completed`, `run.completed`, `chat.message`, `heartbeat` |
+| `sse_event_type` | `run.state_changed`, `task.state_changed`, `agent.message`, `cli.output`, `directive.impact_ready`, `directive.state_changed`, `approval.requested`, `approval.decided`, `gate.completed`, `run.completed`, `chat.message`, `review.comment`, `heartbeat` |
 
 ## 4. Общие проектные соглашения
 

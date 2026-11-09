@@ -1,0 +1,171 @@
+# Алерты ТЗ §16 / FR-OBS-04 / SC-OBS-02 (P8-08): auth failures, stuck leases, high error rates, storage capacity
+# (+ доставка событий, очереди, провайдеры, доступность целей), сбои бэкапов (P9-05: группа aicd-backup —
+# файл статуса `python -m scripts.backup` и pg_stat_archiver, собирает worker-outbox; docs/runbooks/backups.md).
+# Пороги — стартовые значения для single-team инсталляции; меняются здесь же вместе с тестами
+# (tests/aicd-alerts.test.yml, `promtool test rules`). Имена метрик сверяются с реестром кода
+# (tests/contract/test_observability.py).
+groups:
+  - name: aicd-security
+    rules:
+      - alert: AicdLoginFailuresSpike
+        expr: sum(rate(aicd_auth_failures_total{reason="login_failed"}[5m])) * 60 > 10
+        for: 5m
+        labels: {severity: warning, area: security}
+        annotations:
+          summary: "Всплеск неудачных входов: {{ $value | printf \"%.1f\" }}/мин"
+          description: "Более 10 неудачных входов в минуту 5 минут подряд (перебор паролей?). Проверьте audit auth.login_failed и блокировки."
+      - alert: AicdTenantDeniedSpike
+        expr: sum(rate(aicd_authz_denied_total{reason="tenant"}[5m])) * 60 > 30
+        for: 10m
+        labels: {severity: warning, area: security}
+        annotations:
+          summary: "Много обращений к чужим workspace/проектам: {{ $value | printf \"%.1f\" }}/мин"
+          description: "Перебор идентификаторов чужих ресурсов (AC-12, SC-OBS-02 tenant_denied)."
+      - alert: AicdWebhookSignatureInvalid
+        expr: sum(increase(aicd_webhook_signature_invalid_total[10m])) > 5
+        for: 5m
+        labels: {severity: warning, area: security}
+        annotations:
+          summary: "Вебхуки GitHub с неверной подписью: {{ $value | printf \"%.0f\" }} за 10 минут"
+          description: "Подделка доставок или устаревший webhook secret после ротации (SC-GH-01, SC-OBS-02). Проверьте github_webhook_deliveries (REJECTED) и секреты."
+      - alert: AicdCsrfFailuresSpike
+        expr: sum(rate(aicd_auth_failures_total{reason="csrf_failed"}[5m])) * 60 > 10
+        for: 10m
+        labels: {severity: warning, area: security}
+        annotations:
+          summary: "Всплеск отказов CSRF: {{ $value | printf \"%.1f\" }}/мин"
+
+  - name: aicd-reliability
+    rules:
+      - alert: AicdTargetDown
+        expr: up{job=~"aicd-.*"} == 0
+        for: 5m
+        labels: {severity: critical, area: availability}
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.instance }} недоступен для скрейпа"
+      - alert: AicdApiHighErrorRate
+        expr: |
+          (
+            sum(rate(aicd_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(aicd_http_requests_total[5m]))
+          ) > 0.05
+          and sum(rate(aicd_http_requests_total[5m])) > 0.1
+        for: 10m
+        labels: {severity: critical, area: api}
+        annotations:
+          summary: "Доля 5xx API {{ $value | humanizePercentage }}"
+          description: "Более 5% ответов 5xx при нагрузке > 0.1 rps в течение 10 минут."
+      - alert: AicdCliErrorRate
+        expr: |
+          (
+            sum by (provider) (rate(aicd_cli_executions_total{status=~"CRASHED|TIMED_OUT"}[30m]))
+            / sum by (provider) (rate(aicd_cli_executions_total[30m]))
+          ) > 0.5
+        for: 15m
+        labels: {severity: warning, area: cli}
+        annotations:
+          summary: "{{ $labels.provider }}: более половины исполнений CLI падает или превышает время"
+      - alert: AicdGateInfrastructureErrors
+        expr: |
+          (
+            sum(rate(aicd_gate_executions_total{status="ERROR"}[30m]))
+            / sum(rate(aicd_gate_executions_total[30m]))
+          ) > 0.2
+        for: 15m
+        labels: {severity: warning, area: verification}
+        annotations:
+          summary: "Доля ERROR quality gates {{ $value | humanizePercentage }} (сбой окружения проверок, не FAIL кода)"
+      - alert: AicdStuckLeases
+        expr: max by (resource_type) (aicd_worker_leases_expired) > 0
+        for: 10m
+        labels: {severity: warning, area: orchestration}
+        annotations:
+          summary: "Истёкшие неосвобождённые аренды ({{ $labels.resource_type }}): {{ $value }}"
+          description: "Аренды с lease_until в прошлом не освобождены 10 минут: reaper/recovery не работает или воркер упал."
+      - alert: AicdOutboxLag
+        expr: max(aicd_outbox_oldest_pending_age_seconds) > 300
+        for: 5m
+        labels: {severity: critical, area: delivery}
+        annotations:
+          summary: "Outbox не доставляется: старейшее событие ждёт {{ $value | humanizeDuration }}"
+      - alert: AicdQueueBacklog
+        expr: max by (queue) (aicd_queue_depth) > 500
+        for: 15m
+        labels: {severity: warning, area: delivery}
+        annotations:
+          summary: "Очередь {{ $labels.queue }}: {{ $value }} сообщений 15 минут"
+      - alert: AicdDeadLetters
+        expr: max by (queue) (aicd_queue_dead_letters) > 0
+        for: 5m
+        labels: {severity: warning, area: delivery}
+        annotations:
+          summary: "Dead-letter очередь {{ $labels.queue }}: {{ $value }} сообщений (исчерпаны повторы)"
+      - alert: AicdProviderUnavailable
+        expr: max by (provider) (aicd_provider_available{provider=~"codex|claude"}) == 0
+        for: 15m
+        labels: {severity: warning, area: cli}
+        annotations:
+          summary: "Нет доступной установки CLI {{ $labels.provider }} (не установлен, не авторизован или несовместим)"
+      - alert: AicdWorkerHeartbeatStale
+        expr: max by (kind) (aicd_worker_heartbeat_age_seconds / aicd_worker_heartbeat_interval_seconds) > 10
+        for: 2m
+        labels: {severity: critical, area: availability}
+        annotations:
+          summary: "Воркер {{ $labels.kind }}: нет heartbeat дольше {{ $value | printf \"%.0f\" }} интервалов"
+          description: "Ни один работающий процесс вида не обновлял worker_hosts дольше 10 интервалов heartbeat: процесс завис или потерял БД (см. GET /api/v1/system/health)."
+      - alert: AicdMetricsSamplingFailing
+        expr: increase(aicd_metrics_sampler_errors_total[15m]) > 3
+        for: 15m
+        labels: {severity: info, area: observability}
+        annotations:
+          summary: "Сбор gauge-метрик воркера завершается ошибками"
+
+  - name: aicd-capacity
+    rules:
+      - alert: AicdArtifactStorageLow
+        expr: min(aicd_artifact_storage_free_bytes / aicd_artifact_storage_size_bytes) < 0.10
+        for: 15m
+        labels: {severity: warning, area: storage}
+        annotations:
+          summary: "Свободно {{ $value | humanizePercentage }} хранилища артефактов"
+      - alert: AicdArtifactStorageCritical
+        expr: min(aicd_artifact_storage_free_bytes / aicd_artifact_storage_size_bytes) < 0.05
+        for: 5m
+        labels: {severity: critical, area: storage}
+        annotations:
+          summary: "Свободно {{ $value | humanizePercentage }} хранилища артефактов — запись артефактов скоро остановится"
+
+  - name: aicd-backup
+    rules:
+      - alert: AicdBackupFailed
+        expr: max by (component) (aicd_backup_last_attempt_failed) == 1
+        for: 5m
+        labels: {severity: critical, area: backup}
+        annotations:
+          summary: "Последний бэкап {{ $labels.component }} завершился ошибкой"
+          description: "См. вывод/журнал задания `python -m scripts.backup` и status.json репозитория бэкапов (docs/runbooks/backups.md §6)."
+      - alert: AicdBaseBackupStale
+        expr: time() - max(aicd_backup_last_success_timestamp_seconds{component="postgres_base"}) > 26 * 3600
+        for: 15m
+        labels: {severity: critical, area: backup}
+        annotations:
+          summary: "Нет успешного базового бэкапа PostgreSQL дольше 26 ч ({{ $value | humanizeDuration }})"
+      - alert: AicdWalSyncStale
+        expr: time() - max(aicd_backup_last_success_timestamp_seconds{component="postgres_wal"}) > 15 * 60
+        for: 5m
+        labels: {severity: critical, area: backup}
+        annotations:
+          summary: "Архив WAL не переносится в репозиторий бэкапов {{ $value | humanizeDuration }} — RPO растёт"
+      - alert: AicdArtifactsBackupStale
+        expr: time() - max(aicd_backup_last_success_timestamp_seconds{component="artifacts"}) > 26 * 3600
+        for: 15m
+        labels: {severity: warning, area: backup}
+        annotations:
+          summary: "Нет успешного снимка артефактов дольше 26 ч"
+      - alert: AicdWalArchiveFailing
+        expr: max(delta(aicd_postgres_wal_archive_failures[15m])) > 0
+        for: 0m
+        labels: {severity: critical, area: backup}
+        annotations:
+          summary: "PostgreSQL: archive_command завершается ошибкой ({{ $value | printf \"%.0f\" }} за 15 мин)"
+          description: "WAL копится в pg_wal (риск переполнения диска), PITR невозможен. Проверьте том архива WAL и логи postgres."

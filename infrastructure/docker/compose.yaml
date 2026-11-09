@@ -1,6 +1,8 @@
 # Профиль local (SYSTEM_ARCHITECTURE §7): docker compose -f infrastructure/docker/compose.yaml up -d
 # Перед первым запуском: infrastructure/docker/init-secrets.sh (генерирует случайные секреты в ./secrets).
-# Workers (orchestrator/outbox/exec/verify/index) появятся в Phase 2–5.
+# Воркеры `aicd-worker outbox|orchestrator|exec|index` — сервисы worker-* ниже (OQ-46 (3), OQ-51 (d)); проверка
+# gates worker-exec в контейнерах — через docker-socket-proxy оверлея compose.sandbox.yaml (SECURITY_ARCHITECTURE §7.5).
+# Образы: AICD_BACKEND_IMAGE / AICD_WEB_IMAGE (по умолчанию локальная сборка; при установке релиза — версия релиза).
 name: aicodingdev
 
 x-backend-env: &backend-env
@@ -13,6 +15,40 @@ x-backend-env: &backend-env
   AICD_REPOSITORY_ROOTS: main=/srv/repos
   AICD_COOKIE_SECURE: "${AICD_COOKIE_SECURE:-true}"
   AICD_ALLOWED_ORIGINS: "${AICD_PUBLIC_ORIGIN:-http://localhost:8080}"
+  # /metrics (P8-06): bearer-токен скрейпа; без него в production endpoint выключен. Воркеры — AICD_METRICS_PORT=9464.
+  AICD_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+
+# Воркеры: роль БД aicd_worker (NOBYPASSRLS, DATABASE_DESIGN §19) — секрет worker_database_url; ключ подписи API
+# (app_secret_key) и роль aicd_maintenance воркерам не выдаются (обслуживание — `aicd maintenance …` оператора).
+# AICD_ENVIRONMENT=production жёстко: Fake CLI (`AICD_EXEC_ADAPTER=fake`, сейчас единственный адаптер) в production
+# запрещён — worker-exec завершается с кодом 2 (ConfigurationError) до появления реальных адаптеров (P2-01).
+x-worker-env: &worker-env
+  AICD_ENVIRONMENT: production
+  AICD_DATABASE_URL_FILE: /run/secrets/worker_database_url
+  AICD_REDIS_URL_FILE: /run/secrets/app_redis_url
+  AICD_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+  AICD_METRICS_PORT: "9464"  # скрейп Prometheus (job aicd-worker, DNS-имена сервисов), порт не публикуется
+
+x-worker: &worker
+  image: ${AICD_BACKEND_IMAGE:-aicodingdev/backend:local}
+  secrets: [worker_database_url, app_redis_url, metrics_token]
+  networks: [backend]
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  stop_grace_period: 60s  # SIGTERM: новые сообщения не берутся, текущие дорабатываются
+  # HEALTHCHECK образа проверяет API (:8000); у воркера — его /metrics (процесс жив, токен из секрета).
+  healthcheck:
+    test: ["CMD", "python", "-c", "import sys,urllib.request as u; t=open('/run/secrets/metrics_token').read().strip(); r=u.urlopen(u.Request('http://127.0.0.1:9464/metrics',headers={'Authorization':'Bearer '+t}),timeout=3); sys.exit(0 if r.status==200 else 1)"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    redis: { condition: service_healthy }
 
 services:
   postgres:
@@ -22,8 +58,26 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
       POSTGRES_DB: aicd
     secrets: [pg_admin_password, pg_migrator_password, pg_app_password, pg_worker_password, pg_maintenance_password]
+    # Непрерывное архивирование WAL для PITR (P9-05, docs/runbooks/backups.md): сегменты атомарно (cp → mv)
+    # кладутся в том pgwal, откуда `python -m scripts.backup pg-wal-sync` переносит их в зашифрованный
+    # репозиторий бэкапов. archive_timeout ограничивает RPO при малой нагрузке. Каталог архива создаётся с
+    # владельцем postgres до запуска штатного entrypoint образа.
+    entrypoint: ["/bin/sh", "-c", "install -d -o postgres -g postgres -m 0700 /var/lib/postgresql/wal-archive && exec docker-entrypoint.sh \"$$@\"", "aicd-postgres"]
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /var/lib/postgresql/wal-archive/%f && cp %p /var/lib/postgresql/wal-archive/%f.tmp && mv /var/lib/postgresql/wal-archive/%f.tmp /var/lib/postgresql/wal-archive/%f
+      - -c
+      - archive_timeout=${AICD_PG_ARCHIVE_TIMEOUT:-60}
+      - -c
+      - max_wal_senders=4
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - pgwal:/var/lib/postgresql/wal-archive
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
       - ../postgres:/aicd-bootstrap:ro
     networks: [backend]
@@ -45,7 +99,7 @@ services:
 
   migrate:
     build: { context: ../.., dockerfile: infrastructure/docker/backend.Dockerfile }
-    image: aicodingdev/backend:local
+    image: ${AICD_BACKEND_IMAGE:-aicodingdev/backend:local}
     command: ["alembic", "-c", "infrastructure/migrations/alembic.ini", "upgrade", "head"]
     environment:
       AICD_MIGRATOR_DATABASE_URL_FILE: /run/secrets/migrator_database_url
@@ -56,12 +110,18 @@ services:
     restart: "no"
 
   api:
-    image: aicodingdev/backend:local
-    environment: *backend-env
-    secrets: [app_database_url, app_secret_key, app_redis_url]
+    image: ${AICD_BACKEND_IMAGE:-aicodingdev/backend:local}
+    # Файл статуса бэкапа (только чтение) — компонент `backup` в GET /api/v1/system/health (UI redesign B2).
+    environment:
+      <<: *backend-env
+      AICD_BACKUP_STATUS_FILE: /run/aicd-backup/status.json
+      # Виды воркеров этого профиля (сервисы worker-* ниже): вид без heartbeat — `down` в GET /system/health.
+      AICD_EXPECTED_WORKER_KINDS: outbox,orchestrator,exec,index
+    secrets: [app_database_url, app_secret_key, app_redis_url, metrics_token]
     volumes:
       - artifacts:/var/lib/aicd/artifacts
       - ${AICD_REPOS_DIR:-./repos}:/srv/repos:ro
+      - ${AICD_BACKUP_STATUS_DIR:-/srv/aicd-backup/status}:/run/aicd-backup:ro
     networks: [backend, edge]
     read_only: true
     tmpfs: [/tmp]
@@ -73,20 +133,155 @@ services:
 
   web:
     build: { context: ../.., dockerfile: infrastructure/docker/web.Dockerfile }
-    image: aicodingdev/web:local
-    ports: ["127.0.0.1:8080:8080"]
+    image: ${AICD_WEB_IMAGE:-aicodingdev/web:local}
+    ports: ["127.0.0.1:${AICD_WEB_PORT:-8080}:8080"]
     networks: [edge]
     read_only: true
     tmpfs: [/var/cache/nginx, /var/run, /tmp]
     depends_on: [api]
 
+  # --- Воркеры (ADR-0001: тот же образ backend, разные команды) ----------------------------------------------
+  # worker-outbox: outbox → Dramatiq/run_event_log/SSE + gauge-метрики (backlog, провайдеры, очереди, бэкапы).
+  # Файл статуса бэкапа (docs/runbooks/backups.md §6) — каталог AICD_BACKUP_STATUS_DIR только для чтения.
+  worker-outbox:
+    <<: *worker
+    command: ["aicd-worker", "outbox"]
+    environment:
+      <<: *worker-env
+      AICD_BACKUP_STATUS_FILE: /run/aicd-backup/status.json
+    volumes:
+      - ${AICD_BACKUP_STATUS_DIR:-/srv/aicd-backup/status}:/run/aicd-backup:ro
+
+  # worker-orchestrator: очереди orchestrator/docs/github, tick, поручения. Репозитории — только чтение (push ветки
+  # в GitHub читает объекты); загрузка документации и GitHub App требуют egress, сеть backend — internal
+  # (AICD_EGRESS_PROXY_URL и сеть оператора — github-app.md; без них импорт документации завершается ошибкой сети).
+  worker-orchestrator:
+    <<: *worker
+    command: ["aicd-worker", "orchestrator"]
+    environment:
+      <<: *worker-env
+      AICD_ARTIFACT_BACKEND: fs
+      AICD_ARTIFACT_FS_ROOT: /var/lib/aicd/artifacts
+      AICD_REPOSITORY_ROOTS: main=/srv/repos
+      # Задачи исполняет только worker-exec (очередь exec); общая сборка оркестратора создаёт каталог worktrees при
+      # старте — у этого воркера он во временной tmpfs и не используется.
+      AICD_WORKTREE_ROOT: /tmp/aicd-worktrees-unused
+    volumes:
+      - artifacts:/var/lib/aicd/artifacts
+      - ${AICD_REPOS_DIR:-./repos}:/srv/repos:ro
+
+  # worker-exec (CLI Gateway, SECURITY_ARCHITECTURE §7): очередь exec, reaper/reconciler хоста, gates.
+  # * Репозитории — запись: `git worktree add` пишет в `.git/worktrees` основного клона (каталог должен быть
+  #   доступен на запись uid 10001). Агенту основной клон не монтируется (§7.1).
+  # * Worktrees и staging gates — bind-каталоги хоста по ТОМУ ЖЕ пути, что в контейнере: контейнеры gates создаёт
+  #   dockerd хоста (через docker-socket-proxy) и монтирует их по пути хоста (allowed_bind_roots линтера).
+  # * Docker: только docker-socket-proxy в сети docker-ctl (оверлей compose.sandbox.yaml); сокет Docker сюда не
+  #   монтируется никогда. Без оверлея имя docker-socket-proxy не разрешается — gates в контейнере не запускаются.
+  # * hostname закреплён: регистрация хоста исполнения (worker_hosts) и ссылки процессов reconciler переживают
+  #   пересоздание контейнера (один worker-exec на хост, OQ-03).
+  worker-exec:
+    <<: *worker
+    command: ["aicd-worker", "exec"]
+    hostname: worker-exec
+    environment:
+      <<: *worker-env
+      AICD_ARTIFACT_BACKEND: fs
+      AICD_ARTIFACT_FS_ROOT: /var/lib/aicd/artifacts
+      AICD_REPOSITORY_ROOTS: main=/srv/repos
+      AICD_VERIFICATION_RUNNER: docker
+      AICD_DOCKER_URL: http://docker-socket-proxy:2375
+      AICD_WORKTREE_ROOT: ${AICD_WORKTREES_DIR:-/var/lib/aicd/worktrees}
+      AICD_VERIFICATION_STAGING_ROOT: ${AICD_VERIFICATION_STAGING_DIR:-/var/lib/aicd/verification}
+      AICD_INDEX_EXPORT_CACHE_ROOT: /var/lib/aicd/index-export
+    volumes:
+      - artifacts:/var/lib/aicd/artifacts
+      - index-export:/var/lib/aicd/index-export
+      - ${AICD_REPOS_DIR:-./repos}:/srv/repos
+      - ${AICD_WORKTREES_DIR:-/var/lib/aicd/worktrees}:${AICD_WORKTREES_DIR:-/var/lib/aicd/worktrees}
+      - ${AICD_VERIFICATION_STAGING_DIR:-/var/lib/aicd/verification}:${AICD_VERIFICATION_STAGING_DIR:-/var/lib/aicd/verification}
+
+  # worker-index: очередь indexing_jobs, определение стека, очистка кэша экспортов снимков (общий том с worker-exec).
+  worker-index:
+    <<: *worker
+    command: ["aicd-worker", "index"]
+    environment:
+      <<: *worker-env
+      AICD_REPOSITORY_ROOTS: main=/srv/repos
+      AICD_INDEX_EXPORT_CACHE_ROOT: /var/lib/aicd/index-export
+    volumes:
+      - index-export:/var/lib/aicd/index-export
+      - ${AICD_REPOS_DIR:-./repos}:/srv/repos:ro
+
+  # --- Профиль observability (P8-08): docker compose ... --profile observability up -d ----------------------
+  # Prometheus (скрейп /metrics api и воркеров по bearer-токену) и Alertmanager портов не публикуют;
+  # Grafana — только на 127.0.0.1:3000 со своей аутентификацией (admin, пароль — secret grafana_admin_password),
+  # анонимный доступ выключен (SC-OBS-03). Образы закреплены по digest.
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    secrets: [metrics_token]
+    networks: [backend, monitoring]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [api, alertmanager]
+
+  alertmanager:
+    profiles: [observability]
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks: [monitoring]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_SECURITY_COOKIE_SECURE: "${AICD_COOKIE_SECURE:-true}"
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    secrets: [grafana_admin_password]
+    ports: ["127.0.0.1:${AICD_GRAFANA_PORT:-3000}:3000"]
+    networks: [monitoring, edge]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [prometheus]
+
 networks:
   backend: { internal: true }
   edge: {}
+  monitoring: { internal: true }
 
 volumes:
   pgdata: {}
+  pgwal: {}  # архив WAL (P9-05); переносится в репозиторий бэкапов pg-wal-sync
   artifacts: {}
+  index-export: {}  # кэш экспортов снимков индекса (worker-exec пишет, worker-index очищает)
+  prometheus-data: {}
+  alertmanager-data: {}
+  grafana-data: {}
 
 secrets:
   pg_admin_password: { file: ./secrets/pg_admin_password }
@@ -96,6 +291,9 @@ secrets:
   pg_maintenance_password: { file: ./secrets/pg_maintenance_password }
   migrator_database_url: { file: ./secrets/migrator_database_url }
   app_database_url: { file: ./secrets/app_database_url }
+  worker_database_url: { file: ./secrets/worker_database_url }
   app_secret_key: { file: ./secrets/app_secret_key }
   redis_password: { file: ./secrets/redis_password }
   app_redis_url: { file: ./secrets/app_redis_url }
+  metrics_token: { file: ./secrets/metrics_token }
+  grafana_admin_password: { file: ./secrets/grafana_admin_password }

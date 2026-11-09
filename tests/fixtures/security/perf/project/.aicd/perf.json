@@ -1,0 +1,7 @@
+{
+  "command": ["python3", "bench/workload.py"],
+  "repeat": 7,
+  "warmup": 1,
+  "run_timeout_seconds": 60,
+  "min_improvement_percent": 10
+}

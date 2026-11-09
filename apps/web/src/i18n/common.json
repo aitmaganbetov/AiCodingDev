@@ -1,0 +1,224 @@
+{
+  "app": {
+    "name": "AiCodingDev",
+    "documentTitle": "{{page}} — AiCodingDev"
+  },
+  "common": {
+    "createdAt": "Создан"
+  },
+  "action": {
+    "retry": "Повторить",
+    "create": "Создать",
+    "creating": "Создание…",
+    "cancel": "Отмена",
+    "close": "Закрыть",
+    "copy": "Копировать",
+    "copied": "Скопировано",
+    "copyFailed": "Не удалось скопировать",
+    "back": "Назад"
+  },
+  "state": {
+    "loading": "Загрузка…",
+    "errorTitle": "Не удалось загрузить данные",
+    "requestId": "Идентификатор запроса: {{id}}",
+    "emptyTitle": "Здесь пока пусто",
+    "forbiddenTitle": "Недостаточно прав",
+    "forbiddenDescription": "У вашей роли нет доступа к этому разделу. Обратитесь к владельцу или администратору рабочего пространства.",
+    "underConstructionTitle": "Раздел в разработке",
+    "underConstructionDescription": "Экран «{{section}}» появится в одном из следующих обновлений Mission Control."
+  },
+  "list": {
+    "loadMore": "Загрузить ещё",
+    "shown_one": "Показан {{count}} элемент",
+    "shown_few": "Показано {{count}} элемента",
+    "shown_many": "Показано {{count}} элементов",
+    "shown_other": "Показано {{count}} элемента"
+  },
+  "validation": {
+    "required": "Обязательное поле.",
+    "maxLength": "Не более {{max}} символов."
+  },
+  "fieldError": {
+    "invalid": "Недопустимое значение.",
+    "required": "Обязательное поле.",
+    "conflict": "Значение уже используется."
+  },
+  "auth": {
+    "loginTitle": "Вход",
+    "email": "Электронная почта",
+    "password": "Пароль",
+    "signIn": "Войти",
+    "signingIn": "Вход…",
+    "logout": "Выйти",
+    "loggingOut": "Выход…",
+    "loggedOut": "Вы вышли из системы.",
+    "invalidCredentials": "Неверная электронная почта или пароль.",
+    "checkingSession": "Проверка сессии…"
+  },
+  "workspaces": {
+    "title": "Рабочие пространства",
+    "loading": "Загрузка рабочих пространств…",
+    "emptyTitle": "Рабочих пространств пока нет",
+    "emptyDescription": "Создайте первое рабочее пространство — вы станете его владельцем.",
+    "create": "Создать пространство",
+    "createTitle": "Новое рабочее пространство",
+    "created": "Рабочее пространство «{{name}}» создано.",
+    "name": "Название",
+    "slug": "Slug",
+    "slugHint": "2–63 символа: строчные латинские буквы, цифры и дефис; первый и последний символ — буква или цифра.",
+    "slugInvalid": "Slug должен состоять из 2–63 символов: строчные латинские буквы, цифры и дефис, начинаться и заканчиваться буквой или цифрой.",
+    "slugTaken": "Этот slug уже занят.",
+    "role": "Ваша роль"
+  },
+  "notFound": {
+    "title": "Страница не найдена",
+    "description": "Проверьте адрес или вернитесь на главную.",
+    "home": "На главную",
+    "workspaceTitle": "Рабочее пространство не найдено",
+    "workspaceDescription": "Пространство не существует или у вас нет к нему доступа.",
+    "code": "Ошибка 404"
+  },
+  "problem": {
+    "network_error": "Нет связи с сервером. Проверьте подключение и повторите.",
+    "unknown_error": "Непредвиденная ошибка. Повторите попытку позже.",
+    "malformed_request": "Некорректный запрос.",
+    "validation_error": "Проверьте правильность заполнения полей.",
+    "invalid_cursor": "Список устарел — обновите страницу.",
+    "idempotency_key_missing": "Некорректный запрос: отсутствует ключ идемпотентности.",
+    "unauthenticated": "Требуется вход в систему.",
+    "session_expired": "Сессия истекла. Войдите снова.",
+    "csrf_failed": "Проверка безопасности не пройдена. Обновите страницу и повторите.",
+    "forbidden": "Недостаточно прав для этого действия.",
+    "four_eyes_violation": "Это действие должен подтвердить другой участник.",
+    "step_up_required": "Подтвердите пароль: действие требует повторного входа.",
+    "reauthentication_failed": "Неверный пароль.",
+    "policy_denied": "Действие запрещено политикой.",
+    "not_found": "Не найдено или нет доступа.",
+    "conflict": "Конфликт: такой объект уже существует.",
+    "version_mismatch": "Данные изменились. Обновите страницу.",
+    "invalid_state_transition": "Действие недоступно в текущем состоянии.",
+    "idempotency_key_in_flight": "Запрос ещё обрабатывается. Повторите через несколько секунд.",
+    "last_owner": "Нельзя удалить или понизить последнего владельца.",
+    "replay_window_exceeded": "История событий устарела — обновите страницу.",
+    "precondition_failed": "Данные изменились. Обновите страницу.",
+    "payload_too_large": "Слишком большой запрос.",
+    "unsupported_media_type": "Неподдерживаемый формат запроса.",
+    "idempotency_key_reuse": "Повтор запроса с другими данными. Обновите страницу и повторите.",
+    "precondition_required": "Требуется актуальная версия данных. Обновите страницу.",
+    "rate_limited": "Слишком много запросов. Подождите и повторите.",
+    "internal_error": "Внутренняя ошибка сервера. Повторите попытку позже.",
+    "provider_unavailable": "Провайдер CLI недоступен.",
+    "service_unavailable": "Сервис временно недоступен. Повторите попытку позже."
+  },
+  "enums": {
+    "workspace_role": {
+      "owner": "Владелец",
+      "admin": "Администратор",
+      "developer": "Разработчик",
+      "reviewer": "Ревьюер",
+      "viewer": "Наблюдатель"
+    },
+    "documentation_mode": {
+      "OFF": "Выключен (OFF)",
+      "SMART": "Умный (SMART)",
+      "STRICT": "Строгий (STRICT)"
+    },
+    "quality_profile": {
+      "basic": "Базовый (basic)",
+      "strict": "Строгий (strict)",
+      "critical": "Критичный (critical)"
+    },
+    "project_status": {
+      "ACTIVE": "Активен",
+      "ARCHIVED": "В архиве"
+    },
+    "run_mode": {
+      "CREATE": "Создание (CREATE)",
+      "DEVELOP": "Разработка (DEVELOP)",
+      "DEBUG": "Отладка (DEBUG)",
+      "AUDIT": "Аудит (AUDIT)",
+      "MODERNIZE": "Модернизация (MODERNIZE)",
+      "SECURITY": "Безопасность (SECURITY)",
+      "OPTIMIZE": "Оптимизация (OPTIMIZE)",
+      "TEST": "Тестирование (TEST)",
+      "MAINTAIN": "Сопровождение (MAINTAIN)",
+      "DOCUMENT": "Документирование (DOCUMENT)",
+      "REVIEW": "Ревью (REVIEW)"
+    },
+    "run_status": {
+      "CREATED": "Создан",
+      "DISCOVERY": "Исследование",
+      "PLANNED": "Спланирован",
+      "AWAITING_APPROVAL": "Ожидает одобрения",
+      "RUNNING": "Выполняется",
+      "VERIFYING": "Проверка",
+      "COMPLETED": "Завершён",
+      "PAUSED": "Приостановлен",
+      "BLOCKED": "Заблокирован",
+      "FAILED": "Ошибка",
+      "CANCELLED": "Отменён"
+    },
+    "task_status": {
+      "PENDING": "Ожидает",
+      "READY": "Готова",
+      "LEASED": "Назначена",
+      "RUNNING": "Выполняется",
+      "VERIFYING": "Проверка",
+      "SUCCEEDED": "Успешно",
+      "BLOCKED": "Заблокирована",
+      "RETRY_WAIT": "Ожидает повтора",
+      "FAILED": "Ошибка",
+      "CANCELLED": "Отменена"
+    },
+    "blocked_reason": {
+      "APPROVAL_REQUIRED": "Требуется одобрение",
+      "PROVIDER_UNAVAILABLE": "Провайдер CLI недоступен",
+      "AUTH_REQUIRED": "Требуется аутентификация провайдера",
+      "DIRECTIVE_REPLAN": "Перепланирование по директиве",
+      "RUN_PAUSED": "Run приостановлен",
+      "DOCS_REQUIRED": "Требуется документация",
+      "MANUAL_REVIEW": "Требуется ручная проверка",
+      "REVIEW_LOOP_EXHAUSTED": "Исчерпан цикл ревью",
+      "DEPENDENCY_FAILED": "Ошибка зависимости"
+    },
+    "agent_role": {
+      "requirements": "Аналитик требований",
+      "architect": "Архитектор",
+      "planner": "Планировщик",
+      "developer": "Разработчик",
+      "reviewer": "Ревьюер",
+      "security": "Безопасность",
+      "qa": "QA",
+      "database": "Базы данных",
+      "performance": "Производительность",
+      "devops": "DevOps",
+      "maintenance": "Сопровождение",
+      "documentation": "Документация",
+      "orchestrator": "Оркестратор",
+      "user": "Пользователь"
+    }
+  },
+  "ui": {
+    "sortAscending": "по возрастанию",
+    "sortDescending": "по убыванию",
+    "sortBy": "Сортировать по столбцу «{{column}}»",
+    "sortedBy": "Отсортировано: «{{column}}», {{direction}}",
+    "tableEmpty": "Нет данных.",
+    "code": "Код",
+    "toastRegion": "Уведомления ({{hotkey}})",
+    "dismiss": "Скрыть уведомление",
+    "toolbar": "Панель инструментов",
+    "absoluteTime": "Точное время: {{time}}",
+    "toastLabel": "Уведомление",
+    "codeRegion": "{{label}} (прокручиваемая область)",
+    "relative": {
+      "now": "только что"
+    }
+  },
+  "theme": {
+    "label": "Тема оформления",
+    "system": "Как в системе",
+    "light": "Светлая",
+    "dark": "Тёмная"
+  }
+}

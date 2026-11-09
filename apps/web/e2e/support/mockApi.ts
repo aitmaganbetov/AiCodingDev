@@ -12,6 +12,7 @@ import {
   validateHeader,
   validateRequest,
   validateResponse,
+  validateNotificationEvent,
   validateSseEvent,
 } from './contract';
 
@@ -31,7 +32,7 @@ export interface MockUser {
   display_name: string;
 }
 
-interface Reply {
+export interface Reply {
   status: number;
   body?: unknown;
   headers?: Record<string, string>;
@@ -65,11 +66,22 @@ export interface SseConnectionScript {
   status?: 410;
 }
 
+/** Кадр `notification.created` потока workspace (SseNotificationCreated: seq = null). */
+export interface MockNotificationFrame {
+  event_id: string;
+  run_id: string | null;
+  seq: null;
+  type: 'notification.created';
+  timestamp: string;
+  schema_version: '1.0';
+  payload: S['Notification'];
+}
+
 export function sseFrame(e: MockRunEvent): string {
   return `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
 }
 
-function problem(status: number, code: S['Problem']['code'], extra: Partial<S['Problem']> = {}): Reply {
+export function problem(status: number, code: S['Problem']['code'], extra: Partial<S['Problem']> = {}): Reply {
   return {
     status,
     body: {
@@ -97,13 +109,122 @@ const ROUTES: { method: string; path: string; operationId: string }[] = [
   { method: 'GET', path: '/api/v1/runs/{id}', operationId: 'getRun' },
   { method: 'GET', path: '/api/v1/runs/{id}/tasks', operationId: 'getRunTasks' },
   { method: 'GET', path: '/api/v1/runs/{id}/events', operationId: 'streamRunEvents' },
+  { method: 'GET', path: '/api/v1/workspaces/{id}/events', operationId: 'streamWorkspaceEvents' },
+  { method: 'GET', path: '/api/v1/workspaces/{id}', operationId: 'getWorkspace' },
   { method: 'POST', path: '/api/v1/runs/{id}/pause', operationId: 'pauseRun' },
   { method: 'POST', path: '/api/v1/runs/{id}/resume', operationId: 'resumeRun' },
   { method: 'POST', path: '/api/v1/runs/{id}/cancel', operationId: 'cancelRun' },
+  // B8: персональные уведомления (оболочка запрашивает их на каждом экране workspace).
+  { method: 'GET', path: '/api/v1/notifications', operationId: 'listNotifications' },
+  { method: 'GET', path: '/api/v1/notifications/unread-count', operationId: 'getNotificationUnreadCount' },
+  { method: 'POST', path: '/api/v1/notifications/mark-read', operationId: 'markNotificationsRead' },
 ];
 
-function matchRoute(method: string, pathname: string): { operationId: string; id: string | undefined } | null {
-  for (const r of ROUTES) {
+/**
+ * Операции, которые вызывает оболочка на каждом экране (F2: чипы CLI, счётчик approvals, поиск) и
+ * стартовый экран Dashboard (F3). Ответ по умолчанию — пустой; spec переопределяет его через `api.route(...)` (приоритет у spec).
+ */
+const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply: (id: string | undefined) => Reply }[] = [
+  { method: 'GET', path: '/api/v1/providers', operationId: 'listProviders', reply: () => ({ status: 200, body: { items: [] } }) },
+  { method: 'GET', path: '/api/v1/approvals', operationId: 'listApprovals', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  // F3 Bento Dashboard — стартовый экран после входа в каждом spec: пустые, но валидные ответы
+  // (как у workspace без данных); dashboard.spec и другие spec переопределяют их через api.route.
+  { method: 'GET', path: '/api/v1/tasks', operationId: 'listTasks', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  { method: 'GET', path: '/api/v1/findings', operationId: 'listFindings', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  { method: 'GET', path: '/api/v1/activity', operationId: 'listActivity', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  { method: 'GET', path: '/api/v1/analytics/summary', operationId: 'getAnalyticsSummary', reply: () => ({ status: 200, body: emptyAnalyticsSummary() }) },
+  {
+    method: 'GET',
+    path: '/api/v1/system/health',
+    operationId: 'getSystemHealth',
+    reply: () => ({
+      status: 200,
+      body: {
+        status: 'unknown',
+        checked_at: '2026-11-08T09:00:00Z',
+        cache_ttl_seconds: 10,
+        components: [],
+        worker_hosts: null,
+        worker_kinds: null,
+        queues: null,
+        backups: null,
+      } satisfies S['SystemHealth'],
+    }),
+  },
+  // F4 AI Mission Control — центральный экран run, на него ведут поиск, палитра, уведомления и старые
+  // пути run/графа/чата: пустые валидные ответы (отчёт качества без gates, без evidence, пустая лента).
+  // missionControl.spec и другие spec переопределяют их через api.route.
+  {
+    method: 'GET',
+    path: '/api/v1/runs/{id}/quality',
+    operationId: 'getRunQuality',
+    reply: (id) => ({
+      status: 200,
+      body: { run_id: id ?? '', quality_profile: 'strict', verdict: 'PENDING', gate_executions: [], findings_summary: {}, findings: [], findings_total: 0 } satisfies S['QualityReport'],
+    }),
+  },
+  { method: 'GET', path: '/api/v1/runs/{id}/evidence', operationId: 'listRunEvidence', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  { method: 'GET', path: '/api/v1/runs/{id}/chat', operationId: 'getRunChat', reply: () => ({ status: 200, body: { items: [], threads: [], next_cursor: null } }) },
+  // F5: экран «Агенты» (профили B7) и Настройки › CLI-провайдеры (история исполнений B1) — пустые валидные
+  // ответы; agents.spec / providers.spec и другие spec переопределяют их через api.route.
+  { method: 'GET', path: '/api/v1/agent-profiles', operationId: 'listAgentProfiles', reply: () => ({ status: 200, body: { items: [] } }) },
+  // F8: Code Intelligence (раздел меню; на него ведут сочетание `g x` и палитра) — проект без репозиториев.
+  // code-intelligence.spec и другие spec переопределяют ответ через api.route.
+  {
+    method: 'GET',
+    path: '/api/v1/projects/{id}/repositories',
+    operationId: 'listRepositories',
+    reply: () => ({ status: 200, body: { items: [], next_cursor: null } }),
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/providers/{id}/executions',
+    operationId: 'listProviderExecutions',
+    reply: () => ({ status: 200, body: { items: [], next_cursor: null } }),
+  },
+];
+
+/** Сводка analytics workspace без данных за окно (нули и null-доли — как у сервера). */
+export function emptyAnalyticsSummary(): S['AnalyticsSummary'] {
+  const none = { p50: null, p90: null, avg: null };
+  return {
+    window: { from: '2026-10-09T09:00:00Z', to: '2026-11-08T09:00:00Z' },
+    project_id: null,
+    runs: { total: 0, finished: 0, completed: 0, success_rate: null, by_status: {}, duration_seconds: none, by_mode: [] },
+    daily: [],
+    tasks: { attempts: 0, succeeded: 0, failed: 0, retries: 0, verified_completion_rate: null, tasks_finished: 0, latency_seconds: none, by_role: [] },
+    gates: [],
+    providers: [],
+    review_loops: { review_requests: 0, fix_requests: 0, review_chains: 0, chains_with_fixes: 0, avg_fix_rounds: null, max_fix_rounds: 0, loops_exhausted: 0 },
+    agent_messages: { total: 0, by_type: {} },
+    approvals: { requested: 0, pending: 0, by_status: {}, wait_seconds: none },
+    context: {
+      packs: 0,
+      avg_size_bytes: null,
+      max_size_bytes: null,
+      fragments: 0,
+      stale_fragment_ratio: null,
+      usefulness: { rate: null, packs_evaluated: 0, fragments_referenced: 0, fragments_total: 0, truncated: false },
+    },
+  };
+}
+
+/** Запрос к дополнительной операции мока (MockApi.route). */
+export interface MockRequest {
+  url: URL;
+  headers: Record<string, string>;
+  body: unknown;
+  /** Значение `{id}` из шаблона пути. */
+  id: string | undefined;
+  workspaceId: string | undefined;
+}
+
+function matchRoute(
+  method: string,
+  pathname: string,
+  extra: readonly { method: string; path: string; operationId: string }[] = [],
+): { operationId: string; id: string | undefined } | null {
+  for (const r of [...ROUTES, ...extra, ...SHELL_DEFAULTS]) {
     if (r.method !== method) continue;
     const re = new RegExp(`^${r.path.replace('{id}', '([^/]+)')}$`);
     const m = re.exec(pathname);
@@ -124,8 +245,11 @@ export class MockApi {
    * для всех операций; клиент её не повторяет автоматически — повтор только кнопкой).
    */
   failProjectsTimes = 0;
-  /** Следующий запрос (кроме auth) ответит 401 session_expired. */
-  expireSessionOnNextRequest = false;
+  /**
+   * Следующий запрос (кроме auth) ответит 401 session_expired. Строка — operationId: истекает только
+   * этот запрос (детерминированно, без гонки с фоновыми запросами оболочки — опрос CLI, поток уведомлений).
+   */
+  expireSessionOnNextRequest: boolean | string = false;
   pageSize = 3;
   /** Slug, занятые workspace других пользователей (→ 409 conflict). */
   readonly takenSlugs = new Set<string>();
@@ -140,6 +264,28 @@ export class MockApi {
   sseRetryMs = 100;
   /** Сколько SSE-подключений было и с какими Last-Event-ID / after_seq. */
   readonly sseConnections: { lastEventId: string | undefined; afterSeq: string | null }[] = [];
+  /**
+   * «Сеть недоступна» (вместе с context.setOffline): запросы обрываются, удерживаемый
+   * SSE-ответ не досылается — как при реальном обрыве (без «призрачных» подключений в журнале).
+   */
+  offline = false;
+  /** Журнал потока уведомлений workspace: курсор (`id:`) → событие (OQ-45 (c)) или кадр `notification.created` (B8). */
+  readonly workspaceEvents: { workspaceId: string; cursor: number; event: MockRunEvent | MockNotificationFrame }[] = [];
+  /** Персональные уведомления текущего пользователя (B8, `notifications`), новые в конце. */
+  readonly notifications: { workspaceId: string; item: S['Notification'] }[] = [];
+  /** Подключения к потоку workspace с их Last-Event-ID. */
+  readonly workspaceStreamConnections: { workspaceId: string; lastEventId: string | undefined }[] = [];
+  private workspaceCursor = 1_762_590_000_000_000;
+  private readonly extraRoutes: { method: string; path: string; operationId: string; handler: (req: MockRequest) => Reply }[] = [];
+
+  /**
+   * Дополнительная операция контракта для E2E экрана (вызывается из своего spec-файла,
+   * этот файл менять не нужно). Путь — шаблон с `{id}`, ответ валидируется по контракту operationId.
+   * Пример: `api.route('GET', '/api/v1/approvals', 'listApprovals', () => ({ status: 200, body: {...} }))`.
+   */
+  route(method: string, path: string, operationId: string, handler: (req: MockRequest) => Reply): void {
+    this.extraRoutes.push({ method, path, operationId, handler });
+  }
 
   addRun(project: S['Project'], init: Partial<S['Run']> = {}): S['Run'] {
     const run: S['Run'] = {
@@ -226,6 +372,8 @@ export class MockApi {
       if (task) {
         task.status = p.to_status as S['TaskStatus'];
         if (typeof p.attempt_no === 'number') task.attempt_count = p.attempt_no;
+        // Исполнитель попытки (payload.provider) — REST после события видит того же провайдера.
+        if (typeof p.provider === 'string') task.current_provider = p.provider as S['CliProvider'];
         task.version += 1;
       }
     }
@@ -264,6 +412,78 @@ export class MockApi {
       if (next) raw += sseFrame(next).slice(0, 40); // кадр оборван посередине: id без пустой строки
     }
     return { status: 200, raw, headers: { 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } };
+  }
+
+  /** Событие потока уведомлений workspace (approval.*, run.state_changed, run.completed) с новым курсором. */
+  addWorkspaceEvent(workspaceId: string, type: string, payload: Record<string, unknown>, runId?: string): MockRunEvent {
+    this.workspaceCursor += 1000;
+    const event: MockRunEvent = {
+      event_id: uuid(),
+      run_id: runId ?? this.runs.find((r) => r.workspace_id === workspaceId)?.id ?? uuid(),
+      seq: this.workspaceEvents.length + 1,
+      type,
+      // Время записи растёт с курсором (как на сервере): «прочитано до» в уведомлениях сравнивает время.
+      timestamp: new Date(Date.parse('2026-11-08T09:00:00Z') + this.workspaceEvents.length * 1000).toISOString().replace('.000Z', 'Z'),
+      schema_version: '1.0',
+      payload,
+    };
+    const error = validateSseEvent(event);
+    if (error) this.violations.push(`mock ${error}`);
+    this.workspaceEvents.push({ workspaceId, cursor: this.workspaceCursor, event });
+    return event;
+  }
+
+  /**
+   * Новое персональное уведомление (B8): строка `notifications` и, если `live`, кадр `notification.created`
+   * в потоке workspace (как сервер: курсор = время создания). `created_at` растёт с порядком добавления.
+   */
+  addNotification(workspaceId: string, init: Partial<S['Notification']> & Pick<S['Notification'], 'kind' | 'title'>, live = true): S['Notification'] {
+    const created = new Date(Date.parse('2026-11-08T09:00:00Z') + this.notifications.length * 60_000).toISOString().replace('.000Z', 'Z');
+    const item: S['Notification'] = {
+      id: uuid(),
+      severity: 'info',
+      body: '',
+      project_id: null,
+      run_id: null,
+      task_id: null,
+      resource_type: 'run',
+      resource_id: uuid(),
+      data: {},
+      created_at: created,
+      read_at: null,
+      read: false,
+      ...init,
+    };
+    this.notifications.push({ workspaceId, item });
+    if (live) {
+      this.workspaceCursor += 1000;
+      const frame: MockNotificationFrame = {
+        event_id: item.id,
+        run_id: item.run_id,
+        seq: null,
+        type: 'notification.created',
+        timestamp: item.created_at,
+        schema_version: '1.0',
+        payload: { ...item },
+      };
+      const error = validateNotificationEvent(frame);
+      if (error) this.violations.push(`mock ${error}`);
+      this.workspaceEvents.push({ workspaceId, cursor: this.workspaceCursor, event: frame });
+    }
+    return item;
+  }
+
+  private notificationsOf(workspaceId: string): S['Notification'][] {
+    // Новые сверху: (created_at, id) desc.
+    return this.notifications
+      .filter((n) => n.workspaceId === workspaceId)
+      .map((n) => n.item)
+      .sort((a, b) => (a.created_at === b.created_at ? b.id.localeCompare(a.id) : b.created_at.localeCompare(a.created_at)));
+  }
+
+  private unreadNotifications(workspaceId: string): S['NotificationUnreadCount'] {
+    const unread = this.notificationsOf(workspaceId).filter((n) => !n.read);
+    return { unread_count: unread.length, latest_unread_at: unread[0]?.created_at ?? null };
   }
 
   addWorkspace(name: string, slug: string, role: S['WorkspaceRole'] = 'owner'): S['Workspace'] {
@@ -323,13 +543,17 @@ export class MockApi {
     const req = route.request();
     const url = new URL(req.url());
     const method = req.method();
-    const match = matchRoute(method, url.pathname);
+    const match = matchRoute(method, url.pathname, this.extraRoutes);
     if (!match) {
       this.violations.push(`unexpected request ${method} ${url.pathname}`);
       await route.fulfill({ status: 404, contentType: 'application/problem+json', body: JSON.stringify(problem(404, 'not_found').body) });
       return;
     }
     const { operationId } = match;
+    if (this.offline) {
+      await route.abort('internetdisconnected').catch(() => undefined);
+      return;
+    }
     const headers = await req.allHeaders();
     const raw = req.postData();
     const body: unknown = raw ? JSON.parse(raw) : undefined;
@@ -340,13 +564,30 @@ export class MockApi {
       const after = Number(headers['last-event-id'] ?? url.searchParams.get('after_seq') ?? 0);
       const runId = match.id;
       const hasNew = () => (this.events.get(runId) ?? []).some((e) => e.seq > after);
-      for (let waited = 0; waited < 1500 && !hasNew(); waited += 50) await new Promise((r) => setTimeout(r, 50));
+      for (let waited = 0; waited < 1500 && !hasNew() && !this.offline; waited += 50) await new Promise((r) => setTimeout(r, 50));
+      if (this.offline) {
+        await route.abort('internetdisconnected').catch(() => undefined);
+        return;
+      }
+    }
+    if (operationId === 'streamWorkspaceEvents' && match.id) {
+      // Как сервер: держим соединение, пока нет событий после курсора (до 1,5 с), затем закрываем.
+      const after = Number(headers['last-event-id'] ?? 0);
+      const wsId = match.id;
+      const hasNew = () => this.workspaceEvents.some((e) => e.workspaceId === wsId && e.cursor > after);
+      for (let waited = 0; waited < 1500 && !hasNew() && !this.offline; waited += 50) await new Promise((r) => setTimeout(r, 50));
+      if (this.offline) {
+        await route.abort('internetdisconnected').catch(() => undefined);
+        return;
+      }
     }
     const reply = this.dispatch(operationId, url, headers, body, match.id);
 
-    const responseError = validateResponse(operationId, reply.status, reply.raw ?? reply.body);
+    // Явный Content-Type ответа мока (content negotiation) проверяется по своей схеме представления.
+    const explicitType = reply.headers?.['content-type']?.split(';')[0]?.trim();
+    const responseError = validateResponse(operationId, reply.status, reply.raw ?? reply.body, explicitType);
     if (responseError) this.violations.push(`mock ${responseError}`);
-    const contentType = responseMediaType(operationId, reply.status) ?? 'application/json';
+    const contentType = explicitType ? (reply.headers?.['content-type'] ?? explicitType) : (responseMediaType(operationId, reply.status) ?? 'application/json');
     if (reply.raw !== undefined) {
       // Страница могла закрыться, пока поток «висел» в ожидании событий.
       await route
@@ -365,7 +606,8 @@ export class MockApi {
     // Порядок проверок как на сервере (API_DESIGN §6): 401 → CSRF → tenant → idempotency → схема.
     if (operationId !== 'login') {
       if (!this.loggedIn) return problem(401, 'unauthenticated');
-      if (this.expireSessionOnNextRequest && operationId !== 'getSession') {
+      const expire = this.expireSessionOnNextRequest;
+      if (expire && operationId !== 'getSession' && (expire === true || expire === operationId)) {
         this.expireSessionOnNextRequest = false;
         this.loggedIn = false;
         return problem(401, 'session_expired');
@@ -397,7 +639,10 @@ export class MockApi {
         return { ...stored.reply, headers: { ...stored.reply.headers, 'Idempotency-Replayed': 'true' } };
       }
       const reply = this.execute(operationId, url, headers, body, id);
-      if (reply.status < 500) this.idempotency.set(scoped, { body: JSON.stringify(body), reply });
+      // Как сервер: отказ step-up (403 step_up_required) не сохраняется — повтор после POST /auth/reauthenticate
+      // идёт с тем же Idempotency-Key (src/auth/StepUp.tsx) и выполняется заново.
+      const stepUp = (reply.body as { code?: string } | undefined)?.code === 'step_up_required';
+      if (reply.status < 500 && !stepUp) this.idempotency.set(scoped, { body: JSON.stringify(body), reply });
       return reply;
     }
     return this.execute(operationId, url, headers, body, id);
@@ -452,8 +697,16 @@ export class MockApi {
       case 'listRuns': {
         if (!ws) return problem(404, 'not_found');
         const projectId = url.searchParams.get('project_id');
+        const statuses = url.searchParams.getAll('status');
+        const mode = url.searchParams.get('mode');
         const items = this.runs
-          .filter((r) => r.workspace_id === ws.id && (!projectId || r.project_id === projectId))
+          .filter(
+            (r) =>
+              r.workspace_id === ws.id &&
+              (!projectId || r.project_id === projectId) &&
+              (statuses.length === 0 || statuses.includes(r.status)) &&
+              (!mode || r.mode === mode),
+          )
           .map((r) => {
             const summary: S['RunSummary'] = {
               id: r.id,
@@ -505,6 +758,52 @@ export class MockApi {
         const run = this.runs.find((r) => r.id === id);
         return run ? this.streamEvents(run, headers, url) : problem(404, 'not_found');
       }
+      case 'streamWorkspaceEvents': {
+        const target = this.workspaces.find((w) => w.id === id);
+        if (!target) return problem(404, 'not_found');
+        const lastEventId = headers['last-event-id'];
+        this.workspaceStreamConnections.push({ workspaceId: target.id, lastEventId });
+        const after = Number(lastEventId ?? 0);
+        const types = url.searchParams.getAll('types');
+        let raw = `retry: ${this.sseRetryMs}\n\n`;
+        for (const e of this.workspaceEvents) {
+          if (e.workspaceId !== target.id || e.cursor <= after || (types.length > 0 && !types.includes(e.event.type))) continue;
+          raw += `id: ${e.cursor}\nevent: ${e.event.type}\ndata: ${JSON.stringify(e.event)}\n\n`;
+        }
+        return { status: 200, raw, headers: { 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } };
+      }
+      case 'listNotifications': {
+        if (!ws) return problem(404, 'not_found');
+        const unreadOnly = url.searchParams.get('unread_only') === 'true';
+        const items = this.notificationsOf(ws.id).filter((n) => !unreadOnly || !n.read);
+        return { status: 200, body: { ...this.page(items, url.searchParams.get('cursor')), unread_count: this.unreadNotifications(ws.id).unread_count } };
+      }
+      case 'getNotificationUnreadCount':
+        return ws ? { status: 200, body: this.unreadNotifications(ws.id) } : problem(404, 'not_found');
+      case 'markNotificationsRead': {
+        if (!ws) return problem(404, 'not_found');
+        const b = body as S['NotificationMarkReadRequest'];
+        const list = this.notificationsOf(ws.id);
+        let targets: S['Notification'][];
+        if (b.notification_ids) targets = list.filter((n) => b.notification_ids?.includes(n.id));
+        else if (b.up_to) {
+          const index = list.findIndex((n) => n.id === b.up_to);
+          if (index < 0) return problem(404, 'not_found');
+          targets = list.slice(index);
+        } else targets = list;
+        const fresh = targets.filter((n) => !n.read);
+        for (const n of fresh) {
+          n.read = true;
+          n.read_at = '2026-11-08T10:00:00Z';
+        }
+        return { status: 200, body: { marked: fresh.length, unread_count: this.unreadNotifications(ws.id).unread_count } };
+      }
+      case 'getWorkspace': {
+        const target = this.workspaces.find((w) => w.id === id);
+        if (!target) return problem(404, 'not_found');
+        const version = target.version ?? 0;
+        return { status: 200, body: { ...target, settings: target.settings ?? {}, version }, headers: { ETag: `"v${version}"` } };
+      }
       case 'pauseRun':
       case 'resumeRun':
       case 'cancelRun': {
@@ -524,8 +823,12 @@ export class MockApi {
           body: { run_id: run.id, command, status: run.status, version: run.version, accepted_at: '2026-11-08T09:30:00Z' },
         };
       }
-      default:
-        return problem(404, 'not_found');
+      default: {
+        const extra = this.extraRoutes.find((r) => r.operationId === operationId);
+        if (extra) return extra.handler({ url, headers, body, id, workspaceId: headers['x-workspace-id'] });
+        const fallback = SHELL_DEFAULTS.find((r) => r.operationId === operationId);
+        return fallback ? fallback.reply(id) : problem(404, 'not_found');
+      }
     }
   }
 }

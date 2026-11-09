@@ -1,12 +1,17 @@
 """Точки входа воркеров: `aicd-worker outbox|orchestrator|exec|index`.
 
 * `outbox` — опрос outbox (0,5 с без LISTEN), проекция в run_event_log, публикация в Dramatiq, сигнал SSE;
-* `orchestrator` — Dramatiq-консьюмер очередей `orchestrator` и `docs` (загрузка документации через
-  `security.ssrf`, `aicd_worker.docs`) + периодический tick/повторная постановка READY;
+* `orchestrator` — Dramatiq-консьюмер очередей `orchestrator`, `github`, `notifications` (персональные
+  уведомления, `aicd_worker.notifications`) и `docs` (загрузка документации через
+  `security.ssrf`, `aicd_worker.docs`; шаги поручений `directive.state_changed` → `directives.process`)
+  + периодический tick/повторная постановка READY;
 * `exec` — консьюмер очереди `exec` (исполнение задач через CLI Gateway; fake-адаптер запрещён в production)
   + reaper аренд и recovery reconciler своего хоста;
 * `index` — опрос очереди `indexing_jobs` (`sys_indexing_workspaces`), индексация, определение стека,
   очистка кэша экспортов снимков (`aicd_worker.indexing`).
+
+Каждый процесс пишет heartbeat в `worker_hosts` (`AICD_WORKER_HEARTBEAT_SECONDS`, по умолчанию 15 с;
+`aicd_platform.worker_hosts`); при штатной остановке строка помечается OFFLINE.
 
 SIGINT/SIGTERM — штатная остановка: новые сообщения не берутся, текущие дорабатываются.
 """
@@ -28,15 +33,31 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_cli_adapters.registry import register_host
-from aicd_platform import sse
+from aicd_orchestration import directives
+from aicd_platform import sse, worker_hosts
 from aicd_platform.artifacts import build_artifact_store
-from aicd_platform.db import DbContext, create_engine, transaction
+from aicd_platform.db import DbContext, TcpKeepalive, create_engine, transaction
 from aicd_platform.logging import configure_logging
 from aicd_platform.outbox_dispatcher import dispatch_batch
-from aicd_worker import docs, indexing, maintenance, runtime
-from aicd_worker.broker import DOCS_QUEUE, EXEC_QUEUE, ORCHESTRATOR_QUEUE, Actors, build_broker, register_actors
+from aicd_worker import docs, github, indexing, maintenance, observability, runtime
+from aicd_worker.broker import (
+    DOCS_QUEUE,
+    EXEC_QUEUE,
+    GITHUB_QUEUE,
+    NOTIFICATIONS_QUEUE,
+    ORCHESTRATOR_QUEUE,
+    Actors,
+    build_broker,
+    register_actors,
+)
 from aicd_worker.settings import WorkerSettings
-from aicd_worker.wiring import ConfigurationError, build_orchestrator, build_reconciler, check_exec_adapter
+from aicd_worker.wiring import (
+    ConfigurationError,
+    build_orchestrator,
+    build_provider_prober,
+    build_reconciler,
+    check_exec_adapter,
+)
 
 log = logging.getLogger("aicd.worker")
 
@@ -64,10 +85,17 @@ async def run_outbox(
     async def notify(run_id: uuid.UUID) -> None:
         await redis.publish(sse.run_channel(run_id), str(run_id))
 
+    async def notify_workspace(workspace_id: uuid.UUID) -> None:
+        await redis.publish(sse.workspace_channel(workspace_id), str(workspace_id))
+
+    sampler = observability.Sampler(engine, redis, backup_status_file=settings.backup_status_file)
     try:
         while not stop.is_set():
+            await sampler.maybe_sample()  # gauge-метрики P8-06 (ошибки сбора не прерывают доставку)
             try:
-                published = await dispatch_batch(engine, actors.publish, notify, settings.outbox_batch_size)
+                published = await dispatch_batch(
+                    engine, actors.publish, notify, settings.outbox_batch_size, notify_workspace=notify_workspace
+                )
             except Exception:
                 log.exception("outbox dispatch failed")
                 await _wait(stop, ERROR_BACKOFF_SECONDS)
@@ -118,10 +146,22 @@ async def run_consumers(
         stale_ready_seconds=settings.stale_ready_seconds,
         reconciler=build_reconciler(settings, engine, host_id, store) if host_id is not None else None,
         docs_importer=docs.build_importer(settings, engine, store) if kind == "orchestrator" else None,
+        provider_prober=build_provider_prober(settings, engine, store) if kind == "exec" else None,
+        worker_host_id=host_id,
     )
+    if kind == "orchestrator":
+
+        async def process_directive(ws: uuid.UUID, directive_id: uuid.UUID) -> None:
+            await directives.process(engine, ws, directive_id, artifacts=store)
+
+        rt.process_directive = process_directive
+        rt.github = github.build_workflow(settings, engine)  # None — GitHub App не настроен
     runtime.install(rt)
     scheduler = maintenance.Scheduler()  # exec: reconcile при старте, далее reap 15 с / reconcile 60 с
-    queues = {ORCHESTRATOR_QUEUE, DOCS_QUEUE} if kind == "orchestrator" else {EXEC_QUEUE}
+    github_recovery = maintenance.GitHubRecoverySchedule()  # orchestrator: сверка GitHub-действий (OQ-47 (7))
+    queues = (
+        {ORCHESTRATOR_QUEUE, DOCS_QUEUE, GITHUB_QUEUE, NOTIFICATIONS_QUEUE} if kind == "orchestrator" else {EXEC_QUEUE}
+    )
     worker = dramatiq.Worker(actors.broker, queues=queues, worker_threads=settings.worker_threads)
     worker.start()
     try:
@@ -129,6 +169,7 @@ async def run_consumers(
             try:
                 if kind == "orchestrator":
                     await maintenance.sweep(rt)
+                    await github_recovery.run_due(rt)
                 else:
                     await scheduler.run_due(rt)
             except Exception:
@@ -137,6 +178,8 @@ async def run_consumers(
     finally:
         await asyncio.to_thread(worker.stop)
         runtime.install(None)
+        if rt.github is not None:
+            await rt.github.client.aclose()
 
 
 async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None = None) -> None:
@@ -145,7 +188,18 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError, RuntimeError):
             loop.add_signal_handler(sig, stop.set)
-    engine = create_engine(settings.require_database_url(), pool_size=settings.worker_threads + 2)
+    engine = create_engine(
+        settings.require_database_url(),
+        pool_size=settings.worker_threads + 2,
+        keepalive=TcpKeepalive.from_settings(settings),
+    )
+    metrics_server = observability.start(settings, kind)
+    # Heartbeat процесса (worker_hosts, GET /system/health и aicd_worker_heartbeat_age_seconds): отдельная задача,
+    # останавливается тем же событием stop и помечает строку OFFLINE.
+    heartbeat_stop = asyncio.Event()
+    heartbeat = asyncio.create_task(
+        worker_hosts.Heartbeat(engine, kind, settings.worker_heartbeat_seconds).run(heartbeat_stop)
+    )
     try:
         if kind == "outbox":
             await run_outbox(settings, engine, stop)
@@ -154,6 +208,11 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
         else:
             await run_consumers(kind, settings, engine, stop)
     finally:
+        heartbeat_stop.set()
+        await heartbeat
+        if metrics_server is not None:
+            await asyncio.to_thread(metrics_server.shutdown)
+            metrics_server.server_close()
         await engine.dispose()
 
 

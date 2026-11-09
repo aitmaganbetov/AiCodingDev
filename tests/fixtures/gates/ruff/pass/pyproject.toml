@@ -1,0 +1,6 @@
+[project]
+name = "fx"
+version = "0"
+
+[tool.ruff.lint]
+select = ["E", "F"]

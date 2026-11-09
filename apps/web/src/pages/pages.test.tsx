@@ -29,18 +29,19 @@ describe('auth', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Неверная электронная почта или пароль.');
   });
 
-  it('logs in and lands on the projects of the first workspace', async () => {
+  it('logs in and lands on the dashboard of the first workspace', async () => {
     const user = userEvent.setup();
     const { calls } = mockFetch({
       'GET /api/v1/auth/session': () => problem(401, 'unauthenticated'),
       'POST /api/v1/auth/login': () => json(200, session('owner')),
       'GET /api/v1/projects': () => json(200, { items: [project(1)], next_cursor: null }),
+      'GET /api/v1/runs': () => json(200, { items: [], next_cursor: null }),
     });
     renderApp('/login');
     await user.type(await screen.findByLabelText('Электронная почта'), 'anna@example.com');
     await user.type(screen.getByLabelText('Пароль'), 'secret{Enter}');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Проекты · Команда 1' })).toBeInTheDocument();
-    expect(await screen.findByText('Проект 1')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Обзор · Команда 1' })).toBeInTheDocument();
+    expect(await screen.findByText('Активные процессы', { selector: 'h2 span' })).toBeInTheDocument();
     const list = calls.find((c) => c.url.pathname === '/api/v1/projects');
     expect(list?.headers.get('X-Workspace-Id')).toBe(WS_ID);
   });
@@ -221,7 +222,7 @@ describe('project create form', () => {
 });
 
 describe('layout', () => {
-  it('has a skip link, main nav with only implemented items, and logs out', async () => {
+  it('has a skip link, grouped sidebar nav for all Mission Control sections, workspace switcher and user menu', async () => {
     const user = userEvent.setup();
     const { calls } = mockFetch({
       'GET /api/v1/auth/session': () => json(200, session('owner', 2)),
@@ -232,8 +233,26 @@ describe('layout', () => {
     await screen.findByTestId('empty-state');
     expect(screen.getByRole('link', { name: 'Перейти к основному содержимому' })).toHaveAttribute('href', '#main');
     const nav = screen.getByRole('navigation', { name: 'Основная навигация' });
-    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Проекты', 'Рабочие пространства']);
+    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual([
+      'Обзор',
+      'Проекты',
+      'AI Mission Control',
+      'Агенты',
+      'Процессы',
+      'Одобрения',
+      'Code Intelligence',
+      'Центр безопасности',
+      'Гейты качества',
+      'Стандарты и соответствие',
+      'Интеграция с GitHub',
+      'Аналитика',
+      'Документация',
+      'Настройки',
+      'Рабочие пространства',
+    ]);
+    for (const group of ['Обзор', 'Исполнение', 'Код и качество', 'Платформа']) expect(within(nav).getByRole('list', { name: group })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Проекты' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'Настройки' })).toHaveAttribute('href', `/w/${WS_ID}/settings`);
 
     const switcher = screen.getByRole('button', { name: /Рабочее пространство/ });
     await user.click(switcher);
@@ -244,8 +263,57 @@ describe('layout', () => {
     expect(switcher).toHaveFocus();
 
     await user.click(screen.getByRole('button', { name: /Меню пользователя/ }));
-    await user.click(screen.getByRole('button', { name: 'Выйти' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Выйти' }));
     expect(await screen.findByText('Вы вышли из системы.')).toBeInTheDocument();
     expect(calls.find((c) => c.url.pathname === '/api/v1/auth/logout')?.headers.get('X-CSRF-Token')).toBe('csrf-from-session');
+  });
+
+  it('hides sections the role cannot access and shows a forbidden page on direct navigation', async () => {
+    mockFetch({ 'GET /api/v1/auth/session': () => json(200, session('viewer')) });
+    renderApp(`/w/${WS_ID}/audit`);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Недостаточно прав' })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Основная навигация' });
+    expect(within(nav).queryByRole('link', { name: 'Аудит' })).not.toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Одобрения' })).toBeInTheDocument();
+  });
+
+  // Разделы approvals/quality/compliance реализованы (P7-10/P7-11): их экраны — в своих тестах и e2e.
+  it('renders 404 for unknown paths inside a workspace', async () => {
+    mockFetch({ 'GET /api/v1/auth/session': () => json(200, session('developer')) });
+    renderApp(`/w/${WS_ID}/no-such-screen`);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Страница не найдена' })).toBeInTheDocument();
+    expect(screen.queryByTestId('area-placeholder')).not.toBeInTheDocument();
+  });
+
+  it('opens the keyboard shortcuts dialog with "?" and navigates with "g" sequences', async () => {
+    const user = userEvent.setup();
+    mockFetch({
+      'GET /api/v1/auth/session': () => json(200, session('owner')),
+      'GET /api/v1/projects': () => json(200, { items: [], next_cursor: null }),
+    });
+    renderApp(projectsPath);
+    await screen.findByTestId('empty-state');
+    await user.keyboard('?');
+    const dialog = await screen.findByRole('dialog', { name: 'Сочетания клавиш' });
+    expect(within(dialog).getByRole('table', { name: 'Сочетания клавиш Mission Control' })).toBeInTheDocument();
+    expect(within(dialog).getByText('Перейти: Одобрения')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await user.keyboard('ga');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Одобрения' })).toBeInTheDocument();
+
+    // Отключение односимвольных сочетаний (WCAG 2.1.4).
+    await user.click(screen.getByRole('button', { name: 'Сочетания клавиш' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Использовать односимвольные сочетания клавиш' }));
+    await user.keyboard('{Escape}');
+    await user.keyboard('gp');
+    expect(screen.getByRole('heading', { level: 1, name: 'Одобрения' })).toBeInTheDocument();
+  });
+
+  it('renders the 404 page for unknown paths inside a workspace', async () => {
+    mockFetch({ 'GET /api/v1/auth/session': () => json(200, session('owner')) });
+    renderApp(`/w/${WS_ID}/no-such-screen`);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Страница не найдена' })).toBeInTheDocument();
   });
 });

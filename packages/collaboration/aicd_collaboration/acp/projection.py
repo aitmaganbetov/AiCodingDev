@@ -163,6 +163,7 @@ async def project_chat(conn: AsyncConnection, delivery: Delivery) -> None:
         "target_role": msg.recipient_role if msg.recipient_role in AGENT else None,
         "mentions": mentions,
         "body": body,
+        "acp_type": msg.message_type,
         "source_event_id": None,
         "links": render.links(list(dict.fromkeys(iter_refs(msg.payload)))),
         "created_at": isoformat_z(created_at),

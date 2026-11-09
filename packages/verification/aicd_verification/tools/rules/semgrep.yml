@@ -1,0 +1,191 @@
+# AiCodingDev — ruleset Semgrep, поставляемый платформой (P6-04, gate `semgrep-sast`).
+#
+# Закреплён в репозитории платформы (без загрузки из registry во время сканирования: `--metrics=off`,
+# `--disable-version-check`, сеть контейнера `none`). Правила — собственные формулировки платформы.
+# `metadata.aicd-severity` — нормализованная severity находки (info|low|medium|high|critical),
+# `metadata.cwe` — CWE. Изменение файла меняет `RULESET_SHA256` (фиксируется в evidence).
+rules:
+  # ------------------------------------------------------------------ Python
+  - id: aicd.python.subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: Процесс запускается через shell (shell=True) — риск внедрения команд; передавайте argv-список.
+    metadata: {cwe: ["CWE-78"], aicd-severity: high, category: command-injection}
+    pattern-either:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+      - pattern: asyncio.create_subprocess_shell(...)
+  - id: aicd.python.os-system
+    languages: [python]
+    severity: ERROR
+    message: os.system/os.popen исполняют строку через shell — риск внедрения команд.
+    metadata: {cwe: ["CWE-78"], aicd-severity: high, category: command-injection}
+    pattern-either:
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+  - id: aicd.python.eval-exec
+    languages: [python]
+    severity: ERROR
+    message: eval/exec динамического выражения — исполнение произвольного кода.
+    metadata: {cwe: ["CWE-95"], aicd-severity: high, category: code-injection}
+    patterns:
+      - pattern-either:
+          - pattern: eval($X, ...)
+          - pattern: exec($X, ...)
+      - pattern-not: eval("...", ...)
+      - pattern-not: exec("...", ...)
+  - id: aicd.python.pickle-load
+    languages: [python]
+    severity: ERROR
+    message: Десериализация pickle недоверенных данных исполняет код.
+    metadata: {cwe: ["CWE-502"], aicd-severity: high, category: deserialization}
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: cPickle.loads(...)
+      - pattern: dill.loads(...)
+  - id: aicd.python.yaml-unsafe-load
+    languages: [python]
+    severity: ERROR
+    message: yaml.load без SafeLoader создаёт произвольные объекты; используйте yaml.safe_load.
+    metadata: {cwe: ["CWE-502"], aicd-severity: high, category: deserialization}
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load($DATA)
+          - pattern: yaml.load($DATA, Loader=yaml.Loader)
+          - pattern: yaml.load($DATA, Loader=yaml.UnsafeLoader)
+          - pattern: yaml.load($DATA, Loader=yaml.FullLoader)
+          - pattern: yaml.unsafe_load(...)
+  - id: aicd.python.sql-string-format
+    languages: [python]
+    severity: ERROR
+    message: SQL собирается форматированием строки — риск SQL-инъекции; используйте параметры запроса.
+    metadata: {cwe: ["CWE-89"], aicd-severity: high, category: sql-injection}
+    pattern-either:
+      - pattern: $CUR.execute(f"...", ...)
+      - pattern: $CUR.execute("..." % $ARGS, ...)
+      - pattern: $CUR.execute("...".format(...), ...)
+      - pattern: $CUR.execute("..." + $X, ...)
+  - id: aicd.python.tls-verify-disabled
+    languages: [python]
+    severity: WARNING
+    message: Проверка TLS-сертификата отключена (verify=False).
+    metadata: {cwe: ["CWE-295"], aicd-severity: medium, category: tls}
+    pattern-either:
+      - pattern: requests.$FUNC(..., verify=False, ...)
+      - pattern: httpx.$FUNC(..., verify=False, ...)
+      - pattern: httpx.Client(..., verify=False, ...)
+      - pattern: httpx.AsyncClient(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
+  - id: aicd.python.jwt-no-verify
+    languages: [python]
+    severity: ERROR
+    message: JWT декодируется без проверки подписи.
+    metadata: {cwe: ["CWE-347"], aicd-severity: high, category: authn}
+    pattern-either:
+      - pattern: 'jwt.decode(..., options={..., "verify_signature": False, ...}, ...)'
+      - pattern: jwt.decode(..., verify=False, ...)
+  - id: aicd.python.flask-debug
+    languages: [python]
+    severity: WARNING
+    message: Flask запускается с debug=True (интерактивный отладчик исполняет код).
+    metadata: {cwe: ["CWE-489"], aicd-severity: medium, category: misconfiguration}
+    pattern: $APP.run(..., debug=True, ...)
+  - id: aicd.python.weak-hash
+    languages: [python]
+    severity: INFO
+    message: MD5/SHA1 непригодны для безопасности (пароли, подписи).
+    metadata: {cwe: ["CWE-327"], aicd-severity: low, category: crypto}
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)
+  - id: aicd.python.insecure-tempfile
+    languages: [python]
+    severity: INFO
+    message: tempfile.mktemp подвержен гонке (используйте mkstemp/NamedTemporaryFile).
+    metadata: {cwe: ["CWE-377"], aicd-severity: low, category: filesystem}
+    pattern: tempfile.mktemp(...)
+  # ------------------------------------------------------------------ JavaScript / TypeScript
+  - id: aicd.js.eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: eval/new Function динамического кода — исполнение произвольного кода.
+    metadata: {cwe: ["CWE-95"], aicd-severity: high, category: code-injection}
+    patterns:
+      - pattern-either:
+          - pattern: eval($X)
+          - pattern: new Function(...)
+      - pattern-not: eval("...")
+  - id: aicd.js.child-process-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: child_process.exec/execSync исполняют строку через shell — используйте execFile/spawn с argv.
+    metadata: {cwe: ["CWE-78"], aicd-severity: high, category: command-injection}
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              const $CP = require("child_process");
+              ...
+          - pattern-inside: |
+              $CP = require("child_process");
+              ...
+          - pattern-inside: |
+              import * as $CP from "child_process";
+              ...
+          - pattern-inside: |
+              import $CP from "child_process";
+              ...
+      - pattern-either:
+          - pattern: $CP.exec($CMD, ...)
+          - pattern: $CP.execSync($CMD, ...)
+      - pattern-not: $CP.exec("...", ...)
+      - pattern-not: $CP.execSync("...", ...)
+  - id: aicd.js.inner-html
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Присваивание innerHTML/outerHTML или dangerouslySetInnerHTML — риск XSS.
+    metadata: {cwe: ["CWE-79"], aicd-severity: medium, category: xss}
+    pattern-either:
+      - pattern: $EL.innerHTML = $X
+      - pattern: $EL.outerHTML = $X
+      - pattern: document.write(...)
+  - id: aicd.js.tls-reject-unauthorized
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Проверка TLS отключена (rejectUnauthorized false).
+    metadata: {cwe: ["CWE-295"], aicd-severity: medium, category: tls}
+    pattern-either:
+      - pattern: "{..., rejectUnauthorized: false, ...}"
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+  - id: aicd.js.weak-hash
+    languages: [javascript, typescript]
+    severity: INFO
+    message: MD5/SHA1 непригодны для безопасности.
+    metadata: {cwe: ["CWE-327"], aicd-severity: low, category: crypto}
+    pattern-either:
+      - pattern: crypto.createHash("md5")
+      - pattern: crypto.createHash("sha1")
+  # ------------------------------------------------------------------ PHP
+  - id: aicd.php.command-exec
+    languages: [php]
+    severity: ERROR
+    message: Исполнение команды через shell — риск внедрения команд.
+    metadata: {cwe: ["CWE-78"], aicd-severity: high, category: command-injection}
+    pattern-either:
+      - pattern: shell_exec(...)
+      - pattern: system(...)
+      - pattern: exec(...)
+      - pattern: passthru(...)
+      - pattern: popen(...)
+      - pattern: proc_open(...)
+  - id: aicd.php.eval
+    languages: [php]
+    severity: ERROR
+    message: eval динамического кода.
+    metadata: {cwe: ["CWE-95"], aicd-severity: high, category: code-injection}
+    pattern: eval(...)
+  - id: aicd.php.unserialize
+    languages: [php]
+    severity: ERROR
+    message: unserialize недоверенных данных — внедрение объектов.
+    metadata: {cwe: ["CWE-502"], aicd-severity: high, category: deserialization}
+    pattern: unserialize(...)

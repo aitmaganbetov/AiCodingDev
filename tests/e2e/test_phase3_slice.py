@@ -66,6 +66,16 @@ async def test_develop_run_completes_with_verified_evidence(world: Slice) -> Non
         assert ev["commit_sha"] and ev["command"] and ev["exit_code"] == 0 and ev["started_at"] and ev["finished_at"]
         assert ev["verification_status"] == "VERIFIED" and len(ev["sha256"]) == 64 and ev["environment"]
     assert changed == 2
+    async with transaction(
+        world.worker, DbContext(workspace_id=uuid7().__class__(world.ws), actor_type="system")
+    ) as conn:
+        compliance = (
+            await conn.execute(
+                text("SELECT count(*) FROM compliance_results WHERE run_id = :r AND superseded_at IS NULL"),
+                {"r": uuid7().__class__(run_id)},
+            )
+        ).scalar_one()
+    assert compliance > 0, "compliance.evaluate(run) выполнен до guard завершения и записал вердикты контролей"
 
 
 async def test_secret_in_change_fails_gate_and_run_never_completes(world: Slice) -> None:

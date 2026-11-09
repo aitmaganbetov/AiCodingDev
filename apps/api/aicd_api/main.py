@@ -12,24 +12,39 @@ from aicd_api import errors
 from aicd_api.middleware import BodyLimitMiddleware, request_context_middleware
 from aicd_api.ratelimit import RateLimiter
 from aicd_api.routers import (
+    agent_profiles,
+    aggregates,
+    analytics,
     approvals,
+    artifacts,
     audit,
     auth,
     chat,
+    code_intelligence,
     directives,
     documentation,
     events,
+    findings,
+    github,
     health,
+    metrics,
+    notifications,
     projects,
     providers,
+    quality,
+    reviews,
     runs,
+    search,
+    standards,
+    system,
     technologies,
     workspaces,
+    worktrees,
 )
 from aicd_api.state import AppState
 from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.config import Settings, get_settings
-from aicd_platform.db import create_engine
+from aicd_platform.db import TcpKeepalive, create_engine
 from aicd_platform.logging import configure_logging
 from aicd_platform.telemetry import configure_tracing
 
@@ -43,7 +58,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        engine = create_engine(settings.require_database_url(), pool_size=settings.db_pool_size)
+        engine = create_engine(
+            settings.require_database_url(),
+            pool_size=settings.db_pool_size,
+            keepalive=TcpKeepalive.from_settings(settings),
+        )
         redis = Redis.from_url(settings.redis_url, socket_timeout=1.0, socket_connect_timeout=1.0)
         app.state.aicd = AppState(
             settings=settings,
@@ -56,6 +75,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            hub = getattr(app.state, "aicd_sse_hub", None)  # общий pub/sub SSE-потоков (aicd_api.sse_hub)
+            if hub is not None:
+                await hub.close()
+            client = getattr(app.state, "aicd_github", None)
+            if client is not None:
+                await client.aclose()
             await redis.aclose()
             await engine.dispose()
 
@@ -68,7 +93,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.middleware("http")(request_context_middleware)
-    app.add_middleware(BodyLimitMiddleware)
+    # Вебхуки GitHub — до 25 MiB (SC-GH-01); остальные тела — 256 KiB (API_DESIGN §6).
+    app.add_middleware(
+        BodyLimitMiddleware, overrides={API_PREFIX + github.WEBHOOK_PATH: settings.github_webhook_max_bytes}
+    )
     errors.install(app)
     for router in (
         health.router,
@@ -76,14 +104,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         workspaces.router,
         projects.router,
         technologies.router,
+        technologies.workspace_router,
         documentation.router,
         providers.router,
         runs.router,
+        quality.router,
+        findings.router,
+        standards.router,
         approvals.router,
         directives.router,
         chat.router,
         events.router,
         audit.router,
+        artifacts.router,
+        github.router,
+        analytics.router,
+        code_intelligence.router,
+        worktrees.router,
+        search.router,
+        aggregates.router,
+        system.router,
+        agent_profiles.router,
+        notifications.router,
+        reviews.router,
     ):
         app.include_router(router, prefix=API_PREFIX)
+    app.include_router(metrics.router)  # /metrics вне /api/v1: только внутренняя сеть (P8-06)
     return app

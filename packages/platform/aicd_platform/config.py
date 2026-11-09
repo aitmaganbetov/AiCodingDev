@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     database_url_file: str | None = None
     db_pool_size: int = Field(default=10, ge=1, le=200)
+    # TCP keepalive / tcp_user_timeout соединений libpq (P9-03): «чёрная дыра» сети (пакеты теряются без RST)
+    # обнаруживается за idle + interval × count секунд вместо ~2 ч по умолчанию ядра; 0 в tcp_user_timeout — выкл.
+    db_keepalives_idle_seconds: int = Field(default=30, ge=1, le=7200)
+    db_keepalives_interval_seconds: int = Field(default=10, ge=1, le=600)
+    db_keepalives_count: int = Field(default=3, ge=1, le=60)
+    db_tcp_user_timeout_ms: int = Field(default=60_000, ge=0, le=3_600_000)
 
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_url_file: str | None = None  # URL с паролем — из файла секрета
@@ -55,6 +61,8 @@ class Settings(BaseSettings):
     rate_limit_mutation_per_minute: int = 120
     rate_limit_login_per_ip_per_minute: int = 10
     rate_limit_anonymous_per_ip_per_minute: int = 60
+    # Глобальный поиск `GET /search` (B6): отдельный бакет на пользователя поверх общего лимита чтения.
+    rate_limit_search_per_minute: int = Field(default=60, ge=1)
 
     # Allowlist корней локальных репозиториев: "имя=/абсолютный/путь" (FR-PRJ-02).
     repository_roots: Annotated[dict[str, Path], NoDecode] = Field(default_factory=dict)
@@ -84,16 +92,71 @@ class Settings(BaseSettings):
     retention_processed_events_days: int = Field(default=30, ge=1)
     retention_user_sessions_days: int = Field(default=30, ge=1)
     retention_provider_health_days: int = Field(default=30, ge=1)
+    retention_webhook_deliveries_days: int = Field(default=30, ge=1)
+    retention_usage_metrics_days: int = Field(default=365, ge=1)
+    retention_index_snapshots_failed_days: int = Field(default=7, ge=1)
+    retention_index_snapshots_keep_ready: int = Field(default=5, ge=1)
+    retention_documentation_superseded_days: int = Field(default=90, ge=1)
+    retention_artifacts_ephemeral_days: int = Field(default=7, ge=1)
+    retention_artifacts_raw_log_days: int = Field(default=30, ge=1)
+    retention_artifacts_standard_days: int = Field(default=180, ge=1)
+    retention_notifications_days: int = Field(default=90, ge=1)  # уведомления пользователей (миграция 0020)
     # Партиции создаются на N месяцев вперёд; алерт, если впереди меньше 2 (§20.1).
     retention_partitions_ahead_months: int = Field(default=3, ge=2, le=24)
     # Пакетное удаление непартиционированных таблиц (§20.2): 5–10 тыс. строк с паузами.
     retention_batch_size: int = Field(default=5000, ge=1, le=10_000)
     retention_batch_pause_seconds: float = Field(default=0.05, ge=0, le=10)
-    # Каталог архива NDJSON.gz (FS); по умолчанию <artifact_fs_root>/archive.
+    # Приёмник архива NDJSON.gz (§20.2): fs | s3; не задан — как artifact_backend.
+    retention_archive_backend: Literal["fs", "s3"] | None = None
+    # Каталог архива (fs); по умолчанию <artifact_fs_root>/archive.
     retention_archive_root: Path | None = None
+    # Bucket архива (s3; по умолчанию artifact_s3_bucket — рекомендуется отдельный bucket с object lock/WORM)
+    # и префикс ключей: `<prefix>/<workspace_id|global>/<table|runs>/<period|run_id>.ndjson.gz`.
+    # Endpoint, регион и ключи доступа — общие с хранилищем артефактов (AICD_ARTIFACT_S3_*).
+    retention_archive_s3_bucket: str | None = None
+    retention_archive_s3_prefix: str = Field(default="archive", pattern=r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 
     log_level: str = "INFO"
     otel_exporter: Literal["none", "console"] = "none"
+
+    # GitHub App (P8-02/P8-03, SECURITY_ARCHITECTURE §6.1, §10): ключ App и webhook secret(ы) — только файлы
+    # секретов (Docker secrets); при ротации активны два webhook secret (текущий и предыдущий, SC-SEC-06).
+    # Базовые URL — конфигурация оператора (в production — только https); исходящие запросы к GitHub идут
+    # через egress-proxy (`egress_proxy_url`), если он задан.
+    github_app_id: int | None = Field(default=None, ge=1)
+    github_app_slug: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,99}$")
+    github_app_private_key_file: str | None = None
+    github_webhook_secret_file: str | None = None
+    github_webhook_secret_previous_file: str | None = None
+    github_api_url: str = "https://api.github.com"
+    github_web_url: str = "https://github.com"
+    github_git_url: str | None = None  # транспорт git push (по умолчанию github_web_url)
+    github_webhook_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
+    github_install_state_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    egress_proxy_url: str | None = None
+
+    # Метрики Prometheus (P8-06, SC-OBS-03): `/metrics` только во внутренней сети и по bearer-токену из файла
+    # секрета; в production без токена endpoint выключен. Воркеры поднимают свой HTTP-сервер на
+    # `metrics_port` (0 — не поднимать), API отдаёт `/metrics` вне `/api/v1` (reverse-proxy его не публикует).
+    metrics_token: SecretStr | None = None
+    metrics_token_file: str | None = None
+    metrics_host: str = "0.0.0.0"  # noqa: S104 — порт доступен только в сети backend (compose), не публикуется
+    metrics_port: int = Field(default=0, ge=0, le=65535)
+
+    # Файл статуса утилиты бэкапа (`python -m scripts.backup … --status-file`, P9-05), смонтированный только для
+    # чтения: worker-outbox — метрики aicd_backup_* и алерты AicdBackup* (ТЗ §16 «failed backups»); API — компонент
+    # `backup` в `GET /system/health` (если файл смонтирован и в контейнер api; иначе статус `unknown`).
+    backup_status_file: Path | None = None
+
+    # Heartbeat процессов воркеров (`worker_hosts.last_heartbeat_at`): период записи; интервал пишется и в
+    # `worker_hosts.labels.heartbeat_interval_seconds`, по нему `GET /system/health` и метрика
+    # `aicd_worker_heartbeat_age_seconds` судят о живости (ok ≤ 3×, degraded ≤ 10×, иначе down).
+    worker_heartbeat_seconds: float = Field(default=15.0, ge=1.0, le=300.0)
+    # Виды воркеров, которые должны работать в этой установке (compose: outbox,orchestrator,exec,index). Пусто —
+    # ожидания не заданы: отсутствие вида в `GET /system/health` — `unknown`, а не `down`.
+    expected_worker_kinds: Annotated[
+        list[Literal["api", "orchestrator", "outbox", "exec", "verify", "index"]], NoDecode
+    ] = Field(default_factory=list)
 
     @field_validator("repository_roots", mode="before")
     @classmethod
@@ -106,7 +169,7 @@ class Settings(BaseSettings):
             return roots
         return value
 
-    @field_validator("allowed_origins", mode="before")
+    @field_validator("allowed_origins", "expected_worker_kinds", mode="before")
     @classmethod
     def _parse_origins(cls, value: object) -> object:
         if isinstance(value, str):
@@ -121,6 +184,8 @@ class Settings(BaseSettings):
             self.secret_key = _read_secret_file(self.secret_key_file)
         if self.maintenance_database_url is None:
             self.maintenance_database_url = _read_secret_file(self.maintenance_database_url_file)
+        if self.metrics_token is None:
+            self.metrics_token = _read_secret_file(self.metrics_token_file)
         redis_from_file = _read_secret_file(self.redis_url_file)
         if redis_from_file is not None:
             self.redis_url = redis_from_file.get_secret_value()
@@ -129,6 +194,11 @@ class Settings(BaseSettings):
                 raise ValueError(f"недопустимое имя корня репозиториев: {name!r}")
             if not root.is_absolute():
                 raise ValueError(f"корень репозиториев {name!r} должен быть абсолютным путём")
+        if self.environment == "production":
+            for name in ("github_api_url", "github_web_url", "github_git_url"):
+                value = getattr(self, name)
+                if value is not None and not str(value).startswith("https://"):
+                    raise ValueError(f"{name} в production должен использовать https://")
         return self
 
     def require_database_url(self) -> str:
@@ -141,8 +211,26 @@ class Settings(BaseSettings):
             raise RuntimeError("AICD_MAINTENANCE_DATABASE_URL или AICD_MAINTENANCE_DATABASE_URL_FILE не заданы")
         return self.maintenance_database_url.get_secret_value()
 
+    def metrics_token_value(self) -> str | None:
+        return self.metrics_token.get_secret_value() if self.metrics_token else None
+
+    def github_private_key_pem(self) -> SecretStr | None:
+        """PEM-ключ GitHub App из файла секрета (читается при обращении, в атрибутах Settings не хранится)."""
+        return _read_secret_file(self.github_app_private_key_file)
+
+    def github_webhook_secrets(self) -> list[SecretStr]:
+        """Активные webhook secret: текущий и (на время ротации) предыдущий."""
+        found = (
+            _read_secret_file(self.github_webhook_secret_file),
+            _read_secret_file(self.github_webhook_secret_previous_file),
+        )
+        return [s for s in found if s is not None and s.get_secret_value()]
+
     def archive_root(self) -> Path:
         return self.retention_archive_root or self.artifact_fs_root / "archive"
+
+    def archive_backend(self) -> Literal["fs", "s3"]:
+        return self.retention_archive_backend or self.artifact_backend
 
     def require_secret_key(self) -> bytes:
         if self.secret_key is None:

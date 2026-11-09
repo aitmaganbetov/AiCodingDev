@@ -11,7 +11,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request
 from starlette.responses import Response
 
-from aicd_api.deps import app_state, authorize, current_principal, project_access
+from aicd_api.deps import (
+    app_state,
+    authorize,
+    current_principal,
+    parse_workspace_header,
+    project_access,
+    workspace_access,
+)
 from aicd_api.responses import json_response
 from aicd_api.routers import op
 from aicd_code_intelligence.technologies import store
@@ -51,3 +58,35 @@ async def list_technologies(
             state.secret_key, [last["ecosystem"], last["name"], str(last["technology_version_id"])], filters
         )
     return json_response({"items": [store.view(r) for r in page], "next_cursor": next_cursor})
+
+
+workspace_router = APIRouter(tags=["documentation"])
+
+
+@workspace_router.get("/technologies", **op("listWorkspaceTechnologies", "documentation:read"))
+async def list_workspace_technologies(
+    request: Request,
+    principal: identity.Principal = Depends(current_principal),
+    q: Annotated[str | None, Query(min_length=1, max_length=100)] = None,
+    limit: Limit = DEFAULT_LIMIT,
+    cursor: Cursor = None,
+) -> Response:
+    """Технологии workspace (OQ-45 (c)): стек проектов и источники документации, без чужого каталога."""
+    access = await workspace_access(request, principal, parse_workspace_header(request))
+    await authorize(request, access, "documentation:read")
+    state = app_state(request)
+    filters = {"r": "ws_technologies", "ws": str(access.workspace_id), "q": q}
+    after = None
+    if cursor:
+        e, n, v = decode_cursor(state.secret_key, cursor, filters)
+        after = (e, n, uuid.UUID(v))
+    async with transaction(state.engine, access.db()) as conn:
+        rows = await store.list_workspace_technologies(conn, after=after, query=q, limit=limit + 1)
+    page = rows[:limit]
+    next_cursor = None
+    if len(rows) > limit:
+        last = page[-1]
+        next_cursor = encode_cursor(
+            state.secret_key, [last["ecosystem"], last["name"], str(last["technology_version_id"])], filters
+        )
+    return json_response({"items": [store.workspace_view(r) for r in page], "next_cursor": next_cursor})

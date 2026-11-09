@@ -190,7 +190,9 @@ stateDiagram-v2
   COMPLETED --> [*]
 ```
 
-`ASK` (вопрос) — упрощённый путь: `RECEIVED → DISPATCHED → ACKNOWLEDGED → COMPLETED` (ответ агента = ACP `ANSWER`), без replan. `PAUSE/RESUME/STOP` — прямые команды FSM run (с impact preview для STOP). `APPROVE/REJECT` в чате = вызов `approvals.decide()` с теми же RBAC-правилами. UI различает **delivered** (`DISPATCHED`), **acknowledged** (`ACKNOWLEDGED`) и **done** (`COMPLETED`) — ТЗ §11.
+`ASK` (вопрос) — упрощённый путь: `RECEIVED → DISPATCHED → ACKNOWLEDGED → COMPLETED` (ответ агента = ACP `ANSWER`), без replan.
+
+**Доставка и выполнение (реализация, `aicd_orchestration.directives`):** `DISPATCHED` — строки `directive_acknowledgements` (`PENDING`) созданы для задач-получателей (задачи замены/новые задачи; для `CONTEXT_ONLY` — затронутые задачи). Ack `DELIVERED` — в транзакции старта попытки задачи-получателя (`LEASED → RUNNING`): поручение входит в её инструкции и в раздел `directives` Context Pack с `directive_id`. Ack `ACKNOWLEDGED`/`REJECTED` — по принятому итогу агента (`directive_acks`: `accepted`/`not_applicable` / `cannot_comply`; без записи — неявное `accepted`). Директива `ACKNOWLEDGED`, когда все ack `ACKNOWLEDGED`; `COMPLETED`, когда задачи-получатели и их производные по `origin_task_id` (замены, fix-задачи), кроме вытесненных, `SUCCEEDED` (обязательные gates пройдены); `FAILED` с причиной — отказ агента, `FAILED`/`CANCELLED` задачи, отмена или завершение run раньше, ack, не доставленный/не подтверждённый до завершения задачи (открытые ack → `EXPIRED`). Статус выводится из состояния БД в транзакции `tick` и обработчика отмены run — повторная обработка событий идемпотентна. `STOP` — команда: ack нет, `COMPLETED` по достижении целевого статуса run/задачи. `PAUSE/RESUME/STOP` — прямые команды FSM run (с impact preview для STOP). `APPROVE/REJECT` в чате = вызов `approvals.decide()` с теми же RBAC-правилами. UI различает **delivered** (`DISPATCHED`), **acknowledged** (`ACKNOWLEDGED`) и **done** (`COMPLETED`) — ТЗ §11.
 
 ### 3.5 Approval
 
@@ -251,6 +253,8 @@ sequenceDiagram
 - `REPLAN_REQUIRED`/`TASK_CANCEL` — текущее исполнение завершается штатно (если до таймаута ≤ `safe_point_wait`, default 5 мин) либо отменяется; worktree фиксируется WIP-коммитом в ветке задачи, diff сохраняется artifact'ом.
 - `RESTART_REQUIRED` — отмена исполнения, попытка помечается `CANCELLED`, не расходует retry budget.
 
+Сигнал safe point между процессами: команду (pause/cancel run, применённое поручение) фиксирует в БД API или `worker-orchestrator`, а CLI-процесс принадлежит `worker-exec`. Исполнитель попытки периодически (`Orchestrator.cancel_poll_seconds`, по умолчанию 5 с) читает флаг — run `PAUSED`/`CANCELLED` или применённое влияние `REPLAN_REQUIRED`/`TASK_CANCEL` на задачу — и штатно останавливает свой процесс (`cancel(reason)` адаптера: `pause` / `run_cancel` / `directive`); in-process хук — лишь ускорение в том же процессе. Replan в утверждённом плане: рёбра утверждённой `plan_version` неизменяемы, поэтому не начатые задачи, зависящие от заменённых, пересоздаются в новой версии вместе с заменами (`directive_impacts` `TASK_ADD`, `details.reason = dependent_of_replaced`).
+
 ## 7. Checkpoint и recovery
 
 **Checkpoint** (`checkpoints`): `run_id`, `state_version` (= `runs.version`), `state_ref` → artifact JSON: статусы и версии задач, `plan_version`, HEAD каждого worktree, открытые approvals, ссылки на последние evidence. Создаётся: при `PLANNED`, перед replan, при `PAUSED`, при `VERIFYING`.
@@ -258,7 +262,7 @@ sequenceDiagram
 **Recovery reconciler** (старт воркера + каждые 60 с):
 1. `cli_executions` в `STARTING/RUNNING` без живой аренды → проверить контейнер (`docker inspect` по label `aicd.execution_id`) / PID группу → жив: переподключить стрим или убить по политике; мёртв: `CRASHED`, задача `RETRY_WAIT`.
 2. `worktrees` без активной задачи → `ORPHANED`; удаление после сохранения diff.
-3. `external_actions` в `EXECUTING` → запрос состояния внешней системы → `CONFIRMED`/повтор (ADR-0012). `CONFIRMED` никогда не повторяется (AC-09).
+3. `external_actions` в `EXECUTING` → запрос состояния внешней системы → `CONFIRMED`/повтор (ADR-0012). `CONFIRMED` никогда не повторяется (AC-09). GitHub-действия (`git_push`, `pr_create`, `pr_comment`, `pr_update`, `pr_merge`) сверяет воркер orchestrator, где есть ключ App (`aicd_orchestration.github_recovery`, Phase 9, OQ-47 (7)): только строки без живой аренды с их fencing token; probe по данным строки ledger (ветка на SHA, PR из head-ветки, ревью с маркером `aicd:review:<action_id>`, commit status, PR смёрджен) ⇒ `CONFIRMED` (`result.reconciled`), затем повторный вход в идемпотентный workflow (`open_pull_request`/`merge`) с новой арендой — оставшиеся шаги через `execute_once` (probe → do), без ожидания повторной доставки Dramatiq; GitHub недоступен ⇒ строка остаётся `EXECUTING` в отчёте (алерт по логу).
 4. `outbox_events` неопубликованные старше 30 с → повторная публикация (consumers идемпотентны).
 5. Runs в нетерминальных состояниях без прогресса > порога → алерт `stuck_run`.
 

@@ -15,21 +15,28 @@ RUN --mount=type=secret,id=ca_bundle,required=false \
 COPY packages ./packages
 COPY apps/api ./apps/api
 COPY apps/cli ./apps/cli
+COPY apps/worker ./apps/worker
 RUN --mount=type=secret,id=ca_bundle,required=false \
     if [ -f /run/secrets/ca_bundle ]; then export SSL_CERT_FILE=/run/secrets/ca_bundle; fi; \
     uv sync --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 # git нужен для проверки привязываемых репозиториев (P1-12). Источники apt — по HTTPS.
+# AICD_INSTALL_GIT=0 — только для проверки конвейера релиза там, где deb.debian.org недоступен: такой образ
+# не релизный (без git привязка репозиториев не работает), конвейер помечает его releasable=false в provenance.
+ARG AICD_INSTALL_GIT=1
 RUN --mount=type=secret,id=ca_bundle,required=false \
-    sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
- && CA=""; if [ -f /run/secrets/ca_bundle ]; then CA="-o Acquire::https::CAInfo=/run/secrets/ca_bundle"; fi \
- && apt-get $CA update \
- && apt-get $CA install -y --no-install-recommends git \
- && rm -rf /var/lib/apt/lists/* \
+    if [ "$AICD_INSTALL_GIT" = "1" ]; then \
+      sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+      && CA=""; if [ -f /run/secrets/ca_bundle ]; then CA="-o Acquire::https::CAInfo=/run/secrets/ca_bundle"; fi \
+      && apt-get $CA update \
+      && apt-get $CA install -y --no-install-recommends git \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi \
  && groupadd --system --gid 10001 aicd \
  && useradd --system --uid 10001 --gid aicd --home-dir /nonexistent --shell /usr/sbin/nologin aicd \
- && mkdir -p /var/lib/aicd/artifacts && chown aicd:aicd /var/lib/aicd/artifacts
+ && mkdir -p /var/lib/aicd/artifacts /var/lib/aicd/index-export \
+ && chown aicd:aicd /var/lib/aicd/artifacts /var/lib/aicd/index-export
 WORKDIR /app
 COPY --from=build /app /app
 COPY infrastructure/migrations ./infrastructure/migrations

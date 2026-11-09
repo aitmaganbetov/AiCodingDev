@@ -19,6 +19,7 @@ from aicd_api.deps import (
     authorize,
     current_principal,
     parse_workspace_header,
+    require_step_up,
     workspace_access,
 )
 from aicd_api.hooks import get_hooks
@@ -26,8 +27,10 @@ from aicd_api.idempotency import CommandResult, run_idempotent
 from aicd_api.responses import etag, json_response, require_if_match
 from aicd_api.routers import op
 from aicd_identity import api as identity
+from aicd_identity.rbac import FOUR_EYES_ACTIONS
 from aicd_orchestration.approvals import Approvals, SelfApprovalContext, summary_for
 from aicd_orchestration.directives import Directives
+from aicd_platform import metrics
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
@@ -38,7 +41,7 @@ ApprovalStatus = Literal["PENDING", "APPROVED", "REJECTED", "EXPIRED", "CANCELLE
 ApprovalActionType = Literal[
     "PLAN_APPROVAL", "MERGE", "PRODUCTION_DEPLOY", "DESTRUCTIVE_MIGRATION", "DATA_DELETION", "SECRET_CHANGE",
     "UNRESTRICTED_NETWORK", "DOCS_DOWNLOAD", "CRITICAL_DIRECTIVE", "MANUAL_REVIEW", "SELF_REVIEW_FALLBACK",
-    "LOCAL_EXECUTION_FALLBACK",
+    "LOCAL_EXECUTION_FALLBACK", "VULN_DB_UPDATE",
 ]  # fmt: skip
 Limit = Annotated[int, Query(ge=1, le=MAX_LIMIT)]
 Cursor = Annotated[str | None, Query(max_length=1024)]
@@ -84,13 +87,14 @@ def approval_view(row: dict[str, Any], can_decide: bool) -> dict[str, Any]:
 
 async def _locate(request: Request, principal: identity.Principal, approval_id: uuid.UUID) -> Access:
     """Workspace approval через SECURITY DEFINER `sys_resolve_approval_workspace` (только для членов) —
-    иначе 404, не раскрывая чужие ресурсы (AC-12); как `_resolve` в routers/runs.py."""
+    иначе 404, не раскрывая чужие ресурсы (AC-12); как `resolve_resource` в routers/runs.py."""
     state = app_state(request)
     async with transaction(state.engine, DbContext(user_id=principal.user_id)) as conn:
         ws = (
             await conn.execute(text("SELECT sys_resolve_approval_workspace(:id)"), {"id": approval_id})
         ).scalar_one_or_none()
     if ws is None:
+        metrics.AUTHZ_DENIED.labels("tenant").inc()  # 404 на чужой/несуществующий ресурс — метрика безопасности (AC-12)
         raise ProblemError("not_found")
     header = request.headers.get("x-workspace-id")
     if header is not None and header != str(ws):
@@ -184,6 +188,9 @@ async def decide_approval(
         async with transaction(state.engine, access.db()) as conn:
             await _audit_denied(conn, access, f"approval:decide:{row['action_type']}", request)
         raise ProblemError(verdict.code or "forbidden")
+    if body.decision == "APPROVED" and row["action_type"] in FOUR_EYES_ACTIONS:
+        # SC-IAM-08 / SC-APR-06: утверждение действия критического набора — только со свежим вводом пароля.
+        await require_step_up(request, principal, f"approval:decide:{row['action_type']}")
     decided: dict[str, Any] = {}
 
     async def command(conn: AsyncConnection) -> CommandResult:

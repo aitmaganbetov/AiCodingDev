@@ -104,15 +104,24 @@ flowchart TD
 | # | Фильтр | Источник | Причина исключения в `score_breakdown.excluded[]` |
 |---|---|---|---|
 | H1 | провайдер и установка включены | `cli_providers.enabled`, settings | `disabled` |
-| H2 | установлен, `compatibility ≠ UNSUPPORTED`; `UNTESTED` только если `allow_untested_cli_versions` | probe | `not_installed`, `unsupported_version`, `untested_version` |
+| H2 | установлен, `compatibility ≠ UNSUPPORTED`; `UNTESTED` только если `allow_untested_cli_versions` (snapshot run `routing`; по умолчанию профиля — `true` для basic/strict, `false` для critical; выбор `UNTESTED` — `score_breakdown.warnings = ["UNTESTED_CLI_VERSION"]`, `candidates[].compatibility`, предупреждение в `reason`) | probe | `not_installed`, `unsupported_version`, `untested_version` |
 | H3 | `auth_status = AUTHENTICATED` (статус `UNKNOWN` допустим, только если последнее исполнение на установке успешно < 1 ч назад) | `cli_installations`, `provider_health` | `auth_required` |
 | H4 | `availability ∈ {AVAILABLE, DEGRADED}`, `now ≥ cooldown_until` | `provider_health` | `unavailable`, `rate_limited` |
 | H5 | требуемые capabilities (`noninteractive_mode`, `machine_readable_output ≠ none`; для задач с `session_ref_hint` — `resume_session`) | матрица совместимости | `capability_missing:<flag>` |
 | H6 | `provider ∈ snapshot.routing.allowed_providers` | `runs.policy_snapshot` | `policy_disallowed` |
+| H6a | провайдер включён в workspace, роль задачи ∈ `allowed_roles`, `max_parallel_sessions > 0` (§4.1a) | `policies(provider_settings)` | `workspace_disabled`, `role_not_allowed`, `workspace_sessions_zero` |
 | H7 | независимость (раздел 5) для задач `reviewer`/`security` и review-задач `qa`/`architect`/`database` | история попыток | `independence_conflict` |
-| H8 | `active_executions(installation) < max_concurrent` (по умолчанию 2 на установку, ≤ `max_concurrent_per_provider` на workspace) | `cli_executions` в `STARTING/RUNNING` | `concurrency_full` |
+| H8 | `active_executions(installation) < max_concurrent` (по умолчанию 2 на установку) **и** сессии провайдера в workspace `< max_parallel_sessions` (§4.1a) — действует более строгий лимит | `cli_executions` в `QUEUED…EXITED`; попытки задач workspace в `RUNNING` | `concurrency_full`, `workspace_concurrency_full` |
 
 Если после H1–H7 кандидатов нет — задача `BLOCKED`: `AUTH_REQUIRED`, если единственная причина исключения всех кандидатов — `auth_required`; иначе `PROVIDER_UNAVAILABLE` (ТЗ §5, AC-16). Задача разблокируется автоматически событием `provider.health_changed`/`provider.auth_restored` (повторный роутинг), без ручного вмешательства и без обходных путей. Если run не имеет ни одной исполнимой задачи, run → `BLOCKED` с той же причиной в `runs.blocked_reason`.
+
+### 4.1a Безопасные настройки провайдера в workspace (Phase 8, OQ-45)
+
+`PATCH /providers/{id}/settings` (API_DESIGN §15) хранит настройки в `policies(policy_type='provider_settings', name=<провайдер>)`; без строки действуют значения по умолчанию (`enabled=true`, `max_parallel_sessions=1` — OQ-01, `default_timeout_seconds=1800`, все роли). Router (`routing_service._candidates`) применяет их к каждому кандидату:
+
+- `enabled=false` ⇒ `workspace_disabled`; роль задачи не в `allowed_roles` ⇒ `role_not_allowed`; `max_parallel_sessions=0` ⇒ `workspace_sessions_zero` (исключение, а не WAIT — слот не появится). Если все кандидаты отсеяны (без учёта `disabled`), задача `BLOCKED(PROVIDER_UNAVAILABLE)`; текст `routing_decisions.reason` указывает «по настройкам workspace», когда все причины — политические (`policy_disallowed` и перечисленные).
+- Лимит сессий: сессия = попытка задачи workspace в статусе `RUNNING` с этим провайдером (попытка создаётся в той же транзакции, что и решение, поэтому учитывает и ещё не запущенный процесс CLI). При `сессий ≥ max_parallel_sessions` установка не свободна (`workspace_concurrency_full`); если свободных нет — `WAIT` (задача остаётся `READY`, решение не записывается, как для занятых установок), иначе выбирается другой провайдер. Решения разных run одного workspace сериализуются транзакционной advisory-блокировкой `aicd:provider_sessions:<workspace_id>`, поэтому лимит не превышается гонкой. Лимит установки (`cli_installations.max_concurrency`, по всем workspace, проверяется и шлюзом) действует одновременно — более строгий выигрывает.
+- Тайм-аут исполнения (CLI executor): явный `tasks.timeout_seconds` задачи важнее `default_timeout_seconds` workspace; значение столбца по умолчанию (1800 — план/поручение его не задавали) считается «не задано» и заменяется настройкой; итог ограничен 30…14400 с (`ExecutionRequest.limits`). Ограничение: явный тайм-аут, равный 1800, неотличим от «не задано» — нужен nullable-столбец (миграция, кандидат OQ-45).
 
 ### 4.2 Взвешенная оценка
 

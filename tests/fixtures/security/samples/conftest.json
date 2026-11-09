@@ -1,0 +1,1 @@
+[{"filename": "/workspace/deploy/app.yaml", "namespace": "main", "successes": 0, "warnings": [{"msg": "pod should set runAsNonRoot", "metadata": {"query": "data.main.warn"}}], "failures": [{"msg": "container web must not be privileged", "metadata": {"query": "data.main.deny"}}]}]

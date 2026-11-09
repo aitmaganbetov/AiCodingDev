@@ -1,0 +1,183 @@
+{
+  "tasks": {
+    "title": "Задача",
+    "loading": "Загрузка задачи…",
+    "backToGraph": "К графу задач",
+    "openChat": "Чат по задаче",
+    "status": "Статус",
+    "role": "Роль агента",
+    "executor": "Исполнитель",
+    "lastProvider": "последний: {{provider}}",
+    "reviewLoops": "Циклов ревью",
+    "complexity": "Сложность · риск",
+    "nextAttempt": "Следующая попытка",
+    "updatedAt": "Обновлена",
+    "instructions": "Инструкции",
+    "criteria": "Критерии приёмки",
+    "noCriteria": "Критерии не заданы.",
+    "dependsCount": "Зависит от задач: {{count}}",
+    "tabsLabel": "Разделы задачи",
+    "tab": {
+      "overview": "Описание",
+      "attempts": "Попытки",
+      "events": "События и логи",
+      "messages": "Сообщения ACP",
+      "diff": "Изменения (diff)",
+      "evidence": "Evidence и проверки"
+    },
+    "attempts": {
+      "loading": "Загрузка попыток…",
+      "empty": "Попыток ещё не было",
+      "caption": "Попытки выполнения задачи",
+      "no": "Попытка",
+      "noValue": "№ {{no}}",
+      "status": "Статус",
+      "executor": "Исполнитель",
+      "time": "Время",
+      "failure": "Ошибка",
+      "executions": "Запуски CLI",
+      "exitCode": "код {{code}}",
+      "output": "вывод",
+      "routing": "Причина маршрутизации"
+    },
+    "events": {
+      "loading": "Загрузка событий…",
+      "empty": "Событий по задаче пока нет",
+      "label": "События задачи",
+      "onlyCli": "Только вывод CLI"
+    },
+    "messages": {
+      "loading": "Загрузка сообщений…",
+      "empty": "ACP-сообщений по задаче нет",
+      "label": "ACP-сообщения задачи",
+      "payload": "Содержимое (ACP payload)"
+    },
+    "gates": {
+      "loading": "Загрузка проверок…",
+      "caption": "Проверки качества (gate executions)",
+      "empty": "Проверок по задаче нет.",
+      "gate": "Проверка",
+      "required": "Обязательная",
+      "yes": "да",
+      "no": "нет",
+      "status": "Результат",
+      "commit": "Commit",
+      "evidence": "Evidence",
+      "evidenceLink": "evidence {{id}}",
+      "note": "Примечание"
+    },
+    "evidence": {
+      "title": "Evidence",
+      "loading": "Загрузка evidence…",
+      "empty": "Evidence по задаче нет",
+      "label": "Evidence задачи",
+      "producer": "Источник",
+      "commit": "Commit",
+      "exitCode": "Код выхода",
+      "time": "Время",
+      "checksum": "Контрольная сумма",
+      "size": "Размер",
+      "command": "Команда",
+      "download": "Скачать артефакт",
+      "noDownload": "Скачивание недоступно для вашей роли."
+    },
+    "diff": {
+      "emptyTitle": "Изменений нет",
+      "emptyDescription": "Diff появляется как evidence (артефакт git_diff) после выполнения задачи.",
+      "artifactTitle": "Diff · commit {{commit}}",
+      "noCommit": "не указан",
+      "download": "Скачать diff",
+      "noDownloadPermission": "Просмотр diff недоступен для вашей роли.",
+      "tooLarge": "Diff больше {{size}} — откройте его скачиванием.",
+      "loading": "Загрузка diff…",
+      "loadError": "Не удалось загрузить diff",
+      "unparsable": "Артефакт не похож на unified diff — скачайте его.",
+      "filesLabel": "Изменённые файлы",
+      "stats": "+{{add}} −{{del}}",
+      "status": {
+        "added": "добавлен",
+        "deleted": "удалён",
+        "modified": "изменён",
+        "renamed": "переименован"
+      },
+      "modeLabel": "Вид diff",
+      "mode": {
+        "split": "Рядом",
+        "inline": "В одну колонку",
+        "text": "Текст"
+      },
+      "binary": "Двоичный файл — содержимое не показывается.",
+      "a11yHint": "Редактор только для чтения. Строки вне изменений свёрнуты; вид «Текст» удобнее для скринридера.",
+      "editorLoading": "Загрузка редактора…",
+      "editorLabel": "Diff файла {{path}}"
+    },
+    "enums": {
+      "risk": {
+        "low": "низкий",
+        "medium": "средний",
+        "high": "высокий",
+        "critical": "критический"
+      },
+      "failure": {
+        "CLI_NOT_INSTALLED": "CLI не установлен",
+        "AUTH_REQUIRED": "Требуется вход в CLI",
+        "RATE_LIMITED": "Лимит запросов",
+        "TIMEOUT": "Таймаут",
+        "SANDBOX_DENIED": "Запрещено песочницей",
+        "PROCESS_FAILED": "Процесс завершился с ошибкой",
+        "OUTPUT_PARSE_ERROR": "Не разобран вывод",
+        "UNSUPPORTED_VERSION": "Неподдерживаемая версия",
+        "CANCELLED": "Отменено",
+        "GATE_FAILED": "Проверка не пройдена",
+        "REVIEW_REJECTED": "Отклонено ревью",
+        "LEASE_LOST": "Потеряна аренда",
+        "WORKER_CRASH": "Сбой воркера",
+        "POLICY_DENIED": "Запрещено политикой",
+        "INTERNAL_ERROR": "Внутренняя ошибка"
+      },
+      "execution": {
+        "QUEUED": "в очереди",
+        "STARTING": "запуск",
+        "RUNNING": "выполняется",
+        "EXITED": "завершён",
+        "COLLECTED": "собран",
+        "TIMED_OUT": "таймаут",
+        "CANCELLED": "отменён",
+        "CRASHED": "сбой",
+        "AUTH_REQUIRED": "нужен вход",
+        "RATE_LIMITED": "лимит"
+      },
+      "gate": {
+        "PENDING": "Ожидает",
+        "RUNNING": "Выполняется",
+        "PASS": "Пройдена",
+        "FAIL": "Не пройдена",
+        "ERROR": "Ошибка",
+        "SKIPPED": "Пропущена",
+        "NOT_APPLICABLE": "Неприменима"
+      },
+      "verification": {
+        "PENDING": "Проверяется",
+        "VERIFIED": "Подтверждено",
+        "REJECTED": "Отклонено",
+        "UNVERIFIED": "Не подтверждено"
+      },
+      "artifact": {
+        "git_diff": "Diff",
+        "test_report": "Отчёт тестов",
+        "scan_report": "Отчёт сканирования",
+        "sbom": "SBOM",
+        "context_pack": "Context pack",
+        "cli_output": "Вывод CLI",
+        "raw_cli_log": "Сырой лог CLI",
+        "run_report": "Отчёт run",
+        "other": "Другое",
+        "coverage_report": "Покрытие",
+        "gate_log": "Лог проверки",
+        "applicability_report": "Применимость",
+        "signature": "Подпись"
+      }
+    },
+    "openReview": "Ревью кода"
+  }
+}

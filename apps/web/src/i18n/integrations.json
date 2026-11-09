@@ -1,0 +1,112 @@
+{
+  "integrations": {
+    "title": "Интеграция с GitHub",
+    "github": {
+      "title": "GitHub App",
+      "description": "Установка GitHub App даёт платформе доступ к выбранным репозиториям: push веток aicd/*, pull requests и merge только после утверждения. Ключ App хранится только на воркере; установку и права проверяет воркер.",
+      "connect": "Подключить GitHub App",
+      "connecting": "Переход на GitHub…",
+      "notConfigured": "GitHub App не настроен на этой инсталляции — обратитесь к оператору.",
+      "manageOnly": "Подключать и отключать установки могут владелец и администраторы.",
+      "listLabel": "Установки GitHub App",
+      "loading": "Загрузка установок…",
+      "emptyTitle": "Установок пока нет",
+      "emptyDescription": "Подключите GitHub App, чтобы привязывать GitHub-репозитории и создавать pull requests.",
+      "emptyDescriptionReadOnly": "Установки подключает владелец или администратор.",
+      "account": "Аккаунт",
+      "installationId": "ID установки",
+      "selection": "Репозитории",
+      "status": "Статус",
+      "connectedAt": "Подключена",
+      "actions": "Действия",
+      "pendingAccount": "проверяется…",
+      "disconnect": "Отключить",
+      "disconnectOf": "Отключить установку {{name}}",
+      "disconnectTitle": "Отключить установку «{{name}}»?",
+      "disconnectDescription": "Новые pull requests и merge через эту установку станут невозможны. История PR сохранится.",
+      "disconnectConfirm": "Отключить установку",
+      "disconnected": "Установка «{{name}}» отключена.",
+      "callbackConnecting": "Подключение установки GitHub App…",
+      "callbackRegistered": "Установка {{id}} зарегистрирована и проверяется.",
+      "callbackInvalid": "Ссылка возврата с GitHub некорректна: нет installation_id или state.",
+      "setupTitle": "Возврат с GitHub",
+      "setupNoWorkspace": "Не удалось определить рабочее пространство для этой установки. Начните подключение заново из раздела «Интеграции» нужного пространства.",
+      "setupRedirecting": "Переход к рабочему пространству…",
+      "enums": {
+        "status": {
+          "PENDING": "Проверяется",
+          "ACTIVE": "Активна",
+          "SUSPENDED": "Приостановлена",
+          "REVOKED": "Отключена"
+        },
+        "selection": {
+          "all": "Все",
+          "selected": "Выбранные"
+        }
+      }
+    },
+    "verification": {
+      "label": "Проверка GitHub",
+      "PENDING": "Воркер проверяет установку и права через GitHub API…",
+      "SUCCEEDED_installation": "Установка проверена и подключена.",
+      "SUCCEEDED_repository": "Доступ к репозиторию подтверждён, репозиторий привязан.",
+      "FAILED": "Проверка не пройдена: {{reason}}",
+      "errors": {
+        "not_found": "установка GitHub App не найдена",
+        "foreign_app": "установка принадлежит другому GitHub App",
+        "permissions": "права установки не совпадают с минимальным набором ({{detail}})",
+        "conflict": "уже подключено в другом рабочем пространстве",
+        "no_installation": "в рабочем пространстве нет активной установки GitHub App",
+        "not_accessible": "репозиторий недоступен установкам GitHub App",
+        "invalid_repository": "локальная копия репозитория некорректна",
+        "github_unavailable": "GitHub API недоступен — повторите позже",
+        "unknown": "{{code}}"
+      }
+    },
+    "pr": {
+      "title": "Pull requests",
+      "listLabel": "Pull requests",
+      "loading": "Загрузка pull requests…",
+      "emptyTitle": "Pull requests пока нет",
+      "emptyDescription": "PR создаётся из завершённого запуска: изменения проверенной задачи пушатся в ветку aicd/* и открываются как pull request.",
+      "number": "PR",
+      "repository": "Репозиторий",
+      "branches": "Ветки",
+      "state": "Состояние",
+      "run": "Запуск",
+      "openOnGitHub": "Открыть PR #{{number}} на GitHub",
+      "create": "Создать pull request",
+      "createTitle": "Создать pull request",
+      "createDescription": "Платформа запушит ветку задачи и откроет PR; изменения CI-конфигурации сначала требуют одобрения.",
+      "createOnlyCompleted": "Pull request можно создать только для завершённого запуска.",
+      "titleField": "Заголовок PR",
+      "titleHint": "Необязательно; по умолчанию — цель запуска.",
+      "baseBranch": "Целевая ветка",
+      "baseBranchHint": "Необязательно; по умолчанию — ветка по умолчанию репозитория.",
+      "branchInvalid": "Допустимы латинские буквы, цифры и . _ / -",
+      "submit": "Создать PR",
+      "queued": "Создание PR поставлено в очередь: {{repo}}, ветка {{branch}} → {{base}}.",
+      "ciApproval": "Изменения CI-конфигурации требуют одобрения перед push.",
+      "openApproval": "Перейти к одобрению",
+      "merge": "Запросить merge",
+      "mergeOf": "Запросить merge PR #{{number}}",
+      "mergeTitle": "Запросить merge PR #{{number}}",
+      "mergeDescription": "Merge выполнится только после утверждения другим администратором (four-eyes) и при выполненных требованиях защиты ветки.",
+      "mergeMethod": "Способ merge",
+      "mergeSubmit": "Запросить merge",
+      "mergeRequested": "Запрошено одобрение merge PR #{{number}}.",
+      "enums": {
+        "state": {
+          "OPEN": "Открыт",
+          "CLOSED": "Закрыт",
+          "MERGED": "Слит"
+        },
+        "method": {
+          "merge": "Merge commit",
+          "squash": "Squash",
+          "rebase": "Rebase"
+        }
+      }
+    }
+  }
+}

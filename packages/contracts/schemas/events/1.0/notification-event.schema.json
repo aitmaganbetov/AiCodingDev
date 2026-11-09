@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/events/1.0/notification-event.schema.json",
+  "title": "NotificationSseEvent",
+  "description": "data: кадра notification.created потока workspace (GET /workspaces/{id}/events): новое персональное уведомление текущего пользователя (строка notifications, миграция 0020). id: кадра — курсор потока (created_at, микросекунды epoch). Содержимое — шаблонный заголовок, редактированная выжимка и идентификаторы; без секретов и payload доменных событий.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "run_id",
+    "seq",
+    "type",
+    "timestamp",
+    "schema_version",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "= payload.id (notifications.id)"
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "seq": {
+      "type": "null"
+    },
+    "type": {
+      "const": "notification.created"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "payload": {
+      "$ref": "#/$defs/notification"
+    }
+  },
+  "$defs": {
+    "uuid_or_null": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "severity",
+        "title",
+        "body",
+        "project_id",
+        "run_id",
+        "task_id",
+        "resource_type",
+        "resource_id",
+        "data",
+        "created_at",
+        "read_at",
+        "read"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "approval.requested",
+            "approval.decided",
+            "run.completed",
+            "run.failed",
+            "run.blocked",
+            "directive.awaiting_confirmation",
+            "directive.acknowledged",
+            "directive.completed",
+            "directive.failed",
+            "pull_request.merged",
+            "pull_request.failed",
+            "finding.critical"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "success",
+            "warning",
+            "error"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "project_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "run_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "task_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "resource_type": {
+          "enum": [
+            "approval",
+            "run",
+            "directive",
+            "gate_execution",
+            "external_action"
+          ]
+        },
+        "resource_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 12,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "read_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "read": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

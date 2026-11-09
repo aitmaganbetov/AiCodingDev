@@ -1,0 +1,482 @@
+{
+  "generated_at": "2026-11-08T19:30:56.187308Z",
+  "commit_sha": "a1457cee6d28d0356fd3aa5f6089886c81df5e81",
+  "dirty_paths": 1,
+  "run": {
+    "command": "uv run pytest -p no:cacheprovider -q -rs --cov --cov-report=json:reports/coverage/coverage.json --cov-report=term -o junit_family=xunit1 --junitxml=reports/coverage/junit-full.xml",
+    "exit_code": 0,
+    "started_at": "2026-11-08T19:18:57.251903Z",
+    "duration_seconds": 718.9
+  },
+  "coverage_tool": "7.17.2",
+  "coverage_json_sha256": "8ddf0651de1b4db5ce39de1dd0732b7f6818766092453214910cbc753c43fa05",
+  "metric": "line",
+  "threshold_percent": 85.0,
+  "core_packages": [
+    "packages/orchestration",
+    "packages/collaboration",
+    "packages/cli_adapters",
+    "packages/verification",
+    "packages/security",
+    "packages/identity"
+  ],
+  "exceptions": [
+    {
+      "path": "packages/cli_adapters/aicd_cli_adapters/fake/fake_cli.py",
+      "status": "approved",
+      "reason": "Исполняемый файл Fake CLI — запускается дочерним процессом адаптера; сценарии проверяются тестами адаптера через настоящий процесс (tests/integration/test_fake_adapter.py, test_gateway.py, e2e)."
+    }
+  ],
+  "packages_with_exceptions": {
+    "apps/api": {
+      "files": 36,
+      "statements": 3293,
+      "covered_lines": 3130,
+      "line_percent": 95.05,
+      "branches": 648,
+      "covered_branches": 554,
+      "branch_percent": 85.49,
+      "combined_percent": 93.48
+    },
+    "apps/cli": {
+      "files": 2,
+      "statements": 165,
+      "covered_lines": 73,
+      "line_percent": 44.24,
+      "branches": 24,
+      "covered_branches": 4,
+      "branch_percent": 16.67,
+      "combined_percent": 40.74
+    },
+    "apps/worker": {
+      "files": 13,
+      "statements": 914,
+      "covered_lines": 760,
+      "line_percent": 83.15,
+      "branches": 220,
+      "covered_branches": 144,
+      "branch_percent": 65.45,
+      "combined_percent": 79.72
+    },
+    "packages/analytics": {
+      "files": 2,
+      "statements": 123,
+      "covered_lines": 122,
+      "line_percent": 99.19,
+      "branches": 18,
+      "covered_branches": 15,
+      "branch_percent": 83.33,
+      "combined_percent": 97.16
+    },
+    "packages/cli_adapters": {
+      "files": 12,
+      "statements": 933,
+      "covered_lines": 882,
+      "line_percent": 94.53,
+      "branches": 246,
+      "covered_branches": 206,
+      "branch_percent": 83.74,
+      "combined_percent": 92.28
+    },
+    "packages/code_intelligence": {
+      "files": 27,
+      "statements": 3585,
+      "covered_lines": 3302,
+      "line_percent": 92.11,
+      "branches": 1382,
+      "covered_branches": 1154,
+      "branch_percent": 83.5,
+      "combined_percent": 89.71
+    },
+    "packages/collaboration": {
+      "files": 15,
+      "statements": 1200,
+      "covered_lines": 1141,
+      "line_percent": 95.08,
+      "branches": 376,
+      "covered_branches": 329,
+      "branch_percent": 87.5,
+      "combined_percent": 93.27
+    },
+    "packages/contracts": {
+      "files": 8,
+      "statements": 214,
+      "covered_lines": 214,
+      "line_percent": 100.0,
+      "branches": 0,
+      "covered_branches": 0,
+      "branch_percent": 100.0,
+      "combined_percent": 100.0
+    },
+    "packages/identity": {
+      "files": 6,
+      "statements": 315,
+      "covered_lines": 295,
+      "line_percent": 93.65,
+      "branches": 64,
+      "covered_branches": 52,
+      "branch_percent": 81.25,
+      "combined_percent": 91.56
+    },
+    "packages/integrations_github": {
+      "files": 9,
+      "statements": 587,
+      "covered_lines": 519,
+      "line_percent": 88.42,
+      "branches": 110,
+      "covered_branches": 76,
+      "branch_percent": 69.09,
+      "combined_percent": 85.37
+    },
+    "packages/orchestration": {
+      "files": 34,
+      "statements": 4725,
+      "covered_lines": 4352,
+      "line_percent": 92.11,
+      "branches": 1454,
+      "covered_branches": 1190,
+      "branch_percent": 81.84,
+      "combined_percent": 89.69
+    },
+    "packages/platform": {
+      "files": 21,
+      "statements": 1780,
+      "covered_lines": 1656,
+      "line_percent": 93.03,
+      "branches": 430,
+      "covered_branches": 351,
+      "branch_percent": 81.63,
+      "combined_percent": 90.81
+    },
+    "packages/projects": {
+      "files": 3,
+      "statements": 405,
+      "covered_lines": 344,
+      "line_percent": 84.94,
+      "branches": 122,
+      "covered_branches": 86,
+      "branch_percent": 70.49,
+      "combined_percent": 81.59
+    },
+    "packages/security": {
+      "files": 8,
+      "statements": 1069,
+      "covered_lines": 962,
+      "line_percent": 89.99,
+      "branches": 370,
+      "covered_branches": 311,
+      "branch_percent": 84.05,
+      "combined_percent": 88.46
+    },
+    "packages/standards": {
+      "files": 7,
+      "statements": 445,
+      "covered_lines": 441,
+      "line_percent": 99.1,
+      "branches": 110,
+      "covered_branches": 104,
+      "branch_percent": 94.55,
+      "combined_percent": 98.2
+    },
+    "packages/verification": {
+      "files": 19,
+      "statements": 3041,
+      "covered_lines": 2885,
+      "line_percent": 94.87,
+      "branches": 994,
+      "covered_branches": 889,
+      "branch_percent": 89.44,
+      "combined_percent": 93.53
+    }
+  },
+  "packages_without_exceptions": {
+    "apps/api": {
+      "files": 36,
+      "statements": 3293,
+      "covered_lines": 3130,
+      "line_percent": 95.05,
+      "branches": 648,
+      "covered_branches": 554,
+      "branch_percent": 85.49,
+      "combined_percent": 93.48
+    },
+    "apps/cli": {
+      "files": 2,
+      "statements": 165,
+      "covered_lines": 73,
+      "line_percent": 44.24,
+      "branches": 24,
+      "covered_branches": 4,
+      "branch_percent": 16.67,
+      "combined_percent": 40.74
+    },
+    "apps/worker": {
+      "files": 13,
+      "statements": 914,
+      "covered_lines": 760,
+      "line_percent": 83.15,
+      "branches": 220,
+      "covered_branches": 144,
+      "branch_percent": 65.45,
+      "combined_percent": 79.72
+    },
+    "packages/analytics": {
+      "files": 2,
+      "statements": 123,
+      "covered_lines": 122,
+      "line_percent": 99.19,
+      "branches": 18,
+      "covered_branches": 15,
+      "branch_percent": 83.33,
+      "combined_percent": 97.16
+    },
+    "packages/cli_adapters": {
+      "files": 12,
+      "statements": 933,
+      "covered_lines": 882,
+      "line_percent": 94.53,
+      "branches": 246,
+      "covered_branches": 206,
+      "branch_percent": 83.74,
+      "combined_percent": 92.28
+    },
+    "packages/code_intelligence": {
+      "files": 27,
+      "statements": 3585,
+      "covered_lines": 3302,
+      "line_percent": 92.11,
+      "branches": 1382,
+      "covered_branches": 1154,
+      "branch_percent": 83.5,
+      "combined_percent": 89.71
+    },
+    "packages/collaboration": {
+      "files": 15,
+      "statements": 1200,
+      "covered_lines": 1141,
+      "line_percent": 95.08,
+      "branches": 376,
+      "covered_branches": 329,
+      "branch_percent": 87.5,
+      "combined_percent": 93.27
+    },
+    "packages/contracts": {
+      "files": 8,
+      "statements": 214,
+      "covered_lines": 214,
+      "line_percent": 100.0,
+      "branches": 0,
+      "covered_branches": 0,
+      "branch_percent": 100.0,
+      "combined_percent": 100.0
+    },
+    "packages/identity": {
+      "files": 6,
+      "statements": 315,
+      "covered_lines": 295,
+      "line_percent": 93.65,
+      "branches": 64,
+      "covered_branches": 52,
+      "branch_percent": 81.25,
+      "combined_percent": 91.56
+    },
+    "packages/integrations_github": {
+      "files": 9,
+      "statements": 587,
+      "covered_lines": 519,
+      "line_percent": 88.42,
+      "branches": 110,
+      "covered_branches": 76,
+      "branch_percent": 69.09,
+      "combined_percent": 85.37
+    },
+    "packages/orchestration": {
+      "files": 34,
+      "statements": 4725,
+      "covered_lines": 4352,
+      "line_percent": 92.11,
+      "branches": 1454,
+      "covered_branches": 1190,
+      "branch_percent": 81.84,
+      "combined_percent": 89.69
+    },
+    "packages/platform": {
+      "files": 21,
+      "statements": 1780,
+      "covered_lines": 1656,
+      "line_percent": 93.03,
+      "branches": 430,
+      "covered_branches": 351,
+      "branch_percent": 81.63,
+      "combined_percent": 90.81
+    },
+    "packages/projects": {
+      "files": 3,
+      "statements": 405,
+      "covered_lines": 344,
+      "line_percent": 84.94,
+      "branches": 122,
+      "covered_branches": 86,
+      "branch_percent": 70.49,
+      "combined_percent": 81.59
+    },
+    "packages/security": {
+      "files": 8,
+      "statements": 1069,
+      "covered_lines": 962,
+      "line_percent": 89.99,
+      "branches": 370,
+      "covered_branches": 311,
+      "branch_percent": 84.05,
+      "combined_percent": 88.46
+    },
+    "packages/standards": {
+      "files": 7,
+      "statements": 445,
+      "covered_lines": 441,
+      "line_percent": 99.1,
+      "branches": 110,
+      "covered_branches": 104,
+      "branch_percent": 94.55,
+      "combined_percent": 98.2
+    },
+    "packages/verification": {
+      "files": 19,
+      "statements": 3041,
+      "covered_lines": 2885,
+      "line_percent": 94.87,
+      "branches": 994,
+      "covered_branches": 889,
+      "branch_percent": 89.44,
+      "combined_percent": 93.53
+    }
+  },
+  "core_total_with_exceptions": {
+    "statements": 11283,
+    "covered_lines": 10517,
+    "line_percent": 93.21,
+    "branches": 3504,
+    "covered_branches": 2977,
+    "branch_percent": 84.96
+  },
+  "core_total_without_exceptions": {
+    "statements": 11283,
+    "covered_lines": 10517,
+    "line_percent": 93.21,
+    "branches": 3504,
+    "covered_branches": 2977,
+    "branch_percent": 84.96
+  },
+  "all_total": {
+    "statements": 22794,
+    "covered_lines": 21078,
+    "line_percent": 92.47,
+    "branches": 6568,
+    "covered_branches": 5465,
+    "branch_percent": 83.21
+  },
+  "core_pass": true,
+  "weakest_core_files": [
+    {
+      "path": "packages/orchestration/aicd_orchestration/directives.py",
+      "missing_lines": 70,
+      "line_percent": 86.3
+    },
+    {
+      "path": "packages/orchestration/aicd_orchestration/github_flow.py",
+      "missing_lines": 51,
+      "line_percent": 81.7
+    },
+    {
+      "path": "packages/orchestration/aicd_orchestration/engine.py",
+      "missing_lines": 47,
+      "line_percent": 86.6
+    },
+    {
+      "path": "packages/verification/aicd_verification/engine.py",
+      "missing_lines": 41,
+      "line_percent": 87.4
+    },
+    {
+      "path": "packages/security/aicd_security/ssrf.py",
+      "missing_lines": 38,
+      "line_percent": 87.0
+    },
+    {
+      "path": "packages/security/aicd_security/docker_runner.py",
+      "missing_lines": 33,
+      "line_percent": 83.3
+    },
+    {
+      "path": "packages/orchestration/aicd_orchestration/recovery.py",
+      "missing_lines": 31,
+      "line_percent": 79.8
+    },
+    {
+      "path": "packages/cli_adapters/aicd_cli_adapters/subprocess_adapter.py",
+      "missing_lines": 28,
+      "line_percent": 90.9
+    },
+    {
+      "path": "packages/verification/aicd_verification/gates.py",
+      "missing_lines": 27,
+      "line_percent": 90.6
+    },
+    {
+      "path": "packages/verification/aicd_verification/tools/parsers.py",
+      "missing_lines": 24,
+      "line_percent": 89.7
+    },
+    {
+      "path": "packages/orchestration/aicd_orchestration/agent_io.py",
+      "missing_lines": 21,
+      "line_percent": 89.6
+    },
+    {
+      "path": "packages/verification/aicd_verification/security_gates.py",
+      "missing_lines": 20,
+      "line_percent": 95.4
+    },
+    {
+      "path": "packages/orchestration/aicd_orchestration/github_recovery.py",
+      "missing_lines": 19,
+      "line_percent": 82.1
+    },
+    {
+      "path": "packages/orchestration/aicd_orchestration/worktrees.py",
+      "missing_lines": 19,
+      "line_percent": 84.1
+    },
+    {
+      "path": "packages/verification/aicd_verification/runners.py",
+      "missing_lines": 18,
+      "line_percent": 94.1
+    }
+  ],
+  "tests": {
+    "total": 2887,
+    "passed": 2883,
+    "failed": 0,
+    "skipped": 4,
+    "failed_tests": [],
+    "skipped_tests": [
+      {
+        "test": "tests/integration/test_gate_runners_tools.py::test_phpstan_fixtures[pass-PASS]",
+        "reason": "PHPStan недоступен: composer не скачал phpstan/phpstan (github.com закрыт egress), образа нет"
+      },
+      {
+        "test": "tests/integration/test_gate_runners_tools.py::test_phpstan_fixtures[fail-FAIL]",
+        "reason": "PHPStan недоступен: composer не скачал phpstan/phpstan (github.com закрыт egress), образа нет"
+      },
+      {
+        "test": "tests/integration/test_github_real.py::test_real_github_app_read_only_flow",
+        "reason": "реальный GitHub: задайте AICD_TEST_GITHUB_APP_ID, AICD_TEST_GITHUB_APP_KEY_FILE, AICD_TEST_GITHUB_INSTALLATION_ID, AICD_TEST_GITHUB_REPO (opt-in, P8-02)"
+      },
+      {
+        "test": "tests/security/test_security_gates_docker.py::test_trivy_vuln_with_offline_db",
+        "reason": "AICD_TRIVY_DB_DIR (офлайн-БД trivy) не задан"
+      }
+    ],
+    "junit_sha256": "17932fbb1315fda132614ac6333ce6f51c80c5ba47e7eb4eedc1026f2da968cd"
+  }
+}

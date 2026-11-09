@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import type { Run, TaskSummary } from '../api/client';
+import type { Run, TaskSummary } from '../api/runs';
 import { json, mockFetch, problem, project, renderApp, session, WS_ID } from '../test/utils';
 
 const PROJECT = project(1);
@@ -59,7 +59,10 @@ const completed = `id: 1\nevent: run.completed\ndata: ${JSON.stringify({
   payload: { final_status: 'COMPLETED', required_gates_total: 3, required_gates_passed: 3 },
 })}\n\n`;
 
-describe('run page', () => {
+/** С F4 экран run — AI Mission Control (`?run=`; старый путь run перенаправляется туда с видом «Системные события»). */
+const mcPath = `/w/${WS_ID}/mission-control?run=${RUN_ID}&nav=list&view=system`;
+
+describe('run in AI Mission Control', () => {
   it('shows header (status, blocked reason, pending approvals), tasks with dependencies and the event feed', async () => {
     const { calls } = mockFetch({
       'GET /api/v1/auth/session': () => json(200, session('owner')),
@@ -74,10 +77,14 @@ describe('run page', () => {
         }),
       [`GET /api/v1/runs/${RUN_ID}/events`]: () => sse(`retry: 10\n\n${completed}`),
     });
-    renderApp(`${runPath}/${RUN_ID}`);
+    renderApp(mcPath);
+    // Ленивый экран: модуль Mission Control и строки его namespace грузятся при первом переходе.
+    await screen.findByTestId('mc-run-bar');
     expect(await screen.findByText('Требуется одобрение')).toBeInTheDocument();
+    expect(screen.getByTestId('run-status')).toHaveTextContent('Заблокирован');
     expect(screen.getByTestId('run-pending-approvals')).toHaveTextContent('2');
-    const table = await screen.findByRole('table', { name: 'Задачи run (план v2)' });
+    expect(screen.getByText('План v2')).toBeInTheDocument();
+    const table = await screen.findByRole('table', { name: 'Задачи run и их зависимости' });
     const row2 = within(table).getByRole('row', { name: /^Задача 2/ });
     expect(row2).toHaveTextContent('Задача 1');
     expect(row2).toHaveTextContent('1 из 3');
@@ -88,7 +95,8 @@ describe('run page', () => {
     const feed = await screen.findByRole('list', { name: 'События run' });
     expect(within(feed).getByText('Итог: Завершён; обязательные проверки 3 из 3')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('stream-state')).toHaveAttribute('data-state', 'closed'));
-    expect(calls.filter((c) => c.url.pathname.endsWith('/events'))).toHaveLength(1);
+    // Поток run (поток уведомлений workspace оболочки — отдельный путь /workspaces/{id}/events).
+    expect(calls.filter((c) => c.url.pathname.startsWith('/api/v1/runs/') && c.url.pathname.endsWith('/events'))).toHaveLength(1);
   });
 
   it('shows a fatal stream error with a manual reconnect button', async () => {
@@ -98,7 +106,8 @@ describe('run page', () => {
       [`GET /api/v1/runs/${RUN_ID}/tasks`]: () => json(200, { run_id: RUN_ID, plan_version: 1, tasks: [], edges: [], next_cursor: null }),
       [`GET /api/v1/runs/${RUN_ID}/events`]: () => problem(403, 'forbidden'),
     });
-    renderApp(`${runPath}/${RUN_ID}`);
+    renderApp(mcPath);
+    await screen.findByTestId('mc-run-bar');
     expect(await screen.findByText('Недостаточно прав для этого действия.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Переподключиться' })).toBeInTheDocument();
     // viewer: нет run:control
