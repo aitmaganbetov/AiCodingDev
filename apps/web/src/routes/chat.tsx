@@ -1,20 +1,11 @@
-import { lazy } from 'react';
-import { RequirePermission } from '../auth/RequirePermission';
+import { RunRedirect } from './redirect';
 import type { AreaModule } from './types';
 
-const ChatPage = lazy(() => import('../features/chat/ChatPage'));
-
-/** P7-06 Live Agent Chat + P7-07 директивы (namespace chat/directives). Контекстный экран run — без пункта меню. */
+/**
+ * P7-06 Live Agent Chat + P7-07 директивы. С F4 — центральная панель AI Mission Control (вид «Беседа
+ * агентов», поручения — Command Center); прежний путь перенаправляется с сохранением фильтров.
+ */
 export const chatArea: AreaModule = {
   id: 'chat',
-  workspaceRoutes: [
-    {
-      path: 'projects/:projectId/runs/:runId/chat',
-      element: (
-        <RequirePermission permission="chat:read">
-          <ChatPage />
-        </RequirePermission>
-      ),
-    },
-  ],
+  workspaceRoutes: [{ path: 'projects/:projectId/runs/:runId/chat', element: <RunRedirect from="chat" /> }],
 };

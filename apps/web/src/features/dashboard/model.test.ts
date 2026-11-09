@@ -16,6 +16,7 @@ import {
   fromStream,
   gateOutcomes,
   gateTotals,
+  gateVerifiedRate,
   healthStatus,
   mergeTimeline,
   pageCount,
@@ -28,10 +29,13 @@ import {
 } from './model';
 
 type Gate = AnalyticsSummary['gates'][number];
-const gate = (gate_type: string, passed: number, failed: number, errored: number, skipped: number): Gate => ({
+/** `unverified` — сколько из `passed` без VERIFIED evidence (D-8). */
+const gate = (gate_type: string, passed: number, failed: number, errored: number, skipped: number, unverified = 0): Gate => ({
   gate_type,
   total: passed + failed + errored + skipped,
   passed,
+  passed_verified: passed - unverified,
+  passed_unverified: unverified,
   failed,
   errored,
   skipped,
@@ -146,27 +150,42 @@ describe('approvalsSummary', () => {
 });
 
 describe('качество: D-6 и D-8', () => {
-  it('gateTotals: доля PASS среди исполненных, SKIPPED не в знаменателе', () => {
-    const t = gateTotals([gate('UNIT', 6, 1, 1, 2), gate('SAST', 2, 0, 0, 3)]);
-    expect(t).toEqual({ total: 15, passStatus: 8, failed: 1, errored: 1, skipped: 5, passStatusRate: 0.8 });
+  it('gateTotals: доля «Пройдено» (PASS + VERIFIED) среди исполненных, SKIPPED не в знаменателе', () => {
+    const t = gateTotals([gate('UNIT', 6, 1, 1, 2, 2), gate('SAST', 2, 0, 0, 3)]);
+    expect(t).toEqual({
+      total: 15,
+      passStatus: 8,
+      passVerified: 6,
+      passUnverified: 2,
+      failed: 1,
+      errored: 1,
+      skipped: 5,
+      executed: 10,
+      verifiedRate: 0.6,
+    });
   });
 
   it('gateTotals: только SKIPPED → доля null (не 0 и не 100 %)', () => {
-    expect(gateTotals([gate('UNIT', 0, 0, 0, 4)]).passStatusRate).toBeNull();
-    expect(gateTotals([]).passStatusRate).toBeNull();
+    expect(gateTotals([gate('UNIT', 0, 0, 0, 4)]).verifiedRate).toBeNull();
+    expect(gateTotals([]).verifiedRate).toBeNull();
   });
 
-  it('gateOutcomes: PASS без evidence → «Недостаточно доказательств», ERROR → BLOCKED, SKIPPED → NOT RUN; «Пройдено» не выводится из агрегата', () => {
-    const o = gateOutcomes([gate('UNIT', 5, 2, 1, 3)]);
+  it('gateVerifiedRate: PASS без VERIFIED evidence не входит в числитель', () => {
+    expect(gateVerifiedRate(gate('UNIT', 4, 1, 0, 2, 1))).toBe(0.6);
+    expect(gateVerifiedRate(gate('UNIT', 0, 0, 0, 2))).toBeNull();
+  });
+
+  it('gateOutcomes: passed_verified → «Пройдено», passed_unverified → «Недостаточно доказательств», ERROR → BLOCKED, SKIPPED → NOT RUN', () => {
+    const o = gateOutcomes([gate('UNIT', 5, 2, 1, 3, 2), gate('SAST', 1, 0, 0, 0, 1)]);
     expect(o).toEqual([
-      { state: 'PASS', count: null, source: 'PASS + VERIFIED evidence' },
-      { state: 'INSUFFICIENT_EVIDENCE', count: 5, source: 'PASS' },
+      { state: 'PASS', count: 3, source: 'PASS + VERIFIED evidence' },
+      { state: 'INSUFFICIENT_EVIDENCE', count: 3, source: 'PASS' },
       { state: 'FAIL', count: 2, source: 'FAIL' },
       { state: 'BLOCKED', count: 1, source: 'ERROR' },
       { state: 'NOT_RUN', count: 3, source: 'SKIPPED / NOT_APPLICABLE' },
     ]);
-    // Зелёный «Пройдено» с числом невозможен ни при каких входных данных агрегата.
-    expect(gateOutcomes([gate('X', 100, 0, 0, 0)]).find((x) => x.state === 'PASS')?.count).toBeNull();
+    // PASS без проверенного evidence никогда не становится зелёным «Пройдено».
+    expect(gateOutcomes([gate('X', 100, 0, 0, 0, 100)]).find((x) => x.state === 'PASS')?.count).toBe(0);
   });
 
   it('formatPercent: null → null (нет данных), а не 0 %', () => {

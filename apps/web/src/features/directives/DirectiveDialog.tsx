@@ -7,6 +7,7 @@ import {
   directiveKeys,
   directivesApi,
   directiveTypesFor,
+  type DirectiveAccepted,
   type DirectiveCreateRequest,
   type DirectiveTargetType,
   type DirectiveType,
@@ -39,8 +40,6 @@ interface Props {
 export function DirectiveDialogContent({ run, role, workspaceId, tasks, taskHref, approvalsHref, canConfirm }: Props) {
   const { t } = useTranslation();
   const id = useId();
-  const queryClient = useQueryClient();
-  const intent = useRef(new IdempotentIntent());
   const types = directiveTypesFor(role);
   const [type, setType] = useState<DirectiveType>(types[0] ?? 'ASK');
   const [targetType, setTargetType] = useState<Exclude<DirectiveTargetType, 'approval'>>('run');
@@ -61,28 +60,7 @@ export function DirectiveDialogContent({ run, role, workspaceId, tasks, taskHref
     enabled: needsApproval && directiveId === null,
   });
 
-  const create = useMutation({
-    mutationFn: (body: DirectiveCreateRequest) => directivesApi.create(run.id, body, intent.current.keyFor(body)),
-    onSuccess: (accepted) => {
-      intent.current.complete();
-      setDirectiveId(accepted.directive_id);
-      void queryClient.invalidateQueries({ queryKey: directiveKeys.list(run.id) });
-    },
-    onError: (e) => {
-      // Run ушёл вперёд (409 version_mismatch): перечитать версию — следующая отправка пойдёт с новой.
-      if (isApiError(e) && (e.code === 'version_mismatch' || e.status === 409)) {
-        void queryClient.invalidateQueries({ queryKey: runKeys.detail(run.id), exact: true });
-      }
-    },
-  });
-
-  const directive = useQuery({
-    queryKey: directiveKeys.detail(run.id, directiveId ?? ''),
-    queryFn: ({ signal }) => directivesApi.get(run.id, directiveId ?? '', signal),
-    enabled: directiveId !== null,
-    // Основной канал — SSE (directive.*); опрос — подстраховка, пока идёт анализ влияния.
-    refetchInterval: (q) => (q.state.data && DIRECTIVE_ANALYZING.includes(q.state.data.status) ? 3000 : false),
-  });
+  const create = useCreateDirective(run, (accepted) => setDirectiveId(accepted.directive_id));
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -115,27 +93,15 @@ export function DirectiveDialogContent({ run, role, workspaceId, tasks, taskHref
 
   if (directiveId !== null) {
     return (
-      <DialogContent
-        title={t('directives.dialog.trackTitle', { type: t(`directives.enums.type.${type}`) })}
-        description={t('directives.dialog.trackDescription')}
-        size="lg"
-        footer={<DialogClose className="btn-secondary">{t('action.close')}</DialogClose>}
-      >
-        {directive.isPending ? (
-          <LoadingState label={t('directives.loadingOne')} />
-        ) : directive.isError ? (
-          <FormAlert messages={[problemMessage(t, directive.error)]} />
-        ) : (
-          <DirectiveDetails
-            directive={directive.data}
-            taskTitle={taskTitle}
-            taskHref={taskHref}
-            approvalsHref={approvalsHref}
-            canAct={canConfirm}
-            headingLevel={3}
-          />
-        )}
-      </DialogContent>
+      <DirectiveTrackContent
+        runId={run.id}
+        directiveId={directiveId}
+        type={type}
+        taskTitle={taskTitle}
+        taskHref={taskHref}
+        approvalsHref={approvalsHref}
+        canConfirm={canConfirm}
+      />
     );
   }
 
@@ -298,6 +264,87 @@ export function DirectiveDialogContent({ run, role, workspaceId, tasks, taskHref
         <p className="text-sm text-fg-muted">{t('directives.form.version', { version: run.version })}</p>
         {create.isError ? <FormAlert messages={[problemMessage(t, create.error)]} /> : null}
       </form>
+    </DialogContent>
+  );
+}
+
+/**
+ * Создание поручения (общая логика диалога и User Command Center): Idempotency-Key на одно намерение,
+ * `expected_run_version` — версия run в теле; 409 (run ушёл вперёд) — перечитать run, следующая отправка
+ * пойдёт с новой версией. 202 = «сохранено», а не «доставлено»/«выполнено». `run` — для step-up
+ * (критические поручения сервер может отклонить `step_up_required`) обёртка передаётся извне.
+ */
+export function useCreateDirective(
+  run: Pick<Run, 'id'>,
+  onAccepted: (accepted: DirectiveAccepted, body: DirectiveCreateRequest) => void,
+  wrap: <T>(call: () => Promise<T>) => Promise<T> = (call) => call(),
+) {
+  const queryClient = useQueryClient();
+  const intent = useRef(new IdempotentIntent());
+  return useMutation({
+    mutationFn: (body: DirectiveCreateRequest) => wrap(() => directivesApi.create(run.id, body, intent.current.keyFor(body))),
+    onSuccess: (accepted, body) => {
+      intent.current.complete();
+      void queryClient.invalidateQueries({ queryKey: directiveKeys.list(run.id) });
+      onAccepted(accepted, body);
+    },
+    onError: (e) => {
+      // Run ушёл вперёд (409 version_mismatch): перечитать версию — следующая отправка пойдёт с новой.
+      if (isApiError(e) && (e.code === 'version_mismatch' || e.status === 409)) {
+        void queryClient.invalidateQueries({ queryKey: runKeys.detail(run.id), exact: true });
+      }
+    },
+  });
+}
+
+/**
+ * Ход созданного поручения в диалоге: impact preview → подтверждение → доставлено → подтверждено
+ * агентами → выполнено. Основной канал обновлений — SSE (directive.*), опрос — пока идёт анализ влияния.
+ */
+export function DirectiveTrackContent({
+  runId,
+  directiveId,
+  type,
+  taskTitle,
+  taskHref,
+  approvalsHref,
+  canConfirm,
+}: {
+  runId: string;
+  directiveId: string;
+  type: DirectiveType;
+  taskTitle: (taskId: string) => string | undefined;
+  taskHref: (taskId: string) => string;
+  approvalsHref: string;
+  canConfirm: boolean;
+}) {
+  const { t } = useTranslation();
+  const directive = useQuery({
+    queryKey: directiveKeys.detail(runId, directiveId),
+    queryFn: ({ signal }) => directivesApi.get(runId, directiveId, signal),
+    refetchInterval: (q) => (q.state.data && DIRECTIVE_ANALYZING.includes(q.state.data.status) ? 3000 : false),
+  });
+  return (
+    <DialogContent
+      title={t('directives.dialog.trackTitle', { type: t(`directives.enums.type.${type}`) })}
+      description={t('directives.dialog.trackDescription')}
+      size="lg"
+      footer={<DialogClose className="btn-secondary">{t('action.close')}</DialogClose>}
+    >
+      {directive.isPending ? (
+        <LoadingState label={t('directives.loadingOne')} />
+      ) : directive.isError ? (
+        <FormAlert messages={[problemMessage(t, directive.error)]} />
+      ) : (
+        <DirectiveDetails
+          directive={directive.data}
+          taskTitle={taskTitle}
+          taskHref={taskHref}
+          approvalsHref={approvalsHref}
+          canAct={canConfirm}
+          headingLevel={3}
+        />
+      )}
     </DialogContent>
   );
 }

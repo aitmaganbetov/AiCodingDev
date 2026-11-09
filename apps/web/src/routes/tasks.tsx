@@ -1,8 +1,8 @@
-import { lazy } from 'react';
 import { RequirePermission } from '../auth/RequirePermission';
+import { lazyPage } from './lazyPage';
 import type { AreaModule, RouteHandle } from './types';
 
-const TaskDetailPage = lazy(() => import('../features/tasks/TaskDetailPage'));
+const TaskDetailPage = lazyPage(() => import('../features/tasks/TaskDetailPage'), 'default', ['tasks', 'runs', 'chat']);
 
 /** P7-08 Task Detail (попытки, события/логи, diff viewer на Monaco — лениво, evidence). Контекстный экран run — без пункта меню. */
 export const tasksArea: AreaModule = {

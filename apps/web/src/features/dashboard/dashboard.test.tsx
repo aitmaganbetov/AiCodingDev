@@ -47,7 +47,7 @@ function analyticsBody(over: Partial<AnalyticsSummary> = {}): AnalyticsSummary {
       latency_seconds: none,
       by_role: [{ role: 'developer', attempts: 8, succeeded: 6, failed: 2, retries: 1, verified_completion_rate: 0.857 }],
     },
-    gates: [{ gate_type: 'UNIT', total: 6, passed: 4, failed: 1, errored: 0, skipped: 1, pass_rate: 0.8, avg_duration_seconds: 12 }],
+    gates: [{ gate_type: 'UNIT', total: 6, passed: 4, passed_verified: 3, passed_unverified: 1, failed: 1, errored: 0, skipped: 1, pass_rate: 0.8, avg_duration_seconds: 12 }],
     providers: [
       {
         provider: 'codex',
@@ -156,7 +156,9 @@ describe('Bento Dashboard', () => {
 
     const quality = screen.getByRole('region', { name: 'Качество (измеренные доли)' });
     expect(await within(quality).findByTestId('metric-verified-rate')).toHaveTextContent('90%');
-    expect(within(quality).getByTestId('metric-gate-pass-status')).toHaveTextContent('80%');
+    // D-8: «Пройдено» — только PASS с VERIFIED evidence: 3 из 5 исполненных (PASS без него не засчитан).
+    expect(within(quality).getByTestId('metric-gate-pass-verified')).toHaveTextContent('60%');
+    expect(within(quality).getByTestId('metric-gate-pass-verified')).toHaveTextContent('недостаточно доказательств: 1');
     expect(quality).not.toHaveTextContent(/score|оценка качества:/i);
 
     const security = screen.getByRole('region', { name: 'Находки безопасности' });
@@ -168,8 +170,9 @@ describe('Bento Dashboard', () => {
 
     const qOverview = screen.getByRole('region', { name: 'Обзор качества' });
     const outcomes = await within(qOverview).findByRole('list', { name: 'Исходы гейтов' });
-    expect(within(outcomes).getByText('Недостаточно доказательств').closest('li')).toHaveTextContent('4');
-    expect(within(qOverview).getByText('по сводке не определяется')).toBeInTheDocument();
+    expect(within(outcomes).getByText('Пройдено').closest('li')).toHaveTextContent('3');
+    expect(within(outcomes).getByText('Недостаточно доказательств').closest('li')).toHaveTextContent('1');
+    expect(qOverview).not.toHaveTextContent('по сводке не определяется');
 
     const feed = await screen.findByRole('feed', { name: 'События рабочего пространства' });
     expect(await within(feed).findByText('Проверка качества')).toBeInTheDocument();

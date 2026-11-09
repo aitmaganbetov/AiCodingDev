@@ -1,8 +1,10 @@
 import { RequirePermission } from '../auth/RequirePermission';
-import { ComplianceIndexPage } from '../features/compliance/ComplianceIndexPage';
-import { ProjectControlsPage } from '../features/compliance/ProjectControlsPage';
-import { RunCompliancePage } from '../features/compliance/RunCompliancePage';
+import { lazyPage } from './lazyPage';
 import type { AreaModule } from './types';
+
+const ComplianceIndexPage = lazyPage(() => import('../features/compliance/ComplianceIndexPage'), 'ComplianceIndexPage', ['compliance', 'quality']);
+const ProjectControlsPage = lazyPage(() => import('../features/compliance/ProjectControlsPage'), 'ProjectControlsPage', ['compliance', 'quality']);
+const RunCompliancePage = lazyPage(() => import('../features/compliance/RunCompliancePage'), 'RunCompliancePage', ['compliance', 'quality']);
 
 /**
  * P7-10 Standards & Compliance (FR-STD-05, ТЗ §13): матрица standard → control → applicability → роль →

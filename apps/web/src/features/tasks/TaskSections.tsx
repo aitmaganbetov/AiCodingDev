@@ -13,7 +13,7 @@ import {
   type TaskAttempt,
 } from '../../api/tasks';
 import { Badge, CodeBlock, EmptyState, ErrorState, LoadMore, LoadingState, StatusBadge, Table, Timestamp, type Column } from '../../components/ui';
-import { describeEvent } from '../../pages/RunPage';
+import { describeEvent } from '../runs/describeEvent';
 import { providerLabel, roleLabel } from '../runs/labels';
 
 const PAGE = 50;

@@ -26,3 +26,37 @@
 .aicd-graph .react-flow__controls-button svg {
   fill: currentColor;
 }
+/* Ожидание незавершённой зависимости: пунктир без цвета статуса. */
+.aicd-graph .react-flow__edge.aicd-edge-waiting path {
+  stroke-dasharray: 2 4;
+}
+/* Активный узел (исполняется): мягкая пульсация кольца — только opacity, при reduced motion — нет. */
+.aicd-node-active::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid rgb(var(--color-accent));
+  opacity: 0.2;
+  pointer-events: none;
+  animation: aicd-node-pulse 1.8s var(--ease-standard, ease-in-out) infinite alternate;
+}
+@keyframes aicd-node-pulse {
+  from {
+    opacity: 0.15;
+  }
+  to {
+    opacity: 0.6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aicd-node-active::after {
+    animation: none;
+    opacity: 0.45;
+  }
+}
+@media (forced-colors: active) {
+  .aicd-node-active::after {
+    border-color: Highlight;
+  }
+}

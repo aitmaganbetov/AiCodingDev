@@ -38,8 +38,8 @@ function summary(overrides: Partial<AnalyticsSummary> = {}): AnalyticsSummary {
       by_role: [{ role: 'developer', attempts: 4, succeeded: 3, failed: 1, retries: 1, verified_completion_rate: 0.75 }],
     },
     gates: [
-      { gate_type: 'UNIT', total: 4, passed: 3, failed: 1, errored: 0, skipped: 1, pass_rate: 0.75, avg_duration_seconds: 12 },
-      { gate_type: 'SAST', total: 1, passed: 0, failed: 0, errored: 0, skipped: 1, pass_rate: null, avg_duration_seconds: null },
+      { gate_type: 'UNIT', total: 4, passed: 3, passed_verified: 3, passed_unverified: 0, failed: 1, errored: 0, skipped: 1, pass_rate: 0.75, avg_duration_seconds: 12 },
+      { gate_type: 'SAST', total: 1, passed: 0, passed_verified: 0, passed_unverified: 0, failed: 0, errored: 0, skipped: 1, pass_rate: null, avg_duration_seconds: null },
     ],
     providers: [
       {

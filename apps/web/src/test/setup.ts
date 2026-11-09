@@ -2,7 +2,10 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import { clientConfig, setCsrfToken } from '../api/client';
-import '../i18n';
+import { loadAllNamespaces } from '../i18n';
+
+// В приложении namespace областей грузятся лениво (lazyPage); unit-тестам нужны все строки сразу.
+await loadAllNamespaces();
 
 clientConfig.retryDelayMs = 1;
 

@@ -72,8 +72,8 @@ function analytics(): S['AnalyticsSummary'] {
       ],
     },
     gates: [
-      { gate_type: 'UNIT', total: 7, passed: 5, failed: 1, errored: 0, skipped: 1, pass_rate: 0.833, avg_duration_seconds: 20 },
-      { gate_type: 'SAST', total: 3, passed: 1, failed: 0, errored: 1, skipped: 1, pass_rate: 0.5, avg_duration_seconds: 40 },
+      { gate_type: 'UNIT', total: 7, passed: 5, passed_verified: 4, passed_unverified: 1, failed: 1, errored: 0, skipped: 1, pass_rate: 0.833, avg_duration_seconds: 20 },
+      { gate_type: 'SAST', total: 3, passed: 1, passed_verified: 0, passed_unverified: 1, failed: 0, errored: 1, skipped: 1, pass_rate: 0.5, avg_duration_seconds: 40 },
     ],
     providers: [
       {
@@ -232,8 +232,9 @@ test('happy path: hero, 8 KPI from real operations with sources, sections, D-6/D
   await expect(page.getByTestId('metric-completed')).toContainText('11');
   const quality = page.getByRole('region', { name: 'Качество (измеренные доли)' });
   await expect(quality.getByTestId('metric-verified-rate')).toContainText('91,7%');
-  // Гейты: PASS 6 из 8 исполненных (SKIPPED не в знаменателе) = 75 %.
-  await expect(quality.getByTestId('metric-gate-pass-status')).toContainText('75%');
+  // Гейты (D-8): «Пройдено» — PASS с VERIFIED evidence, 4 из 8 исполненных (SKIPPED не в знаменателе) = 50 %.
+  await expect(quality.getByTestId('metric-gate-pass-verified')).toContainText('50%');
+  await expect(quality.getByTestId('metric-gate-pass-verified')).toContainText('недостаточно доказательств: 2');
   await expect(quality).toContainText('Интегральная оценка качества не вычисляется');
   await expect(page.getByText(/quality score/i)).toHaveCount(0);
   const security = page.getByRole('region', { name: 'Находки безопасности' });
@@ -270,11 +271,12 @@ test('happy path: hero, 8 KPI from real operations with sources, sections, D-6/D
   await expect(agentsSection.getByTestId('data-unavailable')).toContainText('Циклы ревью по ролям');
   const qualitySection = page.getByRole('region', { name: 'Обзор качества' });
   const outcomes = qualitySection.getByRole('list', { name: 'Исходы гейтов' });
-  await expect(outcomes.locator('[data-segment="INSUFFICIENT_EVIDENCE"]')).toContainText('6');
+  await expect(outcomes.locator('[data-segment="PASS"]')).toContainText('4');
+  await expect(outcomes.locator('[data-segment="INSUFFICIENT_EVIDENCE"]')).toContainText('2');
   await expect(outcomes.locator('[data-segment="FAIL"]')).toContainText('1');
   await expect(outcomes.locator('[data-segment="BLOCKED"]')).toContainText('1');
   await expect(outcomes.locator('[data-segment="NOT_RUN"]')).toContainText('2');
-  await expect(qualitySection.locator('[data-outcome="PASS"]')).toContainText('по сводке не определяется');
+  await expect(qualitySection.locator('[data-gate-type="UNIT"]')).toContainText('пройдено 4 из 6 исп., недостаточно доказательств 1');
 
   // Состояние системы (owner): компоненты, воркеры по видам, «неизвестно» остаётся «неизвестно».
   const health = page.getByRole('region', { name: 'Состояние системы' });

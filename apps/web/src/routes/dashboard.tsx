@@ -1,8 +1,8 @@
-import { lazy } from 'react';
+import { lazyPage } from './lazyPage';
 import type { AreaModule } from './types';
 
 /** Ленивый чанк (бюджет начального JS, план §4.3): плитки, диаграммы и лента грузятся с экраном. */
-const DashboardPage = lazy(() => import('../features/dashboard/DashboardPage'));
+const DashboardPage = lazyPage(() => import('../features/dashboard/DashboardPage'), 'default', ['dashboard', 'runs']);
 
 /** F3 Bento Dashboard — стартовый экран workspace после входа (home.priority > projects). */
 export const dashboardArea: AreaModule = {

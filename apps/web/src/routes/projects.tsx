@@ -1,7 +1,9 @@
-import { ProjectDetailPage } from '../features/projects/ProjectDetailPage';
-import { ProjectCreatePage } from '../pages/ProjectCreatePage';
-import { ProjectsPage } from '../pages/ProjectsPage';
+import { lazyPage } from './lazyPage';
 import type { AreaModule, RouteHandle } from './types';
+
+const ProjectsPage = lazyPage(() => import('../pages/ProjectsPage'), 'ProjectsPage', ['projects']);
+const ProjectCreatePage = lazyPage(() => import('../pages/ProjectCreatePage'), 'ProjectCreatePage', ['projects']);
+const ProjectDetailPage = lazyPage(() => import('../features/projects/ProjectDetailPage'), 'ProjectDetailPage', ['projects', 'integrations']);
 
 /** Проекты (P1-13) + P7-04 Repository Explorer: `projects/:projectId` (репозитории, индекс, стек). */
 export const projectsArea: AreaModule = {

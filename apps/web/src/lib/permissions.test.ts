@@ -25,4 +25,13 @@ describe('permissions catalogue (API_DESIGN §5.1)', () => {
     expect(can('viewer', 'compliance:review')).toBe(false);
     expect(can(undefined, 'compliance:review')).toBe(false);
   });
+
+  it('notification:read / notification:update (B8, §13.2) — любая роль workspace (только свои уведомления)', () => {
+    for (const role of ['owner', 'admin', 'developer', 'reviewer', 'viewer']) {
+      expect(can(role, 'notification:read')).toBe(true);
+      expect(can(role, 'notification:update')).toBe(true);
+    }
+    expect(can('auditor', 'notification:read')).toBe(false);
+    expect(can(null, 'notification:update')).toBe(false);
+  });
 });

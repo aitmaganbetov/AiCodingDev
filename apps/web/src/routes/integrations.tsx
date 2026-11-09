@@ -1,5 +1,8 @@
-import { GitHubPage, GitHubSetupRedirect } from '../features/integrations/GitHubPage';
+import { lazyPage } from './lazyPage';
 import type { AreaModule } from './types';
+
+const GitHubPage = lazyPage(() => import('../features/integrations/GitHubPage'), 'GitHubPage', ['integrations']);
+const GitHubSetupRedirect = lazyPage(() => import('../features/integrations/GitHubPage'), 'GitHubSetupRedirect', ['integrations']);
 
 /**
  * Интеграции (P8-02, OQ-47 (2)): установки GitHub App (github:read — все роли, управление — owner/admin).

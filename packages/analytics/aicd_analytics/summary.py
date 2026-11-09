@@ -11,7 +11,8 @@ MODULE_BOUNDARIES §2 п.6; миграция 0013, `security_invoker`): табл
 * verified completion rate — доля успешных попыток среди попыток, характеризующих качество агента
   (ROUTING_POLICY §7: неудачи только из `FAILURES`, исключения `EXCLUDED` не учитываются), без сглаживания;
 * retry count — попытки с `attempt_no > 1`; task latency — от создания задачи до терминального статуса;
-* gate failures — `FAIL`/`ERROR` актуальных (не заменённых повтором) исполнений gates;
+* gate failures — `FAIL`/`ERROR` актуальных (не заменённых повтором) исполнений gates; PASS делится на
+  `passed_verified` (evidence `VERIFIED`) и `passed_unverified` (решение D-8, миграция 0021);
 * provider usage/limits — исполнения CLI по провайдеру и статусу Execution FSM (`RATE_LIMITED`,
   `AUTH_REQUIRED` — ограничения), токены — только `cli_reported` (иначе `null`, UI показывает «unknown»);
 * review loops — ACP `REVIEW_REQUEST`/`FIX_REQUEST` по цепочкам `correlation_id`, эскалации
@@ -223,6 +224,7 @@ async def gates_section(conn: AsyncConnection, w: Window) -> list[dict[str, Any]
         conn,
         "SELECT v.gate_type, count(*) AS total,"
         " count(*) FILTER (WHERE v.status = 'PASS') AS passed,"
+        " count(*) FILTER (WHERE v.status = 'PASS' AND v.evidence_verification_status = 'VERIFIED') AS passed_verified,"
         " count(*) FILTER (WHERE v.status = 'FAIL') AS failed,"
         " count(*) FILTER (WHERE v.status = 'ERROR') AS errored,"
         " count(*) FILTER (WHERE v.status IN ('SKIPPED','NOT_APPLICABLE')) AS skipped,"
@@ -240,6 +242,9 @@ async def gates_section(conn: AsyncConnection, w: Window) -> list[dict[str, Any]
                 "gate_type": str(r["gate_type"]),
                 "total": int(r["total"]),
                 "passed": passed,
+                # D-8: «Пройдено» — только PASS с VERIFIED evidence; остальные PASS — «Недостаточно доказательств».
+                "passed_verified": int(r["passed_verified"]),
+                "passed_unverified": passed - int(r["passed_verified"]),
                 "failed": failed,
                 "errored": errored,
                 "skipped": int(r["skipped"]),

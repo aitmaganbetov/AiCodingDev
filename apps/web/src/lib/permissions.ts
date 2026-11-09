@@ -42,7 +42,9 @@ export type Permission =
   | 'github:read'
   | 'github:manage'
   | 'pull_request:create'
-  | 'pull_request:merge';
+  | 'pull_request:merge'
+  | 'notification:read'
+  | 'notification:update';
 
 const ALL: readonly WorkspaceRole[] = ['owner', 'admin', 'developer', 'reviewer', 'viewer'];
 const ADMINS: readonly WorkspaceRole[] = ['owner', 'admin'];
@@ -90,6 +92,9 @@ const MATRIX: Record<Permission, readonly WorkspaceRole[]> = {
   'github:manage': ADMINS,
   'pull_request:create': WRITERS,
   'pull_request:merge': WRITERS,
+  // UI redesign B8 (§13.2): только собственные уведомления — любой участник workspace.
+  'notification:read': ALL,
+  'notification:update': ALL,
 };
 
 /** Неизвестная роль (расширение enum) трактуется как отсутствие права. */

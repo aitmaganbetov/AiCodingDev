@@ -1,5 +1,7 @@
-import { KnowledgePage } from '../features/knowledge/KnowledgePage';
+import { lazyPage } from './lazyPage';
 import type { AreaModule } from './types';
+
+const KnowledgePage = lazyPage(() => import('../features/knowledge/KnowledgePage'), 'KnowledgePage', ['knowledge', 'projects']);
 
 /** P7-12 Knowledge/Documentation (documentation:read — все роли). */
 export const knowledgeArea: AreaModule = {

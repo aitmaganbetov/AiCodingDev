@@ -47,8 +47,8 @@ function summary(projectId: string | null, empty = false): S['AnalyticsSummary']
     gates: empty
       ? []
       : [
-          { gate_type: 'LINT', total: 4, passed: 4, failed: 0, errored: 0, skipped: 0, pass_rate: 1, avg_duration_seconds: 3 },
-          { gate_type: 'UNIT', total: 4, passed: 3, failed: 1, errored: 0, skipped: 1, pass_rate: 0.75, avg_duration_seconds: 40 },
+          { gate_type: 'LINT', total: 4, passed: 4, passed_verified: 4, passed_unverified: 0, failed: 0, errored: 0, skipped: 0, pass_rate: 1, avg_duration_seconds: 3 },
+          { gate_type: 'UNIT', total: 4, passed: 3, passed_verified: 3, passed_unverified: 0, failed: 1, errored: 0, skipped: 1, pass_rate: 0.75, avg_duration_seconds: 40 },
         ],
     providers: empty
       ? []

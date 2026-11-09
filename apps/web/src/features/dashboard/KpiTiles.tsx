@@ -156,10 +156,10 @@ export function QualityTile({ analytics, window }: { analytics: Analytics; windo
       {gates ? (
         <Metric
           size="sm"
-          testId="metric-gate-pass-status"
+          testId="metric-gate-pass-verified"
           label={t('dashboard.kpi.quality.gates')}
-          value={gates.passStatusRate !== null ? formatPercent(gates.passStatusRate) : null}
-          hint={t('dashboard.kpi.quality.gatesHint', { pass: gates.passStatus, executed: gates.passStatus + gates.failed + gates.errored })}
+          value={gates.verifiedRate !== null ? formatPercent(gates.verifiedRate) : null}
+          hint={t('dashboard.kpi.quality.gatesHint', { pass: gates.passVerified, executed: gates.executed, unverified: gates.passUnverified })}
         />
       ) : null}
       <p className="text-xs text-fg-muted">{t('dashboard.kpi.quality.noScore')}</p>

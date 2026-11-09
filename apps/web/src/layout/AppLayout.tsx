@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { IconButton } from '../components/ui/Button';
@@ -9,6 +9,7 @@ import { MQ_DESKTOP, MQ_REDUCED_MOTION, MQ_WIDE, useMediaQuery, useSidebarMode }
 import { useGlobalShortcuts, useShortcutsEnabled } from '../lib/shortcuts';
 import { mainWidthFor, type MainWidth } from '../routes';
 import { useCurrentWorkspace } from '../workspace';
+import { lazyPage } from '../routes/lazyPage';
 import { ContextPanelProvider, ContextPanelToggle, ShellContextPanel } from './ContextPanel';
 import { GlobalSearch } from './GlobalSearch';
 import { NotificationsBell } from './Notifications';
@@ -19,7 +20,8 @@ import { SidebarNav, useNavEntries } from './Sidebar';
 import { UserMenu } from './UserMenu';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
-const CommandPalette = lazy(() => import('./CommandPalette'));
+// Палитра — отдельный чанк; подписи подразделов Настроек — из namespace settings.
+const CommandPalette = lazyPage(() => import('./CommandPalette'), 'default', ['settings']);
 
 /** Ширина рабочей области по типу экрана (handle.width маршрута). */
 const MAIN_WIDTH: Record<MainWidth, string> = {

@@ -16,7 +16,7 @@ export interface LayoutResult {
 }
 
 export const NODE_WIDTH = 256;
-export const NODE_HEIGHT = 112;
+export const NODE_HEIGHT = 156;
 const GAP_X = 72;
 const GAP_Y = 24;
 

@@ -2012,7 +2012,12 @@ export interface components {
             gates: {
                 gate_type: string;
                 total: number;
+                /** @description Статус PASS (без учёта верификации evidence). */
                 passed: number;
+                /** @description PASS с evidence в статусе VERIFIED — «Пройдено» (решение D-8, evidence-first ТЗ §14). */
+                passed_verified: number;
+                /** @description PASS без VERIFIED evidence — «Недостаточно доказательств» (D-8); passed = passed_verified + passed_unverified. */
+                passed_unverified: number;
                 failed: number;
                 errored: number;
                 /** @description SKIPPED/NOT_APPLICABLE — не входят в pass_rate (SKIPPED ≠ PASS). */

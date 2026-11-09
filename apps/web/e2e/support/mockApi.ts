@@ -12,6 +12,7 @@ import {
   validateHeader,
   validateRequest,
   validateResponse,
+  validateNotificationEvent,
   validateSseEvent,
 } from './contract';
 
@@ -65,6 +66,17 @@ export interface SseConnectionScript {
   status?: 410;
 }
 
+/** Кадр `notification.created` потока workspace (SseNotificationCreated: seq = null). */
+export interface MockNotificationFrame {
+  event_id: string;
+  run_id: string | null;
+  seq: null;
+  type: 'notification.created';
+  timestamp: string;
+  schema_version: '1.0';
+  payload: S['Notification'];
+}
+
 export function sseFrame(e: MockRunEvent): string {
   return `id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
 }
@@ -102,6 +114,10 @@ const ROUTES: { method: string; path: string; operationId: string }[] = [
   { method: 'POST', path: '/api/v1/runs/{id}/pause', operationId: 'pauseRun' },
   { method: 'POST', path: '/api/v1/runs/{id}/resume', operationId: 'resumeRun' },
   { method: 'POST', path: '/api/v1/runs/{id}/cancel', operationId: 'cancelRun' },
+  // B8: персональные уведомления (оболочка запрашивает их на каждом экране workspace).
+  { method: 'GET', path: '/api/v1/notifications', operationId: 'listNotifications' },
+  { method: 'GET', path: '/api/v1/notifications/unread-count', operationId: 'getNotificationUnreadCount' },
+  { method: 'POST', path: '/api/v1/notifications/mark-read', operationId: 'markNotificationsRead' },
 ];
 
 /**
@@ -219,8 +235,10 @@ export class MockApi {
    * SSE-ответ не досылается — как при реальном обрыве (без «призрачных» подключений в журнале).
    */
   offline = false;
-  /** Журнал потока уведомлений workspace: курсор (`id:`) → событие (OQ-45 (c)). */
-  readonly workspaceEvents: { workspaceId: string; cursor: number; event: MockRunEvent }[] = [];
+  /** Журнал потока уведомлений workspace: курсор (`id:`) → событие (OQ-45 (c)) или кадр `notification.created` (B8). */
+  readonly workspaceEvents: { workspaceId: string; cursor: number; event: MockRunEvent | MockNotificationFrame }[] = [];
+  /** Персональные уведомления текущего пользователя (B8, `notifications`), новые в конце. */
+  readonly notifications: { workspaceId: string; item: S['Notification'] }[] = [];
   /** Подключения к потоку workspace с их Last-Event-ID. */
   readonly workspaceStreamConnections: { workspaceId: string; lastEventId: string | undefined }[] = [];
   private workspaceCursor = 1_762_590_000_000_000;
@@ -379,6 +397,59 @@ export class MockApi {
     if (error) this.violations.push(`mock ${error}`);
     this.workspaceEvents.push({ workspaceId, cursor: this.workspaceCursor, event });
     return event;
+  }
+
+  /**
+   * Новое персональное уведомление (B8): строка `notifications` и, если `live`, кадр `notification.created`
+   * в потоке workspace (как сервер: курсор = время создания). `created_at` растёт с порядком добавления.
+   */
+  addNotification(workspaceId: string, init: Partial<S['Notification']> & Pick<S['Notification'], 'kind' | 'title'>, live = true): S['Notification'] {
+    const created = new Date(Date.parse('2026-11-08T09:00:00Z') + this.notifications.length * 60_000).toISOString().replace('.000Z', 'Z');
+    const item: S['Notification'] = {
+      id: uuid(),
+      severity: 'info',
+      body: '',
+      project_id: null,
+      run_id: null,
+      task_id: null,
+      resource_type: 'run',
+      resource_id: uuid(),
+      data: {},
+      created_at: created,
+      read_at: null,
+      read: false,
+      ...init,
+    };
+    this.notifications.push({ workspaceId, item });
+    if (live) {
+      this.workspaceCursor += 1000;
+      const frame: MockNotificationFrame = {
+        event_id: item.id,
+        run_id: item.run_id,
+        seq: null,
+        type: 'notification.created',
+        timestamp: item.created_at,
+        schema_version: '1.0',
+        payload: { ...item },
+      };
+      const error = validateNotificationEvent(frame);
+      if (error) this.violations.push(`mock ${error}`);
+      this.workspaceEvents.push({ workspaceId, cursor: this.workspaceCursor, event: frame });
+    }
+    return item;
+  }
+
+  private notificationsOf(workspaceId: string): S['Notification'][] {
+    // Новые сверху: (created_at, id) desc.
+    return this.notifications
+      .filter((n) => n.workspaceId === workspaceId)
+      .map((n) => n.item)
+      .sort((a, b) => (a.created_at === b.created_at ? b.id.localeCompare(a.id) : b.created_at.localeCompare(a.created_at)));
+  }
+
+  private unreadNotifications(workspaceId: string): S['NotificationUnreadCount'] {
+    const unread = this.notificationsOf(workspaceId).filter((n) => !n.read);
+    return { unread_count: unread.length, latest_unread_at: unread[0]?.created_at ?? null };
   }
 
   addWorkspace(name: string, slug: string, role: S['WorkspaceRole'] = 'owner'): S['Workspace'] {
@@ -655,6 +726,32 @@ export class MockApi {
           raw += `id: ${e.cursor}\nevent: ${e.event.type}\ndata: ${JSON.stringify(e.event)}\n\n`;
         }
         return { status: 200, raw, headers: { 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } };
+      }
+      case 'listNotifications': {
+        if (!ws) return problem(404, 'not_found');
+        const unreadOnly = url.searchParams.get('unread_only') === 'true';
+        const items = this.notificationsOf(ws.id).filter((n) => !unreadOnly || !n.read);
+        return { status: 200, body: { ...this.page(items, url.searchParams.get('cursor')), unread_count: this.unreadNotifications(ws.id).unread_count } };
+      }
+      case 'getNotificationUnreadCount':
+        return ws ? { status: 200, body: this.unreadNotifications(ws.id) } : problem(404, 'not_found');
+      case 'markNotificationsRead': {
+        if (!ws) return problem(404, 'not_found');
+        const b = body as S['NotificationMarkReadRequest'];
+        const list = this.notificationsOf(ws.id);
+        let targets: S['Notification'][];
+        if (b.notification_ids) targets = list.filter((n) => b.notification_ids?.includes(n.id));
+        else if (b.up_to) {
+          const index = list.findIndex((n) => n.id === b.up_to);
+          if (index < 0) return problem(404, 'not_found');
+          targets = list.slice(index);
+        } else targets = list;
+        const fresh = targets.filter((n) => !n.read);
+        for (const n of fresh) {
+          n.read = true;
+          n.read_at = '2026-11-08T10:00:00Z';
+        }
+        return { status: 200, body: { marked: fresh.length, unread_count: this.unreadNotifications(ws.id).unread_count } };
       }
       case 'getWorkspace': {
         const target = this.workspaces.find((w) => w.id === id);

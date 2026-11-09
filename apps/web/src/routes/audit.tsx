@@ -1,8 +1,10 @@
 import { RequirePermission } from '../auth/RequirePermission';
-import { AuditPage } from '../features/audit/AuditPage';
-import { SettingsSection } from '../features/settings/SettingsSection';
+import { lazyPage } from './lazyPage';
 import { WorkspaceRedirect } from './redirect';
 import type { AreaModule } from './types';
+
+const SettingsSection = lazyPage(() => import('../features/settings/SettingsSection'), 'SettingsSection', ['settings']);
+const AuditPage = lazyPage(() => import('../features/audit/AuditPage'), 'AuditPage', ['audit']);
 
 /** P7-13 Audit (право audit:read: owner/admin). С F2 — подраздел Настроек (D-3); `audit` — редирект. */
 export const auditArea: AreaModule = {

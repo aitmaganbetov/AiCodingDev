@@ -15,7 +15,7 @@ import {
 } from '../../components/ui';
 import type { VerificationState } from '../../lib/verification';
 import { formatPercent } from './format';
-import { DASHBOARD_WINDOW_DAYS, gateOutcomes, gateTotals } from './model';
+import { DASHBOARD_WINDOW_DAYS, gateOutcomes, gateTotals, gateVerifiedRate } from './model';
 
 type Analytics = UseQueryResult<AnalyticsSummary>;
 type RoleRow = AnalyticsSummary['tasks']['by_role'][number];
@@ -129,9 +129,7 @@ export function QualityOverview({ analytics }: { analytics: Analytics }) {
   const data = analytics.data;
   const outcomes = data ? gateOutcomes(data.gates) : [];
   const totals = data ? gateTotals(data.gates) : null;
-  const segments: DonutSegment[] = outcomes
-    .filter((o): o is typeof o & { count: number } => o.count !== null)
-    .map((o) => ({
+  const segments: DonutSegment[] = outcomes.map((o) => ({
       key: o.state,
       label: t(`ds.verification.${o.state}`),
       value: o.count,
@@ -172,10 +170,6 @@ export function QualityOverview({ analytics }: { analytics: Analytics }) {
                 </span>
               }
             />
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm" data-outcome="PASS">
-              <VerificationBadge result={{ state: 'PASS', source: 'PASS + VERIFIED evidence' }} />
-              <span className="text-fg-muted">{t('dashboard.quality.notDerivable')}</span>
-            </div>
             <p className="text-xs text-fg-muted">{t('dashboard.quality.passNote')}</p>
             <h3 className="text-sm font-semibold text-fg">{t('dashboard.quality.byGate')}</h3>
             <ul className="flex flex-col gap-3" aria-label={t('dashboard.quality.byGate')}>
@@ -183,11 +177,12 @@ export function QualityOverview({ analytics }: { analytics: Analytics }) {
                 <li key={g.gate_type} data-gate-type={g.gate_type}>
                   <Meter
                     label={<span className="font-mono text-code-sm">{g.gate_type}</span>}
-                    ratio={g.pass_rate}
+                    ratio={gateVerifiedRate(g)}
                     valueText={t('dashboard.quality.gateLine', {
-                      rate: formatPercent(g.pass_rate) ?? t('ds.metric.noData'),
-                      pass: g.passed,
+                      rate: formatPercent(gateVerifiedRate(g)) ?? t('ds.metric.noData'),
+                      pass: g.passed_verified,
                       executed: g.passed + g.failed + g.errored,
+                      unverified: g.passed_unverified,
                       skipped: g.skipped,
                     })}
                   />

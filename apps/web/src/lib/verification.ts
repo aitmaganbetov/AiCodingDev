@@ -82,3 +82,34 @@ export function complianceVerificationState(status: ComplianceStatus, hasVerifie
               : 'NOT_RUN';
   return { state, source: status };
 }
+
+/** Счётчики исходов gates из агрегата (analytics.gates[]: PASS разделён по статусу evidence, D-8). */
+export interface GateAggregateCounts {
+  passed_verified: number;
+  passed_unverified: number;
+  failed: number;
+  errored: number;
+  skipped: number;
+}
+
+export interface GateAggregateOutcome {
+  state: VerificationState;
+  count: number;
+  /** Исходные статусы контракта, из которых получено состояние. */
+  source: string;
+}
+
+/**
+ * Агрегат исходов gates → пять состояний (D-8), та же логика, что у `gateVerificationState`:
+ * PASS + VERIFIED evidence → «Пройдено»; PASS без VERIFIED evidence → «Недостаточно доказательств»;
+ * FAIL → «Провалено»; ERROR → «Заблокировано»; SKIPPED/NOT_APPLICABLE → «Не запускалось».
+ */
+export function gateAggregateOutcomes(c: GateAggregateCounts): GateAggregateOutcome[] {
+  return [
+    { state: 'PASS', count: c.passed_verified, source: 'PASS + VERIFIED evidence' },
+    { state: 'INSUFFICIENT_EVIDENCE', count: c.passed_unverified, source: 'PASS' },
+    { state: 'FAIL', count: c.failed, source: 'FAIL' },
+    { state: 'BLOCKED', count: c.errored, source: 'ERROR' },
+    { state: 'NOT_RUN', count: c.skipped, source: 'SKIPPED / NOT_APPLICABLE' },
+  ];
+}

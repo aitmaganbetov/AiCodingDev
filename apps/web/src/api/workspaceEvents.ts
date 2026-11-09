@@ -1,6 +1,7 @@
 /**
  * Поток уведомлений workspace `GET /workspaces/{id}/events` (API_DESIGN §13.1, OQ-45 (c)):
- * approval.requested / approval.decided / run.state_changed / run.completed всех run workspace.
+ * approval.requested / approval.decided / run.state_changed / run.completed всех run workspace и
+ * notification.created — персональные уведомления текущего пользователя (B8, EVENT_SCHEMAS §3.2a; seq = null).
  * `id:` — курсор (время записи события), не seq: возобновление по Last-Event-ID с перекрытием,
  * дедупликация — по event_id (EventStream resume = 'cursor'). Поток не терминальный.
  */
@@ -17,6 +18,7 @@ export type WorkspaceSseEventType = Schemas['WorkspaceSseEventType'];
 export const WORKSPACE_NOTIFICATION_TYPES: readonly WorkspaceSseEventType[] = [
   'approval.decided',
   'approval.requested',
+  'notification.created',
   'run.completed',
   'run.state_changed',
 ];

@@ -1,13 +1,23 @@
-import { lazy } from 'react';
 import { RequirePermission } from '../auth/RequirePermission';
+import { lazyPage } from './lazyPage';
 import type { AreaModule, RouteHandle } from './types';
 
-const MissionControlPage = lazy(() => import('../features/missionControl/MissionControlPage'));
+const MissionControlPage = lazyPage(() => import('../features/missionControl/MissionControlPage'), 'default', [
+  'missionControl',
+  'runs',
+  'chat',
+  'directives',
+  'tasks',
+  'quality',
+  'integrations',
+  'settings',
+]);
 
 /**
- * AI Mission Control (план §6.1 п. 3). F2: выбор активного run (список, задачи выбранного run в
- * split view, сводка в контекстной панели) и `?run=<id>` — переход к run по одному id (уведомления,
- * поиск). Объединённый экран Navigator / Live Chat / Inspector — фаза F4.
+ * AI Mission Control (F4, план §3.3, §6.2): центральный экран исполнения. `mission-control` — выбор
+ * активного run; `?run=<id>` — Navigator (этапы, DAG/список задач) · Live Agent Chat (5 видов) ·
+ * User Command Center · Agent Inspector (контекстная панель). Прежние экраны run/графа/чата
+ * перенаправляются сюда (`routes/redirect.tsx`), Task Detail остаётся отдельным экраном.
  */
 export const missionControlArea: AreaModule = {
   id: 'mission-control',

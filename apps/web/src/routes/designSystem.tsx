@@ -1,7 +1,7 @@
-import { lazy } from 'react';
+import { lazyPage } from './lazyPage';
 import type { AreaModule } from './types';
 
-const DesignSystemPage = lazy(() => import('../features/designSystem/DesignSystemPage'));
+const DesignSystemPage = lazyPage(() => import('../features/designSystem/DesignSystemPage'), 'default', []);
 
 /**
  * Справочник дизайн-системы (F1 редизайна) — для разработки UI. Пункта навигации нет (не входит

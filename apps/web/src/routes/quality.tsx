@@ -1,8 +1,11 @@
 import { RequirePermission } from '../auth/RequirePermission';
-import { EvidencePage } from '../features/quality/EvidencePage';
-import { FindingPage } from '../features/quality/FindingPage';
-import { QualityIndexPage, RunQualityPage } from '../features/quality/RunQualityPage';
+import { lazyPage } from './lazyPage';
 import type { AreaModule } from './types';
+
+const EvidencePage = lazyPage(() => import('../features/quality/EvidencePage'), 'EvidencePage', ['quality']);
+const FindingPage = lazyPage(() => import('../features/quality/FindingPage'), 'FindingPage', ['quality']);
+const QualityIndexPage = lazyPage(() => import('../features/quality/RunQualityPage'), 'QualityIndexPage', ['quality']);
+const RunQualityPage = lazyPage(() => import('../features/quality/RunQualityPage'), 'RunQualityPage', ['quality']);
 
 /**
  * P7-10 Evidence & Quality (FR-QG-07): выбор run → сводка verdict/gates (SKIPPED/ERROR ≠ PASS),

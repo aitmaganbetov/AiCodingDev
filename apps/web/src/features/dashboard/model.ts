@@ -14,7 +14,7 @@ import type { SystemHealthStatus } from '../../api/system';
 import type { WorkspaceTask } from '../../api/tasks';
 import type { Tone } from '../../components/ui/Badge';
 import { providerChipModel, type ProviderChipState } from '../../layout/providerStatus';
-import type { VerificationState } from '../../lib/verification';
+import { gateAggregateOutcomes, type GateAggregateOutcome } from '../../lib/verification';
 
 /* ── Окно аналитики ─────────────────────────────────────────────────────────────────────────── */
 
@@ -178,48 +178,66 @@ type Gates = AnalyticsSummary['gates'];
 
 export interface GateTotals {
   total: number;
-  /** Статус контракта PASS (без проверки evidence — агрегат её не сообщает). */
+  /** Статус контракта PASS (без учёта evidence). */
   passStatus: number;
+  /** PASS с evidence VERIFIED — «Пройдено» (D-8). */
+  passVerified: number;
+  /** PASS без VERIFIED evidence — «Недостаточно доказательств» (D-8). */
+  passUnverified: number;
   failed: number;
   errored: number;
   /** SKIPPED и NOT_APPLICABLE (контракт объединяет их; не входят в знаменатель). */
   skipped: number;
-  /** Доля PASS среди исполненных (PASS + FAIL + ERROR), как `pass_rate` контракта; null — исполненных нет. */
-  passStatusRate: number | null;
+  /** Исполненные проверки: PASS + FAIL + ERROR (знаменатель долей). */
+  executed: number;
+  /** Доля «Пройдено» (PASS + VERIFIED evidence) среди исполненных; null — исполненных нет. */
+  verifiedRate: number | null;
 }
 
+type GateCountKey = 'total' | 'passed' | 'passed_verified' | 'passed_unverified' | 'failed' | 'errored' | 'skipped';
+
 export function gateTotals(gates: Gates): GateTotals {
-  const sum = (k: 'total' | 'passed' | 'failed' | 'errored' | 'skipped') => gates.reduce((a, g) => a + g[k], 0);
+  const sum = (k: GateCountKey) => gates.reduce((a, g) => a + g[k], 0);
   const passStatus = sum('passed');
+  const passVerified = sum('passed_verified');
   const failed = sum('failed');
   const errored = sum('errored');
   const executed = passStatus + failed + errored;
-  return { total: sum('total'), passStatus, failed, errored, skipped: sum('skipped'), passStatusRate: executed > 0 ? passStatus / executed : null };
+  return {
+    total: sum('total'),
+    passStatus,
+    passVerified,
+    passUnverified: sum('passed_unverified'),
+    failed,
+    errored,
+    skipped: sum('skipped'),
+    executed,
+    verifiedRate: executed > 0 ? passVerified / executed : null,
+  };
 }
 
-export interface GateOutcome {
-  state: VerificationState;
-  /** null — состояние не определяется по агрегату (PASS требует проверенного evidence, D-8). */
-  count: number | null;
-  /** Исходные статусы контракта, из которых получено состояние. */
-  source: string;
+/** Доля «Пройдено» (PASS + VERIFIED evidence) одного типа гейтов среди исполненных; null — исполненных нет. */
+export function gateVerifiedRate(g: Gates[number]): number | null {
+  const executed = g.passed + g.failed + g.errored;
+  return executed > 0 ? g.passed_verified / executed : null;
 }
+
+export type GateOutcome = GateAggregateOutcome;
 
 /**
- * Пять состояний верификации по агрегату analytics.gates (D-8): FAIL ← FAIL, BLOCKED ← ERROR,
- * NOT RUN ← SKIPPED/NOT_APPLICABLE. PASS контракта без статуса evidence (агрегат его не сообщает) —
- * «Недостаточно доказательств»; «Пройдено» по агрегату не показывается (count = null): подтверждение
- * evidence видно только в отчёте run (правило evidence-first).
+ * Пять состояний верификации по агрегату analytics.gates (D-8, `lib/verification`): PASS делится сервером
+ * по статусу evidence (`passed_verified` → «Пройдено», `passed_unverified` → «Недостаточно доказательств»),
+ * FAIL ← FAIL, BLOCKED ← ERROR, NOT RUN ← SKIPPED/NOT_APPLICABLE.
  */
 export function gateOutcomes(gates: Gates): GateOutcome[] {
   const t = gateTotals(gates);
-  return [
-    { state: 'PASS', count: null, source: 'PASS + VERIFIED evidence' },
-    { state: 'INSUFFICIENT_EVIDENCE', count: t.passStatus, source: 'PASS' },
-    { state: 'FAIL', count: t.failed, source: 'FAIL' },
-    { state: 'BLOCKED', count: t.errored, source: 'ERROR' },
-    { state: 'NOT_RUN', count: t.skipped, source: 'SKIPPED / NOT_APPLICABLE' },
-  ];
+  return gateAggregateOutcomes({
+    passed_verified: t.passVerified,
+    passed_unverified: t.passUnverified,
+    failed: t.failed,
+    errored: t.errored,
+    skipped: t.skipped,
+  });
 }
 
 /* ── CLI-провайдеры ─────────────────────────────────────────────────────────────────────────── */

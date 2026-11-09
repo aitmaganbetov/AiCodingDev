@@ -4623,13 +4623,21 @@ components:
             properties:
               gate_type: {type: string}
               total: {type: integer, minimum: 0}
-              passed: {type: integer, minimum: 0}
+              passed: {type: integer, minimum: 0, description: Статус PASS (без учёта верификации evidence).}
+              passed_verified:
+                type: integer
+                minimum: 0
+                description: PASS с evidence в статусе VERIFIED — «Пройдено» (решение D-8, evidence-first ТЗ §14).
+              passed_unverified:
+                type: integer
+                minimum: 0
+                description: PASS без VERIFIED evidence — «Недостаточно доказательств» (D-8); passed = passed_verified + passed_unverified.
               failed: {type: integer, minimum: 0}
               errored: {type: integer, minimum: 0}
               skipped: {type: integer, minimum: 0, description: SKIPPED/NOT_APPLICABLE — не входят в pass_rate (SKIPPED ≠ PASS).}
               pass_rate: {$ref: '#/components/schemas/AnalyticsRate'}
               avg_duration_seconds: {type: [number, 'null'], minimum: 0}
-            required: [gate_type, total, passed, failed, errored, skipped, pass_rate, avg_duration_seconds]
+            required: [gate_type, total, passed, passed_verified, passed_unverified, failed, errored, skipped, pass_rate, avg_duration_seconds]
         providers:
           type: array
           items:

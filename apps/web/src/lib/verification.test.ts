@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ComplianceStatus } from '../api/compliance';
 import type { EvidenceVerificationStatus, GateExecutionStatus } from '../api/quality';
-import { complianceVerificationState, gateVerificationState, type VerificationDisplayState } from './verification';
+import { complianceVerificationState, gateAggregateOutcomes, gateVerificationState, type VerificationDisplayState } from './verification';
 
 const GATE: readonly GateExecutionStatus[] = ['PENDING', 'RUNNING', 'PASS', 'FAIL', 'ERROR', 'SKIPPED', 'NOT_APPLICABLE'];
 const EVIDENCE: readonly (EvidenceVerificationStatus | null | undefined)[] = ['PENDING', 'VERIFIED', 'REJECTED', 'UNVERIFIED', null, undefined];
@@ -60,5 +60,24 @@ describe('complianceVerificationState', () => {
     ['NOT_APPLICABLE', false, 'NOT_APPLICABLE'],
   ])('%s (verified evidence: %s) → %s', (status, verified, expected) => {
     expect(complianceVerificationState(status, verified)).toEqual({ state: expected, source: status });
+  });
+});
+
+describe('gateAggregateOutcomes (D-8)', () => {
+  it('«Пройдено» — только PASS с VERIFIED evidence; PASS без него — «Недостаточно доказательств»', () => {
+    const o = gateAggregateOutcomes({ passed_verified: 4, passed_unverified: 2, failed: 1, errored: 3, skipped: 5 });
+    expect(o.map((x) => [x.state, x.count])).toEqual([
+      ['PASS', 4],
+      ['INSUFFICIENT_EVIDENCE', 2],
+      ['FAIL', 1],
+      ['BLOCKED', 3],
+      ['NOT_RUN', 5],
+    ]);
+  });
+
+  it('PASS без проверенного evidence никогда не попадает в «Пройдено»', () => {
+    const o = gateAggregateOutcomes({ passed_verified: 0, passed_unverified: 7, failed: 0, errored: 0, skipped: 0 });
+    expect(o.find((x) => x.state === 'PASS')?.count).toBe(0);
+    expect(o.find((x) => x.state === 'INSUFFICIENT_EVIDENCE')?.count).toBe(7);
   });
 });

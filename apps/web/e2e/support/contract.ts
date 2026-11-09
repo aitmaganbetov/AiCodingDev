@@ -142,3 +142,15 @@ export function validateSseEvent(envelope: unknown): string | null {
   sseValidator ??= ajv.compile(JSON.parse(readFileSync(SSE_SCHEMA_PATH, 'utf8')) as Json);
   return sseValidator(envelope) ? null : `SSE event: ${format(sseValidator)}`;
 }
+
+const NOTIFICATION_SCHEMA_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../packages/contracts/schemas/events/1.0/notification-event.schema.json',
+);
+let notificationValidator: ValidateFunction | null = null;
+
+/** Ошибка валидации кадра `notification.created` потока workspace (EVENT_SCHEMAS §3.2a) или null. */
+export function validateNotificationEvent(envelope: unknown): string | null {
+  notificationValidator ??= ajv.compile(JSON.parse(readFileSync(NOTIFICATION_SCHEMA_PATH, 'utf8')) as Json);
+  return notificationValidator(envelope) ? null : `notification SSE event: ${format(notificationValidator)}`;
+}

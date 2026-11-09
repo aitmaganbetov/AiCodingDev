@@ -194,6 +194,10 @@ async def test_analytics_summary_reflects_runs(analytics_world: Slice) -> None:
     assert tasks["latency_seconds"]["p90"] is not None
     assert {"developer"} <= {row["role"] for row in tasks["by_role"]}
     assert any(g["passed"] >= 1 and g["pass_rate"] is not None for g in body["gates"])
+    # D-8: настоящие gates пишут PASS только с VERIFIED evidence (триггер evidence-first) ⇒ всё — «Пройдено».
+    assert sum(g["passed_verified"] for g in body["gates"]) >= 1
+    for g in body["gates"]:
+        assert g["passed_verified"] == g["passed"] and g["passed_unverified"] == 0, g
     providers = {p["provider"]: p for p in body["providers"]}
     assert providers and sum(p["executions"] for p in providers.values()) >= 4
     for p in providers.values():

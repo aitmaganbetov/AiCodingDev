@@ -1,6 +1,9 @@
 import { RequirePermission } from '../auth/RequirePermission';
-import { ApprovalDetailPage, ApprovalsPage } from '../features/approvals/ApprovalsPages';
+import { lazyPage } from './lazyPage';
 import type { AreaModule } from './types';
+
+const ApprovalsPage = lazyPage(() => import('../features/approvals/ApprovalsPages'), 'ApprovalsPage', ['approvals', 'quality', 'settings']);
+const ApprovalDetailPage = lazyPage(() => import('../features/approvals/ApprovalsPages'), 'ApprovalDetailPage', ['approvals', 'quality', 'settings']);
 
 /**
  * P7-11 Approvals (FR-APR-03, AC-13): ожидающие/решённые подтверждения, карточка (предмет, риск, срок),

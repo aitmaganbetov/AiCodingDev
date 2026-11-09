@@ -273,15 +273,16 @@ test('CLI status chips: real provider data (ready / AUTH_REQUIRED / unknown / no
   await expect(page.getByRole('heading', { level: 1, name: 'CLI-провайдеры' })).toBeFocused();
 });
 
-test('notifications: workspace SSE events → unread count, list with links, mark read persists on this device; pending approvals link', async ({ page, api }) => {
+test('notifications (B8): server list and unread badge, live arrival via workspace SSE, mark one / all read (Idempotency-Key), survives reload; pending approvals link', async ({ page, api }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
-  const { ws, active } = seed(api);
+  const { ws, p, active, done } = seed(api);
+  const approvalId = '01900000-0000-7000-8000-0000000a0001';
   api.route('GET', '/api/v1/approvals', 'listApprovals', ({ url }) => {
     const mine = url.searchParams.get('decidable_by_me') === 'true';
     const items: S['Approval'][] = mine
       ? [
           {
-            id: '01900000-0000-7000-8000-0000000a0001',
+            id: approvalId,
             workspace_id: ws.id,
             run_id: active.id,
             action_type: 'MERGE',
@@ -297,55 +298,84 @@ test('notifications: workspace SSE events → unread count, list with links, mar
       : [];
     return { status: 200, body: { items, next_cursor: null } };
   });
-  api.addWorkspaceEvent(
+  // История до входа: одно прочитанное и одно непрочитанное уведомление (без кадров потока).
+  api.addNotification(
     ws.id,
-    'approval.requested',
     {
-      approval_id: '01900000-0000-7000-8000-0000000a0001',
-      action_type: 'MERGE',
-      task_id: null,
-      summary: 'Слияние ветки feature/export',
-      required_role: 'reviewer',
-      requested_by: { type: 'agent', id: null },
-      expires_at: '2026-11-15T09:00:00Z',
+      kind: 'run.completed', severity: 'success', title: 'Запуск завершён', body: 'Обновить зависимости',
+      project_id: p.id, run_id: done.id, resource_type: 'run', resource_id: done.id, data: { final_status: 'COMPLETED' },
+      read: true, read_at: '2026-11-08T09:05:00Z',
     },
-    active.id,
-  );
+    false,
+  ); // fmt: skip
+  const approvalNote = api.addNotification(
+    ws.id,
+    {
+      kind: 'approval.requested', severity: 'warning', title: 'Требуется ваше решение: MERGE', body: 'Слияние ветки feature/export',
+      project_id: p.id, run_id: active.id, resource_type: 'approval', resource_id: approvalId, data: { action_type: 'MERGE' },
+    },
+    false,
+  ); // fmt: skip
+  // Устаревший курсор F2 в localStorage игнорируется.
+  await page.addInitScript((key) => window.localStorage.setItem(key, '2030-01-01T00:00:00Z'), `aicd.notifications.read.${ws.id}`);
   await login(page, api);
   const bell = page.getByTestId('notifications-trigger');
   await expect(bell).toHaveAccessibleName('Уведомления: 1 непрочитанное');
   await expect(page.getByTestId('notifications-count')).toHaveText('1');
-  // Счётчик approvals в навигации (ожидают моего решения).
   await expect(page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: /Одобрения/ })).toContainText('1');
 
-  // Новое событие приходит live (поток workspace).
-  api.addWorkspaceEvent(ws.id, 'run.completed', { final_status: 'COMPLETED', required_gates_total: 3, required_gates_passed: 3 }, active.id);
+  // Новое уведомление приходит live: кадр notification.created потока workspace.
+  const failed = api.addNotification(ws.id, {
+    kind: 'run.failed', severity: 'error', title: 'Запуск завершился с ошибкой', body: 'Добавить экспорт отчётов в CSV',
+    project_id: p.id, run_id: active.id, resource_type: 'run', resource_id: active.id, data: { final_status: 'FAILED' },
+  }); // fmt: skip
   await expect(bell).toHaveAccessibleName('Уведомления: 2 непрочитанных');
+  const connections = api.workspaceStreamConnections.filter((c) => c.workspaceId === ws.id);
+  expect(connections.length).toBeGreaterThan(0);
 
   await bell.click();
   const panel = page.getByRole('dialog', { name: 'Уведомления' });
-  await expect(panel.getByTestId('notification-item')).toHaveCount(2);
-  await expect(panel.getByTestId('notification-item').first()).toContainText('Запуск завершён: Завершён');
-  await expect(panel).toContainText('Запрошено одобрение: Слияние ветки feature/export');
+  const items = panel.getByTestId('notification-item');
+  await expect(items).toHaveCount(3);
+  await expect(items.first()).toContainText('Запуск завершился с ошибкой');
+  await expect(items.first()).toHaveAttribute('data-read', 'false');
+  await expect(items.nth(2)).toHaveAttribute('data-read', 'true');
   await expect(panel.getByTestId('notifications-approvals')).toContainText('Ожидают вашего решения: 1');
-  await expect(panel).toContainText('хранится только в этом браузере');
+  await expect(panel).not.toContainText('только в этом браузере');
+  await expect(panel.getByRole('link', { name: /Требуется ваше решение/ })).toHaveAttribute('href', `/w/${ws.id}/approvals/${approvalId}`);
+  await expect(panel.getByRole('link', { name: /Запуск завершился с ошибкой/ })).toHaveAttribute('href', `/w/${ws.id}/projects/${p.id}/runs/${active.id}`);
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     await expectNoSeriousA11yViolations(page, `notifications (${scheme})`);
   }
-  await panel.getByRole('button', { name: 'Отметить прочитанными' }).click();
+
+  // Отметить одно: POST /notifications/mark-read по id с Idempotency-Key.
+  await panel.getByRole('button', { name: `Отметить прочитанным: ${approvalNote.title}` }).click();
+  await expect(bell).toHaveAccessibleName('Уведомления: 1 непрочитанное');
+  await expect(items.nth(1)).toHaveAttribute('data-read', 'true');
+  const marks = () => api.requests.filter((r) => r.operationId === 'markNotificationsRead');
+  expect(marks()[0]?.body).toEqual({ notification_ids: [approvalNote.id] });
+  expect(marks()[0]?.headers['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
+
+  // Отметить все: «до самого нового показанного» (up_to).
+  await panel.getByRole('button', { name: 'Отметить все прочитанными' }).click();
   await expect(bell).toHaveAccessibleName('Уведомления');
   await expect(page.getByTestId('notifications-count')).toHaveCount(0);
-  await expect(panel.getByRole('link', { name: /Запрошено одобрение/ })).toHaveAttribute('href', `/w/${ws.id}/approvals/01900000-0000-7000-8000-0000000a0001`);
-  await expect(panel.getByRole('link', { name: /Запуск завершён/ })).toHaveAttribute('href', `/w/${ws.id}/mission-control?run=${active.id}`);
+  expect(marks()[1]?.body).toEqual({ up_to: failed.id });
+  expect(marks()[1]?.headers['idempotency-key']).not.toBe(marks()[0]?.headers['idempotency-key']);
+  await expect(panel.getByRole('button', { name: 'Отметить все прочитанными' })).toBeDisabled();
   await page.keyboard.press('Escape');
   await expect(panel).toHaveCount(0);
   await expect(bell).toBeFocused();
 
-  // Отметка «прочитано» — в localStorage этого устройства: после перезагрузки те же события не непрочитанные.
+  // Отметка «прочитано» хранится на сервере: после перезагрузки непрочитанных нет.
   await page.reload();
+  await expect(page.getByRole('navigation', { name: 'Основная навигация' })).toBeVisible();
+  await expect.poll(() => api.requests.filter((r) => r.operationId === 'getNotificationUnreadCount').length).toBeGreaterThan(1);
   await expect(bell).toHaveAccessibleName('Уведомления');
-  expect(api.workspaceStreamConnections.filter((c) => c.workspaceId === ws.id).length).toBeGreaterThan(0);
+  for (const r of api.requests.filter((x) => x.operationId === 'listNotifications' || x.operationId === 'getNotificationUnreadCount')) {
+    expect(r.headers['x-workspace-id']).toBe(ws.id);
+  }
 });
 
 test('context panel on Mission Control: default "no context", selected run summary, toggle + keyboard resize, persisted after reload; split view', async ({ page, api }) => {
