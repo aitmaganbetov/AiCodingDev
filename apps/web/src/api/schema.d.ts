@@ -1577,7 +1577,7 @@ export interface components {
                     [key: string]: number;
                 };
                 tokens: {
-                    /** @description Сумма токенов */
+                    /** @description Сумма токенов, сообщённых CLI; null — CLI не сообщали. */
                     total: number | null;
                     /** @enum {string} */
                     source: "cli_reported" | "not_exposed_by_cli" | "mixed";

@@ -3526,7 +3526,7 @@ components:
               tokens:
                 type: object
                 properties:
-                  total: {type: [integer, 'null'], minimum: 0, description: Сумма токенов, сообщённых CLI; null — CLI не сообщали.}
+                  total: {type: [integer, 'null'], minimum: 0, description: 'Сумма токенов, сообщённых CLI; null — CLI не сообщали.'}
                   source: {type: string, enum: [cli_reported, not_exposed_by_cli, mixed]}
                   executions_reported: {type: integer, minimum: 0}
                 required: [total, source, executions_reported]
