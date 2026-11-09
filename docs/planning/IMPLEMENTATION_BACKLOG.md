@@ -368,6 +368,10 @@
 
 В той же миграции: `sys_resolve_approval_workspace` (approvals API больше не перебирает workspace пользователя) и `sys_recovery_workspaces` для recovery reconciler (P3-12).
 
+### Редизайн UI «Neural Engineering Command Center» (F0–F9, B1–B8; 2026-11-09)
+
+План `docs/design/UI_REDESIGN_PLAN.md`, решения D-1…D-11 (журнал решений), ADR-0014 (поправка: WCAG 2.2 AA), ADR-0015 (inline-комментарии ревью), ADR-0016 (серверные уведомления); миграции 0017–0021. Итоговая проверка ведущего (HEAD после F9): web — `check:api`, `typecheck`, `lint`, `test` → 311 passed, `build` (начальный JS 177,2 kB gzip из 260), mocked e2e → 144 passed / 2 skipped (замер производительности и аудит скриншотов — по переменным окружения), live e2e → 4 passed (AC-05, AC-06, AC-08, smoke); Python — ruff, ruff format (579), mypy (477), import-linter, запрет AI SDK, модели контрактов — OK; `uv run pytest` (после F4, бэкенд далее не менялся) → 3125 passed, 2 skipped; `scripts/run_acceptance.py` → **AC PASS 16/16** на Fake CLI (python 356/356, web live 4/4, web mocked 144), реальные CLI — BLOCKED (P2-01). Доступность: `docs/design/ACCESSIBILITY.md` (axe wcag2a…wcag22aa на всех экранах, 2.5.8/2.4.11/2.5.7/3.2.6/3.3.7/3.3.8, симуляция цветового зрения); ручная проверка скринридерами не выполнялась.
+
 ### После решений владельца (2026-11-08)
 
 Решения OQ-35…OQ-51 записаны; закрыты: воркеры в compose, предрелизная проверка TLS/HSTS (TH-46), архив партиций в S3 (P3-18), PHPStan (P6-03), каталог событий (OQ-49), конвейер `cli.output`, `allow_untested_cli_versions` в политике run, env gate в контейнерах (semgrep офлайн). Итоговая проверка ведущего (HEAD c3fd590): `uv run pytest` → **2939 passed, 0 failed, 2 skipped** (opt-in реальный GitHub, офлайн-БД Trivy); ruff, ruff format (541), mypy (448), import-linter, запрет AI SDK, модели контрактов — OK.
