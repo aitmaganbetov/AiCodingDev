@@ -28,7 +28,8 @@
       "chat": "Live Agent Chat",
       "quality": "Качество",
       "compliance": "Соответствие",
-      "approvals": "Одобрения"
+      "approvals": "Одобрения",
+      "missionControl": "AI Mission Control"
     },
     "enums": {
       "provider": {

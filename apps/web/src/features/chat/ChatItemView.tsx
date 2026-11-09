@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import type { AgentRole } from '../../api/runs';
-import { Badge, StatusBadge, Timestamp } from '../../components/ui';
+import { AgentAvatar, Badge, StatusBadge, Timestamp, cx } from '../../components/ui';
 import { providerLabel, roleLabel } from '../runs/labels';
 import type { TimelineItem } from './chatModel';
 
@@ -30,13 +30,15 @@ export function ChatItemView({ item, taskTitle, taskHref, onMention }: Props) {
   return (
     <article
       aria-labelledby={headingId}
-      className="flex flex-col gap-1.5 px-3 py-3 text-sm"
+      // Новое live-сообщение появляется мягко (opacity, 120 мс; при reduced motion — без анимации).
+      className={cx('flex flex-col gap-1.5 px-3 py-3 text-sm', item.live && 'animate-fade-in')}
       data-testid="chat-item"
       data-item-id={item.id}
       data-item-type={item.item_type}
       data-live={item.live ? 'true' : undefined}
     >
-      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <AgentAvatar agentRole={item.sender_type === 'agent' ? item.sender?.role : item.sender_type === 'user' ? 'user' : 'system'} size="sm" />
         <h3 id={headingId} className="font-semibold text-fg">
           {sender}
           {item.recipient_role ? (

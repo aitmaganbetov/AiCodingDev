@@ -74,8 +74,23 @@ describe('redesign IA (F2)', () => {
     }
     expect(mainWidthFor('/w/ws-1/projects/new')).toBe('form');
     expect(mainWidthFor('/w/ws-1/mission-control')).toBe('full');
-    expect(mainWidthFor('/w/ws-1/projects/p-1/runs/r-1/graph')).toBe('full');
+    expect(mainWidthFor('/w/ws-1/projects/p-1/runs/r-1/tasks/t-1')).toBe('full');
     expect(mainWidthFor('/w/ws-1/dashboard')).toBe('standard');
     expect(mainWidthFor('/workspaces/new')).toBe('form');
+  });
+});
+
+describe('AI Mission Control (F4): old run screens redirect with the same selection', () => {
+  it('run overview, graph and chat → mission-control with view/filters; Task Detail stays a route', async () => {
+    const { missionControlTarget } = await import('./redirect');
+    expect(missionControlTarget('r-1', 'run', '')).toBe('mission-control?run=r-1&view=system');
+    expect(missionControlTarget('r-1', 'graph', '')).toBe('mission-control?run=r-1');
+    expect(missionControlTarget('r-1', 'graph', '?view=list')).toBe('mission-control?run=r-1&nav=list');
+    expect(missionControlTarget('r-1', 'chat', '?stream=role&role=reviewer&q=%D1%8D%D0%BA%D1%81')).toBe(
+      'mission-control?run=r-1&view=conversation&stream=role&role=reviewer&q=%D1%8D%D0%BA%D1%81',
+    );
+    expect(missionControlTarget('r-1', 'chat', '?stream=task&task=t-9')).toBe('mission-control?run=r-1&view=conversation&stream=task&ctask=t-9&task=t-9');
+    const routes = buildRoutes();
+    expect(matchRoutes(routes, '/w/ws-1/projects/p-1/runs/r-1/tasks/t-1')?.at(-1)?.route.path).toBe('projects/:projectId/runs/:runId/tasks/:taskId');
   });
 });

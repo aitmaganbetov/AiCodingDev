@@ -161,7 +161,6 @@ export function TaskDetailPage() {
   const liveForTask = useMemo(() => stream.events.filter((e) => e.payload.task_id === taskId), [stream.events, taskId]);
 
   if (!workspaceId || !membership) return <WorkspaceNotFound />;
-  const runBase = `/w/${workspaceId}/projects/${projectId}/runs/${runId}`;
   const setTab = (next: string) => {
     const p = new URLSearchParams(params);
     if (next === 'overview') p.delete('tab');
@@ -173,17 +172,20 @@ export function TaskDetailPage() {
     <section aria-labelledby="page-title">
       <PageHeading title={task.data ? task.data.title : t('tasks.title')}>
         <div className="flex flex-wrap gap-2">
-          <Link to={`${runBase}/graph`} className="btn-secondary">
+          <Link to={`/w/${workspaceId}/mission-control?${new URLSearchParams({ run: runId, task: taskId }).toString()}`} className="btn-secondary">
             {t('tasks.backToGraph')}
           </Link>
           {can(role, 'chat:read') ? (
-            <Link to={`${runBase}/chat?stream=task&task=${encodeURIComponent(taskId)}`} className="btn-secondary">
+            <Link
+              to={`/w/${workspaceId}/mission-control?${new URLSearchParams({ run: runId, task: taskId, stream: 'task', ctask: taskId }).toString()}`}
+              className="btn-secondary"
+            >
               {t('tasks.openChat')}
             </Link>
           ) : null}
         </div>
       </PageHeading>
-      <RunNav workspaceId={workspaceId} projectId={projectId} runId={runId} />
+      <RunNav workspaceId={workspaceId} projectId={projectId} runId={runId} taskId={taskId} />
       {task.isPending ? (
         <LoadingState label={t('tasks.loading')} />
       ) : task.isError ? (

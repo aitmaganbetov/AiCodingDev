@@ -1,288 +1,347 @@
-import { useQuery } from '@tanstack/react-query';
+/**
+ * AI Mission Control (F4, план §3.3, §5.8, §6.2): центральный экран исполнения.
+ *
+ *  ≥ 1366 px — три панели: Workflow Navigator | Live Agent Chat (+ User Command Center снизу) — изменяемые
+ *  разделители (react-resizable-panels, размеры `aicd.layout.mission-control.*`), Agent Inspector —
+ *  правая контекстная панель оболочки (ширина и открытость сохраняются, F2);
+ *  768–1365 px — две панели: вкладки «Навигатор | Инспектор» и лента с Command Center;
+ *  < 768 px — одна панель с сегментными вкладками «Навигатор | Лента | Инспектор», Command Center ниже.
+ *
+ * Состояние (run, задача, вид ленты, фильтры, вкладка) — в URL (`mcParams.ts`). Данные — только API:
+ * getRun/getRunTasks/getRunChat/listDirectives/listRunEvidence/getRunQuality/getTask/listTaskAttempts/
+ * getAttemptContextPack + один поток SSE run на экран (StreamManager).
+ */
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, Navigate } from 'react-router';
 import { isApiError } from '../../api/client';
-import { runKeys, runsApi, type RunStatus, type RunSummary } from '../../api/runs';
+import type { ChatFilters } from '../../api/chat';
+import type { Run } from '../../api/runs';
 import { PageHeading } from '../../components/PageHeading';
 import { StatusBadge } from '../../components/StatusBadge';
-import { EmptyState, ErrorState, LoadingState } from '../../components/states';
-import { AgentBadge } from '../../components/ui/AgentBadge';
-import { Callout } from '../../components/ui/Badge';
-import { ButtonLink } from '../../components/ui/Button';
+import { ButtonLink, EmptyState, ErrorState, IconButton, LoadingState, Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui';
 import { ResizableGroup, ResizableHandle, ResizablePanel, useResizableGroup } from '../../components/ui/Resizable';
-import { Skeleton } from '../../components/ui/Skeleton';
-import { RelativeTime } from '../../components/ui/Time';
-import { cx } from '../../components/ui/cx';
 import { ContextPanel } from '../../layout/ContextPanel';
-import { useMediaQuery } from '../../lib/layoutPrefs';
+import { MQ_DESKTOP, useContextOpenPref, useMediaQuery } from '../../lib/layoutPrefs';
+import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
 import { useInPageSearchParams } from '../runs/useInPageSearchParams';
+import { CommandCenter } from './CommandCenter';
+import { FeedPanel } from './FeedPanel';
+import { RunInspector, TaskInspector, useTaskSummary } from './Inspector';
+import { readMcState, writeMcState, type FeedFilters, type McPane, type McState, type McView, type NavMode } from './mcParams';
+import { CurrentExecutors, MISSION_CONTROL_RUNS_LIMIT, RunList, RunStages, RunSwitcher, TaskDag, useActiveRuns } from './Navigator';
+import { useMissionControlRun } from './useRunData';
 
-/** Активные статусы run (не терминальные). */
-export const ACTIVE_RUN_STATUSES: RunStatus[] = ['CREATED', 'DISCOVERY', 'PLANNED', 'AWAITING_APPROVAL', 'RUNNING', 'VERIFYING', 'PAUSED', 'BLOCKED'];
-export const MISSION_CONTROL_RUNS_LIMIT = 20;
+/** Три панели (Navigator | лента | Inspector в контекстной панели) — с этой ширины окна (план §5.8). */
+export const MQ_MC_WIDE = '(min-width: 1366px)';
+export const MC_SCREEN_ID = 'mission-control';
 
-/** `?run=<id>`: переход к run по одному id (уведомления/поиск не знают project_id). */
-function RunResolver({ workspaceId, runId }: { workspaceId: string; runId: string }) {
+/** Выбор активного run (без `?run=`). */
+function RunChooser({ workspaceId, onSelect }: { workspaceId: string; onSelect: (id: string) => void }) {
   const { t } = useTranslation();
-  const run = useQuery({ queryKey: runKeys.detail(runId), queryFn: ({ signal }) => runsApi.get(runId, signal), retry: false });
-  if (run.isPending) return <LoadingState label={t('missionControl.resolving')} />;
-  if (run.isError) {
-    return (
-      <>
-        <PageHeading title={t('nav.missionControl')} />
-        <ErrorState
-          error={run.error}
-          title={isApiError(run.error) && run.error.status === 404 ? t('missionControl.runNotFound') : t('missionControl.resolveError')}
-          onRetry={() => void run.refetch()}
+  const runs = useActiveRuns(workspaceId);
+  const items = runs.data?.items ?? [];
+  return (
+    <section aria-labelledby="mc-choose-title" className="flex max-w-3xl flex-col gap-3">
+      <h2 id="mc-choose-title" className="text-lg font-semibold">
+        {runs.isPending ? t('missionControl.activeRunsList') : t('missionControl.activeRuns', { count: items.length })}
+      </h2>
+      <p className="text-sm text-fg-muted">{t('missionControl.chooseHint')}</p>
+      {runs.isPending ? (
+        <LoadingState label={t('missionControl.loading')} />
+      ) : runs.isError ? (
+        <ErrorState error={runs.error} onRetry={() => void runs.refetch()} title={t('missionControl.error')} />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon="missionControl"
+          title={t('missionControl.emptyTitle')}
+          description={t('missionControl.emptyDescription')}
+          action={
+            <ButtonLink to={`/w/${workspaceId}/runs`} icon="workflow">
+              {t('missionControl.toRuns')}
+            </ButtonLink>
+          }
         />
-      </>
-    );
-  }
-  return <Navigate replace to={`/w/${workspaceId}/projects/${run.data.project_id}/runs/${run.data.id}`} />;
-}
-
-function RunLinks({ workspaceId, run }: { workspaceId: string; run: RunSummary }) {
-  const { t } = useTranslation();
-  const base = `/w/${workspaceId}/projects/${run.project_id}/runs/${run.id}`;
-  return (
-    <div className="flex flex-wrap gap-2">
-      <ButtonLink size="sm" variant="primary" to={base}>
-        {t('missionControl.openRun')}
-        <span className="sr-only">: {run.objective.slice(0, 80)}</span>
-      </ButtonLink>
-      <ButtonLink size="sm" to={`${base}/graph`}>
-        {t('missionControl.openGraph')}
-      </ButtonLink>
-      <ButtonLink size="sm" to={`${base}/chat`}>
-        {t('missionControl.openChat')}
-      </ButtonLink>
-    </div>
-  );
-}
-
-function RunsPanel({
-  runs,
-  selected,
-  onSelect,
-}: {
-  runs: RunSummary[];
-  selected: string | null;
-  onSelect: (id: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <section aria-labelledby="mc-runs" className="flex h-full min-h-0 flex-col">
-      <h2 id="mc-runs" className="mb-2 text-base font-semibold text-fg">
-        {t('missionControl.activeRuns', { count: runs.length })}
-      </h2>
-      <ul className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1" aria-label={t('missionControl.activeRunsList')}>
-        {runs.map((r) => {
-          const isSelected = r.id === selected;
-          return (
-            <li key={r.id} data-run-id={r.id}>
-              <button
-                type="button"
-                aria-pressed={isSelected}
-                onClick={() => onSelect(r.id)}
-                className={cx(
-                  'flex w-full flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors duration-instant',
-                  isSelected ? 'border-border-active bg-accent-soft/40' : 'border-border bg-surface hover:bg-surface-muted',
-                )}
-              >
-                <span className="flex flex-wrap items-center gap-2">
-                  <StatusBadge kind="run" status={r.status} />
-                  <span className="text-xs text-fg-muted">{t(`enums.run_mode.${r.mode}`, { defaultValue: r.mode })}</span>
-                </span>
-                <span className="line-clamp-2 break-words text-sm font-medium text-fg">{r.objective}</span>
-                <span className="text-xs text-fg-muted">
-                  {t('missionControl.created')} <RelativeTime value={r.created_at} />
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-function TasksPanel({ workspaceId, run }: { workspaceId: string; run: RunSummary | null }) {
-  const { t } = useTranslation();
-  const tasks = useQuery({
-    queryKey: runKeys.tasks(run?.id ?? ''),
-    queryFn: ({ signal }) => runsApi.tasks(run?.id ?? '', {}, signal),
-    enabled: Boolean(run),
-  });
-  if (!run) {
-    return (
-      <section aria-labelledby="mc-tasks" className="flex h-full flex-col">
-        <h2 id="mc-tasks" className="mb-2 text-base font-semibold text-fg">
-          {t('missionControl.tasks')}
-        </h2>
-        <p className="text-sm text-fg-muted">{t('missionControl.selectRun')}</p>
-      </section>
-    );
-  }
-  return (
-    <section aria-labelledby="mc-tasks" className="flex h-full min-h-0 flex-col" aria-busy={tasks.isFetching}>
-      <h2 id="mc-tasks" className="mb-2 text-base font-semibold text-fg">
-        {t('missionControl.tasksOf', { objective: run.objective.slice(0, 60) })}
-      </h2>
-      {tasks.isPending ? (
-        <Skeleton lines={4} />
-      ) : tasks.isError ? (
-        <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} title={t('missionControl.tasksError')} />
-      ) : tasks.data.tasks.length === 0 ? (
-        <p className="text-sm text-fg-muted">{t('missionControl.noTasks')}</p>
       ) : (
-        <ul className="flex min-h-0 flex-col divide-y divide-border overflow-y-auto rounded-lg border border-border bg-surface">
-          {tasks.data.tasks.map((task) => (
-            <li key={task.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-              <AgentBadge agentRole={task.agent_role} showName={false} />
-              <Link to={`/w/${workspaceId}/projects/${run.project_id}/runs/${run.id}/tasks/${task.id}`} className="min-w-0 flex-1 break-words text-sm font-medium">
-                {task.title}
-              </Link>
-              <StatusBadge kind="task" status={task.status} />
-            </li>
-          ))}
-        </ul>
+        <RunList runs={items} selected={null} onSelect={onSelect} />
       )}
+      {runs.data?.next_cursor ? <p className="text-sm text-fg-muted">{t('missionControl.sample', { count: MISSION_CONTROL_RUNS_LIMIT })}</p> : null}
     </section>
   );
 }
 
-function ResetPanels() {
+/** Сброс размеров обеих групп панелей (WCAG 2.5.7: альтернатива перетаскиванию — кнопка). */
+function OuterReset({ register }: { register: (fn: () => void) => void }) {
+  const { reset } = useResizableGroup();
+  useEffect(() => register(reset), [register, reset]);
+  return null;
+}
+function ResetLayoutButton({ outer }: { outer: { current: (() => void) | null } }) {
   const { t } = useTranslation();
   const { reset } = useResizableGroup();
   return (
-    <button type="button" className="btn-ghost btn-sm" onClick={reset}>
-      {t('missionControl.resetPanels')}
-    </button>
+    <IconButton
+      icon="refresh"
+      label={t('missionControl.resetPanels')}
+      onClick={() => {
+        reset();
+        outer.current?.();
+      }}
+    />
   );
 }
 
-function RunContext({ workspaceId, run }: { workspaceId: string; run: RunSummary }) {
+function RunBar({ run, planVersion, taskTitle, onClearTask, extra }: { run: Run; planVersion: number; taskTitle: string | null; onClearTask: () => void; extra?: ReactNode }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-3 text-sm" data-testid="mc-context">
-      <StatusBadge kind="run" status={run.status} />
-      <p className="break-words font-medium text-fg">{run.objective}</p>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-fg-muted">
-        <dt>{t('missionControl.mode')}</dt>
-        <dd className="text-fg">{t(`enums.run_mode.${run.mode}`, { defaultValue: run.mode })}</dd>
-        <dt>{t('missionControl.created')}</dt>
-        <dd className="text-fg">
-          <RelativeTime value={run.created_at} />
-        </dd>
-        {run.started_at ? (
-          <>
-            <dt>{t('missionControl.started')}</dt>
-            <dd className="text-fg">
-              <RelativeTime value={run.started_at} />
-            </dd>
-          </>
-        ) : null}
-        <dt>{t('missionControl.requestedBy')}</dt>
-        <dd className="break-words text-fg">{run.requested_by.display_name}</dd>
-      </dl>
-      <RunLinks workspaceId={workspaceId} run={run} />
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm" data-testid="mc-run-bar">
+      <span className="flex items-center gap-2">
+        <span className="text-fg-muted">{t('run.status')}:</span>
+        <span data-testid="run-status">
+          <StatusBadge kind="run" status={run.status} />
+        </span>
+      </span>
+      <span className="text-fg-muted">{t(`enums.run_mode.${run.mode}`, { defaultValue: run.mode })}</span>
+      {planVersion > 0 ? <span className="text-fg-muted">{t('runGraph.planVersion', { version: planVersion })}</span> : null}
+      <span className="min-w-0 flex-1 truncate font-medium text-fg" title={run.objective}>
+        {run.objective}
+      </span>
+      {taskTitle ? (
+        <span className="flex min-w-0 items-center gap-1 text-fg-muted">
+          <span className="truncate">{t('missionControl.selectedTask', { task: taskTitle })}</span>
+          <IconButton icon="close" label={t('missionControl.clearTask')} onClick={onClearTask} />
+        </span>
+      ) : null}
+      {extra}
     </div>
   );
 }
 
-/**
- * AI Mission Control (F2): выбор активного run. Split view (≥ 1024 px, размеры сохраняются,
- * клавиатура/кнопка сброса) — список активных runs и задачи выбранного; сводка — в контекстной
- * панели оболочки. Объединённый экран (DAG, лента, инспектор) — фаза F4 (плашка на экране).
- */
-export default function MissionControlPage() {
+function RunWorkspace({
+  workspaceId,
+  role,
+  state,
+  update,
+}: {
+  workspaceId: string;
+  role: string;
+  state: McState;
+  update: (patch: Partial<McState>) => void;
+}) {
   const { t } = useTranslation();
-  const { workspaceId } = useCurrentWorkspace();
-  const [params, setParams] = useInPageSearchParams();
-  const resolveRun = params.get('run');
-  const selectedId = params.get('selected');
-  const split = useMediaQuery('(min-width: 1024px)', true);
+  const runId = state.runId ?? '';
+  const data = useMissionControlRun(runId, role, state.taskId, t);
+  const wide = useMediaQuery(MQ_MC_WIDE, true);
+  const desktop = useMediaQuery(MQ_DESKTOP, true);
+  const [, setContextOpen] = useContextOpenPref(wide ? MC_SCREEN_ID : null);
+  const outerReset = useRef<(() => void) | null>(null);
+  const registerOuterReset = useCallback((fn: () => void) => {
+    outerReset.current = fn;
+  }, []);
+  const run = data.run.data;
+  const selected = useTaskSummary(data.tasks, state.taskId);
 
-  const runs = useQuery({
-    queryKey: [...runKeys.list(workspaceId ?? ''), 'mission-control'] as const,
-    queryFn: ({ signal }) => runsApi.list(workspaceId ?? '', { status: ACTIVE_RUN_STATUSES, limit: MISSION_CONTROL_RUNS_LIMIT }, signal),
-    enabled: Boolean(workspaceId && !resolveRun),
-  });
+  const taskHref = useCallback(
+    (taskId: string, tab?: string) =>
+      `/w/${workspaceId}/projects/${run?.project_id ?? ''}/runs/${runId}/tasks/${taskId}${tab && tab !== 'overview' ? `?tab=${tab}` : ''}`,
+    [workspaceId, run?.project_id, runId],
+  );
+  const selectTask = useCallback(
+    (taskId: string) => {
+      update({ taskId, ...(!desktop ? { pane: 'inspector' as McPane } : {}) });
+      if (wide) setContextOpen(true);
+    },
+    [update, desktop, wide, setContextOpen],
+  );
+  const clearTask = useCallback(() => update({ taskId: null }), [update]);
+  const setView = useCallback((view: McView) => update({ view }), [update]);
+  const setNav = useCallback((nav: NavMode) => update({ nav }), [update]);
+  const setChat = useCallback((chat: ChatFilters) => update({ chat }), [update]);
+  const setFeed = useCallback((feed: FeedFilters) => update({ feed }), [update]);
 
-  if (!workspaceId) return null;
-  if (resolveRun) return <RunResolver workspaceId={workspaceId} runId={resolveRun} />;
-
-  const items = runs.data?.items ?? [];
-  const selected = items.find((r) => r.id === selectedId) ?? null;
-  const select = (id: string) => {
-    const next = new URLSearchParams(params);
-    next.set('selected', id);
-    setParams(next);
-  };
-
-  let body;
-  if (runs.isPending) body = <LoadingState label={t('missionControl.loading')} />;
-  else if (runs.isError) body = <ErrorState error={runs.error} onRetry={() => void runs.refetch()} title={t('missionControl.error')} />;
-  else if (items.length === 0)
-    body = (
-      <EmptyState
-        icon="missionControl"
-        title={t('missionControl.emptyTitle')}
-        description={t('missionControl.emptyDescription')}
-        action={
-          <ButtonLink to={`/w/${workspaceId}/runs`} icon="workflow">
-            {t('missionControl.toRuns')}
-          </ButtonLink>
-        }
+  if (data.run.isError) {
+    const notFound = isApiError(data.run.error) && data.run.error.status === 404;
+    return (
+      <ErrorState
+        error={data.run.error}
+        title={notFound ? t('missionControl.runNotFound') : t('missionControl.resolveError')}
+        onRetry={() => void data.run.refetch()}
       />
     );
-  else if (split)
-    body = (
-      <div className="h-[min(70vh,44rem)] rounded-lg border border-border bg-canvas-secondary p-3" data-testid="mc-split">
-        <ResizableGroup id="mission-control.chooser" defaultLayout={{ 'mc-runs': 40, 'mc-tasks': 60 }}>
-          <ResizablePanel id="mc-runs" defaultSize="40" minSize="25">
-            <div className="h-full pr-2">
-              <RunsPanel runs={items} selected={selected?.id ?? null} onSelect={select} />
+  }
+  if (!run) return <LoadingState label={t('run.loading')} />;
+
+  const navigator = (
+    <section aria-labelledby="mc-nav-title" className="flex flex-col gap-4" data-testid="mc-navigator">
+      <h2 id="mc-nav-title" className="text-base font-semibold text-fg">
+        {t('missionControl.navigator.title')}
+      </h2>
+      <RunSwitcher workspaceId={workspaceId} selected={run.id} onSelect={(id) => update({ runId: id, taskId: null })} />
+      <RunStages run={run} />
+      <CurrentExecutors tasks={data.tasks} onSelect={selectTask} />
+      <TaskDag
+        tasks={data.tasks}
+        edges={data.edges}
+        loading={data.tasksQuery.isPending}
+        error={data.tasksQuery.isError ? data.tasksQuery.error : null}
+        onRetry={() => void data.tasksQuery.refetch()}
+        mode={state.nav}
+        onMode={setNav}
+        taskHref={taskHref}
+        selectedId={state.taskId}
+        onSelect={selectTask}
+        indicators={data.indicators}
+        graphClassName={wide ? 'h-[max(22rem,calc(100dvh-30rem))]' : 'h-[26rem]'}
+      />
+      {data.tasksQuery.isFetchingNextPage ? <LoadingState inline label={t('runGraph.loadingMore')} /> : null}
+    </section>
+  );
+  const feed = (
+    <FeedPanel
+      workspaceId={workspaceId}
+      role={role}
+      run={run}
+      data={data}
+      view={state.view}
+      onView={setView}
+      chatFilters={state.chat}
+      onChatFilters={setChat}
+      feedFilters={state.feed}
+      onFeedFilters={setFeed}
+      taskHref={taskHref}
+      onSelectTask={selectTask}
+    />
+  );
+  const command = <CommandCenter run={run} role={role} workspaceId={workspaceId} tasks={data.tasks} selectedTask={selected ?? null} taskHref={taskHref} />;
+  const inspector = state.taskId ? (
+    <TaskInspector
+      key={state.taskId}
+      role={role}
+      summary={selected}
+      gates={data.quality.data?.gate_executions ?? null}
+      events={data.stream.events}
+      taskHref={taskHref}
+      onClose={clearTask}
+    />
+  ) : (
+    <RunInspector workspaceId={workspaceId} role={role} run={run} />
+  );
+  const inspectorTitle = state.taskId ? t('missionControl.inspector.title') : t('missionControl.inspector.runTitle');
+
+  let layout: ReactNode;
+  if (wide) {
+    layout = (
+      <div className="h-[max(36rem,calc(100dvh-12.5rem))] min-h-0" data-testid="mc-layout" data-layout="three">
+        <ResizableGroup id="mission-control.main" defaultLayout={{ 'mc-nav': 36, 'mc-center': 64 }}>
+          <OuterReset register={registerOuterReset} />
+          <ResizablePanel id="mc-nav" defaultSize="36" minSize="22">
+            <div className="h-full overflow-y-auto pr-2">{navigator}</div>
+          </ResizablePanel>
+          <ResizableHandle before={t('missionControl.navigator.title')} after={t('missionControl.feed.title')} />
+          <ResizablePanel id="mc-center" defaultSize="64" minSize="35">
+            <ResizableGroup id="mission-control.center" orientation="vertical" defaultLayout={{ 'mc-feed': 68, 'mc-command': 32 }}>
+              <ResizablePanel id="mc-feed" defaultSize="68" minSize="30">
+                <div className="relative h-full overflow-y-auto pb-2 pl-2">
+                  <div className="absolute right-0 top-0 z-10">
+                    <ResetLayoutButton outer={outerReset} />
+                  </div>
+                  {feed}
+                </div>
+              </ResizablePanel>
+              <ResizableHandle orientation="vertical" before={t('missionControl.feed.title')} after={t('missionControl.command.title')} />
+              <ResizablePanel id="mc-command" defaultSize="32" minSize="14">
+                <div className="h-full overflow-y-auto pl-2 pt-2">{command}</div>
+              </ResizablePanel>
+            </ResizableGroup>
+          </ResizablePanel>
+        </ResizableGroup>
+      </div>
+    );
+  } else if (desktop) {
+    const side: McPane = state.pane === 'inspector' ? 'inspector' : 'navigator';
+    layout = (
+      <div className="h-[max(36rem,calc(100dvh-12.5rem))] min-h-0" data-testid="mc-layout" data-layout="two">
+        <ResizableGroup id="mission-control.medium" defaultLayout={{ 'mc-side': 42, 'mc-main': 58 }}>
+          <ResizablePanel id="mc-side" defaultSize="42" minSize="28">
+            <div className="h-full overflow-y-auto pr-2">
+              <Tabs value={side} onValueChange={(v) => update({ pane: v as McPane })}>
+                <TabsList label={t('missionControl.panes.label')} variant="pills">
+                  <TabsTrigger value="navigator">{t('missionControl.panes.navigator')}</TabsTrigger>
+                  <TabsTrigger value="inspector">{inspectorTitle}</TabsTrigger>
+                </TabsList>
+                <TabsContent value="navigator">{navigator}</TabsContent>
+                <TabsContent value="inspector">
+                  <section aria-label={inspectorTitle}>{inspector}</section>
+                </TabsContent>
+              </Tabs>
             </div>
           </ResizablePanel>
-          <ResizableHandle before={t('missionControl.panelRuns')} after={t('missionControl.panelTasks')} />
-          <ResizablePanel id="mc-tasks" defaultSize="60" minSize="30">
-            <div className="flex h-full flex-col gap-2 pl-2">
-              <div className="flex justify-end">
-                <ResetPanels />
-              </div>
-              <div className="min-h-0 flex-1">
-                <TasksPanel workspaceId={workspaceId} run={selected} />
-              </div>
+          <ResizableHandle before={t('missionControl.panes.navigator')} after={t('missionControl.feed.title')} />
+          <ResizablePanel id="mc-main" defaultSize="58" minSize="35">
+            <div className="flex h-full flex-col gap-3 overflow-y-auto pl-2">
+              {feed}
+              {command}
             </div>
           </ResizablePanel>
         </ResizableGroup>
       </div>
     );
-  else
-    body = (
-      <div className="flex flex-col gap-6">
-        <RunsPanel runs={items} selected={selected?.id ?? null} onSelect={select} />
-        <TasksPanel workspaceId={workspaceId} run={selected} />
+  } else {
+    const pane: McPane = state.pane ?? 'feed';
+    layout = (
+      <div className="flex flex-col gap-3" data-testid="mc-layout" data-layout="one">
+        <Tabs value={pane} onValueChange={(v) => update({ pane: v as McPane })}>
+          <TabsList label={t('missionControl.panes.label')} variant="pills" className="w-full">
+            <TabsTrigger value="navigator">{t('missionControl.panes.navigator')}</TabsTrigger>
+            <TabsTrigger value="feed">{t('missionControl.panes.feed')}</TabsTrigger>
+            <TabsTrigger value="inspector">{t('missionControl.panes.inspector')}</TabsTrigger>
+          </TabsList>
+          <TabsContent value="navigator">{navigator}</TabsContent>
+          <TabsContent value="feed">{feed}</TabsContent>
+          <TabsContent value="inspector">
+            <section aria-label={inspectorTitle}>{inspector}</section>
+          </TabsContent>
+        </Tabs>
+        {command}
       </div>
     );
+  }
 
   return (
-    <section aria-labelledby="page-title" className="flex flex-col gap-4">
+    <>
+      <RunBar run={run} planVersion={data.planVersion} taskTitle={selected?.title ?? null} onClearTask={clearTask} />
+      <p className="sr-only" role="status" aria-live="polite" data-testid="graph-announcement">
+        {data.announcement}
+      </p>
+      {layout}
+      {wide ? (
+        <ContextPanel id={MC_SCREEN_ID} title={inspectorTitle}>
+          {inspector}
+        </ContextPanel>
+      ) : null}
+    </>
+  );
+}
+
+export default function MissionControlPage() {
+  const { t } = useTranslation();
+  const { workspaceId, membership } = useCurrentWorkspace();
+  const [params, setParams] = useInPageSearchParams();
+  const state = useMemo(() => readMcState(params), [params]);
+  const update = useCallback((patch: Partial<McState>) => setParams(writeMcState({ ...state, ...patch })), [state, setParams]);
+  if (!workspaceId || !membership) return <WorkspaceNotFound />;
+  return (
+    <section aria-labelledby="page-title" className="flex flex-col gap-3">
       <PageHeading title={t('nav.missionControl')}>
         <ButtonLink to={`/w/${workspaceId}/runs`} icon="workflow">
           {t('missionControl.allRuns')}
         </ButtonLink>
       </PageHeading>
-      <Callout tone="info" title={t('missionControl.phaseTitle')}>
-        {t('missionControl.phaseNote')}
-      </Callout>
-      {runs.data?.next_cursor ? <p className="text-sm text-fg-muted">{t('missionControl.sample', { count: MISSION_CONTROL_RUNS_LIMIT })}</p> : null}
-      {body}
-      <ContextPanel id="mission-control" title={t('missionControl.context.title')}>
-        {selected ? <RunContext workspaceId={workspaceId} run={selected} /> : null}
-      </ContextPanel>
+      {state.runId ? (
+        <RunWorkspace key={state.runId} workspaceId={workspaceId} role={membership.role} state={state} update={update} />
+      ) : (
+        <RunChooser workspaceId={workspaceId} onSelect={(id) => update({ runId: id })} />
+      )}
     </section>
   );
 }

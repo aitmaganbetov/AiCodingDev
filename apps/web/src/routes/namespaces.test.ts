@@ -7,29 +7,34 @@
  * Ключи ищутся в вызовах `t('group.…')`/`t(\`group.…\`)`, `labelKey/titleKey/descriptionKey: 'group.…'`
  * и `t('ns:…')`; группа верхнего уровня → файл namespace (группы уникальны, см. i18n.test.ts).
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EAGER_NAMESPACES, NAMESPACES, SHELL_DEFERRED_NAMESPACES } from '../i18n';
 import i18n from '../i18n';
 
-const SRC = resolve(__dirname, '..');
+/** Исходники приложения как текст (ключ — путь от src/, например `features/chat/ChatPage.tsx`). */
+const raw = import.meta.glob<string>(['../**/*.{ts,tsx}', '!../**/*.test.{ts,tsx}', '!../**/*.d.ts', '!../test/**'], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+const SOURCE = new Map(Object.entries(raw).map(([k, v]) => [k.startsWith('./') ? `routes/${k.slice(2)}` : k.replace(/^\.\.\//, ''), v]));
+const FILES = [...SOURCE.keys()];
 
-function walk(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) return walk(p);
-    return /\.(ts|tsx)$/.test(name) && !/\.test\.(ts|tsx)$/.test(name) && !name.endsWith('.d.ts') && !p.includes(`${join('src', 'test')}`) ? [p] : [];
-  });
+function normalize(path: string): string {
+  const out: string[] = [];
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') out.pop();
+    else out.push(part);
+  }
+  return out.join('/');
 }
-
-const FILES = walk(SRC);
-const SOURCE = new Map(FILES.map((f) => [f, readFileSync(f, 'utf8')]));
+const dirname = (f: string) => f.split('/').slice(0, -1).join('/');
 
 function resolveImport(from: string, spec: string): string | null {
   if (!spec.startsWith('.')) return null;
-  const base = resolve(dirname(from), spec);
-  for (const c of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')]) if (SOURCE.has(c)) return c;
+  const base = normalize(`${dirname(from)}/${spec}`);
+  for (const c of [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`]) if (SOURCE.has(c)) return c;
   return null;
 }
 
@@ -46,7 +51,7 @@ function imports(file: string): { static: string[]; dynamic: string[] } {
 /** Экраны lazyPage (route-файлы, ленивые слои оболочки): модуль → объявленные namespace. */
 function lazyPages(): Map<string, string[]> {
   const out = new Map<string, string[]>();
-  for (const file of FILES.filter((f) => !f.endsWith(join('routes', 'lazyPage.tsx')))) {
+  for (const file of FILES.filter((f) => f !== 'routes/lazyPage.tsx')) {
     const src = SOURCE.get(file) ?? '';
     for (const m of src.matchAll(/lazyPage\(\s*\(\)\s*=>\s*import\(\s*['"]([^'"]+)['"]\s*\)\s*,\s*['"]\w+['"]\s*,\s*\[([^\]]*)\]\s*,?\s*\)/g)) {
       const target = resolveImport(file, m[1] ?? '');
@@ -63,7 +68,7 @@ for (const ns of NAMESPACES) for (const group of Object.keys(i18n.getResourceBun
 
 function namespacesUsed(file: string): Set<string> {
   // i18n/index.ts только описывает соглашение (примеры ключей в комментариях).
-  if (file.endsWith(join('i18n', 'index.ts'))) return new Set();
+  if (file === 'i18n/index.ts') return new Set();
   const src = SOURCE.get(file) ?? '';
   const found = new Set<string>();
   const add = (group: string | undefined) => {
@@ -92,7 +97,7 @@ function closure(entries: readonly string[], stopAt: ReadonlySet<string>): Set<s
   return seen;
 }
 
-const short = (f: string) => relative(SRC, f);
+const short = (f: string) => f;
 
 describe('i18n namespaces per lazy screen', () => {
   const pages = lazyPages();
@@ -106,7 +111,7 @@ describe('i18n namespaces per lazy screen', () => {
   it('initial bundle code uses only eager (and background-preloaded shell) namespaces', () => {
     const allowed = new Set<string>([...EAGER_NAMESPACES, ...SHELL_DEFERRED_NAMESPACES]);
     const problems: string[] = [];
-    for (const f of closure([join(SRC, 'main.tsx')], boundaries)) {
+    for (const f of closure(['main.tsx'], boundaries)) {
       for (const ns of namespacesUsed(f)) if (!allowed.has(ns)) problems.push(`${short(f)} → ${ns}`);
     }
     expect(problems).toEqual([]);

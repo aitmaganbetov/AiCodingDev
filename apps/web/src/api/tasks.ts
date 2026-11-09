@@ -14,6 +14,7 @@ export type QualityReport = Schemas['QualityReport'];
 export type WorkspaceTask = Schemas['WorkspaceTask'];
 export type WorkspaceTaskPage = Schemas['WorkspaceTaskPage'];
 export type ListWorkspaceTasksQuery = Query<'listTasks'>;
+export type AttemptContextPack = Schemas['AttemptContextPack'];
 
 export const taskKeys = {
   detail: (taskId: string) => ['task', taskId] as const,
@@ -22,6 +23,8 @@ export const taskKeys = {
   evidence: (taskId: string) => ['task', taskId, 'evidence'] as const,
   artifact: (artifactId: string) => ['artifact', artifactId, 'text'] as const,
   quality: (runId: string) => ['run', runId, 'quality'] as const,
+  /** Manifest Context Pack попытки (B3, G-08). */
+  contextPack: (taskId: string, attemptId: string) => ['task', taskId, 'context-pack', attemptId] as const,
   /** Задачи workspace (GET /tasks, B1): префикс `['tasks', ws]` — общая инвалидация. */
   workspace: (workspaceId: string, query: ListWorkspaceTasksQuery = {}) => ['tasks', workspaceId, query] as const,
 };
@@ -54,6 +57,14 @@ export const tasksApi = {
 
   evidence(taskId: string, query: Query<'listTaskEvidence'> = {}, signal?: AbortSignal): Promise<EvidencePage> {
     return request({ method: 'GET', path: `/tasks/${seg(taskId)}/evidence`, query, signal });
+  },
+
+  /**
+   * Manifest Context Pack попытки (B3): какие файлы/символы/документация попали в контекст агента
+   * (без текста фрагментов). 404 — pack для попытки не собирался.
+   */
+  contextPack(taskId: string, attemptId: string, signal?: AbortSignal): Promise<AttemptContextPack> {
+    return request({ method: 'GET', path: `/tasks/${seg(taskId)}/attempts/${seg(attemptId)}/context-pack`, signal });
   },
 
   /** Отчёт качества run: gate executions (фильтруются по task_id на клиенте). */

@@ -127,7 +127,7 @@
 | AI Activity Timeline | SSE workspace (4 типа) + `listRuns` (created/started/finished) | ◐ | Без API — лента из этих событий («события runs и approvals»). `listAuditEvents` — только admin (`audit:read`). **B1 (опц.):** `GET /activity` workspace (агрегат `run_event_log` по workspace; индекс `(workspace_id, created_at)` отсутствует — OQ-45 c). |
 | Active Workflows | `listRuns?status=RUNNING,…` + `getRun.task_counts`, `pending_approvals` | ✅ | — |
 | Agent Performance | `analytics.tasks.by_role[]` (attempts, succeeded, failed, retries, verified_completion_rate), `review_loops` | ✅ | Только измеренные доли с размером выборки; без «рейтингов» агентов. |
-| Quality Overview | `analytics.gates[]` (total/passed/failed/errored/skipped/pass_rate) | ✅ | — |
+| Quality Overview | `analytics.gates[]` (total/passed/passed_verified/passed_unverified/failed/errored/skipped/pass_rate; D-8: «Пройдено» = `passed_verified`, миграция 0021) | ✅ | — |
 | System Health | `/health/ready` (postgres, redis, object_storage, migrations) — **вне `/api/`, nginx не проксирует**; workers/queues — нет | ❌ GAP | **B2:** `GET /api/v1/system/health` (право admin): компоненты + `worker_hosts` (kind, status, `last_heartbeat_at`) + глубина очередей Redis/outbox lag. **Без API:** плитка не показывается (не выводить «OK» по умолчанию). |
 
 ### 3.3 AI Mission Control

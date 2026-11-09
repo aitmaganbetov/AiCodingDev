@@ -127,11 +127,9 @@ def _seed(database: testdb.TestDatabase) -> tuple[Tenant, dict[str, uuid.UUID]]:
             "pass_verified_2": q.gate_execution(
                 conn, tenant, run, scope2, "SCOPE", "PASS", commit, evidence_id=q.evidence(conn, tenant, run, commit)
             ),
-            "fail": q.gate_execution(
-                conn, tenant, run, leaks, "SECRETS", "FAIL", commit,
-                evidence_id=q.evidence(conn, tenant, run, commit, kind="scan_report"),
-            ),  # fmt: skip
         }
+        scan = q.evidence(conn, tenant, run, commit, kind="scan_report")
+        ids["fail"] = q.gate_execution(conn, tenant, run, leaks, "SECRETS", "FAIL", commit, evidence_id=scan)
         pending = q.evidence(conn, tenant, run, commit, status="PENDING")
         conn.execute("SET session_replication_role = replica")
         try:
@@ -159,7 +157,7 @@ def test_view_exposes_evidence_verification_status(database: testdb.TestDatabase
             " set_config('app.actor_type', 'user', true)",
             (str(tenant.workspace_id), str(tenant.owner_id)),
         )
-        rows = dict(
+        rows: dict[uuid.UUID, str | None] = dict(
             conn.execute(
                 "SELECT gate_execution_id, evidence_verification_status FROM v_gate_outcomes WHERE workspace_id = %s",
                 (tenant.workspace_id,),
@@ -181,7 +179,11 @@ async def test_summary_splits_pass_by_evidence(database: testdb.TestDatabase, ap
     async with transaction(app_engine, DbContext(user_id=tenant.owner_id, workspace_id=tenant.workspace_id)) as conn:
         gates = {g["gate_type"]: g for g in await summary.gates_section(conn, window)}
     assert set(gates) == {"SCOPE", "SECRETS", "SAST"}
-    assert (gates["SCOPE"]["passed"], gates["SCOPE"]["passed_verified"], gates["SCOPE"]["passed_unverified"]) == (3, 2, 1)
+    assert (gates["SCOPE"]["passed"], gates["SCOPE"]["passed_verified"], gates["SCOPE"]["passed_unverified"]) == (
+        3,
+        2,
+        1,
+    )
     assert (gates["SECRETS"]["passed"], gates["SECRETS"]["passed_verified"], gates["SECRETS"]["passed_unverified"]) == (
         0,
         0,
