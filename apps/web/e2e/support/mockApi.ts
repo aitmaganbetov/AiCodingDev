@@ -104,6 +104,15 @@ const ROUTES: { method: string; path: string; operationId: string }[] = [
   { method: 'POST', path: '/api/v1/runs/{id}/cancel', operationId: 'cancelRun' },
 ];
 
+/**
+ * Операции, которые вызывает оболочка на каждом экране (F2: чипы CLI, счётчик approvals, поиск).
+ * Ответ по умолчанию — пустой; spec переопределяет его через `api.route(...)` (приоритет у spec).
+ */
+const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply: () => Reply }[] = [
+  { method: 'GET', path: '/api/v1/providers', operationId: 'listProviders', reply: () => ({ status: 200, body: { items: [] } }) },
+  { method: 'GET', path: '/api/v1/approvals', operationId: 'listApprovals', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+];
+
 /** Запрос к дополнительной операции мока (MockApi.route). */
 export interface MockRequest {
   url: URL;
@@ -119,7 +128,7 @@ function matchRoute(
   pathname: string,
   extra: readonly { method: string; path: string; operationId: string }[] = [],
 ): { operationId: string; id: string | undefined } | null {
-  for (const r of [...ROUTES, ...extra]) {
+  for (const r of [...ROUTES, ...extra, ...SHELL_DEFAULTS]) {
     if (r.method !== method) continue;
     const re = new RegExp(`^${r.path.replace('{id}', '([^/]+)')}$`);
     const m = re.exec(pathname);
@@ -312,7 +321,8 @@ export class MockApi {
       run_id: runId ?? this.runs.find((r) => r.workspace_id === workspaceId)?.id ?? uuid(),
       seq: this.workspaceEvents.length + 1,
       type,
-      timestamp: '2026-11-08T09:00:00Z',
+      // Время записи растёт с курсором (как на сервере): «прочитано до» в уведомлениях сравнивает время.
+      timestamp: new Date(Date.parse('2026-11-08T09:00:00Z') + this.workspaceEvents.length * 1000).toISOString().replace('.000Z', 'Z'),
       schema_version: '1.0',
       payload,
     };
@@ -624,9 +634,9 @@ export class MockApi {
       }
       default: {
         const extra = this.extraRoutes.find((r) => r.operationId === operationId);
-        return extra
-          ? extra.handler({ url, headers, body, id, workspaceId: headers['x-workspace-id'] })
-          : problem(404, 'not_found');
+        if (extra) return extra.handler({ url, headers, body, id, workspaceId: headers['x-workspace-id'] });
+        const fallback = SHELL_DEFAULTS.find((r) => r.operationId === operationId);
+        return fallback ? fallback.reply() : problem(404, 'not_found');
       }
     }
   }

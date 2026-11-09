@@ -226,7 +226,7 @@ export function ShellContextPanel() {
           {wide ? (
             <IconButton icon="refresh" label={t('shell.context.resetWidth')} onClick={() => setWidth(null)} disabled={width === CONTEXT_WIDTH.default} />
           ) : null}
-          <IconButton icon="close" label={t('shell.context.hide')} onClick={close} />
+          <IconButton icon="close" label={t('shell.context.close')} onClick={close} />
         </div>
         <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3" data-testid="context-panel-body" />
       </div>

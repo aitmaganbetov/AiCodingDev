@@ -9,6 +9,9 @@
 * `index` — опрос очереди `indexing_jobs` (`sys_indexing_workspaces`), индексация, определение стека,
   очистка кэша экспортов снимков (`aicd_worker.indexing`).
 
+Каждый процесс пишет heartbeat в `worker_hosts` (`AICD_WORKER_HEARTBEAT_SECONDS`, по умолчанию 15 с;
+`aicd_platform.worker_hosts`); при штатной остановке строка помечается OFFLINE.
+
 SIGINT/SIGTERM — штатная остановка: новые сообщения не берутся, текущие дорабатываются.
 """
 
@@ -30,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_cli_adapters.registry import register_host
 from aicd_orchestration import directives
-from aicd_platform import sse
+from aicd_platform import sse, worker_hosts
 from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.db import DbContext, TcpKeepalive, create_engine, transaction
 from aicd_platform.logging import configure_logging
@@ -187,6 +190,12 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
         keepalive=TcpKeepalive.from_settings(settings),
     )
     metrics_server = observability.start(settings, kind)
+    # Heartbeat процесса (worker_hosts, GET /system/health и aicd_worker_heartbeat_age_seconds): отдельная задача,
+    # останавливается тем же событием stop и помечает строку OFFLINE.
+    heartbeat_stop = asyncio.Event()
+    heartbeat = asyncio.create_task(
+        worker_hosts.Heartbeat(engine, kind, settings.worker_heartbeat_seconds).run(heartbeat_stop)
+    )
     try:
         if kind == "outbox":
             await run_outbox(settings, engine, stop)
@@ -195,6 +204,8 @@ async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None
         else:
             await run_consumers(kind, settings, engine, stop)
     finally:
+        heartbeat_stop.set()
+        await heartbeat
         if metrics_server is not None:
             await asyncio.to_thread(metrics_server.shutdown)
             metrics_server.server_close()

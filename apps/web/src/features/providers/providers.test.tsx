@@ -63,7 +63,8 @@ describe('ProvidersPage', () => {
     expect(screen.getByText('Требуется вход в CLI')).toBeInTheDocument();
     expect(screen.getByText(/Хосты без действующей авторизации: worker-exec-1/)).toBeInTheDocument();
     expect(container.querySelector('input[type="password"]')).toBeNull();
-    for (const input of container.querySelectorAll('input:not([type="checkbox"])')) {
+    // Поля экрана (в main); поиск оболочки в шапке — не поле провайдера.
+    for (const input of container.querySelectorAll('main input:not([type="checkbox"])')) {
       expect(input.getAttribute('id') ?? '').toMatch(/parallel|timeout/);
     }
     expect(screen.queryByLabelText(/токен|ключ|пароль/i)).toBeNull();

@@ -49,7 +49,9 @@ describe('SettingsPage', () => {
     await screen.findByRole('table', { name: /Участники/ });
     expect(screen.queryByRole('button', { name: /Изменить роль/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Добавить участника' })).toBeNull();
-    expect(screen.getByRole('link', { name: 'Журнал аудита' })).toHaveAttribute('href', `/w/${WS_ID}/audit`);
+    const sections = screen.getByRole('navigation', { name: 'Разделы настроек' });
+    expect(within(sections).getByRole('link', { name: 'Аудит' })).toHaveAttribute('href', `/w/${WS_ID}/settings/audit`);
+    expect(within(sections).getByRole('link', { name: 'Пространство и участники' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('owner adds a member (client email validation first)', async () => {

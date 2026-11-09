@@ -12,7 +12,7 @@ async function login(page: Page, api: MockApi) {
 }
 
 /** Только клавиатура: Tab (или Shift+Tab), пока фокус не окажется на целевом элементе. */
-async function tabTo(page: Page, target: Locator, { backwards = false, max = 20 } = {}) {
+async function tabTo(page: Page, target: Locator, { backwards = false, max = 40 } = {}) {
   for (let i = 0; i < max; i++) {
     if (await target.evaluate((el) => el === document.activeElement)) return;
     await page.keyboard.press(backwards ? 'Shift+Tab' : 'Tab');
@@ -133,13 +133,16 @@ test('error state with retry; session expiry redirects to login', async ({ page,
   await error.getByRole('button', { name: 'Повторить' }).click();
   await expect(page.getByRole('list', { name: 'Список проектов' }).getByRole('listitem')).toHaveCount(1);
 
+  // Истёкшая сессия: первым 401 может ответить и фоновый запрос оболочки (поток уведомлений, опрос CLI) —
+  // тогда next= указывает на текущий экран; в любом случае после входа пользователь возвращается туда.
   api.expireSessionOnNextRequest = true;
   await page.getByRole('link', { name: 'Рабочие пространства' }).click();
-  await expect(page).toHaveURL(/\/login\?next=%2Fworkspaces$/);
+  await expect(page).toHaveURL(/\/login\?next=%2F(workspaces|w%2F[^&]+%2Fprojects)$/);
+  const next = decodeURIComponent(new URL(page.url()).searchParams.get('next') ?? '');
   await page.getByLabel('Электронная почта').fill(api.user.email);
   await page.getByLabel('Пароль').fill(PASSWORD);
   await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page).toHaveURL(/\/workspaces$/);
+  await expect(page).toHaveURL(next);
 });
 
 test('role-aware UI: viewer does not see "Создать проект"', async ({ page, api }) => {

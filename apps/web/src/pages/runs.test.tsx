@@ -88,7 +88,8 @@ describe('run page', () => {
     const feed = await screen.findByRole('list', { name: 'События run' });
     expect(within(feed).getByText('Итог: Завершён; обязательные проверки 3 из 3')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('stream-state')).toHaveAttribute('data-state', 'closed'));
-    expect(calls.filter((c) => c.url.pathname.endsWith('/events'))).toHaveLength(1);
+    // Поток run (поток уведомлений workspace оболочки — отдельный путь /workspaces/{id}/events).
+    expect(calls.filter((c) => c.url.pathname.startsWith('/api/v1/runs/') && c.url.pathname.endsWith('/events'))).toHaveLength(1);
   });
 
   it('shows a fatal stream error with a manual reconnect button', async () => {

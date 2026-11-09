@@ -211,9 +211,9 @@ test('quality: SKIPPED/ERROR are not PASS; gate results arrive via SSE, reconnec
   // 1-е подключение: событие 1 и обрыв посреди кадра 2; 2-е — «сервер» повторяет 1 и досылает 2.
   api.sseScripts = [{ toSeq: 1, cut: true }, { fromSeq: 1 }];
   await login(page, api);
-  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Evidence и качество' }).click();
+  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Гейты качества' }).click();
   await expect(page).toHaveURL(`/w/${ws.id}/quality`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Evidence и качество' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Гейты качества' })).toBeFocused();
   await expectNoSeriousA11yViolations(page, 'quality index');
   await page.getByRole('link', { name: /^Качество и evidence/ }).click();
   await expect(page).toHaveURL(`/w/${ws.id}/quality/runs/${run.id}`);

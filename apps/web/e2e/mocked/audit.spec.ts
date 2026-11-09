@@ -41,7 +41,10 @@ test('audit: list, pagination, filters reflected in the URL, metadata details (l
   const ws = api.addWorkspace('Команда Альфа', 'alpha', 'admin');
   mockAudit(api, events(ws.id, 5));
   await login(page, api);
-  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Аудит' }).click();
+  // С F2 аудит — подраздел Настроек (D-3); прежний адрес перенаправляет туда.
+  await page.goto(`/w/${ws.id}/audit`);
+  await expect(page).toHaveURL(`/w/${ws.id}/settings/audit`);
+  await expect(page.getByRole('navigation', { name: 'Разделы настроек' }).getByRole('link', { name: 'Аудит' })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { level: 1, name: 'Аудит' })).toBeFocused();
   const table = page.getByRole('table', { name: 'События аудита' });
   await expect(table.getByRole('row')).toHaveCount(4);
@@ -71,7 +74,7 @@ test('audit: list, pagination, filters reflected in the URL, metadata details (l
   await page.getByLabel('Идентификатор пользователя').fill('');
   await page.getByLabel('Действие').fill('member.role_change');
   await page.getByLabel('Действие').press('Enter');
-  await expect(page).toHaveURL(`/w/${ws.id}/audit?action=member.role_change`);
+  await expect(page).toHaveURL(`/w/${ws.id}/settings/audit?action=member.role_change`);
   await expect(table.getByRole('row')).toHaveCount(3);
   // Смена query (фильтр) — тот же экран: фокус остаётся в форме, а не уходит на h1 (WCAG 2.4.3).
   await expect(page.getByLabel('Действие')).toBeFocused();
@@ -87,7 +90,7 @@ test('audit: list, pagination, filters reflected in the URL, metadata details (l
   await expect(page.getByTestId('empty-state')).toContainText('Ничего не найдено');
   await expectNoSeriousA11yViolations(page, 'audit empty (filtered)');
   await page.getByRole('button', { name: 'Сбросить' }).click();
-  await expect(page).toHaveURL(`/w/${ws.id}/audit`);
+  await expect(page).toHaveURL(`/w/${ws.id}/settings/audit`);
   await expect(page.getByRole('table', { name: 'События аудита' }).getByRole('row')).toHaveCount(4);
   await expect(page.getByRole('button', { name: 'Сбросить' })).toBeFocused();
   await expect(page.getByLabel('Действие')).toHaveValue('');

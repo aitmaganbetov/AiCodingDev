@@ -236,21 +236,23 @@ describe('layout', () => {
     expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual([
       'Обзор',
       'Проекты',
-      'Запуски',
+      'AI Mission Control',
+      'Агенты',
+      'Процессы',
       'Одобрения',
-      'Evidence и качество',
+      'Code Intelligence',
+      'Центр безопасности',
+      'Гейты качества',
       'Стандарты и соответствие',
-      'Знания и документация',
+      'Интеграция с GitHub',
       'Аналитика',
-      'CLI-провайдеры',
-      'Интеграции',
+      'Документация',
       'Настройки',
-      'Аудит',
       'Рабочие пространства',
     ]);
-    expect(within(nav).getByRole('list', { name: 'Администрирование' })).toBeInTheDocument();
+    for (const group of ['Обзор', 'Исполнение', 'Код и качество', 'Платформа']) expect(within(nav).getByRole('list', { name: group })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: 'Проекты' })).toHaveAttribute('aria-current', 'page');
-    expect(within(nav).getByRole('link', { name: 'Аудит' })).toHaveAttribute('href', `/w/${WS_ID}/audit`);
+    expect(within(nav).getByRole('link', { name: 'Настройки' })).toHaveAttribute('href', `/w/${WS_ID}/settings`);
 
     const switcher = screen.getByRole('button', { name: /Рабочее пространство/ });
     await user.click(switcher);

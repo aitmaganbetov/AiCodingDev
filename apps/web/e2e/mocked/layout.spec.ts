@@ -2,41 +2,29 @@ import { expectNoHorizontalScroll, expectNoSeriousA11yViolations } from '../supp
 import { focusDocumentStart, login, tabTo } from '../support/session';
 import { expect, test } from './fixtures';
 
-/** Все разделы Phase 7 в боковой навигации (порядок = порядок табуляции). */
+/** Разделы боковой навигации (IA редизайна, план §6.1, D-3; порядок = порядок табуляции). */
 const SECTIONS = [
   { name: 'Обзор', path: 'dashboard' },
   { name: 'Проекты', path: 'projects' },
-  { name: 'Запуски', path: 'runs' },
+  { name: 'AI Mission Control', path: 'mission-control' },
+  { name: 'Агенты', path: 'agents' },
+  { name: 'Процессы', path: 'runs' },
   { name: 'Одобрения', path: 'approvals' },
-  { name: 'Evidence и качество', path: 'quality' },
+  { name: 'Code Intelligence', path: 'code' },
+  { name: 'Центр безопасности', path: 'security' },
+  { name: 'Гейты качества', path: 'quality' },
   { name: 'Стандарты и соответствие', path: 'compliance' },
-  { name: 'Знания и документация', path: 'knowledge' },
+  { name: 'Интеграция с GitHub', path: 'integrations' },
   { name: 'Аналитика', path: 'analytics' },
-  { name: 'CLI-провайдеры', path: 'providers' },
-  { name: 'Интеграции', path: 'integrations' },
+  { name: 'Документация', path: 'knowledge' },
   { name: 'Настройки', path: 'settings' },
-  { name: 'Аудит', path: 'audit' },
 ];
 
-/** Разделы, реализованные экранами (axe — в их собственных spec); остальные пока заглушки «в разработке». */
-const IMPLEMENTED = new Set([
-  'projects',
-  'dashboard',
-  'runs',
-  'knowledge',
-  'providers',
-  'settings',
-  'audit',
-  'approvals',
-  'quality',
-  'compliance',
-  'analytics',
-  'integrations',
-]);
-
+/** Разделы, экраны которых появятся в следующих фазах (F5, F7, F8): «Раздел в разработке» + ссылки на существующие экраны. */
 const PLACEHOLDERS = [
-  ...SECTIONS.filter((s) => !IMPLEMENTED.has(s.path)).map((s) => ({ path: s.path, title: s.name })),
-  // Контекстные экраны run (граф, чат, задача) реализованы (P7-05..P7-08): axe — в run-graph/chat/tasks.spec.ts.
+  { path: 'agents', title: 'Агенты' },
+  { path: 'code', title: 'Code Intelligence' },
+  { path: 'security', title: 'Центр безопасности' },
 ];
 
 for (const scheme of ['light', 'dark'] as const) {
@@ -53,6 +41,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.goto(`/w/${ws.id}/${p.path}`);
       await expect(page.getByRole('heading', { level: 1, name: p.title })).toBeFocused();
       await expect(page.getByTestId('area-placeholder')).toContainText('Раздел в разработке');
+      await expect(page.getByRole('navigation', { name: 'Связанные разделы' }).getByRole('link').first()).toBeVisible();
       await expect(page).toHaveTitle(`${p.title} — AiCodingDev`);
       await expectNoSeriousA11yViolations(page, `${p.path} (${scheme})`);
     }
@@ -62,8 +51,9 @@ for (const scheme of ['light', 'dark'] as const) {
     await expectNoSeriousA11yViolations(page, `404 (${scheme})`);
 
     await page.goto(`/w/${ro.id}/audit`);
+    await expect(page).toHaveURL(`/w/${ro.id}/settings/audit`);
     await expect(page.getByRole('heading', { level: 1, name: 'Недостаточно прав' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Аудит' })).toHaveCount(0);
+    await expect(page.getByRole('navigation', { name: 'Разделы настроек' }).getByRole('link', { name: 'Аудит' })).toHaveCount(0);
     await expectNoSeriousA11yViolations(page, `403 (${scheme})`);
 
     await page.goto(`/w/${ws.id}/dashboard`);
@@ -110,18 +100,26 @@ test('keyboard-only: skip link, sidebar in tab order, Enter opens a section, sho
   await focusDocumentStart(page);
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Перейти к основному содержимому' })).toBeFocused();
+  // Порядок фокуса (план §5.9): верхняя панель → боковая навигация → main.
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'AiCodingDev' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: /Рабочее пространство/ })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: /^Проект/ })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('combobox', { name: 'Поиск по рабочему пространству' })).toBeFocused();
 
   const nav = page.getByRole('navigation', { name: 'Основная навигация' });
-  for (const s of SECTIONS) {
+  await tabTo(page, nav.getByRole('link', { name: 'Обзор', exact: true }));
+  for (const s of SECTIONS.slice(1)) {
     await page.keyboard.press('Tab');
-    await expect(nav.getByRole('link', { name: s.name, exact: true })).toBeFocused();
+    await expect(nav.getByRole('link', { name: s.name, exact: s.name !== 'Одобрения' })).toBeFocused();
   }
   await page.keyboard.press('Tab');
   await expect(nav.getByRole('link', { name: 'Рабочие пространства' })).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: /Рабочее пространство/ })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Свернуть навигацию' })).toBeFocused();
 
   // Назад к «Одобрениям» и Enter.
   const approvals = nav.getByRole('link', { name: 'Одобрения' });
@@ -142,11 +140,15 @@ test('keyboard-only: skip link, sidebar in tab order, Enter opens a section, sho
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 
-  // g, затем q — Evidence и качество.
+  // g, затем q — Гейты качества; g, затем m — AI Mission Control (новое сочетание F2).
   await page.keyboard.press('g');
   await page.keyboard.press('q');
   await expect(page).toHaveURL(`/w/${ws.id}/quality`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Evidence и качество' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Гейты качества' })).toBeFocused();
+  await page.keyboard.press('g');
+  await page.keyboard.press('m');
+  await expect(page).toHaveURL(`/w/${ws.id}/mission-control`);
+  await expect(page.getByRole('heading', { level: 1, name: 'AI Mission Control' })).toBeFocused();
 
   // Кнопка справки: после закрытия фокус возвращается на неё.
   const helpButton = page.getByRole('button', { name: 'Сочетания клавиш' });
@@ -182,16 +184,18 @@ test('mobile (360px): navigation drawer is a keyboard-accessible dialog; no hori
   await expectNoSeriousA11yViolations(page, 'mobile drawer');
   await expectNoHorizontalScroll(page);
 
-  const providers = drawer.getByRole('link', { name: 'CLI-провайдеры' });
-  await tabTo(page, providers);
+  // В drawer — переключатели и статус CLI (в шапке на узком экране их нет), затем разделы.
+  await expect(drawer.getByRole('list', { name: 'Состояние CLI-провайдеров' })).toBeVisible();
+  const projects = drawer.getByRole('link', { name: 'Проекты', exact: true });
+  await tabTo(page, projects, { max: 40 });
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(`/w/${ws.id}/providers`);
+  await expect(page).toHaveURL(`/w/${ws.id}/projects`);
   await expect(drawer).toHaveCount(0);
-  await expect(page.getByRole('heading', { level: 1, name: 'CLI-провайдеры' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: /^Проекты/ })).toBeFocused();
 
   await menuButton.click();
   await page.keyboard.press('Escape');
   await expect(drawer).toHaveCount(0);
   await expect(menuButton).toBeFocused();
-  await expectNoSeriousA11yViolations(page, 'providers 360px');
+  await expectNoSeriousA11yViolations(page, 'projects 360px');
 });

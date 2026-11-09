@@ -4,7 +4,8 @@
   `AICD_METRICS_TOKEN_FILE`; в production без токена endpoint выключен);
 * worker-outbox раз в `SAMPLE_INTERVAL_SECONDS` собирает gauge: backlog outbox, stuck leases, размер БД
   (`outbox_dispatcher.sample_gauges`), доступность провайдеров (`cli_adapters.registry`), глубину очередей
-  Dramatiq в Redis, состояние бэкапов (файл статуса `AICD_BACKUP_STATUS_FILE` и `pg_stat_archiver`, P9-05).
+  Dramatiq в Redis, состояние бэкапов (файл статуса `AICD_BACKUP_STATUS_FILE` и `pg_stat_archiver`, P9-05),
+  возраст heartbeat воркеров по видам (`worker_hosts`, `aicd_worker_heartbeat_age_seconds`).
   Ошибка сбора не останавливает доставку (`aicd_metrics_sampler_errors_total`).
 """
 
@@ -23,7 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_cli_adapters import registry
-from aicd_platform import metrics
+from aicd_platform import metrics, worker_hosts
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.outbox_dispatcher import sample_gauges
 from aicd_platform.telemetry import configure_tracing
@@ -99,7 +100,7 @@ class Sampler:
         return True
 
     async def sample(self) -> None:
-        for step in (self._db, self._providers, self._queues, self._backups):
+        for step in (self._db, self._providers, self._queues, self._backups, self._heartbeats):
             try:
                 await step()
             except Exception:
@@ -118,3 +119,6 @@ class Sampler:
 
     async def _backups(self) -> None:
         await sample_backups(self.engine, self.backup_status_file)
+
+    async def _heartbeats(self) -> None:
+        await worker_hosts.sample_heartbeat_gauges(self.engine)

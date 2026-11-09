@@ -111,6 +111,29 @@ tests:
             exp_annotations:
               summary: "Свободно 4% хранилища артефактов — запись артефактов скоро остановится"
 
+  # Heartbeat воркеров: exec не пишет heartbeat (возраст растёт), outbox свежий — алерт только для exec.
+  - interval: 1m
+    input_series:
+      - series: 'aicd_worker_heartbeat_age_seconds{kind="exec", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '0+60x10'
+      - series: 'aicd_worker_heartbeat_interval_seconds{kind="exec", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '15x10'
+      - series: 'aicd_worker_heartbeat_age_seconds{kind="outbox", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '5x10'
+      - series: 'aicd_worker_heartbeat_interval_seconds{kind="outbox", job="aicd-worker", instance="worker-outbox:9464"}'
+        values: '15x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AicdWorkerHeartbeatStale
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: AicdWorkerHeartbeatStale
+        exp_alerts:
+          - exp_labels: {severity: critical, area: availability, kind: exec}
+            exp_annotations:
+              summary: "Воркер exec: нет heartbeat дольше 24 интервалов"
+              description: "Ни один работающий процесс вида не обновлял worker_hosts дольше 10 интервалов heartbeat: процесс завис или потерял БД (см. GET /api/v1/system/health)."
+
   # Outbox не доставляется 10 минут.
   - interval: 1m
     input_series:

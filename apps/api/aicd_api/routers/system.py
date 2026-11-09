@@ -8,8 +8,9 @@
 * `object_storage` — проверка хранилища артефактов (`ArtifactStore.healthy`: каталог fs / `HeadBucket` S3);
 * `outbox` — backlog доставки (`sys_outbox_backlog()`, миграция 0017: число неопубликованных событий и возраст
   самого старого; пороги — как алерт `AicdOutboxLag`);
-* `workers` — строки `worker_hosts` (kind, статус, `last_heartbeat_at`). Воркер обновляет `last_heartbeat_at` при
-  регистрации процесса, периодического heartbeat нет: возраст отдаётся как измерение, живость по нему не выводится;
+* `workers` — heartbeat процессов (`worker_hosts`, `aicd_platform.worker_hosts`): живость каждого процесса и вида по
+  его собственному интервалу (ok ≤ 3 интервалов, degraded ≤ 10, иначе down); остановленные штатно (OFFLINE) не
+  считаются упавшими; вид без работающих процессов — `down`, только если он перечислен в `expected_worker_kinds`;
 * `queues` — глубина очередей Dramatiq в Redis (готовые + отложенные) и dead letters (как `aicd_worker.observability`
   и `aicd_worker.dlq`);
 * `backup` — файл статуса утилиты бэкапа (`AICD_BACKUP_STATUS_FILE`, если смонтирован в api) и `pg_stat_archiver`.
@@ -25,7 +26,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,6 +50,7 @@ from aicd_api.responses import json_response
 from aicd_api.routers import op
 from aicd_api.state import AppState
 from aicd_identity import api as identity
+from aicd_platform import worker_hosts
 from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
 
@@ -211,46 +213,75 @@ async def check_outbox(state: AppState) -> Component:
     )
 
 
-async def check_workers(state: AppState) -> tuple[Component, list[dict[str, Any]] | None]:
+def classify_kinds(hosts: list[worker_hosts.HostState], expected: Collection[str]) -> list[dict[str, Any]]:
+    """Живость по видам: по самому свежему heartbeat неостановленных процессов вида (ok ≤ 3 интервалов, degraded
+    ≤ 10, иначе down). Нет работающих процессов: `down`, если вид ожидается настройкой `expected_worker_kinds`,
+    иначе `unknown` (ожидания не заданы — отсутствие не выдаётся за отказ)."""
+    freshest = worker_hosts.freshest_by_kind(hosts)
+    out = []
+    for kind in sorted({h.kind for h in hosts} | set(expected)):
+        of_kind = [h for h in hosts if h.kind == kind]
+        best = freshest.get(kind)
+        status: Status = best.liveness if best is not None else ("down" if kind in expected else "unknown")
+        out.append(
+            {
+                "kind": kind,
+                "status": status,
+                "expected": kind in expected,
+                "hosts": len(of_kind),
+                "active_hosts": sum(1 for h in of_kind if h.status != "OFFLINE"),
+                "freshest_heartbeat_age_seconds": round(best.age_seconds, 1) if best is not None else None,
+                "heartbeat_interval_seconds": best.interval_seconds if best is not None else None,
+            }
+        )
+    return out
+
+
+async def check_workers(
+    state: AppState,
+) -> tuple[Component, list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
     async def query() -> Any:
         async with transaction(state.engine, DbContext()) as conn:
-            return (
-                (
-                    await conn.execute(
-                        text(
-                            "SELECT id, hostname, kind, status, last_heartbeat_at FROM worker_hosts"
-                            " ORDER BY kind, hostname"
-                        )
-                    )
-                )
-                .mappings()
-                .all()
-            )
+            return await worker_hosts.read_hosts(conn)
 
     try:
         rows, latency = await _timed(query)
     except Exception:
         log.warning("system health: workers check failed", exc_info=True)
-        return Component("workers", "unknown", utcnow(), detail="worker_hosts не прочитаны (БД недоступна)"), None
+        component = Component("workers", "unknown", utcnow(), detail="worker_hosts не прочитаны (БД недоступна)")
+        return component, None, None
     now = utcnow()
     hosts = [
         {
-            "id": r["id"],
-            "hostname": r["hostname"],
-            "kind": r["kind"],
-            "status": r["status"],
-            "last_heartbeat_at": r["last_heartbeat_at"],
-            "heartbeat_age_seconds": round(max((now - r["last_heartbeat_at"]).total_seconds(), 0.0), 1),
+            "id": h.id,
+            "hostname": h.hostname,
+            "kind": h.kind,
+            "status": h.status,
+            "last_heartbeat_at": h.last_heartbeat_at,
+            "heartbeat_age_seconds": round(h.age_seconds, 1),
+            "heartbeat_interval_seconds": h.interval_seconds,
+            "liveness": h.liveness,
+            "version": h.version,
         }
-        for r in rows
+        for h in rows
     ]
-    online = sum(1 for h in hosts if h["status"] == "ONLINE")
-    measurements = {"hosts": len(hosts), "online": online, "not_online": len(hosts) - online}
-    note = "last_heartbeat_at обновляется при регистрации процесса воркера; возраст не означает недоступность"
-    if not hosts:
-        return Component("workers", "unknown", now, latency, measurements, "Нет зарегистрированных воркеров"), hosts
-    status: Status = "ok" if online == len(hosts) else ("degraded" if online else "down")
-    return Component("workers", status, now, latency, measurements, note), hosts
+    kinds = classify_kinds(rows, state.settings.expected_worker_kinds)
+    known: list[Status] = [k["status"] for k in kinds if k["status"] != "unknown"]
+    measurements = {
+        "hosts": len(hosts),
+        "active_hosts": sum(1 for h in rows if h.status != "OFFLINE"),
+        "kinds_ok": sum(1 for k in kinds if k["status"] == "ok"),
+        "kinds_not_ok": sum(1 for k in kinds if k["status"] in ("degraded", "down")),
+    }
+    if not known:
+        unknown = (
+            "Нет процессов воркеров с heartbeat" if not hosts else "Живость воркеров не определена (нет heartbeat)"
+        )
+        return Component("workers", "unknown", now, latency, measurements, unknown), hosts, kinds
+    status = _worst(known)
+    bad = [f"{k['kind']}: {k['status']}" for k in kinds if k["status"] in ("degraded", "down")]
+    detail = ("Heartbeat: " + ", ".join(bad)) if bad else None
+    return Component("workers", status, now, latency, measurements, detail), hosts, kinds
 
 
 async def sample_queues(redis: Redis) -> list[dict[str, Any]]:
@@ -380,7 +411,7 @@ async def collect(state: AppState) -> dict[str, Any]:
     database, redis, storage, outbox = await asyncio.gather(
         check_database(state), check_redis(state), check_object_storage(state), check_outbox(state)
     )
-    (workers, hosts), (queues, queue_list), (backup, backups) = await asyncio.gather(
+    (workers, hosts, kinds), (queues, queue_list), (backup, backups) = await asyncio.gather(
         check_workers(state), check_queues(state), check_backup(state)
     )
     api = Component("api", "ok", started, measurements={"expected_schema_revision": EXPECTED_SCHEMA_REVISION})
@@ -391,6 +422,7 @@ async def collect(state: AppState) -> dict[str, Any]:
         "cache_ttl_seconds": CACHE_TTL_SECONDS,
         "components": [c.view() for c in components],
         "worker_hosts": hosts,
+        "worker_kinds": kinds,
         "queues": queue_list,
         "backups": backups,
     }

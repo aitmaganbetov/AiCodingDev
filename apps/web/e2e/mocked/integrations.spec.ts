@@ -83,7 +83,7 @@ test('integrations (owner): connect GitHub App via GitHub redirect, PENDING → 
   });
   await login(page, api);
   await page.goto(`/w/${ws.id}/integrations`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Интеграции' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Интеграция с GitHub' })).toBeFocused();
   await expect(page.getByText('Установок пока нет')).toBeVisible();
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });

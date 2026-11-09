@@ -993,6 +993,12 @@ CREATE TABLE worker_hosts (
 CREATE INDEX ix_worker_hosts_heartbeat ON worker_hosts (last_heartbeat_at) WHERE status <> 'OFFLINE';
 ```
 
+Heartbeat (`aicd_platform.worker_hosts`): каждый процесс `aicd-worker <kind>` upsert-ит строку `(hostname, kind)` и каждые
+`AICD_WORKER_HEARTBEAT_SECONDS` (15 с) обновляет `last_heartbeat_at`; `labels` = `{heartbeat_interval_seconds, version}`; при
+штатной остановке — `OFFLINE`. Права — существующие `SELECT, INSERT, UPDATE` роли `aicd_worker` (миграция 0002), отдельная
+миграция не нужна. Живость (`GET /system/health`, метрика `aicd_worker_heartbeat_age_seconds`, алерт
+`AicdWorkerHeartbeatStale`): возраст по часам БД ≤ 3 интервалов — ok, ≤ 10 — degraded, иначе down.
+
 ### 8.2 `cli_providers` (G, cli_adapters)
 
 ```sql

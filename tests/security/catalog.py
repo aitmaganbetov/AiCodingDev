@@ -605,6 +605,7 @@ CONTROLS: Final[dict[str, Control]] = {
         (
             I + "test_observability_signals.py",
             I + "test_monitoring_promtool.py::test_promtool_rules_are_valid_and_alerts_fire",
+            I + "test_worker_heartbeat.py",
         )
     ),
     "SC-OBS-03": Control(

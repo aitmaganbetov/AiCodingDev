@@ -68,7 +68,7 @@ export function ProviderChips({ compact = false, onNavigate }: { compact?: boole
   }
 
   return (
-    <ul className="flex items-center gap-2" aria-label={t('shell.cli.label')} data-testid="cli-chips">
+    <ul className="flex flex-wrap items-center gap-2" aria-label={t('shell.cli.label')} data-testid="cli-chips">
       {CHIPS.map((c) => {
         const name = t(`shell.cli.name.${c.code}`);
         const model: ProviderChipModel = query.isError

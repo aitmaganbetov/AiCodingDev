@@ -120,7 +120,7 @@ export function GlobalSearch() {
 
   let index = -1;
   return (
-    <div ref={rootRef} className="relative w-full max-w-md" data-testid="global-search">
+    <div ref={rootRef} className="relative w-full min-w-[10rem] max-w-md" data-testid="global-search">
       <label htmlFor={`${listId}-input`} className="sr-only">
         {t('shell.search.label')}
       </label>

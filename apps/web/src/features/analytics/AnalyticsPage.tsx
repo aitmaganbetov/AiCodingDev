@@ -298,8 +298,11 @@ export function AnalyticsPage() {
   });
   if (!workspaceId || !membership) return <WorkspaceNotFound />;
 
-  // От текущего URL (а не от значений последнего рендера): быстрые последовательные изменения не теряются.
-  const onChange = (patch: Partial<AnalyticsParams>) => setSearch((prev) => searchFromParams({ ...paramsFromSearch(prev), ...patch }));
+  // От текущего URL документа, а не от значений последнего рендера и не от `prev` setSearchParams:
+  // навигация react-router идёт в transition, и history уже обновлён, а рендер с новыми параметрами —
+  // ещё нет. Быстрые последовательные изменения (период → проект) не теряют предыдущее значение.
+  const onChange = (patch: Partial<AnalyticsParams>) =>
+    setSearch(() => searchFromParams({ ...paramsFromSearch(new URLSearchParams(window.location.search)), ...patch }));
 
   let body: ReactNode;
   if (summary.isPending) body = <LoadingState label={t('analytics.loading')} />;

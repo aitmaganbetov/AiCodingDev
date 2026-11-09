@@ -147,6 +147,16 @@ class Settings(BaseSettings):
     # `backup` в `GET /system/health` (если файл смонтирован и в контейнер api; иначе статус `unknown`).
     backup_status_file: Path | None = None
 
+    # Heartbeat процессов воркеров (`worker_hosts.last_heartbeat_at`): период записи; интервал пишется и в
+    # `worker_hosts.labels.heartbeat_interval_seconds`, по нему `GET /system/health` и метрика
+    # `aicd_worker_heartbeat_age_seconds` судят о живости (ok ≤ 3×, degraded ≤ 10×, иначе down).
+    worker_heartbeat_seconds: float = Field(default=15.0, ge=1.0, le=300.0)
+    # Виды воркеров, которые должны работать в этой установке (compose: outbox,orchestrator,exec,index). Пусто —
+    # ожидания не заданы: отсутствие вида в `GET /system/health` — `unknown`, а не `down`.
+    expected_worker_kinds: Annotated[
+        list[Literal["api", "orchestrator", "outbox", "exec", "verify", "index"]], NoDecode
+    ] = Field(default_factory=list)
+
     @field_validator("repository_roots", mode="before")
     @classmethod
     def _parse_roots(cls, value: object) -> object:
@@ -158,7 +168,7 @@ class Settings(BaseSettings):
             return roots
         return value
 
-    @field_validator("allowed_origins", mode="before")
+    @field_validator("allowed_origins", "expected_worker_kinds", mode="before")
     @classmethod
     def _parse_origins(cls, value: object) -> object:
         if isinstance(value, str):

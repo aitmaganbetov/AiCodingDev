@@ -91,7 +91,7 @@ test('knowledge: sources table, refresh needs explicit consent, register source,
   await page.keyboard.press('g');
   await page.keyboard.press('k');
   await expect(page).toHaveURL(`/w/${ws.id}/knowledge`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Знания и документация' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Документация' })).toBeFocused();
 
   const table = page.getByRole('table', { name: 'Источники документации' });
   await expect(table.getByRole('row')).toHaveCount(3);

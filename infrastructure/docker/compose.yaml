@@ -115,6 +115,8 @@ services:
     environment:
       <<: *backend-env
       AICD_BACKUP_STATUS_FILE: /run/aicd-backup/status.json
+      # Виды воркеров этого профиля (сервисы worker-* ниже): вид без heartbeat — `down` в GET /system/health.
+      AICD_EXPECTED_WORKER_KINDS: outbox,orchestrator,exec,index
     secrets: [app_database_url, app_secret_key, app_redis_url, metrics_token]
     volumes:
       - artifacts:/var/lib/aicd/artifacts

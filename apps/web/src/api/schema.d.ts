@@ -3670,10 +3670,29 @@ export interface components {
             status: "ONLINE" | "DRAINING" | "OFFLINE";
             /**
              * Format: date-time
-             * @description Обновляется при регистрации процесса воркера
+             * @description Последний heartbeat процесса (каждые heartbeat_interval_seconds)
              */
             last_heartbeat_at: string;
+            /** @description По часам БД */
             heartbeat_age_seconds: number;
+            /** @description Интервал heartbeat процесса (worker_hosts.labels); null — процесс не пишет heartbeat */
+            heartbeat_interval_seconds: number | null;
+            /** @description ok — возраст ≤ 3 интервалов, degraded — ≤ 10, иначе down; unknown — интервал неизвестен или процесс остановлен штатно (OFFLINE) */
+            liveness: components["schemas"]["SystemHealthStatus"];
+            version: string | null;
+        };
+        WorkerKindHealth: {
+            /** @enum {string} */
+            kind: "api" | "orchestrator" | "outbox" | "exec" | "verify" | "index";
+            /** @description Живость по самому свежему heartbeat неостановленных процессов вида; нет таких процессов — down, если вид ожидается (expected), иначе unknown */
+            status: components["schemas"]["SystemHealthStatus"];
+            /** @description Вид перечислен в настройке установки AICD_EXPECTED_WORKER_KINDS */
+            expected: boolean;
+            hosts: number;
+            /** @description Процессы не в статусе OFFLINE */
+            active_hosts: number;
+            freshest_heartbeat_age_seconds: number | null;
+            heartbeat_interval_seconds: number | null;
         };
         QueueHealth: {
             queue: string;
@@ -3703,6 +3722,8 @@ export interface components {
             components: components["schemas"]["SystemHealthComponent"][];
             /** @description null — не прочитано */
             worker_hosts: components["schemas"]["WorkerHostHealth"][] | null;
+            /** @description Живость по видам воркеров; null — не прочитано */
+            worker_kinds: components["schemas"]["WorkerKindHealth"][] | null;
             /** @description null — не измерено (Redis недоступен) */
             queues: components["schemas"]["QueueHealth"][] | null;
             /** @description null — файл статуса бэкапа не смонтирован в api или не прочитан */

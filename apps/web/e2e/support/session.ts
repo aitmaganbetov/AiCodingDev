@@ -20,7 +20,7 @@ export async function focusDocumentStart(page: Page): Promise<void> {
 }
 
 /** Только клавиатура: Tab (или Shift+Tab), пока фокус не окажется на целевом элементе. */
-export async function tabTo(page: Page, target: Locator, { backwards = false, max = 30 } = {}): Promise<void> {
+export async function tabTo(page: Page, target: Locator, { backwards = false, max = 60 } = {}): Promise<void> {
   for (let i = 0; i < max; i++) {
     if (await target.evaluate((el) => el === document.activeElement)) return;
     await page.keyboard.press(backwards ? 'Shift+Tab' : 'Tab');

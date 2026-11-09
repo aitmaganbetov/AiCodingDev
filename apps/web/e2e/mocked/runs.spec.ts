@@ -26,10 +26,10 @@ test('runs: workspace list with status/project filters in the URL, pagination, l
     if (u.pathname === '/api/v1/runs' && r.method() === 'GET') listUrls.push(u);
   });
   await login(page, api);
-  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Запуски', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'Процессы', exact: true }).click();
   await expect(page).toHaveURL(`/w/${ws.id}/runs`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Запуски' })).toBeFocused();
-  await expect(page).toHaveTitle('Запуски — AiCodingDev');
+  await expect(page.getByRole('heading', { level: 1, name: 'Процессы' })).toBeFocused();
+  await expect(page).toHaveTitle('Процессы — AiCodingDev');
 
   const list = page.getByRole('list', { name: 'Список запусков' });
   await expect(list.locator(':scope > li')).toHaveCount(3);
@@ -103,7 +103,7 @@ test('runs: empty workspace, error with retry and 360px without horizontal scrol
   });
   await page.setViewportSize({ width: 360, height: 800 });
   await page.goto(`/w/${ws.id}/runs`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Запуски' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'Процессы' })).toBeFocused();
   await page.getByRole('button', { name: 'Повторить' }).click();
   await expect(page.getByTestId('empty-state')).toContainText('Запусков пока нет');
   await expectNoHorizontalScroll(page);

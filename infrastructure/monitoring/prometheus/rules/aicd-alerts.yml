@@ -106,6 +106,13 @@ groups:
         labels: {severity: warning, area: cli}
         annotations:
           summary: "Нет доступной установки CLI {{ $labels.provider }} (не установлен, не авторизован или несовместим)"
+      - alert: AicdWorkerHeartbeatStale
+        expr: max by (kind) (aicd_worker_heartbeat_age_seconds / aicd_worker_heartbeat_interval_seconds) > 10
+        for: 2m
+        labels: {severity: critical, area: availability}
+        annotations:
+          summary: "Воркер {{ $labels.kind }}: нет heartbeat дольше {{ $value | printf \"%.0f\" }} интервалов"
+          description: "Ни один работающий процесс вида не обновлял worker_hosts дольше 10 интервалов heartbeat: процесс завис или потерял БД (см. GET /api/v1/system/health)."
       - alert: AicdMetricsSamplingFailing
         expr: increase(aicd_metrics_sampler_errors_total[15m]) > 3
         for: 15m

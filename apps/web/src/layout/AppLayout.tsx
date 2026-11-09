@@ -67,6 +67,8 @@ export function AppLayout() {
   const shortcutsOn = useShortcutsEnabled();
   const desktop = useMediaQuery(MQ_DESKTOP, true);
   const wide = useMediaQuery(MQ_WIDE, true);
+  // Полные подписи чипов CLI — только на очень широком экране; иначе компактный чип (код + иконка, подсказка).
+  const xwide = useMediaQuery('(min-width: 1536px)', true);
   const reducedMotion = useMediaQuery(MQ_REDUCED_MOTION, false);
   const [sidebarMode, setSidebarMode] = useSidebarMode();
   const rail = sidebarMode === 'collapsed' || (sidebarMode === 'auto' && !wide);
@@ -135,7 +137,7 @@ export function AppLayout() {
               </div>
             ) : null}
             <div className="flex min-w-0 flex-1 justify-center px-1">{inWorkspace && desktop ? <GlobalSearch /> : null}</div>
-            {inWorkspace && desktop ? <ProviderChips compact={!wide} /> : null}
+            {inWorkspace && desktop ? <ProviderChips compact={!xwide} /> : null}
             <IconButton
               icon={desktop ? 'command' : 'search'}
               label={desktop ? t('shell.palette.open') : t('shell.palette.openMobile')}
@@ -167,7 +169,6 @@ export function AppLayout() {
                   icon={rail ? 'panelLeftOpen' : 'panelLeftClose'}
                   label={rail ? t('shell.sidebar.expand') : t('shell.sidebar.collapse')}
                   onClick={toggleSidebar}
-                  aria-pressed={rail}
                   data-testid="sidebar-toggle"
                 />
               </div>

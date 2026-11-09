@@ -232,6 +232,27 @@ WORKER_MESSAGE_DURATION = Histogram(
 SAMPLER_ERRORS = Counter(
     "metrics_sampler_errors_total", "Ошибки периодического сбора gauge-метрик", namespace=NAMESPACE
 )
+# Heartbeat процессов воркеров (`worker_hosts`, aicd_platform.worker_hosts): по виду — возраст самого свежего
+# heartbeat среди неостановленных процессов и их интервал (алерт AicdWorkerHeartbeatStale: возраст > 10 интервалов).
+WORKER_KINDS = frozenset({"api", "orchestrator", "outbox", "exec", "verify", "index"})
+WORKER_HEARTBEAT_AGE = Gauge(
+    "worker_heartbeat_age_seconds",
+    "Возраст самого свежего heartbeat работающих (не OFFLINE) процессов воркеров вида kind (worker_hosts)",
+    ["kind"],
+    namespace=NAMESPACE,
+)
+WORKER_HEARTBEAT_INTERVAL = Gauge(
+    "worker_heartbeat_interval_seconds",
+    "Интервал heartbeat процесса воркера вида kind (worker_hosts.labels.heartbeat_interval_seconds)",
+    ["kind"],
+    namespace=NAMESPACE,
+)
+WORKER_HEARTBEAT_FAILURES = Counter(
+    "worker_heartbeat_failures_total",
+    "Неудачные записи heartbeat процесса воркера (БД недоступна)",
+    ["kind"],
+    namespace=NAMESPACE,
+)
 
 # --- резервное копирование (P9-05, ТЗ §16 «failed backups», SC-OBS-02) ---------------------------------
 # Источник — файл статуса утилиты бэкапа (`python -m scripts.backup`, AICD_BACKUP_STATUS_FILE, только чтение) и

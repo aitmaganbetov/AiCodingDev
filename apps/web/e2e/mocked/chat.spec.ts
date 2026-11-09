@@ -480,7 +480,8 @@ test('chat: reviewer command set and APPROVE target from pending approvals', asy
   const { ws, run, url } = seed(api, 'reviewer');
   const approvalId = uid('a000');
   api.route('GET', '/api/v1/approvals', 'listApprovals', ({ url: u }) => {
-    expect(u.searchParams.get('run_id')).toBe(run.id);
+    // Счётчик оболочки (без run_id) — пустой список; композер запрашивает approvals своего run.
+    if (u.searchParams.get('run_id') !== run.id) return { status: 200, body: { items: [], next_cursor: null } };
     return {
       status: 200,
       body: {

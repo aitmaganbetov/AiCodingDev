@@ -6345,9 +6345,43 @@ components:
         status:
           type: string
           enum: [ONLINE, DRAINING, OFFLINE]
-        last_heartbeat_at: {type: string, format: date-time, description: Обновляется при регистрации процесса воркера}
-        heartbeat_age_seconds: {type: number, minimum: 0}
-      required: [id, hostname, kind, status, last_heartbeat_at, heartbeat_age_seconds]
+        last_heartbeat_at: {type: string, format: date-time, description: Последний heartbeat процесса (каждые heartbeat_interval_seconds)}
+        heartbeat_age_seconds: {type: number, minimum: 0, description: По часам БД}
+        heartbeat_interval_seconds:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          description: Интервал heartbeat процесса (worker_hosts.labels); null — процесс не пишет heartbeat
+        liveness:
+          allOf:
+          - {$ref: '#/components/schemas/SystemHealthStatus'}
+          description: ok — возраст ≤ 3 интервалов, degraded — ≤ 10, иначе down; unknown — интервал неизвестен или процесс
+            остановлен штатно (OFFLINE)
+        version:
+          type: [string, 'null']
+          maxLength: 64
+      required: [id, hostname, kind, status, last_heartbeat_at, heartbeat_age_seconds, heartbeat_interval_seconds, liveness,
+        version]
+    WorkerKindHealth:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [api, orchestrator, outbox, exec, verify, index]
+        status:
+          allOf:
+          - {$ref: '#/components/schemas/SystemHealthStatus'}
+          description: Живость по самому свежему heartbeat неостановленных процессов вида; нет таких процессов — down,
+            если вид ожидается (expected), иначе unknown
+        expected: {type: boolean, description: Вид перечислен в настройке установки AICD_EXPECTED_WORKER_KINDS}
+        hosts: {type: integer, minimum: 0}
+        active_hosts: {type: integer, minimum: 0, description: Процессы не в статусе OFFLINE}
+        freshest_heartbeat_age_seconds:
+          type: [number, 'null']
+          minimum: 0
+        heartbeat_interval_seconds:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+      required: [kind, status, expected, hosts, active_hosts, freshest_heartbeat_age_seconds, heartbeat_interval_seconds]
     QueueHealth:
       type: object
       properties:
@@ -6387,6 +6421,10 @@ components:
           type: [array, 'null']
           items: {$ref: '#/components/schemas/WorkerHostHealth'}
           description: null — не прочитано
+        worker_kinds:
+          type: [array, 'null']
+          items: {$ref: '#/components/schemas/WorkerKindHealth'}
+          description: Живость по видам воркеров; null — не прочитано
         queues:
           type: [array, 'null']
           items: {$ref: '#/components/schemas/QueueHealth'}
@@ -6395,7 +6433,7 @@ components:
           type: [array, 'null']
           items: {$ref: '#/components/schemas/BackupComponentHealth'}
           description: null — файл статуса бэкапа не смонтирован в api или не прочитан
-      required: [status, checked_at, cache_ttl_seconds, components, worker_hosts, queues, backups]
+      required: [status, checked_at, cache_ttl_seconds, components, worker_hosts, worker_kinds, queues, backups]
     AgentPermissions:
       type: object
       properties:

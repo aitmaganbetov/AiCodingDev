@@ -102,8 +102,10 @@ test('providers: status, login guidance without secrets, probe and safe settings
   const items = providers();
   mockProviders(api, items);
   await login(page, api);
-  await page.getByRole('navigation', { name: 'Основная навигация' }).getByRole('link', { name: 'CLI-провайдеры' }).click();
-  await expect(page).toHaveURL(`/w/${ws.id}/providers`);
+  // С F2 CLI-провайдеры — подраздел Настроек (D-3); переход — по чипу статуса в верхней панели.
+  await page.getByRole('list', { name: 'Состояние CLI-провайдеров' }).getByRole('link', { name: /^Codex CLI/ }).click();
+  await expect(page).toHaveURL(`/w/${ws.id}/settings/providers`);
+  await expect(page.getByRole('navigation', { name: 'Разделы настроек' }).getByRole('link', { name: 'CLI-провайдеры' })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { level: 1, name: 'CLI-провайдеры' })).toBeFocused();
 
   const codex = page.locator('#provider-codex');

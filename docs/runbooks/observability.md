@@ -62,6 +62,7 @@ Prometheus находит воркеры по DNS-именам сервисов 
 | AicdApiHighErrorRate | > 5% 5xx 10 мин | логи api по `request_id`, `/health/ready` |
 | AicdCliErrorRate, AicdProviderUnavailable | > 50% исполнений CLI падают; нет доступной установки | экран CLI Providers, авторизация CLI оператором (cli-auth), версии |
 | AicdGateInfrastructureErrors | > 20% gates в `ERROR` | образы verification, Docker, лимиты |
+| AicdWorkerHeartbeatStale | ни один работающий процесс вида `kind` не писал heartbeat в `worker_hosts` дольше 10 интервалов (2 мин) | процесс воркера завис/потерял БД: `docker compose ps`, логи `aicd.worker.heartbeat`; детали — `GET /api/v1/system/health` (`worker_kinds`) |
 | AicdStuckLeases | истёкшие неосвобождённые аренды 10 мин | состояние worker-exec/orchestrator, reaper/recovery (логи `recovery`) |
 | AicdOutboxLag, AicdQueueBacklog, AicdDeadLetters | outbox не доставляется 5 мин / очередь растёт / DLQ | worker-outbox и Redis; DLQ — разбор `last_error` |
 | AicdArtifactStorageLow/Critical | < 10% / < 5% свободно в FS-хранилище | расширить том, retention (`aicd maintenance`) |

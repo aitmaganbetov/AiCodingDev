@@ -144,7 +144,12 @@ test('analytics: KPIs, chart + table alternative, filters in URL, empty project 
   // Фильтры — в URL и в запросе; пустой проект — пустое состояние.
   await page.getByLabel('Период').selectOption('7d');
   await expect(page).toHaveURL(`/w/${ws.id}/analytics?period=7d`);
+  // Дождаться, пока экран применит новый период (контролируемый select после transition роутера),
+  // и только затем менять проект: иначе изменение может прийтись на промежуточный рендер.
+  await expect(page.getByLabel('Период')).toHaveValue('7d');
+  await expect(page.getByLabel('Проект')).toBeEnabled();
   await page.getByLabel('Проект').selectOption(p2.id);
+  await expect(page.getByLabel('Проект')).toHaveValue(p2.id);
   await expect(page).toHaveURL(`/w/${ws.id}/analytics?period=7d&project=${p2.id}`);
   await expect(page.getByText('За период нет запусков')).toBeVisible();
   const last = api.requests.filter((r) => r.operationId === 'getAnalyticsSummary').at(-1);
