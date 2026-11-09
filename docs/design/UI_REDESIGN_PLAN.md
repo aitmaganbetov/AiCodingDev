@@ -1,6 +1,6 @@
 # UI Redesign Plan — «AiCodingDev — Neural Engineering Command Center»
 
-**Статус:** проект на утверждение владельцем. Код UI по этому плану **не реализован**; документ — аудит, матрица данных, риски, дизайн-система и поэтапный план.
+**Статус:** утверждён владельцем 2026-11-09 (решения D-1…D-11 — [OPEN_QUESTIONS.md](../planning/OPEN_QUESTIONS.md)). Реализация: **F1 — выполнена** (2026-11-09, см. «Статус фаз» в 7.1); F2–F9 — не начаты.
 **Дата:** 2026-11-08
 **Основания:** ТЗ §1, §3, §4, §6, §8, §11–§14, §19; [ADR-0014](../architecture/adr/ADR-0014-frontend-architecture.md); [AGENT_ROLES.md](../agents/AGENT_ROLES.md); [QUALITY_GATES.md](../agents/QUALITY_GATES.md); [API_DESIGN.md](../api/API_DESIGN.md); `packages/contracts/openapi.yaml` (ADR-0013 — единственный источник контракта); `apps/web/README.md`; `infrastructure/docker/web/nginx.conf`; [OPEN_QUESTIONS.md](../planning/OPEN_QUESTIONS.md) (OQ-44, OQ-45, OQ-50).
 
@@ -631,6 +631,13 @@ Lucide (`lucide-react`), stroke 1,75, размеры 16/20/24; цвет `current
 | **F9. Hardening и выпуск** | Аудит WCAG 2.2 (ручной: NVDA/VoiceOver, клавиатура, zoom 200 %, reflow 320), производительность, визуальная регрессия 4 ширин × 2 темы, документация (`apps/web/README.md`, этот документ) | 0 серьёзных a11y-нарушений; бюджет бандла; все e2e (mocked + live) зелёные | полный прогон | 3–4 д |
 
 Итого frontend: **≈ 37–48 человеко-дней** (без фаз B*).
+
+#### Статус фаз
+
+| Фаза | Статус | Итог |
+|---|---|---|
+| F1 | ✅ выполнена 2026-11-09 | `styles/tokens.css` (тёмная по умолчанию / светлая / как в системе; 5 состояний верификации, семейства ролей, стекло α 0,88/0,92 с непрозрачным fallback, градиент — декор, тени e1–e3, радиусы 6/10/14, motion 120/180/250 мс → 0 при reduced motion), `styles/fonts.css` (Inter/JetBrains Mono self-hosted, только latin/cyrillic; CSP без изменений), `lib/theme.ts`, `lib/verification.ts` (D-8, тест всех комбинаций), `lib/agentRoles.ts`; Lucide за API `Icon`; кит: Button, Card (glass/featured), Badge/Callout, StatusBadge, VerificationBadge, SeverityBadge, AgentBadge/AgentAvatar, DataUnavailable, Skeleton, Kbd, Tooltip, Toast, Tabs (line/pills), Dialog, Menu, Popover, Table (density), VirtualList, Resizable (сохранение размеров); временный SVG-знак (D-7) + favicon; справочник `/w/:id/settings/design-system` (вне навигации). `tokens.test.ts` — все пары ≥ AA в обеих темах; mocked e2e `design-system.spec.ts` (тема, reduced motion, 375/768/1366/1920, axe, клавиатура, forced-colors). Начальный JS 232,4 kB gzip (бюджет 260); шрифты — ≈ 119 kB woff2 на типичную русскую страницу (252 kB все файлы). Не вошло в F1 и перенесено: `ProviderChip`, `Tile`, `Metric`, `Sparkline` — в F3/F5 вместе с экранами; `cmdk` — в F2 (Command Palette); подключение `VirtualList`/`Resizable` к экранам — F2/F4; симуляция дейтеранопии/протанопии для цветов ролей — ручная проверка в F9 (сейчас роли различимы глифом и кодом). |
+| F2–F9 | не начаты | — |
 
 ### 7.2 Фазы backend (каждая — только после утверждения владельцем)
 
