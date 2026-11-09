@@ -10,7 +10,7 @@ import type { AreaModule } from './types';
  */
 export const complianceArea: AreaModule = {
   id: 'compliance',
-  nav: { labelKey: 'nav.compliance', path: 'compliance', icon: 'compliance', group: 'quality', order: 20, shortcut: 's', permission: 'quality:read' },
+  nav: { labelKey: 'nav.compliance', path: 'compliance', icon: 'compliance', group: 'code', order: 40, shortcut: 's', permission: 'quality:read' },
   workspaceRoutes: [
     {
       path: 'compliance',

@@ -8,7 +8,7 @@ import type { AreaModule } from './types';
  */
 export const approvalsArea: AreaModule = {
   id: 'approvals',
-  nav: { labelKey: 'nav.approvals', path: 'approvals', icon: 'approval', group: 'work', order: 40, shortcut: 'a', permission: 'approval:read' },
+  nav: { labelKey: 'nav.approvals', path: 'approvals', icon: 'approval', group: 'execution', order: 40, shortcut: 'a', permission: 'approval:read', badge: 'approvals' },
   workspaceRoutes: [
     {
       path: 'approvals',

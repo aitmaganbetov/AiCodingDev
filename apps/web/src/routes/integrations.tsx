@@ -7,7 +7,7 @@ import type { AreaModule } from './types';
  */
 export const integrationsArea: AreaModule = {
   id: 'integrations',
-  nav: { labelKey: 'nav.integrations', path: 'integrations', icon: 'layers', group: 'admin', order: 15, shortcut: 'i', permission: 'github:read' },
+  nav: { labelKey: 'nav.integrations', path: 'integrations', icon: 'github', group: 'platform', order: 10, shortcut: 'i', permission: 'github:read' },
   workspaceRoutes: [{ path: 'integrations', element: <GitHubPage /> }],
   routes: [{ path: 'integrations/github/setup', element: <GitHubSetupRedirect /> }],
 };

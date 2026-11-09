@@ -8,7 +8,7 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, 
 import { THEMES, useTheme, type ThemePreference } from '../lib/theme';
 
 /** Меню пользователя (Radix DropdownMenu): тема оформления и выход. */
-export function UserMenu() {
+export function UserMenu({ compact = false, onShowShortcuts }: { compact?: boolean; onShowShortcuts?: (() => void) | undefined }) {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const queryClient = useQueryClient();
@@ -26,13 +26,13 @@ export function UserMenu() {
   if (!session) return null;
   return (
     <Menu>
-      <MenuTrigger className="btn-secondary">
+      <MenuTrigger className={compact ? 'btn-ghost min-w-touch px-2' : 'btn-secondary'} data-testid="user-menu">
         <Icon name="user" className="h-4 w-4 shrink-0" />
-        <span className="max-w-[7rem] truncate sm:max-w-[14rem]">
+        <span className={compact ? 'sr-only' : 'max-w-[10rem] truncate xl:max-w-[14rem]'}>
           <span className="sr-only">{t('layout.userMenu')}: </span>
           {session.user.display_name}
         </span>
-        <Icon name="chevronDown" className="h-4 w-4 shrink-0" />
+        {compact ? null : <Icon name="chevronDown" className="h-4 w-4 shrink-0" />}
       </MenuTrigger>
       <MenuContent>
         <MenuLabel>
@@ -48,6 +48,12 @@ export function UserMenu() {
           ))}
         </MenuRadioGroup>
         <MenuSeparator />
+        {onShowShortcuts ? (
+          <>
+            <MenuItem onSelect={onShowShortcuts}>{t('layout.shortcuts')}</MenuItem>
+            <MenuSeparator />
+          </>
+        ) : null}
         <MenuItem disabled={logout.isPending} onSelect={() => logout.mutate()}>
           {logout.isPending ? t('auth.loggingOut') : t('auth.logout')}
         </MenuItem>

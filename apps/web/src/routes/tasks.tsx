@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { RequirePermission } from '../auth/RequirePermission';
-import type { AreaModule } from './types';
+import type { AreaModule, RouteHandle } from './types';
 
 const TaskDetailPage = lazy(() => import('../features/tasks/TaskDetailPage'));
 
@@ -10,6 +10,7 @@ export const tasksArea: AreaModule = {
   workspaceRoutes: [
     {
       path: 'projects/:projectId/runs/:runId/tasks/:taskId',
+      handle: { width: 'full' } satisfies RouteHandle,
       element: (
         <RequirePermission permission="run:read">
           <TaskDetailPage />

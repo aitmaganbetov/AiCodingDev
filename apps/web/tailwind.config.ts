@@ -81,7 +81,7 @@ export default {
       // Минимальная цель касания 44×44 (основные контролы); 24×24 — минимум WCAG 2.5.8 для плотных таблиц.
       minHeight: { touch: '44px', target: '24px' },
       minWidth: { touch: '44px', target: '24px' },
-      spacing: { sidebar: '16rem' },
+      spacing: { sidebar: '15rem', rail: '4rem', topbar: '3.5rem' },
       boxShadow: {
         e1: 'var(--shadow-e1)',
         e2: 'var(--shadow-e2)',
@@ -96,8 +96,14 @@ export default {
       screens: { '3xl': '1920px' },
       keyframes: {
         'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'slide-in-right': { from: { opacity: '0', transform: 'translateX(16px)' }, to: { opacity: '1', transform: 'none' } },
+        'slide-in-left': { from: { opacity: '0', transform: 'translateX(-16px)' }, to: { opacity: '1', transform: 'none' } },
       },
-      animation: { 'fade-in': 'fade-in var(--dur-instant) var(--ease-standard)' },
+      animation: {
+        'fade-in': 'fade-in var(--dur-instant) var(--ease-standard)',
+        'slide-in-right': 'slide-in-right var(--dur-slow) var(--ease-standard)',
+        'slide-in-left': 'slide-in-left var(--dur-slow) var(--ease-standard)',
+      },
     },
   },
   plugins: [],

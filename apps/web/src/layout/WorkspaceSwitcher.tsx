@@ -11,7 +11,7 @@ import { useCurrentWorkspace } from '../workspace';
  * Переключатель workspace: Popover со списком ссылок (это навигация, а не команды меню —
  * поэтому не role=menu). Escape/клик снаружи закрывают и возвращают фокус на кнопку.
  */
-export function WorkspaceSwitcher() {
+export function WorkspaceSwitcher({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation();
   const { data: session } = useSession();
   const { workspaceId, membership } = useCurrentWorkspace();
@@ -23,7 +23,7 @@ export function WorkspaceSwitcher() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger className="btn-secondary max-w-full">
         <Icon name="layers" className="h-4 w-4 shrink-0" />
-        <span className="max-w-[9rem] truncate sm:max-w-[16rem]">
+        <span className={compact ? 'max-w-[7rem] truncate' : 'max-w-[9rem] truncate sm:max-w-[14rem]'}>
           <span className="sr-only">{t('layout.workspaceSwitcher')}: </span>
           {membership?.name ?? t('layout.noWorkspaceSelected')}
         </span>

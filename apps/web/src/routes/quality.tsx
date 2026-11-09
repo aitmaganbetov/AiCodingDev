@@ -10,7 +10,7 @@ import type { AreaModule } from './types';
  */
 export const qualityArea: AreaModule = {
   id: 'quality',
-  nav: { labelKey: 'nav.quality', path: 'quality', icon: 'quality', group: 'quality', order: 10, shortcut: 'q', permission: 'quality:read' },
+  nav: { labelKey: 'nav.quality', path: 'quality', icon: 'quality', group: 'code', order: 30, shortcut: 'q', permission: 'quality:read' },
   workspaceRoutes: [
     {
       path: 'quality',

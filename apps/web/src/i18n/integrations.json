@@ -1,6 +1,6 @@
 {
   "integrations": {
-    "title": "Интеграции",
+    "title": "Интеграция с GitHub",
     "github": {
       "title": "GitHub App",
       "description": "Установка GitHub App даёт платформе доступ к выбранным репозиториям: push веток aicd/*, pull requests и merge только после утверждения. Ключ App хранится только на воркере; установку и права проверяет воркер.",

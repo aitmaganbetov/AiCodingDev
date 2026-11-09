@@ -2,7 +2,18 @@ import type { RouteObject } from 'react-router';
 import type { IconName } from '../components/ui/Icon';
 import type { Permission } from '../lib/permissions';
 
-export type NavGroup = 'work' | 'quality' | 'admin';
+/** Группы sidebar (план §6.1, D-3): Обзор · Исполнение · Код и качество · Платформа. */
+export type NavGroup = 'overview' | 'execution' | 'code' | 'platform';
+
+/**
+ * Ширина рабочей области экрана (F2): `standard` — данные до 1600 px (по умолчанию), `form` — формы
+ * и прозаические экраны (≈ 72ch), `full` — рабочие экраны во всю ширину (граф, лента, split view).
+ * Задаётся в `handle` маршрута: `{ path, element, handle: { width: 'full' } satisfies RouteHandle }`.
+ */
+export type MainWidth = 'standard' | 'form' | 'full';
+export interface RouteHandle {
+  width?: MainWidth;
+}
 
 /** Пункт боковой навигации области (виден, когда выбран workspace). */
 export interface AreaNav {
@@ -18,6 +29,8 @@ export interface AreaNav {
   shortcut?: string;
   /** Скрыть пункт для ролей без права (только UX; сервер всё равно проверяет). */
   permission?: Permission;
+  /** Счётчик рядом с пунктом (реальные данные оболочки): `approvals` — ожидают моего решения. */
+  badge?: 'approvals';
 }
 
 /**

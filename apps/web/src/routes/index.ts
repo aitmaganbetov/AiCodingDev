@@ -12,22 +12,29 @@ import { dashboardArea } from './dashboard';
 import { designSystemArea } from './designSystem';
 import { integrationsArea } from './integrations';
 import { knowledgeArea } from './knowledge';
+import { missionControlArea } from './missionControl';
+import { agentsArea, codeIntelligenceArea, securityArea } from './pending';
 import { projectsArea } from './projects';
 import { providersArea } from './providers';
 import { qualityArea } from './quality';
 import { runsArea } from './runs';
 import { settingsArea } from './settings';
 import { tasksArea } from './tasks';
-import type { AreaModule, AreaNav, NavGroup } from './types';
+import { matchPath, type RouteObject } from 'react-router';
+import type { AreaModule, AreaNav, MainWidth, NavGroup, RouteHandle } from './types';
 import { workspacesArea } from './workspaces';
 
 export const AREAS: readonly AreaModule[] = [
   dashboardArea,
   projectsArea,
+  missionControlArea,
+  agentsArea,
   runsArea,
   chatArea,
   tasksArea,
   approvalsArea,
+  codeIntelligenceArea,
+  securityArea,
   qualityArea,
   complianceArea,
   knowledgeArea,
@@ -40,7 +47,7 @@ export const AREAS: readonly AreaModule[] = [
   designSystemArea,
 ];
 
-export const NAV_GROUPS: readonly NavGroup[] = ['work', 'quality', 'admin'];
+export const NAV_GROUPS: readonly NavGroup[] = ['overview', 'execution', 'code', 'platform'];
 
 export interface NavEntry extends AreaNav {
   id: string;
@@ -60,4 +67,20 @@ export function workspaceHomePath(areas: readonly AreaModule[] = AREAS): string 
   return best?.path ?? 'projects';
 }
 
-export type { AreaModule, AreaNav, NavGroup } from './types';
+/** Ширина рабочей области для пути (handle.width маршрута; по умолчанию `standard`). */
+export function mainWidthFor(pathname: string, areas: readonly AreaModule[] = AREAS): MainWidth {
+  const check = (routes: readonly RouteObject[] | undefined, prefix: string): MainWidth | null => {
+    for (const r of routes ?? []) {
+      const width = (r.handle as RouteHandle | undefined)?.width;
+      if (width && r.path && matchPath({ path: `${prefix}${r.path}`, end: true }, pathname)) return width;
+    }
+    return null;
+  };
+  for (const a of areas) {
+    const w = check(a.workspaceRoutes, '/w/:workspaceId/') ?? check(a.routes, '/');
+    if (w) return w;
+  }
+  return 'standard';
+}
+
+export type { AreaModule, AreaNav, MainWidth, NavGroup, RouteHandle } from './types';

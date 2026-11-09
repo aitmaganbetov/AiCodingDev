@@ -12,6 +12,7 @@ export function ShortcutsDialog({ open, onOpenChange, entries }: { open: boolean
   const toggleId = useId();
   const rows: { keys: string[]; action: string }[] = [
     { keys: ['?'], action: t('shortcuts.help') },
+    { keys: ['Ctrl/⌘ + K'], action: t('shortcuts.palette') },
     ...entries.filter((e) => e.shortcut).map((e) => ({ keys: ['g', e.shortcut as string], action: t('shortcuts.goTo', { section: t(e.labelKey) }) })),
     { keys: ['Tab'], action: t('shortcuts.skip') },
     { keys: ['Esc'], action: t('shortcuts.closeDialog') },

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { RunEvent } from '../../api/runEvents';
 import type { StreamEvent, StreamState } from '../../api/sse';
 import { useEventStream } from '../../api/useEventStream';
-import { workspaceEventsSpec, type WorkspaceSseEventType } from '../../api/workspaceEvents';
+import { WORKSPACE_NOTIFICATION_TYPES, workspaceEventsSpec, type WorkspaceSseEventType } from '../../api/workspaceEvents';
 import { useRunEvents } from '../../api/useRunEvents';
 
 /**
@@ -60,10 +60,8 @@ export function useWorkspaceInvalidation(
     },
     [invalidate, typesKey],
   );
-  const spec = useMemo(
-    () => (workspaceId ? workspaceEventsSpec(workspaceId, typesKey.split(',').filter(Boolean) as WorkspaceSseEventType[]) : null),
-    [workspaceId, typesKey],
-  );
+  // Поток подписывается полным набором типов (общее соединение с оболочкой), фильтр — здесь.
+  const spec = useMemo(() => (workspaceId ? workspaceEventsSpec(workspaceId, WORKSPACE_NOTIFICATION_TYPES) : null), [workspaceId]);
   const { state, reconnect } = useEventStream(spec, { limit: 0, onEvents, onResync: invalidate });
   return { state: workspaceId ? state : 'closed', reconnect };
 }
