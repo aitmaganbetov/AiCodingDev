@@ -4,12 +4,17 @@ import { cx } from './cx';
 import { Icon, type IconName } from './Icon';
 import { Tooltip } from './Tooltip';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
-export type ButtonSize = 'md' | 'sm';
+/**
+ * Варианты (§5): primary — CTA (тёмный текст на cyan в тёмной теме), secondary — обычное действие,
+ * outline — второстепенное акцентное, ghost — в тулбарах и списках, danger — разрушительное.
+ */
+export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+export type ButtonSize = 'md' | 'sm' | 'lg';
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary: 'btn-primary',
   secondary: 'btn-secondary',
+  outline: 'btn-outline',
   ghost: 'btn-ghost',
   danger: 'btn-danger',
 };
@@ -19,7 +24,7 @@ export function buttonClass({
   size = 'md',
   className,
 }: { variant?: ButtonVariant; size?: ButtonSize; className?: string | undefined } = {}): string {
-  return cx(VARIANT[variant], size === 'sm' && 'btn-sm', className);
+  return cx(VARIANT[variant], size === 'sm' && 'btn-sm', size === 'lg' && 'btn-lg', className);
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -45,7 +50,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {...rest}
     >
       {loading ? (
-        <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <span aria-hidden="true" className="h-4 w-4 rounded-full border-2 border-current border-t-transparent motion-safe:animate-spin" />
       ) : icon ? (
         <Icon name={icon} className="h-4 w-4" />
       ) : null}

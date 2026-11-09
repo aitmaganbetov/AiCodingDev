@@ -25,7 +25,7 @@ export function Tooltip({
         <RadixTooltip.Content
           side={side}
           sideOffset={6}
-          className="z-toast max-w-xs rounded-md bg-fg px-2 py-1 text-xs font-medium text-surface shadow-elevated animate-fade-in"
+          className="z-toast max-w-xs rounded-md bg-fg px-2 py-1 text-xs font-medium text-surface shadow-e2 animate-fade-in"
         >
           {content}
           <RadixTooltip.Arrow className="fill-fg" />

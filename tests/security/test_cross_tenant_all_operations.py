@@ -37,7 +37,7 @@ from tests.support import github as ghs
 from tests.support import quality as q
 from tests.support.contract import OPENAPI_PATH, openapi, validate_response
 from tests.support.orch_api import add_task, key, running_run
-from tests.support.orchestration import Tenant, connect_admin, seed_tenant
+from tests.support.orchestration import Tenant, connect_admin, lease_task, new_attempt, seed_tenant
 
 pytestmark = [pytest.mark.db, pytest.mark.security]
 
@@ -76,6 +76,9 @@ async def victim(admin: psycopg.Connection, app_engine: AsyncEngine) -> Victim:
     tenant = seed_tenant(admin)
     run = running_run(admin, tenant)
     task = add_task(admin, tenant, run, "victim")
+    attempt_task = add_task(admin, tenant, run, "victim-attempt")
+    lease_task(admin, attempt_task)
+    attempt = new_attempt(admin, tenant, attempt_task)
     commit = "a" * 40
     evidence = q.evidence(admin, tenant, run, commit)
     finding = q.finding(admin, tenant, run)
@@ -115,6 +118,8 @@ async def victim(admin: psycopg.Connection, app_engine: AsyncEngine) -> Victim:
         "probe_request_id": str(uuid7()),
         "source_id": str(uuid7()),
         "pull_request_id": str(uuid7()),
+        # Попытка задачи жертвы (getAttemptContextPack): `task_id` пути — тоже ресурс жертвы.
+        "attempt_id": str(attempt),
     }
     return Victim(tenant, ids)
 

@@ -35,7 +35,7 @@ export function PopoverContent({
           if (focusMovedElsewhere()) e.preventDefault();
         }}
         className={cx(
-          'z-modal w-72 max-w-[calc(100vw-1rem)] rounded-md border border-border bg-surface-raised p-2 text-fg shadow-elevated animate-fade-in',
+          'glass z-modal w-72 max-w-[calc(100vw-1rem)] rounded-lg p-2 text-fg shadow-e2 animate-fade-in',
           className,
         )}
       >

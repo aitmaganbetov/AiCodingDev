@@ -137,6 +137,9 @@ Dangerous action (ТЗ §15): решение о восстановлении и 
   `--status-file "$AICD_BACKUP_STATUS_DIR/status.json"`, файл 0644, каталог 0755)
   `aicd_backup_last_success_timestamp_seconds{component}`, `aicd_backup_last_attempt_failed{component}`; из `pg_stat_archiver` —
   `aicd_postgres_wal_archived`, `aicd_postgres_wal_archive_failures`.
+* Тот же каталог смонтирован `ro` в контейнер `api`: компонент `backup` в `GET /api/v1/system/health` (owner/admin, экран
+  System Health) показывает последний статус и время успеха каждого компонента и флаг устаревания (пороги — как у алертов
+  ниже) плюс `pg_stat_archiver`; без файла статус компонента — `unknown` (значения не выдумываются).
 * Алерты (`infrastructure/monitoring/prometheus/rules/aicd-alerts.yml`, группа `aicd-backup`, promtool-тесты):
 
 | Алерт | Условие | Действие |

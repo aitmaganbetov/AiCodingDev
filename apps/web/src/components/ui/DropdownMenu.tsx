@@ -25,7 +25,7 @@ export function MenuContent({ children, align = 'end', className }: { children: 
         sideOffset={6}
         collisionPadding={8}
         className={cx(
-          'z-modal min-w-[12rem] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-surface-raised p-1 text-fg shadow-elevated animate-fade-in',
+          'glass z-modal min-w-[12rem] max-w-[calc(100vw-1rem)] rounded-lg p-1 text-fg shadow-e2 animate-fade-in',
           className,
         )}
       >
@@ -36,7 +36,7 @@ export function MenuContent({ children, align = 'end', className }: { children: 
 }
 
 const itemClass =
-  'flex min-h-touch cursor-default select-none items-center gap-2 rounded px-3 text-sm outline-none data-[disabled]:opacity-60 data-[highlighted]:bg-accent-soft data-[highlighted]:text-accent-soft-fg';
+  'flex min-h-touch cursor-default select-none items-center gap-2 rounded-md px-3 text-sm outline-none data-[disabled]:text-fg-disabled data-[highlighted]:bg-accent-soft data-[highlighted]:text-accent-soft-fg';
 
 export const MenuItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof RadixMenu.Item>>(function MenuItem(
   { className, ...rest },

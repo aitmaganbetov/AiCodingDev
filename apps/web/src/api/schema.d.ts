@@ -350,6 +350,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/repositories/{repository_id}/symbols": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Поиск символов по снимку индекса кода (Code Intelligence, B3) [дополнение к ТЗ]
+         * @description Символы READY-снимка индекса (`code_symbols`, tree-sitter) по запросу `q`. Ранжирование (лучшая оценка на символ): точное имя 1.0 > имя без учёта регистра 0.95 > префикс имени 0.8 > подстрока имени или qualified name 0.6 > сходство pg_trgm имени (×0.5) > полнотекстовый поиск по фрагментам символа (≤ 0.45, `match: text`). Порядок детерминирован (score, имя, путь, строка). Снимок: без `commit` — последний READY-снимок репозитория (нет снимка — `snapshot: null`, `items: []`), с `commit` — снимок commit с этим hex-префиксом (нет — 404, неоднозначный префикс — 422). Курсор привязан к снимку и фильтрам; глубина выдачи — не более 1000 результатов. `signature` — текст из кода (секреты редактируются), отображается только как текст.
+         */
+        get: operations["listRepositorySymbols"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Граф зависимостей файлов по снимку индекса (Code Intelligence, B3) [дополнение к ТЗ]
+         * @description Подграф `code_dependencies` (рёбра imports/tests между файлами; неразрешённые импорты — узлы `external`) вокруг корня: `path` (файл или каталог снимка, до 50 файлов-корней) или `symbol` (id символа — его файл); ровно один из двух (иначе 422). Обход в ширину на `depth` (1–3) в направлении `out` (зависимости корня), `in` (зависящие от корня) или `both`. Жёсткие пределы — 200 узлов и 500 рёбер; при их достижении (или > 50 корней) `truncated: true` — граф неполон. Корень отсутствует в снимке — 404. Снимок выбирается как у listRepositorySymbols (нет READY-снимка — `snapshot: null` и пустой граф).
+         */
+        get: operations["getRepositoryDependencies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/repositories/{repository_id}/indexing-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Задания индексации репозитория (очередь и история, B3) [дополнение к ТЗ]
+         * @description Строки `indexing_jobs` репозитория, новые первыми: commit, вид (full/incremental), статус, число попыток, базовый и построенный снимок (с числом файлов/символов), время постановки/старта/завершения, ожидание в очереди и длительность (секунды, только если известны оба момента), безопасный текст ошибки (секреты и пути хоста удаляются).
+         */
+        get: operations["listIndexingJobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/worktrees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Worktrees репозиториев проекта (только чтение, B4) [дополнение к ТЗ]
+         * @description Изолированные git worktree задач (`worktrees`): ветка, base/head commit, связь с run/задачей, статус, время создания/изменения/удаления. Пути на хосте (`path_ref`) и worker host не отдаются. Новые первыми; фильтры — репозиторий, run, статусы.
+         */
+        get: operations["listProjectWorktrees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_id}/technologies": {
         parameters: {
             query?: never;
@@ -583,6 +663,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Лента событий workspace [дополнение к ТЗ]
+         * @description События run_event_log всех run workspace (UI redesign B1, G-04 «AI Activity Timeline») — новые сверху: keyset по (created_at, id события) desc (created_at — время проекции события в журнал; occurred_at — время доменного события). Те же payload, что у getRunActivity/SSE. События, удалённые retention, не возвращаются. `run_id`/`project_id` чужого workspace дают пустую выборку.
+         */
+        get: operations["listActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/chat": {
         parameters: {
             query?: never;
@@ -695,6 +795,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Задачи workspace [дополнение к ТЗ]
+         * @description Актуальные задачи плана всех run workspace (UI redesign B1, G-01 «Running AI Agents») с последней попыткой (роль × провайдер × run × задача, время начала, статус). Порядок — created_at desc, id desc (keyset). «Активные исполнения» — `status=LEASED&status=RUNNING`. Фильтр `provider` — по провайдеру последней попытки. `run_id`/`project_id` чужого workspace дают пустую выборку.
+         */
+        get: operations["listTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -721,6 +841,26 @@ export interface paths {
         };
         /** Попытки задачи [дополнение к ТЗ] */
         get: operations["listTaskAttempts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/attempts/{attempt_id}/context-pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Manifest Context Pack попытки задачи (B3) [дополнение к ТЗ]
+         * @description Состав контекста, переданного агенту в попытке (`context_packs`): снимок индекса и commit, политика, бюджет, размер, хэш содержимого и manifest — фрагменты (раздел, источник, путь, строки, commit, sha256, байты, признак stale) и пропущенные фрагменты с причиной (stale_commit, fragment_too_large, max_files, max_bytes). Текст фрагментов не отдаётся (он — в artifact `context_pack`, `artifact_id`, скачивание по правилам downloadArtifact). Предупреждения сборки — только коды. Попытка не этой задачи или pack не собирался — 404.
+         */
+        get: operations["getAttemptContextPack"];
         put?: never;
         post?: never;
         delete?: never;
@@ -894,6 +1034,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Находки workspace [дополнение к ТЗ]
+         * @description Находки всех run workspace (UI redesign B1, G-02: Security Center, плитка Security Findings) с фильтрами. Порядок и курсор — как у listRunFindings (severity desc, затем created_at, id). Свободный текст редактируется (секреты). `run_id`/`project_id` чужого workspace дают пустую выборку.
+         */
+        get: operations["listFindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/findings/{finding_id}": {
         parameters: {
             query?: never;
@@ -960,6 +1120,66 @@ export interface paths {
         };
         /** Codex/Claude: health и capabilities */
         get: operations["listProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Профили ролей агентов [дополнение к ТЗ]
+         * @description Профили 12 ролей (UI redesign B7, G-13; AGENT_ROLES §1.2, §2, §5), только чтение: права исполнения, классы инструментов, отправляемые типы ACP, уровни по умолчанию, требование независимой проверки, версия и sha256 шаблона инструкций (текст шаблона не отдаётся), строка справочника agent_profiles (null — не синхронизирован) и провайдеры, которым роль разрешена настройками workspace (выбор провайдера адаптивный — ROUTING_POLICY §4). Не пагинируется (12 ролей).
+         */
+        get: operations["listAgentProfiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Состояние платформы (admin) [дополнение к ТЗ]
+         * @description Компоненты платформы (UI redesign B2, G-05): api, database (ревизия схемы), redis, object_storage, outbox (backlog и возраст старейшего неопубликованного события), workers (worker_hosts), queues (глубина очередей Dramatiq и dead letters), backup (файл статуса бэкапа, если смонтирован в api, и pg_stat_archiver). Каждый компонент — ok/degraded/down/unknown с измеренными значениями и временем проверки; не измеренное — unknown с причиной (значения не выдумываются). Ответ кэшируется на сервере на cache_ttl_seconds (checked_at — время фактической проверки). Право — owner/admin workspace из X-Workspace-Id; отдельный лимит 30/мин на пользователя.
+         */
+        get: operations["getSystemHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/providers/{provider_id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * История исполнений CLI провайдера [дополнение к ТЗ]
+         * @description Исполнения CLI (cli_executions) провайдера в workspace (UI redesign B1, G-03): статус, код выхода, длительность, категория ошибки, ссылки на задачу/попытку/run. Без вывода CLI (только id санитизированного артефакта cli_output), команд, путей хоста и учётных данных. Порядок — created_at desc, id desc (keyset). Неизвестный провайдер ⇒ 404.
+         */
+        get: operations["listProviderExecutions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1131,6 +1351,26 @@ export interface paths {
          * @description Явный запрос человека с правом = согласие на загрузку (вне run). Создаёт external_actions(PLANNED); загрузка SSRF-safe в отдельной очереди. Источник disabled ⇒ 409.
          */
         post: operations["refreshDocumentationSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Глобальный поиск по workspace (B6) [дополнение к ТЗ]
+         * @description Поиск по сущностям workspace, которые пользователь вправе читать: проекты (name, description; project:read), runs (objective; run:read), задачи (title; run:read), находки (title, rule_id, cwe_id; quality:read), approvals (action_type, decision_reason; approval:read), источники документации (URI; documentation:read), сообщения чата (FTS по тексту; chat:read). Типы без права пропускаются (`skipped_types`). UUID в запросе — точное совпадение id. Ранжирование: точное совпадение 1.0 > префикс > подстрока (+ сходство pg_trgm); сортировка — score, тип, новизна. Запрос не короче 2 символов без пробелов по краям (422). Отдельный rate limit на пользователя (по умолчанию 60/мин, 429). `snippet` — окно текста вокруг совпадения (секреты редактируются), только текст. `api_path` и id контекста — подсказки маршрута.
+         */
+        get: operations["searchWorkspace"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2190,6 +2430,149 @@ export interface components {
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
         };
+        /** @description READY-снимок индекса кода, к которому относится ответ. */
+        IndexSnapshotRef: {
+            /** Format: uuid */
+            id: string;
+            commit_sha: string;
+            status: string;
+            index_version: number;
+            file_count: number | null;
+            symbol_count: number | null;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        /** @enum {string} */
+        CodeSymbolKind: "module" | "class" | "interface" | "function" | "method" | "variable" | "constant" | "type" | "enum" | "test" | "route" | "other";
+        CodeSymbol: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            qualified_name: string | null;
+            kind: components["schemas"]["CodeSymbolKind"];
+            /** @description Путь файла от корня репозитория */
+            path: string;
+            start_line: number;
+            end_line: number;
+            /** @description Сигнатура из кода (секреты редактируются); только текст */
+            signature: string | null;
+            score: number;
+            /**
+             * @description name — по имени символа, text — FTS по фрагменту
+             * @enum {string}
+             */
+            match: "name" | "text";
+        };
+        CodeSymbolPage: {
+            /** Format: uuid */
+            repository_id: string;
+            snapshot: components["schemas"]["IndexSnapshotRef"] | null;
+            items: components["schemas"]["CodeSymbol"][];
+            /** @description Opaque base64url cursor (привязан к снимку); null — конец выборки. */
+            next_cursor: string | null;
+        };
+        DependencyNode: {
+            /** @description Путь файла (kind=file) или external:<ссылка> */
+            id: string;
+            /** @enum {string} */
+            kind: "file" | "external";
+            path: string | null;
+            /** @description Сырая ссылка импорта (внешний пакет/неразрешённый модуль) для kind=external */
+            ref: string | null;
+            language: string | null;
+            is_test: boolean;
+            /** @description Расстояние от корня (0 — корень) */
+            depth: number;
+        };
+        DependencyEdge: {
+            /** @description id узла-источника */
+            source: string;
+            /** @description id узла-цели */
+            target: string;
+            /** @enum {string} */
+            edge_type: "imports" | "calls" | "inherits" | "implements" | "references" | "tests";
+        };
+        DependencyGraph: {
+            /** Format: uuid */
+            repository_id: string;
+            snapshot: components["schemas"]["IndexSnapshotRef"] | null;
+            depth: number;
+            /** @enum {string} */
+            direction: "out" | "in" | "both";
+            roots: string[];
+            nodes: components["schemas"]["DependencyNode"][];
+            edges: components["schemas"]["DependencyEdge"][];
+            /** @description Достигнут предел узлов/рёбер/корней — граф неполон */
+            truncated: boolean;
+            limits: {
+                max_nodes: number;
+                max_edges: number;
+            };
+        };
+        /** @enum {string} */
+        IndexingJobStatus: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+        IndexingJob: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            repository_id: string;
+            commit_sha: string;
+            /** @enum {string} */
+            kind: "full" | "incremental";
+            status: components["schemas"]["IndexingJobStatus"];
+            attempt_count: number;
+            /** Format: uuid */
+            base_snapshot_id: string | null;
+            /** Format: uuid */
+            snapshot_id: string | null;
+            file_count: number | null;
+            symbol_count: number | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @description От постановки до старта (null — ещё не стартовало) */
+            queue_seconds: number | null;
+            /** @description От старта до завершения (null — не завершено) */
+            duration_seconds: number | null;
+            /** @description Безопасный текст ошибки (секреты и пути хоста удалены) */
+            error: string | null;
+        };
+        IndexingJobPage: {
+            items: components["schemas"]["IndexingJob"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        /** @enum {string} */
+        WorktreeStatus: "ACTIVE" | "LOCKED" | "REMOVED" | "ORPHANED";
+        /** @description Git worktree задачи. Пути хоста не отдаются. */
+        Worktree: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            repository_id: string;
+            /** Format: uuid */
+            run_id: string;
+            /** Format: uuid */
+            task_id: string | null;
+            branch_name: string;
+            base_commit_sha: string;
+            head_commit_sha: string | null;
+            status: components["schemas"]["WorktreeStatus"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            removed_at: string | null;
+        };
+        WorktreePage: {
+            items: components["schemas"]["Worktree"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
         /** @description provider=local требует local_path; provider=github (P8-02, FR-PRJ-03) требует remote_url, local_path (локальная рабочая копия в allowlist-корнях) и активную установку GitHub App workspace с доступом к репозиторию (проверяется через GitHub API). */
         RepositoryAttachRequest: {
             provider: components["schemas"]["RepositoryProvider"];
@@ -2446,6 +2829,77 @@ export interface components {
             items: components["schemas"]["TaskAttempt"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
+        };
+        /** @enum {string} */
+        ContextPackSection: "code" | "symbols_graph" | "tests" | "repo_map" | "docs";
+        /** @enum {string} */
+        ContextPackSourceKind: "map" | "exact" | "dependency" | "task_relevance" | "recency" | "docs";
+        /** @description Фрагмент, вошедший в Context Pack (без текста). */
+        ContextPackFragment: {
+            section: components["schemas"]["ContextPackSection"];
+            kind: components["schemas"]["ContextPackSourceKind"];
+            /** @description Путь снимка; doc:<раздел> для документации, <repo_map> для карты */
+            path: string;
+            lines: number[] | null;
+            commit: string | null;
+            sha256: string | null;
+            bytes: number | null;
+            /** @description Фрагмент из commit */
+            stale: boolean;
+            source_ref: string | null;
+        };
+        /** @description Фрагмент, не вошедший в Context Pack, и причина. */
+        ContextPackOmission: {
+            section: components["schemas"]["ContextPackSection"];
+            kind: components["schemas"]["ContextPackSourceKind"];
+            path: string;
+            commit: string | null;
+            /** @description stale_commit | fragment_too_large | max_files | max_bytes */
+            reason: string;
+        };
+        AttemptContextPack: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            task_id: string;
+            /** Format: uuid */
+            attempt_id: string;
+            /** Format: uuid */
+            snapshot_id: string;
+            /** @description Commit задачи */
+            base_commit: string;
+            /** @description Commit снимка индекса (≠ base_commit — фрагменты устаревшие) */
+            snapshot_commit: string | null;
+            policy_version: number;
+            documentation_mode: components["schemas"]["DocumentationMode"];
+            token_budget: number;
+            size_bytes: number;
+            content_hash: string;
+            /**
+             * Format: uuid
+             * @description Artifact context_pack (текст фрагментов)
+             */
+            artifact_id: string;
+            /** Format: date-time */
+            created_at: string;
+            schema: number | null;
+            /** @enum {string|null} */
+            stale_policy: "exclude" | "mark" | null;
+            role: string | null;
+            /** @enum {string|null} */
+            docs: "allowed" | "off" | null;
+            budget: {
+                max_bytes: number | null;
+                max_files: number | null;
+                max_fragment_bytes: number | null;
+            } | null;
+            cache_hit: boolean | null;
+            fragments: components["schemas"]["ContextPackFragment"][];
+            omitted: components["schemas"]["ContextPackOmission"][];
+            /** @description Коды предупреждений сборки (без текста) */
+            warnings: string[];
+            fragments_total: number;
+            omitted_total: number;
         };
         AcpMessage: {
             /** Format: uuid */
@@ -3098,6 +3552,210 @@ export interface components {
             installations: components["schemas"]["ProviderInstallation"][];
             workspace_settings: components["schemas"]["ProviderSettings"];
         };
+        /** @description Последняя попытка задачи (task_attempts); provider null — попытка без CLI (детерминированный L1-инструмент). */
+        TaskAttemptRef: {
+            /** Format: uuid */
+            id: string;
+            attempt_no: number;
+            /** @enum {string} */
+            status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+            provider: components["schemas"]["CliProvider"] | null;
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            started_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
+        WorkspaceTask: components["schemas"]["TaskSummary"] & {
+            /** Format: uuid */
+            project_id: string;
+            run_status: components["schemas"]["RunStatus"];
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            created_at: string;
+            current_attempt: components["schemas"]["TaskAttemptRef"] | null;
+        };
+        /** @description Страница WorkspaceTask (cursor pagination), created_at desc. */
+        WorkspaceTaskPage: {
+            items: components["schemas"]["WorkspaceTask"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        ProviderExecution: {
+            /** Format: uuid */
+            id: string;
+            provider: components["schemas"]["CliProvider"];
+            /** Format: uuid */
+            installation_id: string;
+            /** Format: uuid */
+            task_attempt_id: string;
+            attempt_no: number;
+            /** Format: uuid */
+            task_id: string;
+            /** Format: uuid */
+            run_id: string;
+            agent_role: components["schemas"]["AgentRole"];
+            status: components["schemas"]["ExecutionStatus"];
+            exit_code: number | null;
+            failure_category: components["schemas"]["CliErrorCode"] | null;
+            timeout_seconds: number;
+            /**
+             * Format: uuid
+             * @description Санитизированный вывод (artifact cli_output, downloadArtifact); сырой лог не отдаётся
+             */
+            output_artifact_id: string | null;
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @description От started_at до выхода процесса (exited_at, иначе finished_at); null — не запускался или не завершён */
+            duration_ms: number | null;
+            links?: components["schemas"]["Links"];
+        };
+        /** @description Страница ProviderExecution (cursor pagination), created_at desc. */
+        ProviderExecutionPage: {
+            items: components["schemas"]["ProviderExecution"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        /**
+         * @description Типы событий, сохраняемые в run_event_log (SseEventType без heartbeat).
+         * @enum {string}
+         */
+        ActivityEventType: "run.state_changed" | "task.state_changed" | "agent.message" | "cli.output" | "directive.impact_ready" | "directive.state_changed" | "approval.requested" | "approval.decided" | "gate.completed" | "run.completed" | "chat.message";
+        /** @description Страница ActivityEvent workspace (cursor pagination), новые сверху (created_at desc). */
+        WorkspaceActivityPage: {
+            items: components["schemas"]["ActivityEvent"][];
+            /** @description Opaque base64url cursor; null — конец выборки. */
+            next_cursor: string | null;
+        };
+        /**
+         * @description unknown — не измерено (причина — detail); не трактуется как ok.
+         * @enum {string}
+         */
+        SystemHealthStatus: "ok" | "degraded" | "down" | "unknown";
+        SystemHealthComponent: {
+            /** @enum {string} */
+            name: "api" | "database" | "redis" | "object_storage" | "outbox" | "workers" | "queues" | "backup";
+            status: components["schemas"]["SystemHealthStatus"];
+            /**
+             * Format: date-time
+             * @description UTC, ISO 8601 с Z
+             */
+            checked_at: string;
+            latency_ms: number | null;
+            /** @description Измеренные значения компонента (имена — snake_case); только фактически измеренное */
+            measurements: {
+                [key: string]: number | string | boolean | null;
+            };
+            /** @description Причина статуса без технических деталей зависимостей (хостов, учётных данных, текста ошибок) */
+            detail: string | null;
+        };
+        WorkerHostHealth: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            /** @enum {string} */
+            kind: "api" | "orchestrator" | "outbox" | "exec" | "verify" | "index";
+            /** @enum {string} */
+            status: "ONLINE" | "DRAINING" | "OFFLINE";
+            /**
+             * Format: date-time
+             * @description Обновляется при регистрации процесса воркера
+             */
+            last_heartbeat_at: string;
+            heartbeat_age_seconds: number;
+        };
+        QueueHealth: {
+            queue: string;
+            ready: number;
+            delayed: number;
+            dead_letters: number;
+        };
+        BackupComponentHealth: {
+            /** @enum {string} */
+            component: "postgres_base" | "postgres_wal" | "postgres_dump" | "artifacts" | "secrets";
+            /** @enum {string} */
+            last_status: "success" | "failure" | "unknown";
+            /** Format: date-time */
+            last_success_at: string | null;
+            /** @description Нет успешного бэкапа дольше порога (как алерты AicdBackup*) */
+            stale: boolean;
+        };
+        SystemHealth: {
+            /** @description down — отказ database или object_storage; degraded — любая деградация/отказ прочих; unknown компонентов итог не меняет */
+            status: components["schemas"]["SystemHealthStatus"];
+            /**
+             * Format: date-time
+             * @description Время фактической проверки (ответ может быть из кэша)
+             */
+            checked_at: string;
+            cache_ttl_seconds: number;
+            components: components["schemas"]["SystemHealthComponent"][];
+            /** @description null — не прочитано */
+            worker_hosts: components["schemas"]["WorkerHostHealth"][] | null;
+            /** @description null — не измерено (Redis недоступен) */
+            queues: components["schemas"]["QueueHealth"][] | null;
+            /** @description null — файл статуса бэкапа не смонтирован в api или не прочитан */
+            backups: components["schemas"]["BackupComponentHealth"][] | null;
+        };
+        AgentPermissions: {
+            /** @enum {string} */
+            write_scope: "none" | "worktree";
+            /** @enum {string} */
+            network: "none" | "restricted" | "unrestricted";
+            /** @description Allowlist glob внутри worktree */
+            path_policy: string[];
+            path_deny: string[];
+            /** @description Дополнительно разрешены файлы */
+            task_paths_allowed: boolean;
+            comments_only_paths: string[];
+        };
+        AgentProfile: {
+            role: components["schemas"]["AgentRole"];
+            template_version: string;
+            /** @description <role>@<version> (ExecutionRequest.input.instruction_template_version) */
+            template_ref: string;
+            template_sha256: string;
+            permissions: components["schemas"]["AgentPermissions"];
+            /** @description Права прототипа L5 (architect), иначе null */
+            prototype_permissions: components["schemas"]["AgentPermissions"] | null;
+            allowed_tools: string[];
+            required_capabilities: string[];
+            /** @description Типы ACP, которые роль вправе отправлять (окончательная проверка — брокер) */
+            acp_send: components["schemas"]["AcpMessageType"][];
+            /** @description Уровни, на которых роль включается в конвейер по умолчанию */
+            complexity_band: {
+                min: components["schemas"]["ComplexityLevel"];
+                max: components["schemas"]["ComplexityLevel"];
+            };
+            /** @description С какого уровня результат роли требует проверки другим провайдером; null — не требуется */
+            independent_check_from: components["schemas"]["ComplexityLevel"] | null;
+            must_differ_from_author: boolean;
+            can_send_fix_request: boolean;
+            /** @description Провайдеры, включённые глобально и в workspace, с ролью в allowed_roles; выбор среди них адаптивный */
+            eligible_providers: components["schemas"]["CliProvider"][];
+            /** @description Строка справочника agent_profiles; null — справочник не синхронизирован */
+            catalog: {
+                template_version: string;
+                enabled: boolean;
+                /** Format: date-time */
+                updated_at: string;
+            } | null;
+        };
+        /** @description Не пагинируется: 12 ролей. */
+        AgentProfileList: {
+            items: components["schemas"]["AgentProfile"][];
+        };
         /** @description Не пагинируется: ровно ≤2 провайдера. */
         ProviderList: {
             items: components["schemas"]["Provider"][];
@@ -3289,6 +3947,37 @@ export interface components {
             items: components["schemas"]["AuditEvent"][];
             /** @description Opaque base64url cursor; null — конец выборки. */
             next_cursor: string | null;
+        };
+        /** @enum {string} */
+        SearchResultType: "project" | "run" | "task" | "finding" | "approval" | "documentation_source" | "chat_message";
+        SearchResult: {
+            type: components["schemas"]["SearchResultType"];
+            /** Format: uuid */
+            id: string;
+            title: string;
+            /** @description Окно текста вокруг совпадения (секреты редактируются); только текст */
+            snippet: string | null;
+            score: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            project_id: string | null;
+            /** Format: uuid */
+            run_id: string | null;
+            /** Format: uuid */
+            task_id: string | null;
+            /** @description Путь API ресурса (подсказка маршрута) */
+            api_path: string;
+        };
+        SearchResults: {
+            query: string;
+            /** @description Типы, по которым выполнен поиск */
+            types: components["schemas"]["SearchResultType"][];
+            /** @description Запрошенные типы, пропущенные из-за отсутствия права */
+            skipped_types: components["schemas"]["SearchResultType"][];
+            items: components["schemas"]["SearchResult"][];
+            /** @description Совпадений больше */
+            truncated: boolean;
         };
         HealthStatus: {
             /** @enum {string} */
@@ -3807,6 +4496,9 @@ export interface components {
         RepositoryId: string;
         /** @description Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра — HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404. */
         RepositoryCommit: string;
+        /** @description Проиндексированный commit: hex-префикс SHA (7–64 символа). Без параметра — последний READY-снимок индекса репозитория. Нет READY-снимка этого commit — 404, префикс совпадает с несколькими commit — 422. */
+        IndexCommit: string;
+        AttemptId: string;
         ProjectId: string;
         WorkspaceId: string;
         UserId: string;
@@ -4781,6 +5473,170 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listRepositorySymbols: {
+        parameters: {
+            query: {
+                /** @description Запрос (имя символа, его часть или слова для FTS). Управляющие символы недопустимы (422). */
+                q: string;
+                /** @description Вид символа. */
+                kind?: components["schemas"]["CodeSymbolKind"];
+                /** @description Файл или каталог (относительный путь снимка); ограничения — как у listRepositoryTree (422). */
+                path?: string;
+                /** @description Проиндексированный commit: hex-префикс SHA (7–64 символа). Без параметра — последний READY-снимок индекса репозитория. Нет READY-снимка этого commit — 404, префикс совпадает с несколькими commit — 422. */
+                commit?: components["parameters"]["IndexCommit"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeSymbolPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getRepositoryDependencies: {
+        parameters: {
+            query?: {
+                /** @description Файл или каталог снимка (ограничения — как у listRepositoryTree). */
+                path?: string;
+                /** @description Id символа снимка (из listRepositorySymbols). */
+                symbol?: string;
+                depth?: number;
+                direction?: "out" | "in" | "both";
+                /** @description Проиндексированный commit: hex-префикс SHA (7–64 символа). Без параметра — последний READY-снимок индекса репозитория. Нет READY-снимка этого commit — 404, префикс совпадает с несколькими commit — 422. */
+                commit?: components["parameters"]["IndexCommit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyGraph"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listIndexingJobs: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["IndexingJobStatus"];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+                repository_id: components["parameters"]["RepositoryId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexingJobPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listProjectWorktrees: {
+        parameters: {
+            query?: {
+                repository_id?: string;
+                run_id?: string;
+                status?: components["schemas"]["WorktreeStatus"][];
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                project_id: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorktreePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listTechnologies: {
         parameters: {
             query?: {
@@ -5358,6 +6214,47 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listActivity: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                event_type?: components["schemas"]["ActivityEventType"][];
+                run_id?: string;
+                project_id?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceActivityPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getRunChat: {
         parameters: {
             query?: {
@@ -5656,6 +6553,51 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listTasks: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                status?: components["schemas"]["TaskStatus"][];
+                /** @description Повторяемый параметр */
+                agent_role?: components["schemas"]["AgentRole"][];
+                /** @description Повторяемый параметр; провайдер последней попытки */
+                provider?: components["schemas"]["CliProvider"][];
+                run_id?: string;
+                project_id?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceTaskPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getTask: {
         parameters: {
             query?: never;
@@ -5714,6 +6656,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskAttemptPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAttemptContextPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: components["parameters"]["TaskId"];
+                attempt_id: components["parameters"]["AttemptId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttemptContextPack"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -6054,6 +7029,51 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listFindings: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                severity?: components["schemas"]["FindingSeverity"][];
+                /** @description Повторяемый параметр */
+                status?: components["schemas"]["FindingStatus"][];
+                /** @description Повторяемый параметр (Finding.source) */
+                source?: ("gate" | "agent_review" | "manual" | "github")[];
+                project_id?: string;
+                run_id?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getFinding: {
         parameters: {
             query?: never;
@@ -6206,6 +7226,119 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listAgentProfiles: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProfileList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getSystemHealth: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemHealth"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listProviderExecutions: {
+        parameters: {
+            query?: {
+                /** @description Повторяемый параметр */
+                status?: components["schemas"]["ExecutionStatus"][];
+                run_id?: string;
+                task_id?: string;
+                /** @description Включительная нижняя граница created_at */
+                created_after?: string;
+                /** @description Исключающая верхняя граница created_at */
+                created_before?: string;
+                /** @description Opaque cursor из next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path: {
+                provider_id: components["parameters"]["ProviderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderExecutionPage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -6613,6 +7746,44 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    searchWorkspace: {
+        parameters: {
+            query: {
+                q: string;
+                /** @description Типы результатов (по умолчанию — все доступные). */
+                types?: components["schemas"]["SearchResultType"][];
+                limit?: number;
+            };
+            header: {
+                /** @description Tenant для коллекций без родительского ресурса. Не член workspace ⇒ 404. */
+                "X-Workspace-Id": components["parameters"]["WorkspaceHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "RateLimit-Limit": components["headers"]["RateLimitLimit"];
+                    "RateLimit-Remaining": components["headers"]["RateLimitRemaining"];
+                    "RateLimit-Reset": components["headers"]["RateLimitReset"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];

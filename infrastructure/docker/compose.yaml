@@ -111,11 +111,15 @@ services:
 
   api:
     image: ${AICD_BACKEND_IMAGE:-aicodingdev/backend:local}
-    environment: *backend-env
+    # Файл статуса бэкапа (только чтение) — компонент `backup` в GET /api/v1/system/health (UI redesign B2).
+    environment:
+      <<: *backend-env
+      AICD_BACKUP_STATUS_FILE: /run/aicd-backup/status.json
     secrets: [app_database_url, app_secret_key, app_redis_url, metrics_token]
     volumes:
       - artifacts:/var/lib/aicd/artifacts
       - ${AICD_REPOS_DIR:-./repos}:/srv/repos:ro
+      - ${AICD_BACKUP_STATUS_DIR:-/srv/aicd-backup/status}:/run/aicd-backup:ro
     networks: [backend, edge]
     read_only: true
     tmpfs: [/tmp]

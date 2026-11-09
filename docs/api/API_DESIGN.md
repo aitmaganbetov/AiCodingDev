@@ -72,6 +72,12 @@ flowchart LR
 | Documentation | `GET/POST /documentation/sources`, `POST /documentation/sources/{source_id}/refresh`; **(доп., Phase 8, OQ-45 (c))** `GET /technologies` (технологии workspace) |
 | Audit | `GET /audit-events` |
 | Analytics **(доп., P8-07)** | `GET /analytics/summary` (экран Analytics ТЗ §11, метрики ТЗ §16, FR-CI-08) |
+| Агрегаты workspace **(доп., UI redesign B1, UI_REDESIGN_PLAN §3.10 G-01…G-04)** | `GET /tasks` (`listTasks`: задачи workspace с последней попыткой — «Running AI Agents»), `GET /findings` (`listFindings`), `GET /providers/{provider_id}/executions` (`listProviderExecutions`: история `cli_executions` без вывода CLI), `GET /activity` (`listActivity`: лента `run_event_log` workspace, индекс миграции 0017). `Finding.remediation` (G-16) не добавлен: в `findings` нет такого поля/данных |
+| System **(доп., UI redesign B2, G-05)** | `GET /system/health` (`getSystemHealth`: api, database, redis, object_storage, outbox, workers, queues, backup — `ok/degraded/down/unknown` с измерениями; кэш 10 с, лимит 30/мин на пользователя) |
+| Agents **(доп., UI redesign B7, G-13)** | `GET /agent-profiles` (`listAgentProfiles`: профили 12 ролей — права, инструменты, ACP, шаблон; только чтение) |
+| Code Intelligence **(доп., UI redesign B3, G-06…G-09)** | `GET /projects/{project_id}/repositories/{repository_id}/symbols` (`listRepositorySymbols`: поиск символов READY-снимка — имя/префикс/подстрока/pg_trgm/FTS, ранжирование, курсор по снимку), `.../dependencies` (`getRepositoryDependencies`: подграф файлов вокруг `path`/`symbol`, `depth` ≤ 3, `direction`, ≤ 200 узлов / 500 рёбер, `truncated`), `.../indexing-jobs` (`listIndexingJobs`: статус, тайминги, безопасная ошибка), `GET /tasks/{task_id}/attempts/{attempt_id}/context-pack` (`getAttemptContextPack`: manifest без текста фрагментов) |
+| Worktrees **(доп., UI redesign B4, G-10)** | `GET /projects/{project_id}/worktrees` (`listProjectWorktrees`: ветка, base/head commit, run/задача, статус, время; пути хоста не отдаются) |
+| Search **(доп., UI redesign B6, G-12)** | `GET /search` (`searchWorkspace`: проекты, runs, задачи, находки, approvals, источники документации, сообщения чата — только типы, на которые есть право; trigram-индексы миграции 0018, FTS чата) |
 
 Обоснование дополнений: auth — без них невозможна cookie-сессия (ADR-0009); members — RBAC требует управления ролями (AC-12); `GET /runs`, `GET .../repositories`, `GET .../directives`, `GET /tasks/{id}/attempts`, `GET /approvals/{id}`, `GET /evidence/{id}` — экраны Dashboard/Run Graph/Task Detail/Evidence (ТЗ §11) без них не строятся; `confirm`/`cancel` директивы — шаг «confirm» из ТЗ §8.2 не имеет эндпоинта в таблице; artifacts download — evidence ссылается на artifact (AC-14); health — эксплуатация (ТЗ §16); findings/transitions, review контроля и применимость контролей проекта — экраны Quality/Standards & Compliance Phase 7: жизненный цикл находок и вердикт человека по контролю (QUALITY_GATES §5.3, §8.2) и утверждение применимости admin (ТЗ §13) без них невыполнимы (OQ-43 (d)).
 
@@ -93,7 +99,7 @@ flowchart LR
 | `/projects/{id}`, `/runs/{id}`, `/tasks/{id}`, `/evidence/{id}`, `/artifacts/{id}`, `/approvals/{id}`, `/documentation/sources/{id}`, вложенные коллекции | Колонка `workspace_id` ресурса (денормализована, ADR-0008) |
 | `POST /runs` | `projects.workspace_id` по `project_id` из тела |
 | `/workspaces/{workspace_id}/members` | Путь |
-| `GET/POST /projects`, `GET /runs`, `GET /approvals`, `GET/POST /documentation/sources`, `GET /technologies`, `GET /providers`, `POST /providers/{id}/probe`, `GET /providers/{id}/probes/{probe_request_id}`, `PATCH /providers/{id}/settings`, `GET /audit-events` | Заголовок `X-Workspace-Id` (обязателен) |
+| `GET/POST /projects`, `GET /runs`, `GET /approvals`, `GET/POST /documentation/sources`, `GET /technologies`, `GET /providers`, `POST /providers/{id}/probe`, `GET /providers/{id}/probes/{probe_request_id}`, `PATCH /providers/{id}/settings`, `GET /audit-events`, `GET /tasks`, `GET /findings`, `GET /providers/{id}/executions`, `GET /activity`, `GET /system/health`, `GET /agent-profiles` (UI redesign B1/B2/B7), `GET /search` (B6) | Заголовок `X-Workspace-Id` (обязателен) |
 | `GET/PATCH /workspaces/{workspace_id}`, `GET /workspaces/{workspace_id}/events` | Путь |
 | `GET/POST /workspaces`, `/auth/*` | Не требуется (список собственных workspace — через SECURITY DEFINER функцию членства) |
 
@@ -138,6 +144,7 @@ flowchart LR
 | `documentation:register` | ✔ | ✔ | — | — | — |
 | `documentation:refresh` | ✔ | ✔ | ✔ | — | — |
 | `audit:read` | ✔ | ✔ | — | — | — |
+| `system:health` (состояние платформы, UI redesign B2) | ✔ | ✔ | — | — | — |
 | `github:read` | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `github:manage` | ✔ | ✔ | — | — | — |
 | `pull_request:create`, `pull_request:merge` (запрос merge; решение — approval `MERGE`, §5.3) | ✔ | ✔ | ✔ | — | — |
@@ -162,7 +169,7 @@ flowchart LR
 | `POST/PATCH/DELETE .../members[/{user_id}]` | member:manage | ✔ | — | — | — | — |
 | `GET /projects`, `GET /projects/{id}` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /projects`, `PATCH /projects/{id}` | project:create / update | ✔ | ✔ | — | — | — |
-| `GET /projects/{id}/repositories`, `.../repositories/{repository_id}/tree|file|branches|commits`, `/technologies`, `GET .../documentation-policy` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /projects/{id}/repositories`, `.../repositories/{repository_id}/tree|file|branches|commits|symbols|dependencies|indexing-jobs` (B3), `GET /projects/{id}/worktrees` (B4), `/technologies`, `GET .../documentation-policy` | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /projects/{id}/repositories` | repository:attach | ✔ | ✔ | — | — | — |
 | `PATCH /projects/{id}/documentation-policy` | project:update | ✔ | ✔ | — | — | — |
 | `GET /runs`, `GET /runs/{id}`, `/tasks`, `/events`, `/activity` | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
@@ -172,7 +179,7 @@ flowchart LR
 | `POST /runs/{id}/chat/messages` | chat:write | ✔ | ✔ | ✔ | ✔ | — |
 | `POST /runs/{id}/directives` | directive:create | ✔ | ✔ | ✔ | частично (§5.4) | — |
 | `POST .../directives/{id}/confirm|cancel` | directive:confirm | ✔ | ✔ | своё | своё | — |
-| `GET /tasks/{id}`, `/attempts`, `/messages` | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /tasks/{id}`, `/attempts`, `/messages`, `/attempts/{attempt_id}/context-pack` (B3) | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /tasks/{id}/evidence`, `GET /runs/{id}/evidence`, `GET /evidence/{id}` | evidence:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /artifacts/{id}/download` | artifact:download (+`download_raw` для `raw_cli_log`) | ✔ | ✔ | ✔ (не raw) | ✔ (не raw) | ✔ (не raw) |
 | `GET /runs/{id}/quality|compliance|report`, `GET /runs/{id}/findings`, `GET /findings/{id}` | quality:read | ✔ | ✔ | ✔ | ✔ | ✔ |
@@ -189,6 +196,11 @@ flowchart LR
 | `POST /documentation/sources/{id}/refresh` | documentation:refresh | ✔ | ✔ | ✔ | — | — |
 | `GET /audit-events` | audit:read | ✔ | ✔ | — | — | — |
 | `GET /analytics/summary` (P8-07; агрегаты run workspace — то же право, что у списка run) | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /tasks`, `GET /activity`, `GET /agent-profiles` (UI redesign B1/B7) | run:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /findings` (UI redesign B1) | quality:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /providers/{id}/executions` (UI redesign B1) | provider:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET /system/health` (UI redesign B2) | system:health | ✔ | ✔ | — | — | — |
+| `GET /search` (UI redesign B6; дополнительно право на каждый тип результата: run:read, quality:read, approval:read, documentation:read, chat:read — типы без права пропускаются, `skipped_types`) | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /integrations/github/installations`, `GET /projects/{id}/pull-requests` (P8) | github:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /integrations/github/installations[/setup]`, `DELETE …/installations/{id}` (P8) | github:manage | ✔ | ✔ | — | — | — |
 | `POST /runs/{id}/pull-requests` (P8) | pull_request:create | ✔ | ✔ | ✔ | — | — |
@@ -282,7 +294,7 @@ flowchart LR
 - Cursor — base64url от `{v:1, k:[значения ключа сортировки], o:"asc|desc", f:<hash фильтров>}` + HMAC-SHA256 (усечённый до 16 байт) секретом инстанса. Изменение фильтров при том же cursor или подделка ⇒ `422 invalid_cursor`. Срок жизни cursor не ограничен (keyset-пагинация устойчива к вставкам).
 - Сортировка по умолчанию — keyset по `(created_at, id)` desc (UUIDv7 монотонен); лента чата и activity поддерживают `order=asc` и `after_seq` для догрузки после SSE.
 - Общего количества (`total`) нет — дорого на больших таблицах; агрегаты отдаются специализированными полями (`findings_total`, `task_counts`).
-- `GET /providers` не пагинируется (≤ 2 элемента); `GET /runs/{id}/tasks` возвращает граф с `next_cursor` для run > 200 задач.
+- `GET /providers` не пагинируется (≤ 2 элемента), `GET /agent-profiles` — тоже (12 ролей); `GET /runs/{id}/tasks` возвращает граф с `next_cursor` для run > 200 задач.
 
 ## 8. Idempotency-Key
 
@@ -323,6 +335,8 @@ flowchart LR
 | Refresh документации | workspace | 20/час |
 | Probe провайдера (реализовано, Phase 8) | workspace + provider | 6/час — окно 1 ч (`RateLimiter.hit(window_seconds=3600)`); попытка до проверки `Idempotency-Key` тоже расходует лимит |
 | Неаутентифицированные (кроме health) | IP | 60/мин |
+| `GET /system/health` (UI redesign B2; поверх лимита чтения; ответ кэшируется на сервере 10 с) | user | 30/мин |
+| `GET /search` (UI redesign B6; поверх лимита чтения; `rate_limit_search_per_minute`) | user | 60/мин |
 | SSE-подключения | user | 5 одновременных; 30 подключений/мин |
 
 ## 11. Асинхронные команды и `202 Accepted`

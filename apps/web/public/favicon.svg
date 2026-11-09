@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- AiCodingDev — ВРЕМЕННЫЙ знак (D-7): векторная перерисовка по PNG до появления исходника дизайнера. -->
+  <style>@media (prefers-color-scheme: light) { stop:nth-child(1) { stop-color: #006E8C } stop:nth-child(2) { stop-color: #3A57E8 } stop:nth-child(3) { stop-color: #8A2BD0 } .code { stroke: #005A73 } }</style>
+  <defs>
+    <linearGradient id="g" x1="6" y1="10" x2="58" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00CFFF"/><stop offset="0.55" stop-color="#4969FF"/><stop offset="1" stop-color="#B64DFF"/>
+    </linearGradient>
+    <clipPath id="c"><rect x="44" y="0" width="20" height="40"/></clipPath>
+  </defs>
+  <g clip-path="url(#c)" fill="none" stroke="url(#g)">
+    <circle cx="44" cy="20" r="11" stroke-width="5" stroke-dasharray="4.3 4.3"/>
+    <circle cx="44" cy="20" r="7" stroke-width="3"/>
+  </g>
+  <path d="M9 33 A24 24 0 0 1 36 8.5" fill="none" stroke="url(#g)" stroke-width="2" stroke-linecap="round"/>
+  <path d="M7 57 L27 7 H37 L57 57 H46.5 L32 20.5 L17.5 57 Z" fill="url(#g)"/>
+  <path d="M5 47 C 16 58, 44 56, 61 38" fill="none" stroke="url(#g)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M28.5 37 l-3 3 3 3 M35.5 37 l3 3 -3 3 M33.2 35.2 l-2.4 9.6" fill="none" class="code" stroke="#7FE6FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

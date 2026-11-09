@@ -1,141 +1,309 @@
 /*
- * Дизайн-токены AiCodingDev (P7-01). Значения — RGB-тройки, чтобы Tailwind мог добавлять
- * прозрачность (`bg-accent/50`). Компоненты используют только семантические имена
- * (tailwind.config.ts → theme.extend.colors), а не палитру slate/blue напрямую.
+ * Дизайн-токены AiCodingDev — фаза F1 редизайна (docs/design/UI_REDESIGN_PLAN.md §4.5, §4.7, §5).
+ * Цвета — RGB-тройки, чтобы Tailwind добавлял прозрачность (`bg-accent/50`). Компоненты используют
+ * только семантические имена (tailwind.config.ts → theme.extend.colors), не палитру напрямую.
  *
- * Тема: по умолчанию следует prefers-color-scheme; `<html data-theme="light|dark">`
- * принудительно задаёт тему (переключатель в меню пользователя, src/lib/theme.ts).
+ * Тема: `<html data-theme="dark|light|system">` (src/lib/theme.ts). По умолчанию — тёмная
+ * (палитра владельца с AA-коррекцией); `system` следует prefers-color-scheme.
  *
- * Контраст (WCAG 2.1 AA; посчитано по относительной яркости, светлая / тёмная тема):
- *  - fg / surface: 17.9 / 16.3; fg-muted / surface: 10.4 / 12.0 (на surface-muted ≥ 9.5 / 9.9);
- *  - fg-subtle / surface: 7.6 / 7.0 (на surface-muted/raised ≥ 6.9 / 5.7) — подсказки, плейсхолдеры;
- *  - accent-fg / accent (кнопка primary): 6.7 / 7.9; link / surface: 8.7 / 9.9; danger-text / surface: 6.5 / 9.4;
- *  - {tone}-fg / {tone}-soft (бейджи, баннеры, toast): ≥ 8.7 / ≥ 10.3;
- *  - input (граница поля) / surface: 4.8 / 7.0, focus (кольцо) / surface: 6.7 / 9.9 — ≥ 3:1 (WCAG 1.4.11).
+ * Соответствие имён плану §5.1 (имена кода сохранены, чтобы существующие экраны перешли на новую
+ * палитру без правок): fg-muted ≡ план `fg-secondary`, fg-subtle ≡ план `fg-muted`,
+ * accent ≡ план `primary` (CTA), highlight ≡ план `accent` (#B64DFF), input ≡ `border-input`.
+ *
+ * Контраст (WCAG 2.2 AA) проверяет src/styles/tokens.test.ts для обеих тем: текст ≥ 4,5:1,
+ * границы полей, кольцо фокуса, иконки и заливки статусов ≥ 3:1; стекло — с учётом альфы над canvas.
+ * Запрещено: текст на градиенте; статус только цветом; цвета ролей из статусных оттенков.
  */
+
+/* ── Тёмная тема (по умолчанию: без атрибута или data-theme="dark") ── */
 :root,
-:root[data-theme='light'] {
-  color-scheme: light;
-  --color-canvas: 248 250 252; /* slate-50 */
-  --color-surface: 255 255 255;
-  --color-surface-muted: 241 245 249; /* slate-100 */
-  --color-surface-raised: 255 255 255;
-  --color-fg: 15 23 42; /* slate-900 */
-  --color-fg-muted: 51 65 85; /* slate-700 */
-  --color-fg-subtle: 71 85 105; /* slate-600 */
-  --color-border: 226 232 240; /* slate-200 */
-  --color-border-strong: 203 213 225; /* slate-300 */
-  --color-input: 100 116 139; /* slate-500 */
-  --color-accent: 29 78 216; /* blue-700 */
-  --color-accent-hover: 30 64 175; /* blue-800 */
-  --color-accent-fg: 255 255 255;
-  --color-accent-soft: 239 246 255; /* blue-50 */
-  --color-accent-soft-fg: 30 58 138; /* blue-900 */
-  --color-link: 30 64 175; /* blue-800 */
-  --color-focus: 29 78 216; /* blue-700 */
-  --color-overlay: 15 23 42;
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-canvas: 8 11 20; /* #080B14 — палитра: background */
+  --color-canvas-secondary: 13 18 32; /* #0D1220 — bg-secondary: sidebar, полосы */
+  --color-surface: 17 24 39; /* #111827 — карточки, таблицы */
+  --color-surface-muted: 24 34 53; /* #182235 — шапки таблиц, код */
+  --color-surface-raised: 24 34 53; /* #182235 — поповеры, меню, диалоги */
+  --color-fg: 245 247 255; /* #F5F7FF — text-primary */
+  --color-fg-muted: 155 169 194; /* #9BA9C2 — вторичный текст (план: fg-secondary) */
+  --color-fg-subtle: 128 144 168; /* #8090A8 — подсказки, мета (план: fg-muted, AA-коррекция #697991) */
+  --color-fg-disabled: 105 121 145; /* #697991 — только disabled (исключение WCAG 1.4.3) */
+  --color-border: 38 50 73; /* #263249 — декоративные разделители */
+  --color-border-strong: 52 66 94; /* #34425E */
+  --color-input: 100 116 143; /* #64748F — граница полей ≥ 3:1 */
+  --color-border-active: 73 105 255; /* #4969FF — выделение/selected */
+  --color-accent: 0 207 255; /* #00CFFF — primary (CTA, активный пункт) */
+  --color-accent-hover: 53 222 255; /* #35DEFF */
+  --color-accent-fg: 8 11 20; /* #080B14 — тёмный текст на cyan (белый — 1,85:1) */
+  --color-accent-soft: 15 50 69; /* #0F3245 */
+  --color-accent-soft-fg: 127 230 255; /* #7FE6FF */
+  --color-link: 53 222 255; /* #35DEFF */
+  --color-focus: 53 222 255; /* #35DEFF */
+  --color-overlay: 0 0 0; /* #000000 */
+  --color-secondary: 117 85 255; /* #7555FF — только заливки/иконки (текст 3,4–4,2:1) */
+  --color-secondary-text: 160 140 255; /* #A08CFF */
+  --color-secondary-soft: 31 33 69; /* #1F2145 */
+  --color-highlight: 182 77 255; /* #B64DFF — accent палитры владельца: редкие выделения */
+  --color-highlight-text: 199 125 255; /* #C77DFF */
+  --color-highlight-soft: 40 31 69; /* #281F45 */
+  --color-neutral: 128 144 168; /* #8090A8 */
+  --color-neutral-soft: 30 38 56; /* #1E2638 */
+  --color-neutral-border: 58 72 101; /* #3A4865 */
+  --color-neutral-fg: 201 211 227; /* #C9D3E3 */
+  --color-info: 90 155 255; /* #5A9BFF */
+  --color-info-soft: 27 42 69; /* #1B2A45 */
+  --color-info-border: 47 79 134; /* #2F4F86 */
+  --color-info-fg: 141 185 255; /* #8DB9FF */
+  --color-success: 34 197 139; /* #22C58B */
+  --color-success-soft: 19 48 53; /* #133035 */
+  --color-success-border: 29 100 80; /* #1D6450 */
+  --color-success-fg: 74 222 159; /* #4ADE9F */
+  --color-warning: 245 185 66; /* #F5B942 */
+  --color-warning-soft: 49 47 43; /* #312F2B */
+  --color-warning-border: 122 95 37; /* #7A5F25 */
+  --color-warning-fg: 255 203 102; /* #FFCB66 */
+  --color-danger: 240 100 118; /* #F06476 */
+  --color-danger-soft: 48 35 50; /* #302332 */
+  --color-danger-border: 122 52 67; /* #7A3443 */
+  --color-danger-fg: 247 137 154; /* #F7899A */
+  --color-danger-text: 247 137 154; /* #F7899A */
+  --color-verify-pass: 34 197 139; /* #22C58B */
+  --color-verify-pass-soft: 19 48 53; /* #133035 */
+  --color-verify-pass-fg: 74 222 159; /* #4ADE9F */
+  --color-verify-fail: 240 100 118; /* #F06476 */
+  --color-verify-fail-soft: 48 35 50; /* #302332 */
+  --color-verify-fail-fg: 247 137 154; /* #F7899A */
+  --color-verify-blocked: 245 185 66; /* #F5B942 */
+  --color-verify-blocked-soft: 42 38 32; /* #2A2620 */
+  --color-verify-blocked-fg: 255 203 102; /* #FFCB66 */
+  --color-verify-not-run: 128 144 168; /* #8090A8 */
+  --color-verify-not-run-soft: 22 30 46; /* #161E2E */
+  --color-verify-not-run-fg: 201 211 227; /* #C9D3E3 */
+  --color-verify-insufficient: 245 185 66; /* #F5B942 */
+  --color-verify-insufficient-soft: 49 47 43; /* #312F2B */
+  --color-verify-insufficient-fg: 255 203 102; /* #FFCB66 */
+  --color-role-discover: 160 140 255; /* #A08CFF */
+  --color-role-discover-soft: 31 33 69; /* #1F2145 */
+  --color-role-build: 0 207 255; /* #00CFFF */
+  --color-role-build-soft: 15 50 69; /* #0F3245 */
+  --color-role-verify: 199 125 255; /* #C77DFF */
+  --color-role-verify-soft: 40 31 69; /* #281F45 */
+  --color-role-sustain: 90 155 255; /* #5A9BFF */
+  --color-role-sustain-soft: 27 42 69; /* #1B2A45 */
+  --color-role-system: 155 169 194; /* #9BA9C2 */
+  --color-role-system-soft: 30 38 56; /* #1E2638 */
+  --color-glass: 24 34 53; /* #182235 — стекло: rgb(glass / --glass-alpha) */
+  --color-glass-border: 73 105 255; /* #4969FF */
 
-  --color-neutral-soft: 241 245 249;
-  --color-neutral-border: 203 213 225;
-  --color-neutral-fg: 30 41 59;
-  --color-info-soft: 239 246 255;
-  --color-info-border: 147 197 253;
-  --color-info-fg: 30 58 138;
-  --color-success-soft: 240 253 244;
-  --color-success-border: 134 239 172;
-  --color-success-fg: 20 83 45;
-  --color-warning-soft: 255 251 235;
-  --color-warning-border: 252 211 77;
-  --color-warning-fg: 120 53 15;
-  --color-danger-soft: 254 242 242;
-  --color-danger-border: 252 165 165;
-  --color-danger-fg: 127 29 29;
-  --color-danger-text: 185 28 28; /* red-700: текст ошибки на surface, 6.5:1 */
-
-  --shadow-elevated: 0 10px 30px -10px rgb(15 23 42 / 0.25);
+  --glass-alpha: 0.88;
+  --glass-border-alpha: 0.24;
+  --gradient-brand: linear-gradient(135deg, #00cfff, #4969ff 50%, #7555ff);
+  --gradient-brand-subtle: linear-gradient(135deg, rgb(0 207 255 / 0.16), rgb(117 85 255 / 0.16));
+  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.24);
+  --shadow-e2: 0 8px 24px -8px rgb(0 0 0 / 0.5);
+  --shadow-e3: 0 24px 48px -12px rgb(0 0 0 / 0.6);
+  --shadow-glow: 0 0 24px -8px rgb(0 207 255 / 0.35);
 }
 
-/* Тёмная тема: системная (если явно не выбрана светлая) или принудительная. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-    --color-canvas: 2 6 23; /* slate-950 */
-    --color-surface: 15 23 42; /* slate-900 */
-    --color-surface-muted: 30 41 59; /* slate-800 */
-    --color-surface-raised: 30 41 59;
-    --color-fg: 241 245 249;
-    --color-fg-muted: 203 213 225;
-    --color-fg-subtle: 148 163 184;
-    --color-border: 51 65 85;
-    --color-border-strong: 71 85 105;
-    --color-input: 148 163 184;
-    --color-accent: 96 165 250; /* blue-400 */
-    --color-accent-hover: 147 197 253;
-    --color-accent-fg: 2 6 23;
-    --color-accent-soft: 23 37 84; /* blue-950 */
-    --color-accent-soft-fg: 191 219 254;
-    --color-link: 147 197 253;
-    --color-focus: 147 197 253;
-    --color-overlay: 0 0 0;
+/* ── Светлая тема (явный выбор) ── */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-canvas: 246 248 252; /* #F6F8FC */
+  --color-canvas-secondary: 238 242 249; /* #EEF2F9 */
+  --color-surface: 255 255 255; /* #FFFFFF */
+  --color-surface-muted: 238 242 249; /* #EEF2F9 */
+  --color-surface-raised: 255 255 255; /* #FFFFFF */
+  --color-fg: 11 18 32; /* #0B1220 */
+  --color-fg-muted: 61 74 99; /* #3D4A63 */
+  --color-fg-subtle: 85 98 122; /* #55627A */
+  --color-fg-disabled: 138 149 168; /* #8A95A8 */
+  --color-border: 213 220 232; /* #D5DCE8 */
+  --color-border-strong: 184 194 211; /* #B8C2D3 */
+  --color-input: 122 135 156; /* #7A879C */
+  --color-border-active: 58 87 232; /* #3A57E8 */
+  --color-accent: 0 110 140; /* #006E8C */
+  --color-accent-hover: 0 90 115; /* #005A73 */
+  --color-accent-fg: 255 255 255; /* #FFFFFF */
+  --color-accent-soft: 224 242 247; /* #E0F2F7 */
+  --color-accent-soft-fg: 0 73 94; /* #00495E */
+  --color-link: 0 90 115; /* #005A73 */
+  --color-focus: 58 87 232; /* #3A57E8 */
+  --color-overlay: 11 18 32; /* #0B1220 */
+  --color-secondary: 90 59 224; /* #5A3BE0 */
+  --color-secondary-text: 90 59 224; /* #5A3BE0 */
+  --color-secondary-soft: 238 234 253; /* #EEEAFD */
+  --color-highlight: 138 43 208; /* #8A2BD0 */
+  --color-highlight-text: 138 43 208; /* #8A2BD0 */
+  --color-highlight-soft: 244 233 252; /* #F4E9FC */
+  --color-neutral: 85 98 122; /* #55627A */
+  --color-neutral-soft: 238 242 249; /* #EEF2F9 */
+  --color-neutral-border: 184 194 211; /* #B8C2D3 */
+  --color-neutral-fg: 43 53 72; /* #2B3548 */
+  --color-info: 45 95 208; /* #2D5FD0 */
+  --color-info-soft: 232 239 252; /* #E8EFFC */
+  --color-info-border: 157 182 238; /* #9DB6EE */
+  --color-info-fg: 31 74 174; /* #1F4AAE */
+  --color-success: 11 122 85; /* #0B7A55 */
+  --color-success-soft: 227 244 238; /* #E3F4EE */
+  --color-success-border: 143 209 184; /* #8FD1B8 */
+  --color-success-fg: 7 92 64; /* #075C40 */
+  --color-warning: 138 90 0; /* #8A5A00 */
+  --color-warning-soft: 251 241 221; /* #FBF1DD */
+  --color-warning-border: 224 190 115; /* #E0BE73 */
+  --color-warning-fg: 107 69 0; /* #6B4500 */
+  --color-danger: 196 47 69; /* #C42F45 */
+  --color-danger-soft: 251 231 234; /* #FBE7EA */
+  --color-danger-border: 235 163 174; /* #EBA3AE */
+  --color-danger-fg: 158 31 51; /* #9E1F33 */
+  --color-danger-text: 196 47 69; /* #C42F45 */
+  --color-verify-pass: 11 122 85; /* #0B7A55 */
+  --color-verify-pass-soft: 227 244 238; /* #E3F4EE */
+  --color-verify-pass-fg: 7 92 64; /* #075C40 */
+  --color-verify-fail: 196 47 69; /* #C42F45 */
+  --color-verify-fail-soft: 251 231 234; /* #FBE7EA */
+  --color-verify-fail-fg: 158 31 51; /* #9E1F33 */
+  --color-verify-blocked: 138 90 0; /* #8A5A00 */
+  --color-verify-blocked-soft: 253 246 232; /* #FDF6E8 */
+  --color-verify-blocked-fg: 107 69 0; /* #6B4500 */
+  --color-verify-not-run: 85 98 122; /* #55627A */
+  --color-verify-not-run-soft: 246 248 252; /* #F6F8FC */
+  --color-verify-not-run-fg: 43 53 72; /* #2B3548 */
+  --color-verify-insufficient: 138 90 0; /* #8A5A00 */
+  --color-verify-insufficient-soft: 251 241 221; /* #FBF1DD */
+  --color-verify-insufficient-fg: 107 69 0; /* #6B4500 */
+  --color-role-discover: 90 59 224; /* #5A3BE0 */
+  --color-role-discover-soft: 238 234 253; /* #EEEAFD */
+  --color-role-build: 0 110 140; /* #006E8C */
+  --color-role-build-soft: 224 242 247; /* #E0F2F7 */
+  --color-role-verify: 138 43 208; /* #8A2BD0 */
+  --color-role-verify-soft: 244 233 252; /* #F4E9FC */
+  --color-role-sustain: 45 95 208; /* #2D5FD0 */
+  --color-role-sustain-soft: 232 239 252; /* #E8EFFC */
+  --color-role-system: 61 74 99; /* #3D4A63 */
+  --color-role-system-soft: 238 242 249; /* #EEF2F9 */
+  --color-glass: 255 255 255; /* #FFFFFF */
+  --color-glass-border: 58 87 232; /* #3A57E8 */
 
-    --color-neutral-soft: 30 41 59;
-    --color-neutral-border: 71 85 105;
-    --color-neutral-fg: 226 232 240;
-    --color-info-soft: 23 37 84;
-    --color-info-border: 30 64 175;
-    --color-info-fg: 191 219 254;
-    --color-success-soft: 5 46 22;
-    --color-success-border: 22 101 52;
-    --color-success-fg: 187 247 208;
-    --color-warning-soft: 69 26 3;
-    --color-warning-border: 146 64 14;
-    --color-warning-fg: 253 230 138;
-    --color-danger-soft: 69 10 10;
-    --color-danger-border: 153 27 27;
-    --color-danger-fg: 254 202 202;
-    --color-danger-text: 252 165 165;
+  --glass-alpha: 0.92;
+  --glass-border-alpha: 0.18;
+  --gradient-brand: linear-gradient(135deg, #006e8c, #3a57e8 50%, #5a3be0);
+  --gradient-brand-subtle: linear-gradient(135deg, rgb(0 110 140 / 0.1), rgb(90 59 224 / 0.1));
+  --shadow-e1: 0 1px 2px rgb(11 18 32 / 0.12);
+  --shadow-e2: 0 8px 24px -8px rgb(11 18 32 / 0.2);
+  --shadow-e3: 0 24px 48px -12px rgb(11 18 32 / 0.2);
+  --shadow-glow: 0 0 24px -8px rgb(0 110 140 / 0.3);
+}
 
-    --shadow-elevated: 0 10px 30px -10px rgb(0 0 0 / 0.7);
+/* ── «Как в системе»: светлая, если ОС просит светлую; иначе действует тёмная из :root ── */
+@media (prefers-color-scheme: light) {
+  :root[data-theme='system'] {
+    color-scheme: light;
+    --color-canvas: 246 248 252; /* #F6F8FC */
+    --color-canvas-secondary: 238 242 249; /* #EEF2F9 */
+    --color-surface: 255 255 255; /* #FFFFFF */
+    --color-surface-muted: 238 242 249; /* #EEF2F9 */
+    --color-surface-raised: 255 255 255; /* #FFFFFF */
+    --color-fg: 11 18 32; /* #0B1220 */
+    --color-fg-muted: 61 74 99; /* #3D4A63 */
+    --color-fg-subtle: 85 98 122; /* #55627A */
+    --color-fg-disabled: 138 149 168; /* #8A95A8 */
+    --color-border: 213 220 232; /* #D5DCE8 */
+    --color-border-strong: 184 194 211; /* #B8C2D3 */
+    --color-input: 122 135 156; /* #7A879C */
+    --color-border-active: 58 87 232; /* #3A57E8 */
+    --color-accent: 0 110 140; /* #006E8C */
+    --color-accent-hover: 0 90 115; /* #005A73 */
+    --color-accent-fg: 255 255 255; /* #FFFFFF */
+    --color-accent-soft: 224 242 247; /* #E0F2F7 */
+    --color-accent-soft-fg: 0 73 94; /* #00495E */
+    --color-link: 0 90 115; /* #005A73 */
+    --color-focus: 58 87 232; /* #3A57E8 */
+    --color-overlay: 11 18 32; /* #0B1220 */
+    --color-secondary: 90 59 224; /* #5A3BE0 */
+    --color-secondary-text: 90 59 224; /* #5A3BE0 */
+    --color-secondary-soft: 238 234 253; /* #EEEAFD */
+    --color-highlight: 138 43 208; /* #8A2BD0 */
+    --color-highlight-text: 138 43 208; /* #8A2BD0 */
+    --color-highlight-soft: 244 233 252; /* #F4E9FC */
+    --color-neutral: 85 98 122; /* #55627A */
+    --color-neutral-soft: 238 242 249; /* #EEF2F9 */
+    --color-neutral-border: 184 194 211; /* #B8C2D3 */
+    --color-neutral-fg: 43 53 72; /* #2B3548 */
+    --color-info: 45 95 208; /* #2D5FD0 */
+    --color-info-soft: 232 239 252; /* #E8EFFC */
+    --color-info-border: 157 182 238; /* #9DB6EE */
+    --color-info-fg: 31 74 174; /* #1F4AAE */
+    --color-success: 11 122 85; /* #0B7A55 */
+    --color-success-soft: 227 244 238; /* #E3F4EE */
+    --color-success-border: 143 209 184; /* #8FD1B8 */
+    --color-success-fg: 7 92 64; /* #075C40 */
+    --color-warning: 138 90 0; /* #8A5A00 */
+    --color-warning-soft: 251 241 221; /* #FBF1DD */
+    --color-warning-border: 224 190 115; /* #E0BE73 */
+    --color-warning-fg: 107 69 0; /* #6B4500 */
+    --color-danger: 196 47 69; /* #C42F45 */
+    --color-danger-soft: 251 231 234; /* #FBE7EA */
+    --color-danger-border: 235 163 174; /* #EBA3AE */
+    --color-danger-fg: 158 31 51; /* #9E1F33 */
+    --color-danger-text: 196 47 69; /* #C42F45 */
+    --color-verify-pass: 11 122 85; /* #0B7A55 */
+    --color-verify-pass-soft: 227 244 238; /* #E3F4EE */
+    --color-verify-pass-fg: 7 92 64; /* #075C40 */
+    --color-verify-fail: 196 47 69; /* #C42F45 */
+    --color-verify-fail-soft: 251 231 234; /* #FBE7EA */
+    --color-verify-fail-fg: 158 31 51; /* #9E1F33 */
+    --color-verify-blocked: 138 90 0; /* #8A5A00 */
+    --color-verify-blocked-soft: 253 246 232; /* #FDF6E8 */
+    --color-verify-blocked-fg: 107 69 0; /* #6B4500 */
+    --color-verify-not-run: 85 98 122; /* #55627A */
+    --color-verify-not-run-soft: 246 248 252; /* #F6F8FC */
+    --color-verify-not-run-fg: 43 53 72; /* #2B3548 */
+    --color-verify-insufficient: 138 90 0; /* #8A5A00 */
+    --color-verify-insufficient-soft: 251 241 221; /* #FBF1DD */
+    --color-verify-insufficient-fg: 107 69 0; /* #6B4500 */
+    --color-role-discover: 90 59 224; /* #5A3BE0 */
+    --color-role-discover-soft: 238 234 253; /* #EEEAFD */
+    --color-role-build: 0 110 140; /* #006E8C */
+    --color-role-build-soft: 224 242 247; /* #E0F2F7 */
+    --color-role-verify: 138 43 208; /* #8A2BD0 */
+    --color-role-verify-soft: 244 233 252; /* #F4E9FC */
+    --color-role-sustain: 45 95 208; /* #2D5FD0 */
+    --color-role-sustain-soft: 232 239 252; /* #E8EFFC */
+    --color-role-system: 61 74 99; /* #3D4A63 */
+    --color-role-system-soft: 238 242 249; /* #EEF2F9 */
+    --color-glass: 255 255 255; /* #FFFFFF */
+    --color-glass-border: 58 87 232; /* #3A57E8 */
+
+    --glass-alpha: 0.92;
+    --glass-border-alpha: 0.18;
+    --gradient-brand: linear-gradient(135deg, #006e8c, #3a57e8 50%, #5a3be0);
+    --gradient-brand-subtle: linear-gradient(135deg, rgb(0 110 140 / 0.1), rgb(90 59 224 / 0.1));
+    --shadow-e1: 0 1px 2px rgb(11 18 32 / 0.12);
+    --shadow-e2: 0 8px 24px -8px rgb(11 18 32 / 0.2);
+    --shadow-e3: 0 24px 48px -12px rgb(11 18 32 / 0.2);
+    --shadow-glow: 0 0 24px -8px rgb(0 110 140 / 0.3);
   }
 }
 
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --color-canvas: 2 6 23;
-  --color-surface: 15 23 42;
-  --color-surface-muted: 30 41 59;
-  --color-surface-raised: 30 41 59;
-  --color-fg: 241 245 249;
-  --color-fg-muted: 203 213 225;
-  --color-fg-subtle: 148 163 184;
-  --color-border: 51 65 85;
-  --color-border-strong: 71 85 105;
-  --color-input: 148 163 184;
-  --color-accent: 96 165 250;
-  --color-accent-hover: 147 197 253;
-  --color-accent-fg: 2 6 23;
-  --color-accent-soft: 23 37 84;
-  --color-accent-soft-fg: 191 219 254;
-  --color-link: 147 197 253;
-  --color-focus: 147 197 253;
-  --color-overlay: 0 0 0;
+/* ── Не зависящие от темы токены: движение, радиусы, слои ── */
+:root {
+  /* Motion (§5.5): анимируются только opacity/transform; при reduced-motion — 0. */
+  --dur-instant: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 250ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  /* Радиусы (§5.4): поля и кнопки 6, карточки 10, плитки и диалоги 14. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --glass-blur: 14px;
+}
 
-  --color-neutral-soft: 30 41 59;
-  --color-neutral-border: 71 85 105;
-  --color-neutral-fg: 226 232 240;
-  --color-info-soft: 23 37 84;
-  --color-info-border: 30 64 175;
-  --color-info-fg: 191 219 254;
-  --color-success-soft: 5 46 22;
-  --color-success-border: 22 101 52;
-  --color-success-fg: 187 247 208;
-  --color-warning-soft: 69 26 3;
-  --color-warning-border: 146 64 14;
-  --color-warning-fg: 253 230 138;
-  --color-danger-soft: 69 10 10;
-  --color-danger-border: 153 27 27;
-  --color-danger-fg: 254 202 202;
-  --color-danger-text: 252 165 165;
-
-  --shadow-elevated: 0 10px 30px -10px rgb(0 0 0 / 0.7);
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
 }

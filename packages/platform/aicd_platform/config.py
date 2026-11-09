@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     rate_limit_mutation_per_minute: int = 120
     rate_limit_login_per_ip_per_minute: int = 10
     rate_limit_anonymous_per_ip_per_minute: int = 60
+    # Глобальный поиск `GET /search` (B6): отдельный бакет на пользователя поверх общего лимита чтения.
+    rate_limit_search_per_minute: int = Field(default=60, ge=1)
 
     # Allowlist корней локальных репозиториев: "имя=/абсолютный/путь" (FR-PRJ-02).
     repository_roots: Annotated[dict[str, Path], NoDecode] = Field(default_factory=dict)
@@ -139,6 +141,11 @@ class Settings(BaseSettings):
     metrics_token_file: str | None = None
     metrics_host: str = "0.0.0.0"  # noqa: S104 — порт доступен только в сети backend (compose), не публикуется
     metrics_port: int = Field(default=0, ge=0, le=65535)
+
+    # Файл статуса утилиты бэкапа (`python -m scripts.backup … --status-file`, P9-05), смонтированный только для
+    # чтения: worker-outbox — метрики aicd_backup_* и алерты AicdBackup* (ТЗ §16 «failed backups»); API — компонент
+    # `backup` в `GET /system/health` (если файл смонтирован и в контейнер api; иначе статус `unknown`).
+    backup_status_file: Path | None = None
 
     @field_validator("repository_roots", mode="before")
     @classmethod

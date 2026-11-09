@@ -748,6 +748,7 @@ CREATE TABLE runs (
 CREATE INDEX ix_runs_project_status_created ON runs (workspace_id, project_id, status, created_at DESC);  -- ТЗ §7.3 + workspace_id
 CREATE INDEX ix_runs_active ON runs (workspace_id, status) WHERE status NOT IN ('COMPLETED','FAILED','CANCELLED');
 CREATE INDEX ix_runs_requested_by ON runs (workspace_id, requested_by, created_at DESC);
+CREATE INDEX ix_runs_objective_trgm ON runs USING gin (workspace_id, objective gin_trgm_ops);  -- GET /search (миграция 0018)
 -- Специфичные триггеры: trg_runs_transition (§18.3), trg_runs_completion_guard (§18.4),
 -- trg_runs_quality_profile_scope (профиль global или того же workspace, code = quality_profile).
 ```
@@ -803,6 +804,8 @@ CREATE TABLE tasks (
   CONSTRAINT ck_tasks_superseded CHECK (superseded_at IS NULL OR status IN ('CANCELLED','SUCCEEDED','FAILED'))
 );
 CREATE INDEX ix_tasks_run_status ON tasks (workspace_id, run_id, status);                      -- ТЗ §7.3 + workspace_id
+CREATE INDEX ix_tasks_ws_created ON tasks (workspace_id, created_at, id) WHERE superseded_at IS NULL;  -- GET /tasks (миграция 0017)
+CREATE INDEX ix_tasks_title_trgm ON tasks USING gin (workspace_id, title gin_trgm_ops);  -- GET /search (миграция 0018)
 CREATE INDEX ix_tasks_ready ON tasks (workspace_id, run_id, created_at) WHERE status = 'READY';   -- выборка планировщиком
 CREATE INDEX ix_tasks_retry_due ON tasks (next_attempt_at) WHERE status = 'RETRY_WAIT';
 CREATE INDEX ix_tasks_pending ON tasks (run_id) WHERE status = 'PENDING';
@@ -1106,6 +1109,7 @@ CREATE TABLE cli_executions (
       (status IN ('COLLECTED','TIMED_OUT','CANCELLED','CRASHED','AUTH_REQUIRED','RATE_LIMITED')) = (finished_at IS NOT NULL))
 );
 CREATE INDEX ix_cli_executions_attempt ON cli_executions (workspace_id, task_attempt_id);
+CREATE INDEX ix_cli_executions_ws_created ON cli_executions (workspace_id, created_at, id);  -- GET /providers/{id}/executions (миграция 0017)
 CREATE INDEX ix_cli_executions_active ON cli_executions (installation_id, created_at)
   WHERE status IN ('QUEUED','STARTING','RUNNING','EXITED');                  -- лимиты параллелизма + recovery
 -- trg_cli_executions_transition (§18.3).
@@ -2055,6 +2059,8 @@ CREATE TABLE findings (
       status NOT IN ('FALSE_POSITIVE','ACCEPTED_RISK') OR (resolved_by IS NOT NULL AND resolution_reason IS NOT NULL))
 );
 CREATE INDEX ix_findings_run_open ON findings (workspace_id, run_id, severity) WHERE status IN ('OPEN','ACKNOWLEDGED','FIXED');
+CREATE INDEX ix_findings_search_trgm ON findings
+  USING gin (workspace_id, (title || ' ' || rule_id || ' ' || coalesce(cwe_id, '')) gin_trgm_ops);  -- GET /search (миграция 0018)
 CREATE INDEX ix_findings_task ON findings (workspace_id, task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX ix_findings_gate_execution ON findings (gate_execution_id) WHERE gate_execution_id IS NOT NULL;
 ```
@@ -2516,6 +2522,7 @@ CREATE TABLE run_event_log (
   CONSTRAINT fk_run_event_log_run FOREIGN KEY (workspace_id, run_id) REFERENCES runs(workspace_id, id) ON DELETE RESTRICT
 );
 CREATE INDEX ix_run_event_log_ws_run ON run_event_log (workspace_id, run_id, seq);
+CREATE INDEX ix_run_event_log_ws_created ON run_event_log (workspace_id, created_at, event_id);  -- GET /activity, SSE workspace (миграция 0017)
 -- trg_run_event_log_append_only: BEFORE UPDATE OR DELETE → trg_fn_append_only() (retention — только aicd_maintenance, §20).
 ```
 Выдача `seq` (ADR-0011): в транзакции диспетчера `UPDATE runs SET last_event_seq = last_event_seq + 1 WHERE id = :run_id RETURNING last_event_seq` (строчная блокировка run сериализует выдачу); `INSERT … ON CONFLICT (event_id) DO NOTHING` делает повторную обработку того же outbox-события безопасной. Обновление `last_event_seq` не считается изменением агрегата: триггер `trg_runs_version` объявлен как `BEFORE UPDATE OF <все колонки, кроме last_event_seq и updated_at>`, поэтому `version`/ETag run не меняется от потока событий. `heartbeat` не персистится (домен `sse_event_type_persisted_t`).
@@ -3065,6 +3072,7 @@ CREATE POLICY p_worker_leases_worker ON worker_leases FOR ALL TO aicd_worker USI
 | `sys_vulndb_request_approval(approval_id, event_id, audit_id, workspace_id, project_id, requested_by_email, subject jsonb, subject_hash)` | `aicd_maintenance` | approval `VULN_DB_UPDATE` в `PENDING` (risk `high`, `required_role = approval_min_role` = admin, срок 24 ч) от имени активного участника workspace (иначе `42501`), проект — того же workspace (иначе `22023`); outbox `approval.requested`, аудит `approval.request` (`via = aicd_maintenance`); повтор того же предмета — id существующего `PENDING` (миграция 0016, OQ-51 (b)) |
 | `sys_vulndb_authorize(approval_id, audit_id, subject jsonb, subject_hash, operator)` | `aicd_maintenance` | однократное использование: `APPROVED`, не истёк, `subject_hash` и `subject` совпадают (иначе `22023`), нет аудита `vulndb.update_authorized` по этому approval (иначе `42501`); сериализация — `pg_advisory_xact_lock`; пишет аудит `vulndb.update_authorized`, возвращает jsonb (workspace, инициатор, утвердивший, сроки) |
 | `sys_vulndb_report(approval_id, audit_id, outcome, metadata jsonb)` | `aicd_maintenance` | итог обновления (`vulndb.update_finished`, outcome `success`/`failure`) — только после авторизации (иначе `42501`) |
+| `sys_outbox_backlog()` | `aicd_app` | только агрегат `(pending bigint, oldest_created_at timestamptz)` неопубликованных `outbox_events` всех workspace — без строк и payload; компонент `outbox` в `GET /system/health` (UI redesign B2; миграция 0017; `aicd_sysfn` — `SELECT (created_at, published_at)`) |
 
 ### 19.6 Обход RLS для обслуживания
 

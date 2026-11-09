@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -199,3 +200,125 @@ async def store_context_pack(
         },
     )
     return StoredPack(pack_id, artifact_id, sha256, size, cache_hit=bool(cache_info["hit"]))
+
+
+# --- Чтение (B3, G-08): manifest Context Pack попытки для API --------------------------------------------------
+
+_SECTIONS = frozenset({"code", "symbols_graph", "tests", "repo_map", "docs"})
+_KINDS = frozenset({"map", "exact", "dependency", "task_relevance", "recency", "docs"})
+_SHA_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_WARNING_CODE_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+MAX_MANIFEST_ENTRIES = 2000
+
+
+async def load_context_pack(conn: AsyncConnection, *, task_attempt_id: uuid.UUID) -> dict[str, Any] | None:
+    """Строка `context_packs` попытки (RLS workspace) и commit её снимка; нет pack — `None`."""
+    row = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT cp.id, cp.task_attempt_id, cp.snapshot_id, cp.source_commit, cp.policy_version,"
+                    "       cp.documentation_mode, cp.token_budget, cp.size_bytes, cp.manifest, cp.content_hash,"
+                    "       cp.artifact_id, cp.created_at, s.commit_sha AS snapshot_commit"
+                    "  FROM context_packs cp"
+                    "  LEFT JOIN code_index_snapshots s ON s.id = cp.snapshot_id AND s.workspace_id = cp.workspace_id"
+                    " WHERE cp.task_attempt_id = :att"
+                ),
+                {"att": task_attempt_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _str(value: Any, limit: int = 4096) -> str | None:
+    return value[:limit] if isinstance(value, str) else None
+
+
+def _int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _lines(value: Any) -> list[int] | None:
+    if isinstance(value, list) and len(value) == 2 and all(_int(v) is not None and v >= 1 for v in value):
+        return [int(value[0]), int(value[1])]
+    return None
+
+
+def _sha(value: Any, pattern: re.Pattern[str]) -> str | None:
+    return value if isinstance(value, str) and pattern.match(value) else None
+
+
+def manifest_view(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Безопасное подмножество manifest: состав pack без текста фрагментов.
+
+    Только перечисленные поля фрагментов (section/kind/path/lines/commit/sha256/bytes/stale/source_ref) и
+    пропущенных (section/kind/path/commit/reason); предупреждения — только коды (`git_read_failed:<текст>` →
+    `git_read_failed`): текст исключений источников может содержать сведения о хосте. Термины задачи не отдаются.
+    """
+    fragments: list[dict[str, Any]] = []
+    raw_fragments = manifest.get("fragments")
+    for f in raw_fragments if isinstance(raw_fragments, list) else []:
+        if not isinstance(f, Mapping) or len(fragments) >= MAX_MANIFEST_ENTRIES:
+            continue
+        section, kind, path = f.get("section"), f.get("kind"), _str(f.get("path"))
+        if section not in _SECTIONS or kind not in _KINDS or path is None:
+            continue
+        fragments.append(
+            {
+                "section": section,
+                "kind": kind,
+                "path": path,
+                "lines": _lines(f.get("lines")),
+                "commit": _sha(f.get("commit"), _SHA_RE),
+                "sha256": _sha(f.get("sha256"), _SHA256_RE),
+                "bytes": _int(f.get("bytes")),
+                "stale": f.get("stale") is True,
+                "source_ref": _str(f.get("source_ref"), 255),
+            }
+        )
+    omitted: list[dict[str, Any]] = []
+    raw_omitted = manifest.get("omitted")
+    for o in raw_omitted if isinstance(raw_omitted, list) else []:
+        if not isinstance(o, Mapping) or len(omitted) >= MAX_MANIFEST_ENTRIES:
+            continue
+        section, kind, path, reason = o.get("section"), o.get("kind"), _str(o.get("path")), _str(o.get("reason"), 64)
+        if section not in _SECTIONS or kind not in _KINDS or path is None or reason is None:
+            continue
+        omitted.append(
+            {
+                "section": section,
+                "kind": kind,
+                "path": path,
+                "commit": _sha(o.get("commit"), _SHA_RE),
+                "reason": reason,
+            }
+        )
+    warnings: list[str] = []
+    raw_warnings = manifest.get("warnings")
+    for w in raw_warnings if isinstance(raw_warnings, list) else []:
+        code = w.split(":", 1)[0] if isinstance(w, str) else ""
+        if _WARNING_CODE_RE.match(code) and code not in warnings:
+            warnings.append(code)
+    budget = manifest.get("budget")
+    budget_view = None
+    if isinstance(budget, Mapping):
+        budget_view = {k: _int(budget.get(k)) for k in ("max_bytes", "max_files", "max_fragment_bytes")}
+    cache = manifest.get("cache")
+    stale_policy = manifest.get("stale_policy")
+    return {
+        "schema": _int(manifest.get("schema")),
+        "stale_policy": stale_policy if stale_policy in ("exclude", "mark") else None,
+        "role": _str(manifest.get("role"), 64),
+        "docs": manifest.get("docs") if manifest.get("docs") in ("allowed", "off") else None,
+        "budget": budget_view,
+        "cache_hit": bool(cache.get("hit")) if isinstance(cache, Mapping) else None,
+        "fragments": fragments,
+        "omitted": omitted,
+        "warnings": warnings,
+        "fragments_total": len(raw_fragments) if isinstance(raw_fragments, list) else 0,
+        "omitted_total": len(raw_omitted) if isinstance(raw_omitted, list) else 0,
+    }

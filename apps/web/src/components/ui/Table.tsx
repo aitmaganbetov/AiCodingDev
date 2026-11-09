@@ -41,7 +41,15 @@ interface TableProps<T> {
   /** Минимальная ширина таблицы (Tailwind-класс); уже — горизонтальная прокрутка контейнера. */
   minWidthClass?: string;
   className?: string;
+  /**
+   * Плотность (§5.3): comfortable — по умолчанию; compact — для длинных списков и панелей
+   * (меньше вертикальные отступы, кнопки сортировки ≥ 24×24 по WCAG 2.5.8). Шрифт не меньше 14 px.
+   */
+  density?: TableDensity;
 }
+
+export type TableDensity = 'comfortable' | 'compact';
+const CELL: Record<TableDensity, string> = { comfortable: 'px-3 py-2', compact: 'px-2 py-1' };
 
 const collator = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' });
 
@@ -71,6 +79,7 @@ export function Table<T>({
   rowProps,
   minWidthClass = 'min-w-[40rem]',
   className,
+  density = 'comfortable',
 }: TableProps<T>) {
   const { t } = useTranslation();
   const [localSort, setLocalSort] = useState<SortState | null>(defaultSort);
@@ -99,8 +108,8 @@ export function Table<T>({
   const directionLabel = (d: SortDirection) => (d === 'asc' ? t('ui.sortAscending') : t('ui.sortDescending'));
 
   return (
-    <div className={cx('overflow-x-auto rounded-lg border border-border bg-surface', className)}>
-      <table className={cx('w-full text-left text-sm', minWidthClass)}>
+    <div className={cx('relative overflow-x-auto rounded-lg border border-border bg-surface', className)}>
+      <table className={cx('w-full text-left text-sm', minWidthClass)} data-density={density}>
         <caption className={captionVisible ? 'px-3 py-2 text-left font-semibold' : 'sr-only'}>
           {caption}
           {sortedCol && sort ? (
@@ -120,13 +129,13 @@ export function Table<T>({
                   key={col.id}
                   scope="col"
                   aria-sort={active && sort ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}
-                  className={cx('px-3 py-2 font-semibold', col.className)}
+                  className={cx(CELL[density], 'font-semibold', col.className)}
                 >
                   {sortable ? (
                     <button
                       type="button"
                       onClick={() => toggle(col)}
-                      className="-mx-2 inline-flex min-h-[2.25rem] items-center gap-1 rounded px-2 font-semibold hover:bg-surface hover:text-fg"
+                      className={cx('-mx-2 inline-flex items-center gap-1 rounded px-2 font-semibold hover:bg-surface hover:text-fg', density === 'compact' ? 'min-h-target' : 'min-h-[2.25rem]')}
                     >
                       {col.header}
                       <Icon
@@ -151,14 +160,14 @@ export function Table<T>({
             </tr>
           ) : (
             sorted.map((row) => (
-              <tr key={rowKey(row)} className="border-t border-border align-top" {...rowProps?.(row)}>
+              <tr key={rowKey(row)} className="border-t border-border align-top transition-colors duration-instant hover:bg-surface-muted/40" {...rowProps?.(row)}>
                 {columns.map((col) =>
                   col.rowHeader ? (
-                    <th key={col.id} scope="row" className={cx('px-3 py-2 font-medium', col.className)}>
+                    <th key={col.id} scope="row" className={cx(CELL[density], 'font-medium', col.className)}>
                       {col.cell(row)}
                     </th>
                   ) : (
-                    <td key={col.id} className={cx('px-3 py-2', col.className)}>
+                    <td key={col.id} className={cx(CELL[density], col.className)}>
                       {col.cell(row)}
                     </td>
                   ),

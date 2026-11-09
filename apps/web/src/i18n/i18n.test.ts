@@ -19,6 +19,7 @@ const EXPECTED = [
   'dashboard',
   'analytics',
   'integrations',
+  'ds',
 ];
 
 function leafKeys(value: unknown, prefix = ''): string[] {

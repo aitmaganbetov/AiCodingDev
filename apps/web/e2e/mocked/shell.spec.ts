@@ -233,7 +233,7 @@ test('keyboard-only: login, skip link, switch workspace, create project, logout'
   await tabTo(page, userMenu, { backwards: true });
   await page.keyboard.press('Enter');
   // Меню (APG Menu Button): фокус на первом пункте, End — последний пункт.
-  await expect(page.getByRole('menuitemradio', { name: 'Как в системе' })).toBeFocused();
+  await expect(page.getByRole('menuitemradio', { name: 'Тёмная' })).toBeFocused();
   await page.keyboard.press('End');
   await expect(page.getByRole('menuitem', { name: 'Выйти' })).toBeFocused();
   await page.keyboard.press('Enter');

@@ -70,6 +70,8 @@ PERMISSIONS: Final[dict[str, frozenset[Role]]] = {
     "documentation:register": _ADMIN_UP,
     "documentation:refresh": _DEV_UP,
     "audit:read": _ADMIN_UP,
+    # Состояние платформы (UI redesign B2, GET /system/health): компоненты, воркеры, очереди — owner/admin.
+    "system:health": _ADMIN_UP,
     # GitHub (P8, SECURITY_ARCHITECTURE §4.2 «Управление GitHub-установкой» — owner/admin): просмотр установок
     # и PR — все участники; запрос PR из проверенного run — как управление run (developer+); запрос merge —
     # developer+, само решение — approval MERGE (admin, four-eyes, §5.3).

@@ -9,6 +9,7 @@ import { auditArea } from './audit';
 import { chatArea } from './chat';
 import { complianceArea } from './compliance';
 import { dashboardArea } from './dashboard';
+import { designSystemArea } from './designSystem';
 import { integrationsArea } from './integrations';
 import { knowledgeArea } from './knowledge';
 import { projectsArea } from './projects';
@@ -36,6 +37,7 @@ export const AREAS: readonly AreaModule[] = [
   settingsArea,
   auditArea,
   workspacesArea,
+  designSystemArea,
 ];
 
 export const NAV_GROUPS: readonly NavGroup[] = ['work', 'quality', 'admin'];

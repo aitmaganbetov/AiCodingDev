@@ -35,7 +35,7 @@ export function DialogContent({ title, description, children, footer, size = 'md
   const opener = useRef<Element | null>(null);
   return (
     <RadixDialog.Portal>
-      <RadixDialog.Overlay className="fixed inset-0 z-overlay bg-overlay/50 animate-fade-in" />
+      <RadixDialog.Overlay className="fixed inset-0 z-overlay bg-overlay/60 animate-fade-in" />
       <RadixDialog.Content
         {...(description ? {} : { 'aria-describedby': undefined })}
         onOpenAutoFocus={() => {
@@ -54,10 +54,10 @@ export function DialogContent({ title, description, children, footer, size = 'md
           }
         }}
         className={cx(
-          'fixed z-modal flex flex-col border border-border bg-surface-raised text-fg shadow-elevated focus:outline-none',
+          'fixed z-modal flex flex-col border border-border bg-surface-raised text-fg shadow-e3 animate-fade-in focus:outline-none',
           variant === 'center'
-            ? cx('left-1/2 top-1/2 max-h-[85vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg', SIZE[size])
-            : 'inset-y-0 left-0 w-[min(20rem,85vw)] rounded-r-lg',
+            ? cx('left-1/2 top-1/2 max-h-[85vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl', SIZE[size])
+            : 'inset-y-0 left-0 w-[min(20rem,85vw)] rounded-r-xl',
           className,
         )}
       >

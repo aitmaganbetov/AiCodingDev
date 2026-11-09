@@ -25,10 +25,6 @@ class WorkerSettings(Settings):
     verification_staging_root: Path = Path("/var/lib/aicd/verification")
     docker_url: str = "unix:///var/run/docker.sock"
 
-    # Файл статуса утилиты бэкапа (`python -m scripts.backup … --status-file`, P9-05), смонтированный только для
-    # чтения в worker-outbox: метрики aicd_backup_* и алерты AicdBackup* (ТЗ §16 «failed backups»).
-    backup_status_file: Path | None = None
-
     outbox_batch_size: int = Field(default=100, ge=1, le=1000)
     outbox_poll_seconds: float = Field(default=0.5, gt=0, le=10)
     tick_interval_seconds: float = Field(default=5.0, gt=0, le=300)

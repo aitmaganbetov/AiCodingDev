@@ -87,11 +87,12 @@ test('theme: user menu switches light/dark (data-theme) and the choice persists'
   api.addWorkspace('Команда', 'team', 'owner');
   await login(page, api);
   const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  await expect.poll(bg).toBe('rgb(248, 250, 252)');
+  // Фикстура начинает с «Как в системе»; Playwright по умолчанию эмулирует светлую схему.
+  await expect.poll(bg).toBe('rgb(246, 248, 252)');
   await page.getByRole('button', { name: /Меню пользователя/ }).click();
   await page.getByRole('menuitemradio', { name: 'Тёмная' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await expect.poll(bg).toBe('rgb(2, 6, 23)');
+  await expect.poll(bg).toBe('rgb(8, 11, 20)');
   await expectNoSeriousA11yViolations(page, 'projects (forced dark)');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

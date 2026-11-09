@@ -28,6 +28,9 @@ tags:
 - {name: audit}
 - {name: analytics}
 - {name: github}
+- {name: system}
+- {name: agents}
+- {name: search}
 paths:
   /auth/login:
     post:
@@ -869,6 +872,197 @@ paths:
       x-required-permission: project:read
       x-audit-action: none
       x-tz-addition: true
+  /projects/{project_id}/repositories/{repository_id}/symbols:
+    get:
+      operationId: listRepositorySymbols
+      summary: Поиск символов по снимку индекса кода (Code Intelligence, B3) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Символы READY-снимка индекса (`code_symbols`, tree-sitter) по запросу `q`. Ранжирование (лучшая оценка на
+        символ): точное имя 1.0 > имя без учёта регистра 0.95 > префикс имени 0.8 > подстрока имени или qualified name 0.6
+        > сходство pg_trgm имени (×0.5) > полнотекстовый поиск по фрагментам символа (≤ 0.45, `match: text`). Порядок
+        детерминирован (score, имя, путь, строка). Снимок: без `commit` — последний READY-снимок репозитория (нет снимка —
+        `snapshot: null`, `items: []`), с `commit` — снимок commit с этим hex-префиксом (нет — 404, неоднозначный префикс
+        — 422). Курсор привязан к снимку и фильтрам; глубина выдачи — не более 1000 результатов. `signature` — текст из
+        кода (секреты редактируются), отображается только как текст.'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      - name: q
+        in: query
+        required: true
+        description: Запрос (имя символа, его часть или слова для FTS). Управляющие символы недопустимы (422).
+        schema: {type: string, minLength: 1, maxLength: 200}
+      - name: kind
+        in: query
+        description: Вид символа.
+        schema: {$ref: '#/components/schemas/CodeSymbolKind'}
+      - name: path
+        in: query
+        description: Файл или каталог (относительный путь снимка); ограничения — как у listRepositoryTree (422).
+        schema: {type: string, maxLength: 4096}
+      - {$ref: '#/components/parameters/IndexCommit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CodeSymbolPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/repositories/{repository_id}/dependencies:
+    get:
+      operationId: getRepositoryDependencies
+      summary: Граф зависимостей файлов по снимку индекса (Code Intelligence, B3) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Подграф `code_dependencies` (рёбра imports/tests между файлами; неразрешённые импорты — узлы `external`)
+        вокруг корня: `path` (файл или каталог снимка, до 50 файлов-корней) или `symbol` (id символа — его файл); ровно
+        один из двух (иначе 422). Обход в ширину на `depth` (1–3) в направлении `out` (зависимости корня), `in` (зависящие
+        от корня) или `both`. Жёсткие пределы — 200 узлов и 500 рёбер; при их достижении (или > 50 корней) `truncated:
+        true` — граф неполон. Корень отсутствует в снимке — 404. Снимок выбирается как у listRepositorySymbols (нет
+        READY-снимка — `snapshot: null` и пустой граф).'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      - name: path
+        in: query
+        description: Файл или каталог снимка (ограничения — как у listRepositoryTree).
+        schema: {type: string, minLength: 1, maxLength: 4096}
+      - name: symbol
+        in: query
+        description: Id символа снимка (из listRepositorySymbols).
+        schema: {type: string, format: uuid}
+      - name: depth
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 3, default: 1}
+      - name: direction
+        in: query
+        schema: {type: string, enum: [out, in, both], default: both}
+      - {$ref: '#/components/parameters/IndexCommit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DependencyGraph'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/repositories/{repository_id}/indexing-jobs:
+    get:
+      operationId: listIndexingJobs
+      summary: Задания индексации репозитория (очередь и история, B3) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Строки `indexing_jobs` репозитория, новые первыми: commit, вид (full/incremental), статус, число попыток,
+        базовый и построенный снимок (с числом файлов/символов), время постановки/старта/завершения, ожидание в очереди и
+        длительность (секунды, только если известны оба момента), безопасный текст ошибки (секреты и пути хоста
+        удаляются).'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      - name: status
+        in: query
+        schema: {$ref: '#/components/schemas/IndexingJobStatus'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IndexingJobPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/worktrees:
+    get:
+      operationId: listProjectWorktrees
+      summary: Worktrees репозиториев проекта (только чтение, B4) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Изолированные git worktree задач (`worktrees`): ветка, base/head commit, связь с run/задачей, статус, время
+        создания/изменения/удаления. Пути на хосте (`path_ref`) и worker host не отдаются. Новые первыми; фильтры —
+        репозиторий, run, статусы.'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - name: repository_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: run_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: status
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/WorktreeStatus'}
+          maxItems: 4
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorktreePage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
   /projects/{project_id}/technologies:
     get:
       operationId: listTechnologies
@@ -1416,6 +1610,54 @@ paths:
       - cookieAuth: []
       x-required-permission: run:read
       x-audit-action: none
+  /activity:
+    get:
+      operationId: listActivity
+      summary: Лента событий workspace [дополнение к ТЗ]
+      tags: [runs]
+      description: 'События run_event_log всех run workspace (UI redesign B1, G-04 «AI Activity Timeline») — новые сверху: keyset
+        по (created_at, id события) desc (created_at — время проекции события в журнал; occurred_at — время доменного события).
+        Те же payload, что у getRunActivity/SSE. События, удалённые retention, не возвращаются. `run_id`/`project_id` чужого
+        workspace дают пустую выборку.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: event_type
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/ActivityEventType'}
+          maxItems: 20
+        description: Повторяемый параметр
+      - name: run_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: project_id
+        in: query
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkspaceActivityPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+      x-tz-addition: true
   /runs/{run_id}/chat:
     get:
       operationId: getRunChat
@@ -1704,6 +1946,68 @@ paths:
       x-required-permission: directive:confirm
       x-audit-action: directive.cancel
       x-tz-addition: true
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: Задачи workspace [дополнение к ТЗ]
+      tags: [tasks]
+      description: 'Актуальные задачи плана всех run workspace (UI redesign B1, G-01 «Running AI Agents») с последней попыткой
+        (роль × провайдер × run × задача, время начала, статус). Порядок — created_at desc, id desc (keyset). «Активные исполнения»
+        — `status=LEASED&status=RUNNING`. Фильтр `provider` — по провайдеру последней попытки. `run_id`/`project_id` чужого
+        workspace дают пустую выборку.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: status
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/TaskStatus'}
+          maxItems: 20
+        description: Повторяемый параметр
+      - name: agent_role
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/AgentRole'}
+          maxItems: 20
+        description: Повторяемый параметр
+      - name: provider
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/CliProvider'}
+          maxItems: 20
+        description: Повторяемый параметр; провайдер последней попытки
+      - name: run_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: project_id
+        in: query
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkspaceTaskPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+      x-tz-addition: true
   /tasks/{task_id}:
     get:
       operationId: getTask
@@ -1748,6 +2052,41 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TaskAttemptPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+      x-tz-addition: true
+  /tasks/{task_id}/attempts/{attempt_id}/context-pack:
+    get:
+      operationId: getAttemptContextPack
+      summary: Manifest Context Pack попытки задачи (B3) [дополнение к ТЗ]
+      tags: [tasks]
+      description: 'Состав контекста, переданного агенту в попытке (`context_packs`): снимок индекса и commit, политика,
+        бюджет, размер, хэш содержимого и manifest — фрагменты (раздел, источник, путь, строки, commit, sha256, байты,
+        признак stale) и пропущенные фрагменты с причиной (stale_commit, fragment_too_large, max_files, max_bytes). Текст
+        фрагментов не отдаётся (он — в artifact `context_pack`, `artifact_id`, скачивание по правилам
+        downloadArtifact). Предупреждения сборки — только коды. Попытка не этой задачи или pack не собирался — 404.'
+      parameters:
+      - {$ref: '#/components/parameters/TaskId'}
+      - {$ref: '#/components/parameters/AttemptId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AttemptContextPack'}
           headers:
             RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
             RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
@@ -2094,6 +2433,69 @@ paths:
       x-required-permission: quality:read
       x-audit-action: none
       x-tz-addition: true
+  /findings:
+    get:
+      operationId: listFindings
+      summary: Находки workspace [дополнение к ТЗ]
+      tags: [quality]
+      description: 'Находки всех run workspace (UI redesign B1, G-02: Security Center, плитка Security Findings) с фильтрами.
+        Порядок и курсор — как у listRunFindings (severity desc, затем created_at, id). Свободный текст редактируется (секреты).
+        `run_id`/`project_id` чужого workspace дают пустую выборку.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: severity
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/FindingSeverity'}
+          maxItems: 20
+        description: Повторяемый параметр
+      - name: status
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/FindingStatus'}
+          maxItems: 20
+        description: Повторяемый параметр
+      - name: source
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+            enum: [gate, agent_review, manual, github]
+          maxItems: 20
+        description: Повторяемый параметр (Finding.source)
+      - name: project_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: run_id
+        in: query
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FindingPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: quality:read
+      x-audit-action: none
+      x-tz-addition: true
   /findings/{finding_id}:
     get:
       operationId: getFinding
@@ -2242,6 +2644,130 @@ paths:
       - cookieAuth: []
       x-required-permission: provider:read
       x-audit-action: none
+  /agent-profiles:
+    get:
+      operationId: listAgentProfiles
+      summary: Профили ролей агентов [дополнение к ТЗ]
+      tags: [agents]
+      description: 'Профили 12 ролей (UI redesign B7, G-13; AGENT_ROLES §1.2, §2, §5), только чтение: права исполнения, классы
+        инструментов, отправляемые типы ACP, уровни по умолчанию, требование независимой проверки, версия и sha256 шаблона
+        инструкций (текст шаблона не отдаётся), строка справочника agent_profiles (null — не синхронизирован) и провайдеры,
+        которым роль разрешена настройками workspace (выбор провайдера адаптивный — ROUTING_POLICY §4). Не пагинируется (12 ролей).'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentProfileList'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: run:read
+      x-audit-action: none
+      x-tz-addition: true
+  /system/health:
+    get:
+      operationId: getSystemHealth
+      summary: Состояние платформы (admin) [дополнение к ТЗ]
+      tags: [system]
+      description: 'Компоненты платформы (UI redesign B2, G-05): api, database (ревизия схемы), redis, object_storage, outbox (backlog
+        и возраст старейшего неопубликованного события), workers (worker_hosts), queues (глубина очередей Dramatiq и dead letters),
+        backup (файл статуса бэкапа, если смонтирован в api, и pg_stat_archiver). Каждый компонент — ok/degraded/down/unknown
+        с измеренными значениями и временем проверки; не измеренное — unknown с причиной (значения не выдумываются). Ответ
+        кэшируется на сервере на cache_ttl_seconds (checked_at — время фактической проверки). Право — owner/admin workspace
+        из X-Workspace-Id; отдельный лимит 30/мин на пользователя.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SystemHealth'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: system:health
+      x-audit-action: none
+      x-tz-addition: true
+  /providers/{provider_id}/executions:
+    get:
+      operationId: listProviderExecutions
+      summary: История исполнений CLI провайдера [дополнение к ТЗ]
+      tags: [providers]
+      description: 'Исполнения CLI (cli_executions) провайдера в workspace (UI redesign B1, G-03): статус, код выхода, длительность,
+        категория ошибки, ссылки на задачу/попытку/run. Без вывода CLI (только id санитизированного артефакта cli_output),
+        команд, путей хоста и учётных данных. Порядок — created_at desc, id desc (keyset). Неизвестный провайдер ⇒ 404.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      - name: status
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/ExecutionStatus'}
+          maxItems: 20
+        description: Повторяемый параметр
+      - name: run_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: task_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: created_after
+        in: query
+        schema: {type: string, format: date-time}
+        description: Включительная нижняя граница created_at
+      - name: created_before
+        in: query
+        schema: {type: string, format: date-time}
+        description: Исключающая верхняя граница created_at
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProviderExecutionPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: provider:read
+      x-audit-action: none
+      x-tz-addition: true
   /providers/{provider_id}/probe:
     post:
       operationId: probeProvider
@@ -2607,6 +3133,59 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: documentation:refresh
       x-audit-action: documentation_source.refresh_requested
+  /search:
+    get:
+      operationId: searchWorkspace
+      summary: Глобальный поиск по workspace (B6) [дополнение к ТЗ]
+      tags: [search]
+      description: 'Поиск по сущностям workspace, которые пользователь вправе читать: проекты (name, description; project:read),
+        runs (objective; run:read), задачи (title; run:read), находки (title, rule_id, cwe_id; quality:read),
+        approvals (action_type, decision_reason; approval:read), источники документации (URI; documentation:read), сообщения
+        чата (FTS по тексту; chat:read). Типы без права пропускаются (`skipped_types`). UUID в запросе — точное совпадение
+        id. Ранжирование: точное совпадение 1.0 > префикс > подстрока (+ сходство pg_trgm); сортировка — score, тип, новизна.
+        Запрос не короче 2 символов без пробелов по краям (422). Отдельный rate limit на пользователя (по умолчанию 60/мин,
+        429). `snippet` — окно текста вокруг совпадения (секреты редактируются), только текст. `api_path` и id контекста —
+        подсказки маршрута.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: q
+        in: query
+        required: true
+        schema: {type: string, minLength: 2, maxLength: 200}
+      - name: types
+        in: query
+        style: form
+        explode: true
+        description: Типы результатов (по умолчанию — все доступные).
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/SearchResultType'}
+          maxItems: 7
+      - name: limit
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SearchResults'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: project:read
+      x-audit-action: none
+      x-tz-addition: true
   /audit-events:
     get:
       operationId: listAuditEvents
@@ -3093,6 +3672,17 @@ components:
       description: 'Commit: hex SHA (7–64 символа, сокращённый допускается) или имя ветки (только refs/heads/). Без параметра —
         HEAD ветки по умолчанию, иначе последний READY-снимок индекса. Неверный формат — 422, отсутствующий commit — 404.'
       schema: {type: string, minLength: 1, maxLength: 255}
+    IndexCommit:
+      name: commit
+      in: query
+      description: 'Проиндексированный commit: hex-префикс SHA (7–64 символа). Без параметра — последний READY-снимок индекса
+        репозитория. Нет READY-снимка этого commit — 404, префикс совпадает с несколькими commit — 422.'
+      schema: {type: string, minLength: 7, maxLength: 64, pattern: '^[0-9a-f]{7,64}$'}
+    AttemptId:
+      name: attempt_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
     ProjectId:
       name: project_id
       in: path
@@ -4168,6 +4758,201 @@ components:
           description: Opaque base64url cursor; null — конец выборки.
       required: [items, next_cursor]
       description: Страница Repository (cursor pagination).
+    IndexSnapshotRef:
+      type: object
+      description: READY-снимок индекса кода, к которому относится ответ.
+      properties:
+        id: {type: string, format: uuid}
+        commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        status: {type: string}
+        index_version: {type: integer, minimum: 1}
+        file_count:
+          type: [integer, 'null']
+          minimum: 0
+        symbol_count:
+          type: [integer, 'null']
+          minimum: 0
+        completed_at:
+          type: [string, 'null']
+          format: date-time
+      required: [id, commit_sha, status, index_version, file_count, symbol_count, completed_at]
+    CodeSymbolKind:
+      type: string
+      enum: [module, class, interface, function, method, variable, constant, type, enum, test, route, other]
+    CodeSymbol:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        qualified_name:
+          type: [string, 'null']
+        kind: {$ref: '#/components/schemas/CodeSymbolKind'}
+        path: {type: string, description: Путь файла от корня репозитория}
+        start_line: {type: integer, minimum: 1}
+        end_line: {type: integer, minimum: 1}
+        signature:
+          type: [string, 'null']
+          description: Сигнатура из кода (секреты редактируются); только текст
+        score: {type: number, minimum: 0, maximum: 1}
+        match: {type: string, enum: [name, text], description: 'name — по имени символа, text — FTS по фрагменту'}
+      required: [id, name, qualified_name, kind, path, start_line, end_line, signature, score, match]
+    CodeSymbolPage:
+      type: object
+      properties:
+        repository_id: {type: string, format: uuid}
+        snapshot:
+          oneOf:
+          - {$ref: '#/components/schemas/IndexSnapshotRef'}
+          - {type: 'null'}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/CodeSymbol'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor (привязан к снимку); null — конец выборки.
+      required: [repository_id, snapshot, items, next_cursor]
+    DependencyNode:
+      type: object
+      properties:
+        id: {type: string, description: 'Путь файла (kind=file) или external:<ссылка>'}
+        kind: {type: string, enum: [file, external]}
+        path:
+          type: [string, 'null']
+        ref:
+          type: [string, 'null']
+          description: Сырая ссылка импорта (внешний пакет/неразрешённый модуль) для kind=external
+        language:
+          type: [string, 'null']
+        is_test: {type: boolean}
+        depth: {type: integer, minimum: 0, maximum: 3, description: Расстояние от корня (0 — корень)}
+      required: [id, kind, path, ref, language, is_test, depth]
+    DependencyEdge:
+      type: object
+      properties:
+        source: {type: string, description: id узла-источника}
+        target: {type: string, description: id узла-цели}
+        edge_type: {type: string, enum: [imports, calls, inherits, implements, references, tests]}
+      required: [source, target, edge_type]
+    DependencyGraph:
+      type: object
+      properties:
+        repository_id: {type: string, format: uuid}
+        snapshot:
+          oneOf:
+          - {$ref: '#/components/schemas/IndexSnapshotRef'}
+          - {type: 'null'}
+        depth: {type: integer, minimum: 1, maximum: 3}
+        direction: {type: string, enum: [out, in, both]}
+        roots:
+          type: array
+          items: {type: string}
+        nodes:
+          type: array
+          items: {$ref: '#/components/schemas/DependencyNode'}
+          maxItems: 200
+        edges:
+          type: array
+          items: {$ref: '#/components/schemas/DependencyEdge'}
+          maxItems: 500
+        truncated: {type: boolean, description: Достигнут предел узлов/рёбер/корней — граф неполон}
+        limits:
+          type: object
+          properties:
+            max_nodes: {type: integer}
+            max_edges: {type: integer}
+          required: [max_nodes, max_edges]
+      required: [repository_id, snapshot, depth, direction, roots, nodes, edges, truncated, limits]
+    IndexingJobStatus:
+      type: string
+      enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED]
+    IndexingJob:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        repository_id: {type: string, format: uuid}
+        commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        kind: {type: string, enum: [full, incremental]}
+        status: {$ref: '#/components/schemas/IndexingJobStatus'}
+        attempt_count: {type: integer, minimum: 0}
+        base_snapshot_id:
+          type: [string, 'null']
+          format: uuid
+        snapshot_id:
+          type: [string, 'null']
+          format: uuid
+        file_count:
+          type: [integer, 'null']
+          minimum: 0
+        symbol_count:
+          type: [integer, 'null']
+          minimum: 0
+        created_at: {type: string, format: date-time}
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+        queue_seconds:
+          type: [number, 'null']
+          minimum: 0
+          description: От постановки до старта (null — ещё не стартовало)
+        duration_seconds:
+          type: [number, 'null']
+          minimum: 0
+          description: От старта до завершения (null — не завершено)
+        error:
+          type: [string, 'null']
+          maxLength: 1000
+          description: Безопасный текст ошибки (секреты и пути хоста удалены)
+      required: [id, repository_id, commit_sha, kind, status, attempt_count, base_snapshot_id, snapshot_id, file_count,
+        symbol_count, created_at, started_at, finished_at, queue_seconds, duration_seconds, error]
+    IndexingJobPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/IndexingJob'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+    WorktreeStatus:
+      type: string
+      enum: [ACTIVE, LOCKED, REMOVED, ORPHANED]
+    Worktree:
+      type: object
+      description: Git worktree задачи. Пути хоста не отдаются.
+      properties:
+        id: {type: string, format: uuid}
+        repository_id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        branch_name: {type: string}
+        base_commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        head_commit_sha:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'
+        status: {$ref: '#/components/schemas/WorktreeStatus'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        removed_at:
+          type: [string, 'null']
+          format: date-time
+      required: [id, repository_id, run_id, task_id, branch_name, base_commit_sha, head_commit_sha, status, created_at,
+        updated_at, removed_at]
+    WorktreePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Worktree'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
     RepositoryAttachRequest:
       type: object
       properties:
@@ -4478,6 +5263,109 @@ components:
           description: Opaque base64url cursor; null — конец выборки.
       required: [items, next_cursor]
       description: Страница TaskAttempt (cursor pagination).
+    ContextPackSection:
+      type: string
+      enum: [code, symbols_graph, tests, repo_map, docs]
+    ContextPackSourceKind:
+      type: string
+      enum: [map, exact, dependency, task_relevance, recency, docs]
+    ContextPackFragment:
+      type: object
+      description: Фрагмент, вошедший в Context Pack (без текста).
+      properties:
+        section: {$ref: '#/components/schemas/ContextPackSection'}
+        kind: {$ref: '#/components/schemas/ContextPackSourceKind'}
+        path: {type: string, description: 'Путь снимка; doc:<раздел> для документации, <repo_map> для карты'}
+        lines:
+          type: [array, 'null']
+          items: {type: integer, minimum: 1}
+          minItems: 2
+          maxItems: 2
+        commit:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'
+        sha256:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+        bytes:
+          type: [integer, 'null']
+          minimum: 0
+        stale: {type: boolean, description: Фрагмент из commit, отличного от base_commit задачи}
+        source_ref:
+          type: [string, 'null']
+      required: [section, kind, path, lines, commit, sha256, bytes, stale, source_ref]
+    ContextPackOmission:
+      type: object
+      description: Фрагмент, не вошедший в Context Pack, и причина.
+      properties:
+        section: {$ref: '#/components/schemas/ContextPackSection'}
+        kind: {$ref: '#/components/schemas/ContextPackSourceKind'}
+        path: {type: string}
+        commit:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'
+        reason: {type: string, description: 'stale_commit | fragment_too_large | max_files | max_bytes'}
+      required: [section, kind, path, commit, reason]
+    AttemptContextPack:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        task_id: {type: string, format: uuid}
+        attempt_id: {type: string, format: uuid}
+        snapshot_id: {type: string, format: uuid}
+        base_commit: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$', description: Commit задачи}
+        snapshot_commit:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'
+          description: Commit снимка индекса (≠ base_commit — фрагменты устаревшие)
+        policy_version: {type: integer, minimum: 1}
+        documentation_mode: {$ref: '#/components/schemas/DocumentationMode'}
+        token_budget: {type: integer, minimum: 1}
+        size_bytes: {type: integer, minimum: 0}
+        content_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        artifact_id: {type: string, format: uuid, description: Artifact context_pack (текст фрагментов)}
+        created_at: {type: string, format: date-time}
+        schema:
+          type: [integer, 'null']
+        stale_policy:
+          type: [string, 'null']
+          enum: [exclude, mark, null]
+        role:
+          type: [string, 'null']
+        docs:
+          type: [string, 'null']
+          enum: [allowed, 'off', null]
+        budget:
+          oneOf:
+          - type: object
+            properties:
+              max_bytes:
+                type: [integer, 'null']
+              max_files:
+                type: [integer, 'null']
+              max_fragment_bytes:
+                type: [integer, 'null']
+            required: [max_bytes, max_files, max_fragment_bytes]
+          - {type: 'null'}
+        cache_hit:
+          type: [boolean, 'null']
+        fragments:
+          type: array
+          items: {$ref: '#/components/schemas/ContextPackFragment'}
+          maxItems: 2000
+        omitted:
+          type: array
+          items: {$ref: '#/components/schemas/ContextPackOmission'}
+          maxItems: 2000
+        warnings:
+          type: array
+          items: {type: string, pattern: '^[a-z0-9_]{1,64}$'}
+          description: Коды предупреждений сборки (без текста)
+        fragments_total: {type: integer, minimum: 0}
+        omitted_total: {type: integer, minimum: 0}
+      required: [id, task_id, attempt_id, snapshot_id, base_commit, snapshot_commit, policy_version, documentation_mode,
+        token_budget, size_bytes, content_hash, artifact_id, created_at, schema, stale_policy, role, docs, budget, cache_hit,
+        fragments, omitted, warnings, fragments_total, omitted_total]
     AcpMessage:
       type: object
       properties:
@@ -5315,6 +6203,283 @@ components:
           items: {$ref: '#/components/schemas/ProviderInstallation'}
         workspace_settings: {$ref: '#/components/schemas/ProviderSettings'}
       required: [provider_id, code, display_name, enabled_globally, installations, workspace_settings]
+    TaskAttemptRef:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        attempt_no: {type: integer, minimum: 1}
+        status:
+          type: string
+          enum: [RUNNING, SUCCEEDED, FAILED, CANCELLED]
+        provider:
+          oneOf:
+          - {$ref: '#/components/schemas/CliProvider'}
+          - {type: 'null'}
+        started_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+      required: [id, attempt_no, status, provider, started_at, finished_at]
+      description: Последняя попытка задачи (task_attempts); provider null — попытка без CLI (детерминированный L1-инструмент).
+    WorkspaceTask:
+      allOf:
+      - {$ref: '#/components/schemas/TaskSummary'}
+      - type: object
+        properties:
+          project_id: {type: string, format: uuid}
+          run_status: {$ref: '#/components/schemas/RunStatus'}
+          created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+          current_attempt:
+            oneOf:
+            - {$ref: '#/components/schemas/TaskAttemptRef'}
+            - {type: 'null'}
+        required: [project_id, run_status, created_at, current_attempt]
+    WorkspaceTaskPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/WorkspaceTask'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница WorkspaceTask (cursor pagination), created_at desc.
+    ProviderExecution:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        provider: {$ref: '#/components/schemas/CliProvider'}
+        installation_id: {type: string, format: uuid}
+        task_attempt_id: {type: string, format: uuid}
+        attempt_no: {type: integer, minimum: 1}
+        task_id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        agent_role: {$ref: '#/components/schemas/AgentRole'}
+        status: {$ref: '#/components/schemas/ExecutionStatus'}
+        exit_code:
+          type: [integer, 'null']
+        failure_category:
+          oneOf:
+          - {$ref: '#/components/schemas/CliErrorCode'}
+          - {type: 'null'}
+        timeout_seconds: {type: integer}
+        output_artifact_id:
+          type: [string, 'null']
+          format: uuid
+          description: Санитизированный вывод (artifact cli_output, downloadArtifact); сырой лог не отдаётся
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+        duration_ms:
+          type: [integer, 'null']
+          minimum: 0
+          description: От started_at до выхода процесса (exited_at, иначе finished_at); null — не запускался или не завершён
+        links: {$ref: '#/components/schemas/Links'}
+      required: [id, provider, installation_id, task_attempt_id, attempt_no, task_id, run_id, agent_role, status, exit_code,
+        failure_category, timeout_seconds, output_artifact_id, created_at, started_at, finished_at, duration_ms]
+    ProviderExecutionPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ProviderExecution'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница ProviderExecution (cursor pagination), created_at desc.
+    ActivityEventType:
+      type: string
+      enum: [run.state_changed, task.state_changed, agent.message, cli.output, directive.impact_ready, directive.state_changed,
+        approval.requested, approval.decided, gate.completed, run.completed, chat.message]
+      description: Типы событий, сохраняемые в run_event_log (SseEventType без heartbeat).
+    WorkspaceActivityPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ActivityEvent'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+      description: Страница ActivityEvent workspace (cursor pagination), новые сверху (created_at desc).
+    SystemHealthStatus:
+      type: string
+      enum: [ok, degraded, down, unknown]
+      description: unknown — не измерено (причина — detail); не трактуется как ok.
+    SystemHealthComponent:
+      type: object
+      properties:
+        name:
+          type: string
+          enum: [api, database, redis, object_storage, outbox, workers, queues, backup]
+        status: {$ref: '#/components/schemas/SystemHealthStatus'}
+        checked_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        latency_ms:
+          type: [number, 'null']
+          minimum: 0
+        measurements:
+          type: object
+          additionalProperties:
+            type: [number, string, boolean, 'null']
+          description: Измеренные значения компонента (имена — snake_case); только фактически измеренное
+        detail:
+          type: [string, 'null']
+          maxLength: 1000
+          description: Причина статуса без технических деталей зависимостей (хостов, учётных данных, текста ошибок)
+      required: [name, status, checked_at, latency_ms, measurements, detail]
+    WorkerHostHealth:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        hostname: {type: string}
+        kind:
+          type: string
+          enum: [api, orchestrator, outbox, exec, verify, index]
+        status:
+          type: string
+          enum: [ONLINE, DRAINING, OFFLINE]
+        last_heartbeat_at: {type: string, format: date-time, description: Обновляется при регистрации процесса воркера}
+        heartbeat_age_seconds: {type: number, minimum: 0}
+      required: [id, hostname, kind, status, last_heartbeat_at, heartbeat_age_seconds]
+    QueueHealth:
+      type: object
+      properties:
+        queue: {type: string}
+        ready: {type: integer, minimum: 0}
+        delayed: {type: integer, minimum: 0}
+        dead_letters: {type: integer, minimum: 0}
+      required: [queue, ready, delayed, dead_letters]
+    BackupComponentHealth:
+      type: object
+      properties:
+        component:
+          type: string
+          enum: [postgres_base, postgres_wal, postgres_dump, artifacts, secrets]
+        last_status:
+          type: string
+          enum: [success, failure, unknown]
+        last_success_at:
+          type: [string, 'null']
+          format: date-time
+        stale: {type: boolean, description: Нет успешного бэкапа дольше порога (как алерты AicdBackup*)}
+      required: [component, last_status, last_success_at, stale]
+    SystemHealth:
+      type: object
+      properties:
+        status:
+          allOf:
+          - {$ref: '#/components/schemas/SystemHealthStatus'}
+          description: down — отказ database или object_storage; degraded — любая деградация/отказ прочих; unknown компонентов
+            итог не меняет
+        checked_at: {type: string, format: date-time, description: Время фактической проверки (ответ может быть из кэша)}
+        cache_ttl_seconds: {type: integer, minimum: 0}
+        components:
+          type: array
+          items: {$ref: '#/components/schemas/SystemHealthComponent'}
+        worker_hosts:
+          type: [array, 'null']
+          items: {$ref: '#/components/schemas/WorkerHostHealth'}
+          description: null — не прочитано
+        queues:
+          type: [array, 'null']
+          items: {$ref: '#/components/schemas/QueueHealth'}
+          description: null — не измерено (Redis недоступен)
+        backups:
+          type: [array, 'null']
+          items: {$ref: '#/components/schemas/BackupComponentHealth'}
+          description: null — файл статуса бэкапа не смонтирован в api или не прочитан
+      required: [status, checked_at, cache_ttl_seconds, components, worker_hosts, queues, backups]
+    AgentPermissions:
+      type: object
+      properties:
+        write_scope:
+          type: string
+          enum: [none, worktree]
+        network:
+          type: string
+          enum: [none, restricted, unrestricted]
+        path_policy:
+          type: array
+          items: {type: string}
+          description: Allowlist glob внутри worktree
+        path_deny:
+          type: array
+          items: {type: string}
+        task_paths_allowed: {type: boolean, description: Дополнительно разрешены файлы, явно перечисленные в задаче}
+        comments_only_paths:
+          type: array
+          items: {type: string}
+      required: [write_scope, network, path_policy, path_deny, task_paths_allowed, comments_only_paths]
+    AgentProfile:
+      type: object
+      properties:
+        role: {$ref: '#/components/schemas/AgentRole'}
+        template_version: {type: string, pattern: '^\d+\.\d+\.\d+$'}
+        template_ref: {type: string, description: '<role>@<version> (ExecutionRequest.input.instruction_template_version)'}
+        template_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        permissions: {$ref: '#/components/schemas/AgentPermissions'}
+        prototype_permissions:
+          oneOf:
+          - {$ref: '#/components/schemas/AgentPermissions'}
+          - {type: 'null'}
+          description: Права прототипа L5 (architect), иначе null
+        allowed_tools:
+          type: array
+          items: {type: string}
+        required_capabilities:
+          type: array
+          items: {type: string}
+        acp_send:
+          type: array
+          items: {$ref: '#/components/schemas/AcpMessageType'}
+          description: Типы ACP, которые роль вправе отправлять (окончательная проверка — брокер)
+        complexity_band:
+          type: object
+          properties:
+            min: {$ref: '#/components/schemas/ComplexityLevel'}
+            max: {$ref: '#/components/schemas/ComplexityLevel'}
+          required: [min, max]
+          description: Уровни, на которых роль включается в конвейер по умолчанию
+        independent_check_from:
+          oneOf:
+          - {$ref: '#/components/schemas/ComplexityLevel'}
+          - {type: 'null'}
+          description: С какого уровня результат роли требует проверки другим провайдером; null — не требуется
+        must_differ_from_author: {type: boolean}
+        can_send_fix_request: {type: boolean}
+        eligible_providers:
+          type: array
+          items: {$ref: '#/components/schemas/CliProvider'}
+          description: Провайдеры, включённые глобально и в workspace, с ролью в allowed_roles; выбор среди них адаптивный
+        catalog:
+          oneOf:
+          - type: object
+            properties:
+              template_version: {type: string}
+              enabled: {type: boolean}
+              updated_at: {type: string, format: date-time}
+            required: [template_version, enabled, updated_at]
+          - {type: 'null'}
+          description: Строка справочника agent_profiles; null — справочник не синхронизирован
+      required: [role, template_version, template_ref, template_sha256, permissions, prototype_permissions, allowed_tools,
+        required_capabilities, acp_send, complexity_band, independent_check_from, must_differ_from_author, can_send_fix_request,
+        eligible_providers, catalog]
+    AgentProfileList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/AgentProfile'}
+          maxItems: 12
+      required: [items]
+      description: 'Не пагинируется: 12 ролей.'
     ProviderList:
       type: object
       properties:
@@ -5527,6 +6692,49 @@ components:
           description: Opaque base64url cursor; null — конец выборки.
       required: [items, next_cursor]
       description: Страница AuditEvent (cursor pagination).
+    SearchResultType:
+      type: string
+      enum: [project, run, task, finding, approval, documentation_source, chat_message]
+    SearchResult:
+      type: object
+      properties:
+        type: {$ref: '#/components/schemas/SearchResultType'}
+        id: {type: string, format: uuid}
+        title: {type: string, maxLength: 201}
+        snippet:
+          type: [string, 'null']
+          description: Окно текста вокруг совпадения (секреты редактируются); только текст
+        score: {type: number, minimum: 0, maximum: 1}
+        created_at: {type: string, format: date-time}
+        project_id:
+          type: [string, 'null']
+          format: uuid
+        run_id:
+          type: [string, 'null']
+          format: uuid
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        api_path: {type: string, description: Путь API ресурса (подсказка маршрута)}
+      required: [type, id, title, snippet, score, created_at, project_id, run_id, task_id, api_path]
+    SearchResults:
+      type: object
+      properties:
+        query: {type: string}
+        types:
+          type: array
+          items: {$ref: '#/components/schemas/SearchResultType'}
+          description: Типы, по которым выполнен поиск
+        skipped_types:
+          type: array
+          items: {$ref: '#/components/schemas/SearchResultType'}
+          description: Запрошенные типы, пропущенные из-за отсутствия права
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/SearchResult'}
+          maxItems: 50
+        truncated: {type: boolean, description: Совпадений больше, чем limit}
+      required: [query, types, skipped_types, items, truncated]
     HealthStatus:
       type: object
       properties:

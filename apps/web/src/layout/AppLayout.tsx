@@ -4,6 +4,7 @@ import { Link, Outlet, useNavigate } from 'react-router';
 import { IconButton } from '../components/ui/Button';
 import { Dialog, DialogContent, DialogTrigger } from '../components/ui/Dialog';
 import { Icon } from '../components/ui/Icon';
+import { LogoMark } from '../components/ui/Logo';
 import { can } from '../lib/permissions';
 import { useGlobalShortcuts, useShortcutsEnabled } from '../lib/shortcuts';
 import { navEntries } from '../routes';
@@ -49,8 +50,9 @@ export function AppLayout() {
       >
         {t('layout.skipToContent')}
       </a>
-      <aside className="sticky top-0 hidden h-screen flex-col overflow-y-auto border-r border-border bg-surface md:flex">
-        <Link to="/" className="flex min-h-[3.75rem] items-center border-b border-border px-6 text-lg font-semibold text-fg no-underline">
+      <aside className="sticky top-0 hidden h-screen flex-col overflow-y-auto border-r border-border bg-canvas-secondary md:flex">
+        <Link to="/" className="flex min-h-[3.75rem] items-center gap-2 border-b border-border px-6 text-lg font-semibold text-fg no-underline">
+          <LogoMark className="h-7 w-7" />
           {t('app.name')}
         </Link>
         <SidebarNav />
@@ -66,7 +68,8 @@ export function AppLayout() {
                 <SidebarNav onNavigate={() => setNavOpen(false)} />
               </DialogContent>
             </Dialog>
-            <Link to="/" className="text-lg font-semibold text-fg no-underline md:hidden">
+            <Link to="/" className="inline-flex items-center gap-2 text-lg font-semibold text-fg no-underline md:hidden">
+              <LogoMark className="h-6 w-6" />
               {t('app.name')}
             </Link>
             <div className="mr-auto" />

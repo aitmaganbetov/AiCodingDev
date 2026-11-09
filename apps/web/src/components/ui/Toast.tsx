@@ -1,7 +1,7 @@
 import * as RadixToast from '@radix-ui/react-toast';
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { TONE_CLASS, type Tone } from './Badge';
+import { TONE_CLASS, TONE_ICON, type Tone } from './Badge';
 import { cx } from './cx';
 import { Icon } from './Icon';
 
@@ -58,9 +58,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             onOpenChange={(open) => {
               if (!open) setItems((prev) => prev.filter((x) => x.id !== item.id));
             }}
-            className={cx('flex items-start gap-3 rounded-md border p-3 shadow-elevated', TONE_CLASS[item.tone ?? 'neutral'])}
+            className={cx('flex items-start gap-3 rounded-lg border p-3 shadow-e2', TONE_CLASS[item.tone ?? 'neutral'])}
             data-testid="toast"
           >
+            <Icon name={TONE_ICON[item.tone ?? 'neutral']} className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="flex-1">
               <RadixToast.Title className="text-sm font-semibold">{item.title}</RadixToast.Title>
               {item.description ? <RadixToast.Description className="mt-1 text-sm">{item.description}</RadixToast.Description> : null}

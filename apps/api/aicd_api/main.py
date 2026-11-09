@@ -12,12 +12,15 @@ from aicd_api import errors
 from aicd_api.middleware import BodyLimitMiddleware, request_context_middleware
 from aicd_api.ratelimit import RateLimiter
 from aicd_api.routers import (
+    agent_profiles,
+    aggregates,
     analytics,
     approvals,
     artifacts,
     audit,
     auth,
     chat,
+    code_intelligence,
     directives,
     documentation,
     events,
@@ -29,9 +32,12 @@ from aicd_api.routers import (
     providers,
     quality,
     runs,
+    search,
     standards,
+    system,
     technologies,
     workspaces,
+    worktrees,
 )
 from aicd_api.state import AppState
 from aicd_platform.artifacts import build_artifact_store
@@ -111,6 +117,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         artifacts.router,
         github.router,
         analytics.router,
+        code_intelligence.router,
+        worktrees.router,
+        search.router,
+        aggregates.router,
+        system.router,
+        agent_profiles.router,
     ):
         app.include_router(router, prefix=API_PREFIX)
     app.include_router(metrics.router)  # /metrics вне /api/v1: только внутренняя сеть (P8-06)

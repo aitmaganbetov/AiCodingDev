@@ -26,6 +26,9 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
+    // Шрифты и прочие ресурсы — только отдельными файлами того же origin: CSP `default-src 'self'`
+    // запрещает data:-шрифты (font-src не задан). Изображения ≤ 4 KiB по-прежнему можно инлайнить.
+    assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined),
   },
   test: {
     environment: 'jsdom',

@@ -4,7 +4,15 @@ import { expect, type Page } from '@playwright/test';
 /** WCAG 2.1 A/AA через axe-core: нарушений уровня serious/critical быть не должно. */
 export async function expectNoSeriousA11yViolations(page: Page, screen: string): Promise<void> {
   // Появление всплывающих слоёв анимируется (opacity) — контраст проверяем по итоговому кадру.
-  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  // Бесконечные индикаторы (спиннер, скелет) не ждём: они не завершаются.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
   const blocking = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
   expect(

@@ -45,6 +45,7 @@ EXPECTED = {
     "documentation:register": {O, A},
     "documentation:refresh": {O, A, D},
     "audit:read": {O, A},
+    "system:health": {O, A},
     "github:read": {O, A, D, R, V},
     "github:manage": {O, A},
     "pull_request:create": {O, A, D},

@@ -85,6 +85,7 @@ CONTROLS: Final[dict[str, Control]] = {
             I + "test_github_api.py::test_rbac_matrix_and_cross_workspace",
             I + "test_runs_api.py::test_runs_are_tenant_isolated_and_role_checked",
             I + "test_api_projects.py::test_role_restrictions",
+            I + "test_workspace_aggregates_api.py::test_rbac_matrix",
         )
     ),
     "SC-IAM-08": Control((S + "test_step_up.py",)),
@@ -97,6 +98,7 @@ CONTROLS: Final[dict[str, Control]] = {
             S + "test_rls.py",
             M + "test_orchestration_invariants.py::test_tenant_tables_isolated",
             M + "test_security_hardening_migration.py::test_verification_table_rls_grants_and_terminal_states",
+            M + "test_workspace_read_models_migration.py::test_sys_outbox_backlog_returns_only_aggregate",
         ),
         tz20=("cross-tenant",),
     ),
@@ -125,6 +127,7 @@ CONTROLS: Final[dict[str, Control]] = {
             I + "test_quality_api.py::test_non_members_get_404_and_anonymous_401",
             I + "test_findings_standards_api.py::test_non_members_get_404_and_anonymous_401",
             I + "test_repository_explorer.py::test_workspace_isolation",
+            I + "test_workspace_aggregates_api.py::test_foreign_workspace_is_404_and_foreign_filters_are_empty",
         ),
         tz20=("cross-tenant",),
     ),
@@ -618,6 +621,7 @@ CONTROLS: Final[dict[str, Control]] = {
             I + "test_api_workspaces.py::test_unknown_fields_rejected",
             I + "test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
             I + "test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
+            I + "test_workspace_aggregates_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
         )
     ),
     "SC-API-02": Control(
@@ -625,6 +629,7 @@ CONTROLS: Final[dict[str, Control]] = {
             S + "test_rate_limits.py",
             S + "test_step_up.py::test_reauthenticate_is_rate_limited_per_user",
             I + "test_oq45_api.py::test_probe_rbac_rate_limit_and_audit",
+            I + "test_workspace_aggregates_api.py::test_system_health_rate_limited_per_user",
         )
     ),
     "SC-API-03": Control(

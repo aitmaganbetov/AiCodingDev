@@ -1,6 +1,6 @@
-# apps/web — Mission Control (P1-13, P3-15, P7-01, P7-02)
+# apps/web — Mission Control (P1-13, P3-15, P7-01, P7-02, редизайн F1)
 
-SPA AiCodingDev: вход, каркас Mission Control (боковая навигация по всем разделам Phase 7, переключатель workspace, клавиатурные сочетания, светлая/тёмная тема), рабочие пространства, проекты, запуски и экран run с лентой событий SSE. Экраны Phase 7, ещё не реализованные, открываются как заглушки «Раздел в разработке». Архитектура — ADR-0014; правила API — `docs/api/API_DESIGN.md`; контракт — `packages/contracts/openapi.yaml` (единственный источник, ADR-0013).
+SPA AiCodingDev: вход, каркас Mission Control (боковая навигация по всем разделам Phase 7, переключатель workspace, клавиатурные сочетания, тёмная (по умолчанию)/светлая/системная тема), рабочие пространства, проекты, запуски и экран run с лентой событий SSE. Экраны Phase 7, ещё не реализованные, открываются как заглушки «Раздел в разработке». Архитектура — ADR-0014; правила API — `docs/api/API_DESIGN.md`; контракт — `packages/contracts/openapi.yaml` (единственный источник, ADR-0013).
 
 ## Команды (pnpm, Node ≥ 22.12)
 
@@ -30,7 +30,8 @@ src/
                           Dialog, Menu (DropdownMenu), Tabs, Tooltip, Popover, Toast (useToast)
   components/states.tsx   LoadingState/Skeleton, EmptyState, ErrorState, ForbiddenState, UnderConstructionState
   components/             LoadMore (cursor-пагинация), StatusBadge/statusTone, PageHeading, form
-  styles/tokens.css       дизайн-токены (CSS-переменные; светлая/тёмная тема)
+  styles/tokens.css       дизайн-токены (CSS-переменные; тёмная по умолчанию / светлая / как в системе)
+  styles/fonts.css        self-hosted Inter Variable и JetBrains Mono Variable (@fontsource-variable)
   api/client.ts           ядро транспорта: fetch, CSRF, Idempotency-Key, If-Match, problem+json, openEventStream;
                           requestWithMeta (тело + ETag ответа → If-Match: `ifMatch` приоритетнее `ifMatchVersion`),
                           requestText (не-JSON представление по Accept, например отчёт run text/markdown)
@@ -41,7 +42,8 @@ src/
                           api/workspaceEvents.ts — поток уведомлений workspace (resume 'cursor': Last-Event-ID = id:,
                           дедуп по event_id; инвалидация экранов — useWorkspaceInvalidation в features/quality/live.tsx)
   i18n/<area>.json        строки UI (namespace = имя файла), i18n/index.ts подхватывает файлы сам
-  lib/                    permissions (полный каталог прав §5.1), theme, shortcuts, format, problem, storage
+  lib/                    permissions (полный каталог прав §5.1), theme, shortcuts, format, problem, storage,
+                          verification (5 состояний, D-8), agentRoles (идентичность 12 ролей)
 ```
 
 ### Как добавить экран (параллельная работа без правки общих файлов)
@@ -54,10 +56,19 @@ src/
 6. **Тесты** — unit рядом с кодом; E2E — свой `e2e/mocked/<area>.spec.ts`: операции своей области регистрируются в мок прямо из spec (`api.route(method, path, operationId, handler)` — ответы валидируются по контракту, `mockApi.ts` не меняется), вход — `login()` из `e2e/support/session.ts`, a11y — `expectNoSeriousA11yViolations`.
 7. **Критические действия (step-up, SC-IAM-08)** — команды, которые сервер может отклонить `403 step_up_required` (политики workspace/провайдера, участники, утверждение approvals набора four-eyes), вызываются через `const stepUp = useStepUp()` из `src/auth/StepUp.tsx`: `mutationFn: (b) => stepUp.run(() => api.call(b))`, а `{stepUp.dialog}` отрисовывается внутри формы/диалога экрана. Диалог запрашивает пароль (`POST /auth/reauthenticate`), сохраняет новый csrf_token ротированной сессии и повторяет тот же запрос (тот же Idempotency-Key/If-Match); отмена возвращает исходную ошибку в `onError`.
 
-### Дизайн-система (P7-01)
+### Дизайн-система (P7-01 → F1 редизайна)
 
-- Только семантические цвета Tailwind (`bg-surface`, `text-fg`, `text-fg-muted`, `border-border`, `bg-accent`, `text-link`, `{neutral|info|success|warning|danger}-{soft,border,fg}`, `text-danger-text`) — значения в `styles/tokens.css`. Тема: `prefers-color-scheme`, принудительно — `<html data-theme>` (меню пользователя, `lib/theme.ts`). Контраст AA для всех пар текст/фон и ≥ 3:1 для границ полей и кольца фокуса проверяет `styles/tokens.test.ts`.
-- Фокус: видимое кольцо 3px (`--color-focus`) на `:focus-visible`; после перехода на другой экран (смена pathname) фокус на h1, смена query (вкладка, фильтр) фокус не трогает; диалоги возвращают фокус открывшему элементу; цели касания ≥ 44px (`min-h-touch`).
+Фаза F1 плана `docs/design/UI_REDESIGN_PLAN.md` (§4.5, §4.7, §5; решения D-1…D-11): фундамент визуальной системы «Neural Engineering Command Center». Оболочка и экраны (F2+) пока не перекомпонованы — существующие экраны получили новую палитру, шрифты и иконки через токены автоматически.
+
+- **Токены** — `src/styles/tokens.css` (RGB-тройки → `tailwind.config.ts`, только семантические имена). Тема по умолчанию — **тёмная** (палитра владельца с AA-коррекцией), также светлая и «как в системе»: `<html data-theme="dark|light|system">`, `lib/theme.ts` (`useTheme`, сохранение в localStorage с try/catch, синхронизация вкладок). Соответствие плану §5.1: `fg-muted` ≡ `fg-secondary`, `fg-subtle` ≡ `fg-muted`, `accent` ≡ `primary` (CTA: тёмный текст на cyan в тёмной теме), `highlight` ≡ `accent` (#B64DFF), `input` ≡ `border-input`; новые: `canvas-secondary`, `fg-disabled`, `border-active`, `secondary(-text/-soft)`, `highlight(-text/-soft)`, сплошные тона `{info,success,warning,danger,neutral}`, 5 состояний верификации `verify-{pass,fail,blocked,not-run,insufficient}(-soft/-fg)`, семейства ролей `role-{discover,build,verify,sustain,system}(-soft)`, стекло `glass`/`glass-border` + `--glass-alpha` (0,88 тёмная / 0,92 светлая), `--gradient-brand` (только декор), тени `e1/e2/e3/glow`, радиусы (`rounded-md` 6 — поля/кнопки, `rounded-lg` 10 — карточки, `rounded-xl` 14 — диалоги/плитки), motion `duration-{instant,base,slow}` = 120/180/250 мс и `ease-{standard,exit}` (при `prefers-reduced-motion` — 0), брейкпоинт `3xl` = 1920.
+- **WCAG 2.2 AA** (D-1) проверяет `styles/tokens.test.ts` в обеих темах: текст ≥ 4,5:1 на всех поверхностях (canvas, canvas-secondary, surface, surface-muted, surface-raised), тон-текст на soft-фонах, метки 5 состояний и ролей; границы полей, кольцо фокуса, выделение, иконки/заливки статусов ≥ 3:1; текст на стекле (с учётом α) над canvas и над cyan. «Как в системе» обязан совпадать со светлой темой.
+- **Стекло** (`.glass`, `Card variant="glass"`, меню, поповеры) — только над плоским фоном; без `backdrop-filter`, при `prefers-reduced-transparency: reduce` и `forced-colors: active` — непрозрачная поверхность. Градиент (`bg-gradient-brand`, `.ring-brand`) — только декор, текст на нём запрещён.
+- **Шрифты** — Inter Variable (UI) и JetBrains Mono Variable (код/логи) из `@fontsource-variable/*` (OFL-1.1), self-hosted: `styles/fonts.css` подключает только наборы latin/latin-ext/cyrillic/cyrillic-ext (`font-display: swap`, загрузка по `unicode-range`); `vite.config.ts` не инлайнит шрифты в data: (CSP `default-src 'self'` без `font-src` разрешает только same-origin файлы — nginx CSP менять не нужно). Типичная русская страница скачивает ≈ 119 kB woff2 (Inter latin 48 + cyrillic 19, Mono latin 40 + cyrillic 12); все 8 файлов — 252 kB в `dist/`.
+- **Иконки** — Lucide (`lucide-react`) за прежним API `<Icon name="…" />` (`components/ui/Icon.tsx`: карта имён, 21 прежняя иконка + статусы, 5 состояний, severity, 12 ролей). ESLint запрещает импорт `lucide-react` вне `Icon.tsx` и `import * as` (tree-shaking).
+- **Компоненты** (`components/ui`, паттерны shadcn/ui поверх Radix, без CLI): `Button` (primary/secondary/outline/ghost/danger; sm/md/lg), `Card` (default/raised/glass/featured, padding), `Badge`/`Callout` (иконка тона), `StatusBadge` (+ иконка статуса), `VerificationBadge` + `lib/verification.ts` (D-8: ERROR→BLOCKED, SKIPPED/PENDING→NOT RUN, PASS без VERIFIED evidence→INSUFFICIENT EVIDENCE; «Пройдено» без evidence невозможно — юнит-тест всех комбинаций), `SeverityBadge`, `AgentBadge`/`AgentAvatar` + `lib/agentRoles.ts` (12 ролей `AgentRole`: глиф Lucide + код + название + цвет семейства; всё вне `AgentRole` — «Система»), `DataUnavailable` (GAP API: причина + операция + ссылка; никогда не нули/демо), `Skeleton`/`SkeletonBlock`, `Kbd`, `Tooltip`, `Toast` (иконка тона), `Tabs` (`variant="line|pills"`), `Dialog`, `Menu`, `Popover` (стекло), `Table` (`density="comfortable|compact"`), `VirtualList` (`@tanstack/react-virtual`: `role=list|feed`, `aria-setsize/posinset`, ↑/↓/Home/End/PageUp/PageDown, `followOutput` + «Перейти к последнему»), `Resizable` (`react-resizable-panels`: `ResizableGroup/Panel/Handle`, размеры в localStorage `aicd.layout.<id>` с try/catch, клавиатурный разделитель с доступным именем, `useResizableGroup().reset`). `Resizable` импортируется напрямую из `components/ui/Resizable` (не из index: пакет попал бы в начальный бандл) и только в ленивых экранах. CSS-классы полей: `.input`, `.select` (нативный select со стрелкой), `.checkbox`.
+- **Логотип** — `components/ui/Logo.tsx` (`LogoMark` по токенам темы, `variant="dark|light"`; `Logo` — знак + набранный словесный знак), `public/logo-mark-{dark,light}.svg`, `public/favicon.svg` (светлый вариант по `prefers-color-scheme`); в forced-colors — монохромный. **Знак ВРЕМЕННЫЙ (D-7):** векторная перерисовка по `Logo AiCodingDev.png` до появления исходника дизайнера; PNG (1,5 МБ) в бандл не входит.
+- **Справочник** — `/w/:workspaceId/settings/design-system` (ленивый чанк, пункта меню нет; все значения — MOCK для разработки UI).
+- Фокус: видимое кольцо 2px + offset 2px (`--color-focus`) на `:focus-visible`; после перехода на другой экран (смена pathname) фокус на h1, смена query (вкладка, фильтр) фокус не трогает; диалоги возвращают фокус открывшему элементу; цели касания ≥ 44px (`min-h-touch`), в плотных таблицах ≥ 24px (`min-h-target`, WCAG 2.5.8).
 - Клавиатура: `?` — справка, `g` + буква — раздел, Esc — закрыть слой; односимвольные сочетания отключаются в справке (WCAG 2.1.4). Мобильная навигация (< 768px) — Dialog-drawer.
 - Radix-обёртки задают доступные имена и классы; меню немодальные (модальный режим Radix скрывает `#root` через aria-hidden → axe `aria-hidden-focus`).
 
@@ -68,7 +79,8 @@ src/
 ### Тесты
 
 - `src/api/client.test.ts`, `runEvents.test.ts`, `streamManager.test.ts`, `useRunEvents.test.tsx` — транспорт, парсер, дедуп, реконнект, ref-counting, лимит, offline/online, видимость, 410, restart.
-- `src/components/ui/ui.test.tsx` — Table (сортировка, aria-sort), Toolbar (roving tabindex), Dialog/Menu/Tabs/Toast, CodeBlock, время; `src/i18n/i18n.test.ts`, `src/routes/routes.test.ts`, `src/styles/tokens.test.ts`.
+- `src/components/ui/ui.test.tsx` — Table (сортировка, aria-sort), Toolbar (roving tabindex), Dialog/Menu/Tabs/Toast, CodeBlock, время; `src/components/ui/ds.test.tsx` — Icon (Lucide), статусы/5 состояний (иконка + текст + паттерн), AgentBadge (12 ролей, «Система»), DataUnavailable, Card/Logo/Table density, VirtualList (окно, aria-posinset, клавиатура), Resizable; `src/lib/verification.test.ts` (D-8), `src/lib/theme.test.ts`; `src/i18n/i18n.test.ts`, `src/routes/routes.test.ts`, `src/styles/tokens.test.ts` (WCAG 2.2 AA обеих тем).
+- `e2e/mocked/design-system.spec.ts` — тема по умолчанию (тёмная), переключение тёмная/светлая/как в системе с сохранением, Inter загружен; `prefers-reduced-motion` (токены 0 мс, слои без анимации); нет горизонтальной прокрутки на 375/768/1366/1920 (Обзор, Проекты, справочник; обе темы); справочник: axe в обеих темах, VirtualList и разделитель панелей с клавиатуры, сохранение размера после перезагрузки и сброс; forced-colors smoke. Фикстура `e2e/mocked/fixtures.ts` по умолчанию выбирает «Как в системе», чтобы `emulateMedia({ colorScheme })` в остальных спеках проверял обе темы (`test.use({ themeDefault: 'app' })` — настоящее значение по умолчанию).
 - `e2e/mocked/layout.spec.ts` — axe (serious/critical) в светлой и тёмной теме для layout, всех заглушек, 404/403, диалога справки, меню и переключателя; клавиатура через sidebar и диалоги; мобильный drawer; тема.
 - `e2e/mocked/sse.spec.ts` — обрыв сети (`context.setOffline`): поток `offline` без попыток подключения, после `online` — `Last-Event-ID`, сервер повторяет часть событий, в ленте каждое событие ровно один раз и без пропусков; обрыв посреди кадра.
 - `e2e/support/contract.ts` — ajv (JSON Schema 2020-12) по схемам самого контракта: тела запросов UI, обязательные заголовки, CSRF и тела ответов моков; SSE-кадры мока — по `packages/contracts/schemas/events/1.0/sse-event.schema.json`; нарушения валят тест.
@@ -105,7 +117,15 @@ Dev:
 - `@xyflow/react` 12.12.0 — Run Graph (ADR-0014): DAG задач; холст — отдельный чанк `TaskGraphCanvas` (~187 kB / 62 kB gzip) вместе со стилями. Анимированные рёбра не используются (prefers-reduced-motion, axe ждёт завершения анимаций).
 - `@monaco-editor/react` 4.7.0 + `monaco-editor` 0.57.0 — read-only diff viewer Task Detail (ADR-0014). Monaco берётся из локального пакета (`loader.config({ monaco })` с `monaco-editor/editor/editor.api`), без CDN; editor worker — отдельный файл того же origin (`?worker`, совместимо с CSP `script-src 'self'`). Чанк `MonacoDiff` (~2,7 MB / 713 kB gzip + worker 276 kB) грузится только на вкладке «Изменения».
 
-Не добавлены: `openapi-fetch` — свой клиент закрывает CSRF/idempotency/problem; иконки — свой набор SVG (`components/ui/Icon.tsx`) без зависимости; Radix Toolbar — `Toolbar` на roving tabindex в ~60 строк.
+Добавлены в F1 редизайна (план §4.4, решения D-5/D-10; точные версии, выпущены ≥ 2 недель назад, React 18):
+- `lucide-react` 1.61.0 (ISC) — иконки за API `Icon`, только именованные импорты (≈ 80 иконок в начальном бандле).
+- `@fontsource-variable/inter` 5.3.0, `@fontsource-variable/jetbrains-mono` 5.3.0 (OFL-1.1) — self-hosted шрифты (без CDN, CSP same-origin).
+- `@tanstack/react-virtual` 3.14.22 (MIT) — `VirtualList` (логи, CLI Output, чат, аудит — подключение к экранам в F4+).
+- `react-resizable-panels` 4.15.0 (MIT) — `Resizable` (панели Mission Control/Code Review в F2+); только в ленивых чанках.
+
+Бюджет начального JS — ≤ 260 kB gzip (план §4.3); после F1: `index-*.js` 790 kB / **232,4 kB gzip** (до F1 — 222 kB), CSS 57 kB / 9,8 kB gzip. `cmdk` 1.1.1 (D-5) будет добавлен в F2 вместе с Command Palette (в F1 не используется). Отклонены (D-10): Recharts, Motion, Zustand; shadcn/ui — только как образцы вариантов, без CLI и кода под Tailwind v4.
+
+Не добавлены: `openapi-fetch` — свой клиент закрывает CSRF/idempotency/problem; Radix Toolbar — `Toolbar` на roving tabindex в ~60 строк.
 
 ## Ошибки по контракту
 

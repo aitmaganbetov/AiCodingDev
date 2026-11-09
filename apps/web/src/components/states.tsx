@@ -14,22 +14,13 @@ export function LoadingState({ label, inline = false }: { label?: string; inline
   const { t } = useTranslation();
   return (
     <div role="status" aria-live="polite" className={cx('flex items-center gap-3 text-fg-muted', inline ? 'py-1' : 'py-8')}>
-      <span aria-hidden="true" className="h-5 w-5 animate-spin rounded-full border-2 border-border-strong border-t-accent" />
+      <span aria-hidden="true" className="h-5 w-5 rounded-full border-2 border-border-strong border-t-accent motion-safe:animate-spin" />
       <span>{label ?? t('state.loading')}</span>
     </div>
   );
 }
 
-/** Заглушка-скелет для области, контент которой ещё грузится (декоративна, aria-hidden). */
-export function Skeleton({ lines = 3, className }: { lines?: number; className?: string }) {
-  return (
-    <div aria-hidden="true" className={cx('flex animate-pulse flex-col gap-2', className)}>
-      {Array.from({ length: lines }, (_, i) => (
-        <div key={i} className={cx('h-4 rounded bg-surface-muted', i === lines - 1 ? 'w-2/3' : 'w-full')} />
-      ))}
-    </div>
-  );
-}
+export { Skeleton } from './ui/Skeleton';
 
 export function EmptyState({
   title,
