@@ -60,7 +60,7 @@ ExecutionStatus = Literal[
 ActivityEventType = Literal[
     "run.state_changed", "task.state_changed", "agent.message", "cli.output", "directive.impact_ready",
     "directive.state_changed", "approval.requested", "approval.decided", "gate.completed", "run.completed",
-    "chat.message",
+    "chat.message", "review.comment",
 ]  # fmt: skip
 
 

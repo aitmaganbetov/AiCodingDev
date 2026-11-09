@@ -186,7 +186,7 @@ CREATE TRIGGER trg_review_threads_transition BEFORE INSERT OR UPDATE OF status O
 ALTER DOMAIN sse_event_type_persisted_t DROP CONSTRAINT sse_event_type_persisted_t_check;
 ALTER DOMAIN sse_event_type_persisted_t ADD CONSTRAINT sse_event_type_persisted_t_check
   CHECK (VALUE IN ({SSE_TYPES_V1},'review.comment'));
-"""
+"""  # noqa: S608 — DDL из констант миграции
 
 TRIGGERS = r"""
 CREATE TRIGGER trg_review_threads_immutable_ws BEFORE UPDATE OF workspace_id ON review_threads
@@ -368,7 +368,7 @@ ALTER TABLE allowed_transitions DROP CONSTRAINT IF EXISTS ck_allowed_transitions
 ALTER TABLE allowed_transitions ADD CONSTRAINT ck_allowed_transitions_entity CHECK (entity IN ({ENTITIES_V8}));
 ALTER DOMAIN sse_event_type_persisted_t DROP CONSTRAINT sse_event_type_persisted_t_check;
 ALTER DOMAIN sse_event_type_persisted_t ADD CONSTRAINT sse_event_type_persisted_t_check CHECK (VALUE IN ({SSE_TYPES_V1}));
-"""
+"""  # noqa: S608 — DDL из констант миграции
 
 
 def upgrade() -> None:

@@ -32,6 +32,7 @@ tags:
 - {name: agents}
 - {name: search}
 - {name: notifications}
+- {name: reviews, description: 'Inline-комментарии ревью кода (UI redesign B5; ADR-0015)'}
 paths:
   /auth/login:
     post:
@@ -1018,6 +1019,406 @@ paths:
       - cookieAuth: []
       x-required-permission: project:read
       x-audit-action: none
+      x-tz-addition: true
+  /projects/{project_id}/repositories/{repository_id}/review-threads:
+    get:
+      operationId: listReviewThreads
+      summary: Треды inline-комментариев ревью репозитория (B5, ADR-0015) [дополнение к ТЗ]
+      tags: [reviews]
+      description: 'Треды, привязанные к commit/стороне diff/файлу/строкам репозитория, с комментариями (тела редактированы,
+        ADR-0015 §7). Фильтры — run, задача, commit, путь файла, статус. `head_sha` — commit просматриваемого diff: `outdated
+        = anchor.commit_sha ≠ head_sha`; без него — относительно последнего worktree задачи (и её fix-задач) или run, иначе
+        `outdated = null` (ADR-0015 §8). Порядок — по времени создания (старые первыми).'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      - name: run_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: task_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: commit_sha
+        in: query
+        schema: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+      - name: file_path
+        in: query
+        schema: {type: string, minLength: 1, maxLength: 1024}
+      - name: status
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/ReviewThreadStatus'}
+          maxItems: 2
+      - name: head_sha
+        in: query
+        schema: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        description: Commit просматриваемого diff (для outdated)
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewThreadPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: review:read
+      x-audit-action: none
+      x-tz-addition: true
+    post:
+      operationId: createReviewThread
+      summary: Новый тред inline-комментария (B5, ADR-0015) [дополнение к ТЗ]
+      tags: [reviews]
+      description: 'Тред с первым комментарием, привязанный к commit/стороне diff/файлу/диапазону строк (≤ 1000 строк);
+        опционально run (того же репозитория), задача этого run, находка этого run. Комментарий агентам НЕ доставляется — воздействие
+        только через POST /runs/{run_id}/reviews (REQUEST_CHANGES → поручение CHANGE_REQUEST). run/задача/находка чужого
+        workspace ⇒ 404; не того репозитория/run ⇒ 422. Тело редактируется (секреты). Событие SSE review.comment.'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewThreadCreateRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewThread'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: review:write
+      x-audit-action: review.thread.create
+      x-tz-addition: true
+  /review-threads/{thread_id}:
+    get:
+      operationId: getReviewThread
+      summary: Тред inline-комментариев (B5) [дополнение к ТЗ]
+      tags: [reviews]
+      parameters:
+      - {$ref: '#/components/parameters/ThreadId'}
+      - name: head_sha
+        in: query
+        schema: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        description: Commit просматриваемого diff (для outdated)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewThread'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '304':
+          description: Не изменился (If-None-Match)
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: review:read
+      x-audit-action: none
+      x-tz-addition: true
+  /review-threads/{thread_id}/comments:
+    post:
+      operationId: replyReviewThread
+      summary: Ответ в треде (B5) [дополнение к ТЗ]
+      tags: [reviews]
+      description: Комментарий в треде (в т.ч. решённом — статус не меняется); ≤ 200 комментариев в треде (иначе 409). Агентам
+        НЕ доставляется. ETag ответа — revision комментария.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ThreadId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewCommentCreateRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewComment'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: review:write
+      x-audit-action: review.comment.create
+      x-tz-addition: true
+  /review-threads/{thread_id}/resolve:
+    post:
+      operationId: resolveReviewThread
+      summary: Отметить тред решённым (B5) [дополнение к ТЗ]
+      tags: [reviews]
+      description: 'OPEN → RESOLVED (FSM allowed_transitions review_thread). Уже решён ⇒ 409 invalid_state_transition. If-Match — ETag
+        треда (version). Отметка обсуждения, не решение по коду: approvals и gates не затрагиваются.'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/ThreadId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewThread'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: review:write
+      x-audit-action: review.thread.resolve
+      x-tz-addition: true
+  /review-threads/{thread_id}/unresolve:
+    post:
+      operationId: unresolveReviewThread
+      summary: Переоткрыть тред (B5) [дополнение к ТЗ]
+      tags: [reviews]
+      description: RESOLVED → OPEN. Уже открыт ⇒ 409 invalid_state_transition. If-Match — ETag треда.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/ThreadId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewThread'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: review:write
+      x-audit-action: review.thread.unresolve
+      x-tz-addition: true
+  /review-comments/{comment_id}:
+    patch:
+      operationId: editReviewComment
+      summary: Правка своего комментария (B5) [дополнение к ТЗ]
+      tags: [reviews]
+      description: 'Правит только автор (иначе 403, аудит authz.denied review:write:own). If-Match — ETag комментария ("v<revision>").
+        Прежнее тело сохраняется в истории правок (GET /review-comments/{comment_id}/revisions), revision растёт на 1; удаления
+        нет. Текст, уже отправленный агентам поручением, правка не меняет (ADR-0015 §1).'
+      parameters:
+      - {$ref: '#/components/parameters/IfMatch'}
+      - {$ref: '#/components/parameters/CommentId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewCommentUpdateRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewComment'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {$ref: '#/components/responses/PreconditionRequired'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: review:write
+      x-audit-action: review.comment.edit
+      x-permission-depends-on: author
+      x-tz-addition: true
+  /review-comments/{comment_id}/revisions:
+    get:
+      operationId: listReviewCommentRevisions
+      summary: История правок комментария (B5) [дополнение к ТЗ]
+      tags: [reviews]
+      parameters:
+      - {$ref: '#/components/parameters/CommentId'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewCommentRevisionList'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: review:read
+      x-audit-action: none
+      x-tz-addition: true
+  /runs/{run_id}/reviews:
+    get:
+      operationId: listReviews
+      summary: Отправленные ревью run (B5) [дополнение к ТЗ]
+      tags: [reviews]
+      parameters:
+      - {$ref: '#/components/parameters/RunId'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewSubmissionPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: review:read
+      x-audit-action: none
+      x-tz-addition: true
+    post:
+      operationId: submitReview
+      summary: Отправить ревью кода (Approve / Request changes / Comment, B5) [дополнение к ТЗ]
+      tags: [reviews]
+      description: 'Единственная точка воздействия комментариев на исполнение (ADR-0015 §3). APPROVE — решение существующего PENDING
+        approval этого run (approval_id обязателен) по правилам POST /approvals/{id}/decision (роль по action_type, four-eyes,
+        step-up). REQUEST_CHANGES — поручение CHANGE_REQUEST (цель — task_id или run) с замечаниями открытых тредов как недоверенным
+        текстом (ограждается в инструкциях задач; > 8000 символов ⇒ 422); право — как у CHANGE_REQUEST (developer+). COMMENT — только
+        запись ревью. Run терминален ⇒ 409; expected_run_version не совпал ⇒ 409 version_mismatch. 202 — ревью сохранено (поручение
+        принято, не выполнено).'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/RunId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewSubmitRequest'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReviewSubmission'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: review:submit
+      x-audit-action: review.submit
+      x-permission-depends-on: verdict
+      x-permission-rules:
+        reviewer: [COMMENT, APPROVE]
+        developer: all
+        admin: all
+        owner: all
+        viewer: []
       x-tz-addition: true
   /projects/{project_id}/worktrees:
     get:
@@ -3873,6 +4274,16 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    ThreadId:
+      name: thread_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    CommentId:
+      name: comment_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
   headers:
     ETag:
       description: Сильный ETag "v<version>"
@@ -4424,7 +4835,7 @@ components:
     SseEventType:
       type: string
       enum: [run.state_changed, task.state_changed, agent.message, cli.output, directive.impact_ready, directive.state_changed, approval.requested,
-        approval.decided, gate.completed, run.completed, chat.message, heartbeat]
+        approval.decided, gate.completed, run.completed, chat.message, review.comment, heartbeat]
       description: Каноническое перечисление (docs/README.md §3).
     RepositoryProvider:
       type: string
@@ -5073,6 +5484,210 @@ components:
         items:
           type: array
           items: {$ref: '#/components/schemas/Worktree'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+    ReviewThreadStatus:
+      type: string
+      enum: [OPEN, RESOLVED]
+      description: Статус треда inline-комментариев (FSM review_thread, ADR-0015)
+    ReviewVerdict:
+      type: string
+      enum: [APPROVE, REQUEST_CHANGES, COMMENT]
+    ReviewAnchor:
+      type: object
+      properties:
+        commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$', description: 'Head-commit diff (сторона head) / commit файла'}
+        base_commit_sha:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'
+          description: База diff; обязательна для side=base
+        side:
+          type: string
+          enum: [base, head]
+        file_path: {type: string, minLength: 1, maxLength: 1024, description: 'Путь относительно корня репозитория (без ., .., //, \ и управляющих символов)'}
+        start_line: {type: integer, minimum: 1}
+        end_line: {type: integer, minimum: 1, description: '≥ start_line, диапазон ≤ 1000 строк'}
+      required: [commit_sha, base_commit_sha, side, file_path, start_line, end_line]
+      description: Якорь треда (неизменяем)
+    ReviewAnchorInput:
+      type: object
+      properties:
+        commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        base_commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        side:
+          type: string
+          enum: [base, head]
+          default: head
+        file_path: {type: string, minLength: 1, maxLength: 1024, pattern: '^[^/\x00-\x1f\x7f\\]([^\x00-\x1f\x7f\\]*[^/\x00-\x1f\x7f\\])?$'}
+        start_line: {type: integer, minimum: 1, maximum: 10000000}
+        end_line: {type: integer, minimum: 1, maximum: 10000000}
+      required: [commit_sha, file_path, start_line, end_line]
+      additionalProperties: false
+      description: 'Сегменты пути «.»/«..» и «//» отклоняются (422); end_line < start_line или > 1000 строк — 422.'
+    ReviewComment:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        thread_id: {type: string, format: uuid}
+        author: {$ref: '#/components/schemas/UserRef'}
+        body: {type: string, maxLength: 8000, description: Санитизированный текст (секреты редактированы)}
+        revision: {type: integer, minimum: 1, description: 'Номер редакции; ETag = "v<revision>"'}
+        created_at: {type: string, format: date-time}
+        edited_at:
+          type: [string, 'null']
+          format: date-time
+        can_edit: {type: boolean, description: Текущий пользователь — автор (правка разрешена)}
+      required: [id, thread_id, author, body, revision, created_at, edited_at, can_edit]
+    ReviewThread:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        repository_id: {type: string, format: uuid}
+        run_id:
+          type: [string, 'null']
+          format: uuid
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        finding_id:
+          type: [string, 'null']
+          format: uuid
+        anchor: {$ref: '#/components/schemas/ReviewAnchor'}
+        status: {$ref: '#/components/schemas/ReviewThreadStatus'}
+        outdated:
+          type: [boolean, 'null']
+          description: Якорь не совпадает с текущим commit (head_sha или последний worktree задачи/run); null — текущий commit неизвестен
+        current_commit_sha:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'
+        resolved_by:
+          oneOf:
+          - {$ref: '#/components/schemas/UserRef'}
+          - {type: 'null'}
+        resolved_at:
+          type: [string, 'null']
+          format: date-time
+        created_by: {$ref: '#/components/schemas/UserRef'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        version: {type: integer, format: int64, minimum: 1, description: 'ETag = "v<version>"'}
+        comment_count: {type: integer, minimum: 1}
+        comments:
+          type: array
+          maxItems: 200
+          items: {$ref: '#/components/schemas/ReviewComment'}
+      required: [id, project_id, repository_id, run_id, task_id, finding_id, anchor, status, outdated, current_commit_sha,
+        resolved_by, resolved_at, created_by, created_at, updated_at, version, comment_count, comments]
+      description: Тред inline-комментариев (ADR-0015). Комментарии агентам не доставляются.
+    ReviewThreadPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ReviewThread'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+      required: [items, next_cursor]
+    ReviewThreadCreateRequest:
+      type: object
+      properties:
+        anchor: {$ref: '#/components/schemas/ReviewAnchorInput'}
+        body: {type: string, minLength: 1, maxLength: 8000, description: Первый комментарий}
+        run_id: {type: string, format: uuid, description: Run того же репозитория}
+        task_id: {type: string, format: uuid, description: Задача этого run (требует run_id)}
+        finding_id: {type: string, format: uuid, description: Находка (этого run)}
+      required: [anchor, body]
+      additionalProperties: false
+    ReviewCommentCreateRequest:
+      type: object
+      properties:
+        body: {type: string, minLength: 1, maxLength: 8000}
+      required: [body]
+      additionalProperties: false
+    ReviewCommentUpdateRequest:
+      type: object
+      properties:
+        body: {type: string, minLength: 1, maxLength: 8000}
+      required: [body]
+      additionalProperties: false
+    ReviewCommentRevision:
+      type: object
+      properties:
+        revision: {type: integer, minimum: 1}
+        body: {type: string, maxLength: 8000, description: Санитизированный текст прежней редакции}
+        authored_at: {type: string, format: date-time}
+        superseded_at: {type: string, format: date-time}
+      required: [revision, body, authored_at, superseded_at]
+    ReviewCommentRevisionList:
+      type: object
+      properties:
+        comment: {$ref: '#/components/schemas/ReviewComment'}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ReviewCommentRevision'}
+          description: Прежние редакции по возрастанию revision (текущая — comment)
+      required: [comment, items]
+    ReviewSubmitRequest:
+      type: object
+      properties:
+        verdict: {$ref: '#/components/schemas/ReviewVerdict'}
+        body: {type: string, minLength: 1, maxLength: 8000, description: Общее замечание}
+        thread_ids:
+          type: array
+          items: {type: string, format: uuid}
+          maxItems: 50
+          uniqueItems: true
+          description: Треды этого run (для REQUEST_CHANGES — открытые)
+        task_id: {type: string, format: uuid, description: 'Задача run: цель поручения REQUEST_CHANGES (иначе — run)'}
+        approval_id: {type: string, format: uuid, description: PENDING approval этого run (обязателен для APPROVE)}
+        expected_run_version: {type: integer, format: int64, minimum: 0, description: Несовпадение с runs.version ⇒ 409 version_mismatch}
+        requires_impact_preview: {type: boolean, default: true, description: REQUEST_CHANGES — подтверждение impact preview}
+      required: [verdict, expected_run_version]
+      additionalProperties: false
+    ReviewSubmission:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        verdict: {$ref: '#/components/schemas/ReviewVerdict'}
+        body:
+          type: [string, 'null']
+          maxLength: 8000
+        thread_ids:
+          type: array
+          items: {type: string, format: uuid}
+        approval_id:
+          type: [string, 'null']
+          format: uuid
+        approval_status:
+          oneOf:
+          - {$ref: '#/components/schemas/ApprovalStatus'}
+          - {type: 'null'}
+        directive_id:
+          type: [string, 'null']
+          format: uuid
+          description: Поручение CHANGE_REQUEST (REQUEST_CHANGES) — GET /runs/{run_id}/directives/{directive_id}
+        directive_status:
+          oneOf:
+          - {$ref: '#/components/schemas/DirectiveStatus'}
+          - {type: 'null'}
+        submitted_by: {$ref: '#/components/schemas/UserRef'}
+        created_at: {type: string, format: date-time}
+      required: [id, run_id, task_id, verdict, body, thread_ids, approval_id, approval_status, directive_id, directive_status,
+        submitted_by, created_at]
+    ReviewSubmissionPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ReviewSubmission'}
         next_cursor:
           type: [string, 'null']
           description: Opaque base64url cursor; null — конец выборки.
@@ -6420,7 +7035,7 @@ components:
     ActivityEventType:
       type: string
       enum: [run.state_changed, task.state_changed, agent.message, cli.output, directive.impact_ready, directive.state_changed,
-        approval.requested, approval.decided, gate.completed, run.completed, chat.message]
+        approval.requested, approval.decided, gate.completed, run.completed, chat.message, review.comment]
       description: Типы событий, сохраняемые в run_event_log (SseEventType без heartbeat).
     WorkspaceActivityPage:
       type: object
@@ -6928,7 +7543,7 @@ components:
           agent.message: '#/components/schemas/SseAgentMessage', cli.output: '#/components/schemas/SseCliOutput', directive.impact_ready: '#/components/schemas/SseDirectiveImpactReady',
           directive.state_changed: '#/components/schemas/SseDirectiveStateChanged', approval.requested: '#/components/schemas/SseApprovalRequested',
           approval.decided: '#/components/schemas/SseApprovalDecided', gate.completed: '#/components/schemas/SseGateCompleted', run.completed: '#/components/schemas/SseRunCompleted',
-          chat.message: '#/components/schemas/SseChatMessage'}
+          chat.message: '#/components/schemas/SseChatMessage', review.comment: '#/components/schemas/SseReviewComment'}
     RunStateChangedPayload:
       type: object
       properties:
@@ -7302,6 +7917,43 @@ components:
         properties:
           type: {const: chat.message}
           payload: {$ref: '#/components/schemas/ChatMessagePayload'}
+    ReviewCommentPayload:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [thread_created, comment_created, comment_edited, thread_resolved, thread_unresolved, review_submitted]
+        thread_id: {type: string, format: uuid}
+        comment_id:
+          type: [string, 'null']
+          format: uuid
+        review_id:
+          type: [string, 'null']
+          format: uuid
+        repository_id: {type: string, format: uuid}
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        commit_sha: {type: string, pattern: '^[0-9a-f]{40}([0-9a-f]{24})?$'}
+        side:
+          type: string
+          enum: [base, head]
+        file_path: {type: string, minLength: 1, maxLength: 1024}
+        start_line: {type: integer, minimum: 1}
+        end_line: {type: integer, minimum: 1}
+        status: {$ref: '#/components/schemas/ReviewThreadStatus'}
+        actor_id: {type: string, format: uuid}
+        occurred_at: {type: string, format: date-time}
+      required: [action, thread_id, repository_id, commit_sha, side, file_path, start_line, end_line, status, actor_id, occurred_at]
+      description: 'Плоский payload SSE (sse-event.schema.json#/$defs/review_comment, ADR-0015 §6). Тела комментария нет —
+        клиент перечитывает GET /review-threads/{thread_id}.'
+    SseReviewComment:
+      allOf:
+      - {$ref: '#/components/schemas/SseEnvelope'}
+      - type: object
+        properties:
+          type: {const: review.comment}
+          payload: {$ref: '#/components/schemas/ReviewCommentPayload'}
     SseHeartbeat:
       type: object
       properties:
@@ -7323,6 +7975,7 @@ components:
       - {$ref: '#/components/schemas/SseGateCompleted'}
       - {$ref: '#/components/schemas/SseRunCompleted'}
       - {$ref: '#/components/schemas/SseChatMessage'}
+      - {$ref: '#/components/schemas/SseReviewComment'}
       - {$ref: '#/components/schemas/SseHeartbeat'}
       description: 'Значение поля data: SSE-кадра. event: = type.'
     WorkspaceSseEventType:

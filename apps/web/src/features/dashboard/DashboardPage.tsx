@@ -1,221 +1,146 @@
-import { useQuery } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router';
-import { projectKeys, projectsApi, type Project } from '../../api/projects';
-import { runKeys, runsApi, type RunSummary } from '../../api/runs';
 import { PageHeading } from '../../components/PageHeading';
-import { EmptyState, ErrorState, LoadingState } from '../../components/states';
-import { StatusBadge } from '../../components/StatusBadge';
-import { ButtonLink, Card, RelativeTime, Table, type Column } from '../../components/ui';
+import { ButtonLink, Card } from '../../components/ui';
+import { formatDate } from '../../lib/format';
 import { can } from '../../lib/permissions';
 import { rememberWorkspace } from '../../lib/storage';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
-import { summarizeRuns } from './summary';
+import { ActiveWorkflows } from './ActiveWorkflows';
+import { ActivityTimeline, LiveIndicator } from './ActivityTimeline';
+import { AgentPerformance, QualityOverview } from './AnalyticsSections';
+import { useActiveProjects, useActiveRuns, useAnalytics, useDashboardLive, useDashboardWindow } from './data';
+import { AgentsTile, ApprovalsTile, CompletedTile, ProjectsTile, ProvidersTile, QualityTile, SecurityTile, WorkflowSuccessTile } from './KpiTiles';
+import { DASHBOARD_WINDOW_DAYS } from './model';
+import { SystemHealthPanel } from './SystemHealthPanel';
 
-/** Сколько последних runs workspace анализирует Dashboard (одна страница listRuns). */
-export const DASHBOARD_RUNS_LIMIT = 50;
-export const DASHBOARD_PROJECTS_LIMIT = 50;
-
-function runHref(workspaceId: string, run: RunSummary): string {
-  return `/w/${workspaceId}/projects/${run.project_id}/runs/${run.id}`;
-}
-
-function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="card flex flex-col gap-1">
-      <dt className="text-sm text-fg-muted">{label}</dt>
-      <dd className="text-3xl font-semibold text-fg">{value}</dd>
-      {hint ? <dd className="text-xs text-fg-muted">{hint}</dd> : null}
-    </div>
-  );
-}
-
-function RunLine({ run, workspaceId, projectName }: { run: RunSummary; workspaceId: string; projectName: string | undefined }) {
-  const { t } = useTranslation();
-  const needsProvider = run.blocked_reason === 'PROVIDER_UNAVAILABLE' || run.blocked_reason === 'AUTH_REQUIRED';
-  return (
-    <li className="flex flex-col gap-1 border-t border-border py-3 first:border-t-0 first:pt-0" data-run-id={run.id}>
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge kind="run" status={run.status} />
-        {run.blocked_reason ? (
-          <span className="text-sm text-fg-muted">{t(`enums.blocked_reason.${run.blocked_reason}`, { defaultValue: run.blocked_reason })}</span>
-        ) : null}
-        <span className="text-sm text-fg-muted">{projectName ?? t('dashboard.unknownProject')}</span>
-      </div>
-      <p className="line-clamp-2 break-words">{run.objective}</p>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        <Link to={runHref(workspaceId, run)} className="font-medium text-link underline">
-          {t('dashboard.openRun')}
-          <span className="sr-only">: {run.objective.slice(0, 80)}</span>
-        </Link>
-        {run.status === 'AWAITING_APPROVAL' ? (
-          <Link to={`/w/${workspaceId}/approvals`} className="font-medium text-link underline">
-            {t('dashboard.toApprovals')}
-          </Link>
-        ) : null}
-        {needsProvider ? (
-          <Link to={`/w/${workspaceId}/providers`} className="font-medium text-link underline">
-            {t('dashboard.toProviders')}
-          </Link>
-        ) : null}
-      </div>
-    </li>
-  );
-}
-
-function RunList({
-  runs,
+function Hero({
   workspaceId,
-  projects,
-  label,
-  empty,
+  workspaceName,
+  role,
+  window,
+  noProjects,
+  canCreateProject,
+  live,
 }: {
-  runs: RunSummary[];
   workspaceId: string;
-  projects: Map<string, Project>;
-  label: string;
-  empty: string;
+  workspaceName: string;
+  role: string;
+  window: { from: string; to: string };
+  noProjects: boolean;
+  canCreateProject: boolean;
+  live: ReactNode;
 }) {
-  if (runs.length === 0) return <p className="text-fg-muted">{empty}</p>;
+  const { t, i18n } = useTranslation();
+  const lastDay = new Date(Date.parse(window.to) - 1).toISOString();
   return (
-    <ul aria-label={label}>
-      {runs.map((r) => (
-        <RunLine key={r.id} run={r} workspaceId={workspaceId} projectName={projects.get(r.project_id)?.name} />
-      ))}
-    </ul>
+    <Card variant="featured" className="rounded-xl p-5 md:p-6" id="dashboard-hero">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            {/* Строки бренда — как у владельца (английский); lang для экранных дикторов (WCAG 3.1.2). */}
+            <p lang="en" className="text-2xl font-semibold text-fg md:text-display" data-testid="hero-title">
+              {t('dashboard.hero.title')}
+            </p>
+            <p lang="en" className="text-base text-fg-muted">
+              {t('dashboard.hero.subtitle')}
+            </p>
+          </div>
+          {live}
+        </div>
+        <p className="text-sm text-fg-muted">
+          {t('dashboard.hero.workspace', { workspace: workspaceName, role: t(`enums.workspace_role.${role}`, { defaultValue: role }) })}
+        </p>
+        <p className="text-xs text-fg-muted">
+          {t('dashboard.hero.window', { days: DASHBOARD_WINDOW_DAYS, from: formatDate(window.from, i18n.language), to: formatDate(lastDay, i18n.language) })}
+        </p>
+        {noProjects ? (
+          <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-surface p-4" data-testid="empty-state">
+            <h2 className="text-lg font-semibold text-fg">{t('dashboard.hero.noProjectsTitle')}</h2>
+            <p className="text-sm text-fg-muted">{canCreateProject ? t('dashboard.hero.noProjectsDescription') : t('dashboard.hero.noProjectsReadOnly')}</p>
+            {canCreateProject ? (
+              <ButtonLink to={`/w/${workspaceId}/projects/new`} variant="primary" icon="plus">
+                {t('dashboard.hero.createProject')}
+              </ButtonLink>
+            ) : null}
+          </div>
+        ) : null}
+        <nav aria-label={t('dashboard.hero.actions')} className="flex flex-wrap gap-2">
+          <ButtonLink to={`/w/${workspaceId}/mission-control`} icon="missionControl" size="sm">
+            {t('dashboard.hero.missionControl')}
+          </ButtonLink>
+          <ButtonLink to={`/w/${workspaceId}/projects`} icon="folder" size="sm" variant="outline">
+            {t('dashboard.hero.projects')}
+          </ButtonLink>
+          <ButtonLink to={`/w/${workspaceId}/approvals`} icon="approval" size="sm" variant="outline">
+            {t('dashboard.hero.approvals')}
+          </ButtonLink>
+          <ButtonLink to={`/w/${workspaceId}/analytics`} icon="analytics" size="sm" variant="outline">
+            {t('dashboard.hero.analytics')}
+          </ButtonLink>
+        </nav>
+      </div>
+    </Card>
   );
 }
 
-function DashboardContent({ workspaceId, canCreateProject }: { workspaceId: string; canCreateProject: boolean }) {
+function DashboardContent({ workspaceId, workspaceName, role }: { workspaceId: string; workspaceName: string; role: string }) {
   const { t } = useTranslation();
-  const projectsQuery = useQuery({
-    queryKey: projectKeys.summary(workspaceId),
-    queryFn: ({ signal }) => projectsApi.list(workspaceId, { limit: DASHBOARD_PROJECTS_LIMIT }, signal),
-  });
-  const runsQuery = useQuery({
-    queryKey: [...runKeys.list(workspaceId), 'dashboard'] as const,
-    queryFn: ({ signal }) => runsApi.list(workspaceId, { limit: DASHBOARD_RUNS_LIMIT }, signal),
-  });
-
-  if (projectsQuery.isPending || runsQuery.isPending) return <LoadingState label={t('dashboard.loading')} />;
-  if (projectsQuery.isError) return <ErrorState error={projectsQuery.error} onRetry={() => void projectsQuery.refetch()} />;
-
-  const projects = new Map(projectsQuery.data.items.map((p) => [p.id, p]));
-  const projectCount = projectsQuery.data.next_cursor
-    ? t('dashboard.countMore', { count: projectsQuery.data.items.length })
-    : String(projectsQuery.data.items.length);
-
-  if (projectsQuery.data.items.length === 0) {
-    return (
-      <EmptyState
-        icon="folder"
-        title={t('dashboard.noProjectsTitle')}
-        description={canCreateProject ? t('dashboard.noProjectsDescription') : t('dashboard.noProjectsReadOnly')}
-        action={
-          canCreateProject ? (
-            <ButtonLink to={`/w/${workspaceId}/projects/new`} variant="primary">
-              {t('dashboard.createProject')}
-            </ButtonLink>
-          ) : undefined
-        }
-      />
-    );
-  }
-
-  if (runsQuery.isError) {
-    return (
-      <>
-        <dl className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatTile label={t('dashboard.stat.projects')} value={projectCount} />
-        </dl>
-        <ErrorState error={runsQuery.error} onRetry={() => void runsQuery.refetch()} title={t('dashboard.runsError')} />
-      </>
-    );
-  }
-
-  const summary = summarizeRuns(runsQuery.data.items);
-  const sample = runsQuery.data.items.length;
-  const sampleHint = t('dashboard.sampleHint', { count: sample });
-  const columns: Column<RunSummary>[] = [
-    {
-      id: 'objective',
-      header: t('dashboard.col.objective'),
-      rowHeader: true,
-      cell: (r) => (
-        <Link to={runHref(workspaceId, r)} className="line-clamp-2 break-words text-link underline">
-          {r.objective}
-        </Link>
-      ),
-      sortValue: (r) => r.objective,
-    },
-    { id: 'project', header: t('dashboard.col.project'), cell: (r) => projects.get(r.project_id)?.name ?? '—', sortValue: (r) => projects.get(r.project_id)?.name },
-    { id: 'mode', header: t('dashboard.col.mode'), cell: (r) => t(`enums.run_mode.${r.mode}`, { defaultValue: r.mode }), sortValue: (r) => r.mode },
-    { id: 'status', header: t('dashboard.col.status'), cell: (r) => <StatusBadge kind="run" status={r.status} />, sortValue: (r) => r.status },
-    { id: 'created', header: t('dashboard.col.created'), cell: (r) => <RelativeTime value={r.created_at} />, sortValue: (r) => r.created_at },
-  ];
+  const window = useDashboardWindow();
+  const analytics = useAnalytics(workspaceId, window);
+  const activeRuns = useActiveRuns(workspaceId);
+  const projects = useActiveProjects(workspaceId);
+  const live = useDashboardLive(workspaceId);
+  const projectNames = useMemo(() => new Map((projects.data?.items ?? []).map((p) => [p.id, p.name])), [projects.data]);
+  const runProjects = useMemo(() => new Map((activeRuns.data?.items ?? []).map((r) => [r.id, r.project_id])), [activeRuns.data]);
+  const liveIndicator = <LiveIndicator state={live.state} onReconnect={live.reconnect} />;
 
   return (
-    <div className="flex flex-col gap-6">
-      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile label={t('dashboard.stat.projects')} value={projectCount} />
-        <StatTile label={t('dashboard.stat.active')} value={String(summary.active.length)} hint={sampleHint} />
-        <StatTile label={t('dashboard.stat.attention')} value={String(summary.attention.length)} hint={sampleHint} />
-        <StatTile label={t('dashboard.stat.failed')} value={String(summary.failed)} hint={sampleHint} />
-      </dl>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card as="section" id="dashboard-attention" title={t('dashboard.attentionTitle')}>
-          <RunList
-            runs={summary.attention}
-            workspaceId={workspaceId}
-            projects={projects}
-            label={t('dashboard.attentionTitle')}
-            empty={t('dashboard.attentionEmpty')}
-          />
-        </Card>
-        <Card as="section" id="dashboard-active" title={t('dashboard.activeTitle')}>
-          <RunList
-            runs={summary.active}
-            workspaceId={workspaceId}
-            projects={projects}
-            label={t('dashboard.activeTitle')}
-            empty={t('dashboard.activeEmpty')}
-          />
-        </Card>
-      </div>
-
-      <section aria-labelledby="dashboard-recent-title">
-        <h2 id="dashboard-recent-title" className="mb-3 text-lg font-semibold">
-          {t('dashboard.recentTitle')}
+    <div className="flex flex-col gap-4 xl:gap-5">
+      <Hero
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        role={role}
+        window={window}
+        noProjects={projects.data?.items.length === 0}
+        canCreateProject={can(role, 'project:create')}
+        live={liveIndicator}
+      />
+      <section aria-labelledby="dashboard-kpi-title">
+        <h2 id="dashboard-kpi-title" className="sr-only">
+          {t('dashboard.kpi.label')}
         </h2>
-        <Table
-          caption={t('dashboard.recentTitle')}
-          columns={columns}
-          rows={summary.recent}
-          rowKey={(r) => r.id}
-          empty={t('dashboard.recentEmpty')}
-        />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 xl:gap-5" data-testid="kpi-grid">
+          <ProjectsTile workspaceId={workspaceId} activeRuns={activeRuns} />
+          <AgentsTile workspaceId={workspaceId} />
+          <CompletedTile analytics={analytics} window={window} />
+          <QualityTile analytics={analytics} window={window} />
+          <SecurityTile workspaceId={workspaceId} />
+          <ApprovalsTile workspaceId={workspaceId} />
+          <ProvidersTile workspaceId={workspaceId} role={role} analytics={analytics} />
+          <WorkflowSuccessTile analytics={analytics} window={window} />
+        </div>
       </section>
-
-      <nav aria-label={t('dashboard.quickLinks')} className="flex flex-wrap gap-3">
-        <ButtonLink to={`/w/${workspaceId}/projects`} icon="folder">
-          {t('dashboard.link.projects')}
-        </ButtonLink>
-        <ButtonLink to={`/w/${workspaceId}/approvals`} icon="approval">
-          {t('dashboard.link.approvals')}
-        </ButtonLink>
-        <ButtonLink to={`/w/${workspaceId}/providers`} icon="terminal">
-          {t('dashboard.link.providers')}
-        </ButtonLink>
-      </nav>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 xl:gap-5">
+        <ActivityTimeline workspaceId={workspaceId} liveEvents={live.events} liveState={live.state} onReconnect={live.reconnect} runProjects={runProjects} />
+        <ActiveWorkflows workspaceId={workspaceId} runs={activeRuns} projectNames={projectNames} />
+        <AgentPerformance analytics={analytics} />
+        <QualityOverview analytics={analytics} />
+        {can(role, 'system:health') ? <SystemHealthPanel workspaceId={workspaceId} role={role} /> : null}
+      </div>
     </div>
   );
 }
 
-/** P7-03 Dashboard: сводка workspace — проекты, идущие runs, runs, требующие внимания, последние runs. */
-export function DashboardPage() {
+/**
+ * Bento Dashboard (F3, план §3.2) — стартовый экран workspace: hero, 8 KPI-плиток из реальных
+ * операций (listProjects, GET /tasks, analytics, GET /findings, listApprovals, listProviders),
+ * лента активности (GET /activity + поток workspace), активные процессы, результаты агентов,
+ * обзор качества (D-8) и состояние системы (B2, только owner/admin). Каждое число подписано
+ * источником/окном/выборкой; нет данных ≠ 0; интегральной «оценки качества» нет (D-6).
+ */
+export default function DashboardPage() {
   const { t } = useTranslation();
   const { workspaceId, membership } = useCurrentWorkspace();
 
@@ -227,7 +152,7 @@ export function DashboardPage() {
   return (
     <section aria-labelledby="page-title">
       <PageHeading title={t('dashboard.pageTitle', { workspace: membership.name })} />
-      <DashboardContent key={workspaceId} workspaceId={workspaceId} canCreateProject={can(membership.role, 'project:create')} />
+      <DashboardContent key={workspaceId} workspaceId={workspaceId} workspaceName={membership.name} role={membership.role} />
     </section>
   );
 }

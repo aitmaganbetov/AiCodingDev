@@ -78,6 +78,7 @@ flowchart LR
 | `cli.output` | cli_execution | worker-exec, исполнение CLI (`aicd_orchestration.cli_output.CliOutputPublisher`, sink `ExecutionGateway.run`): санитизированное нормализованное событие; ≤ 20 событий/с на run, избыток — одним коалесцированным событием | форма SSE `cli_output`: `execution_id`, `task_id`, `provider`, `agent_role`, `cli_seq`, `cli_event_type`, `stream?`, `text?`, `redactions?`, `truncated?`, `coalesced_count?`, `dropped_chunks?`, `tool_kind?`, `tool_phase?`, `target?`, `warning_code?`, `execution_status?`, `artifact_id?` (у `finished` — полный санитизированный вывод, artifact `cli_output`) | `cli.output` | — |
 | `acp.message_rejected` | agent_message | отказ валидации ACP | `rejection_code`, `reason`, `type`, `from_role`, `payload_sha256` | — (только activity/audit) | — |
 | `chat.message` | chat_message | `INSERT chat_messages`: сообщение пользователя (`USER_TEXT`), сообщение поручения (`DIRECTIVE`), проекция ACP (`AGENT_MESSAGE`), выдержка CLI (`CLI_HIGHLIGHT`, worker-exec) | форма SSE `chat_message`: `chat_message_id`, `thread_id`, `scope`, `message_kind`, `sender_type`, `sender_id?`, `sender_role?`, `provider?`, `task_id?`, `target_role?`, `mentions[]`, `body`, `created_at`, `directive_id?`, `approval_id?`, `acp_type?`, `links?`, `source_event_id?` | `chat.message` | — |
+| `review.comment` (UI redesign B5, ADR-0015) | review_thread | команды inline-комментариев ревью кода (`aicd_collaboration.review_comments`): создание треда, ответ, правка комментария, resolve/unresolve, отправка ревью (по событию на тред ревью) | `action` (`thread_created`/`comment_created`/`comment_edited`/`thread_resolved`/`thread_unresolved`/`review_submitted`), `thread_id`, `comment_id?`, `review_id?`, `repository_id`, `task_id?`, `commit_sha`, `side`, `file_path`, `start_line`, `end_line`, `status`, `actor_id`, `occurred_at` — **без тела комментария** (клиент перечитывает `GET /review-threads/{id}`) | `review.comment` (только треды с `run_id`; треды репозитория без run — через REST) | — |
 | `directive.state_changed` | directive | переход Directive FSM (в т. ч. `RECEIVED → IMPACT_ANALYSIS_PENDING` при приёме) | `directive_id`, `directive_type`, `from`/`from_status`, `to`/`to_status`, `version`, `reason?` | `directive.state_changed` | orchestrator (шаги `IMPACT_ANALYSIS_PENDING`, `CONFIRMED`) |
 | `directive.ack_changed` | directive | изменение `directive_acknowledgements` | `directive_id`, `directive_type`, `status`, `recipient_role`, `recipient_task_id?`, `ack_status`, `execution_id?`, `at` | `directive.state_changed` (поле `recipients`) | — |
 | `directive.impact_ready` | directive | impact analysis завершён (`directive_impacts` записаны) | `directive_id`, `summary`, `impacts[{task_id, impact_type}]`, `requires_confirmation`, `approval_id?`, `expected_run_version` | `directive.impact_ready` | — |
@@ -91,6 +92,7 @@ flowchart LR
 | `github.verification.requested` | github_verification | запрос проверки подключения GitHub (`aicd_orchestration.github_verification`) | `verification_id`, `kind` | — | github |
 | `github.webhook.received` | github_webhook_delivery | SQL-функция `sys_github_webhook_receive` (миграция 0012): подпись валидна, событие в allowlist, не дубль | `delivery_id`, `delivery_guid`, `event`, `action?`, `installation_id?`, `hint` | — (глобальное, без `workspace_id`) | github (`process_webhook`) |
 | `worktree.orphan_removed` | worktree | восстановление: удалён осиротевший worktree (diff сохранён артефактом) | `task_id`, `diff_artifact_id?` | — | — |
+| `notification.created` | notification | `INSERT notifications` потребителем `notifications.project` (`aicd_collaboration.notifications.record`, воркер orchestrator; UI redesign B8): по одной строке на получателя | `notification_id`, `kind` | — (не проецируется в `run_event_log`; поток workspace читает строки `notifications` пользователя и отдаёт кадр `notification.created`, §3.2a) | worker-outbox: только сигнал `aicd:ws:{workspace_id}` после commit (`sse.WORKSPACE_SIGNAL_TYPES`) |
 
 Правило: новый `event_type` добавляется в код и в эту таблицу одним изменением — иначе `tests/contract/test_event_catalog.py` падает (формат имени — CHECK `outbox_events`, миграция 0003).
 
@@ -145,7 +147,7 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
     "event_id": {"type": "string", "format": "uuid"},
     "run_id": {"type": "string", "format": "uuid"},
     "seq": {"type": ["integer", "null"], "minimum": 1, "description": "null только для heartbeat"},
-    "type": {"enum": ["run.state_changed", "task.state_changed", "agent.message", "cli.output", "directive.impact_ready", "directive.state_changed", "approval.requested", "approval.decided", "gate.completed", "run.completed", "chat.message", "heartbeat"]},
+    "type": {"enum": ["run.state_changed", "task.state_changed", "agent.message", "cli.output", "directive.impact_ready", "directive.state_changed", "approval.requested", "approval.decided", "gate.completed", "run.completed", "chat.message", "review.comment", "heartbeat"]},
     "timestamp": {"type": "string", "format": "date-time"},
     "schema_version": {"const": "1.0"},
     "source_event_id": {"type": ["string", "null"], "format": "uuid", "description": "outbox event_id, из которого спроецировано"},
@@ -163,7 +165,8 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
     {"if": {"properties": {"type": {"const": "approval.decided"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/approval_decided"}}}},
     {"if": {"properties": {"type": {"const": "gate.completed"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/gate_completed"}}}},
     {"if": {"properties": {"type": {"const": "run.completed"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/run_completed"}}}},
-    {"if": {"properties": {"type": {"const": "chat.message"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/chat_message"}}}}
+    {"if": {"properties": {"type": {"const": "chat.message"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/chat_message"}}}},
+    {"if": {"properties": {"type": {"const": "review.comment"}}}, "then": {"properties": {"payload": {"$ref": "#/$defs/review_comment"}}}}
   ],
   "$defs": {
     "uuid": {"type": "string", "format": "uuid"},
@@ -390,6 +393,27 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
         },
         "created_at": {"type": "string", "format": "date-time"}
       }
+    },
+    "review_comment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["action", "thread_id", "repository_id", "commit_sha", "side", "file_path", "start_line", "end_line", "status", "actor_id", "occurred_at"],
+      "description": "ADR-0015 §6: изменение треда inline-комментариев; тело комментария не передаётся (GET /review-threads/{thread_id})",
+      "properties": {
+        "action": {"enum": ["thread_created", "comment_created", "comment_edited", "thread_resolved", "thread_unresolved", "review_submitted"]},
+        "thread_id": {"$ref": "#/$defs/uuid"},
+        "comment_id": {"type": ["string", "null"], "format": "uuid"},
+        "review_id": {"type": ["string", "null"], "format": "uuid"},
+        "repository_id": {"$ref": "#/$defs/uuid"},
+        "task_id": {"type": ["string", "null"], "format": "uuid"},
+        "commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+        "side": {"enum": ["base", "head"]},
+        "file_path": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "status": {"enum": ["OPEN", "RESOLVED"]},
+        "actor_id": {"$ref": "#/$defs/uuid"},
+        "occurred_at": {"type": "string", "format": "date-time"}
+      }
     }
   }
 }
@@ -404,6 +428,174 @@ data: {"event_id":"…","run_id":"…","seq":1042,"type":"task.state_changed","t
 - heartbeat: `event: heartbeat`, `data: {"type":"heartbeat","workspace_id":"…","timestamp":"…"}` без `id:` (контракт `WorkspaceSseHeartbeat`);
 - пробуждение — Redis `aicd:ws:{workspace_id}` (worker-outbox после commit, только сигнал), опрос раз в 5 с как страховка;
 - поток не терминальный (сервер закрывает его по max lifetime 30 мин, при отзыве доступа и удалении участника).
+
+**Персональные уведомления (UI redesign B8, ADR-0016).** Тип `notification.created` в том же потоке — новые строки `notifications` **текущего пользователя** (RLS `user_id = app_current_user()`; другие участники workspace их не получают). Уведомления создаёт потребитель outbox `notifications.project` из событий `approval.requested`, `approval.decided`, `run.completed`, `run.state_changed` (→ `BLOCKED`), `directive.state_changed`, `external_action.state_changed` (`pr_create`/`pr_merge`), `gate.completed` (критические находки) — набор видов и получателей в API_DESIGN §13.2; в той же транзакции пишется outbox `notification.created` (§2.2), после публикации которого worker-outbox подаёт сигнал `aicd:ws:{workspace_id}`. Поток выбирает строки журнала run и уведомления одним запросом в порядке `(created_at, event_id)`, поэтому курсор `id:` (время записи/создания, микросекунды epoch), перекрытие 60 с и окно повтора 24 ч общие для обоих источников. Данные кадра — схема ниже (контракт `SseNotificationCreated`): `seq = null`, `event_id` = id уведомления, `payload` = `Notification` (как в `GET /notifications`), без секретов и без payload доменных событий. Фильтр `types` потока принимает `notification.created`.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicodingdev.local/contracts/events/1.0/notification-event.schema.json",
+  "title": "NotificationSseEvent",
+  "description": "data: кадра notification.created потока workspace (GET /workspaces/{id}/events): новое персональное уведомление текущего пользователя (строка notifications, миграция 0020). id: кадра — курсор потока (created_at, микросекунды epoch). Содержимое — шаблонный заголовок, редактированная выжимка и идентификаторы; без секретов и payload доменных событий.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "run_id",
+    "seq",
+    "type",
+    "timestamp",
+    "schema_version",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "= payload.id (notifications.id)"
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "seq": {
+      "type": "null"
+    },
+    "type": {
+      "const": "notification.created"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "payload": {
+      "$ref": "#/$defs/notification"
+    }
+  },
+  "$defs": {
+    "uuid_or_null": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "severity",
+        "title",
+        "body",
+        "project_id",
+        "run_id",
+        "task_id",
+        "resource_type",
+        "resource_id",
+        "data",
+        "created_at",
+        "read_at",
+        "read"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "approval.requested",
+            "approval.decided",
+            "run.completed",
+            "run.failed",
+            "run.blocked",
+            "directive.awaiting_confirmation",
+            "directive.acknowledged",
+            "directive.completed",
+            "directive.failed",
+            "pull_request.merged",
+            "pull_request.failed",
+            "finding.critical"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "success",
+            "warning",
+            "error"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "project_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "run_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "task_id": {
+          "$ref": "#/$defs/uuid_or_null"
+        },
+        "resource_type": {
+          "enum": [
+            "approval",
+            "run",
+            "directive",
+            "gate_execution",
+            "external_action"
+          ]
+        },
+        "resource_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 12,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "read_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "read": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
+```
 
 ### 3.3 Правила проекции outbox → SSE
 
@@ -521,6 +713,7 @@ UI обязан показывать «доставлено», «принято 
 | Chat | `UNIQUE(thread_id, source_event_id, projection_index)` |
 | Directives API | `Idempotency-Key` (`idempotency_keys`) + `expected_run_version` |
 | GitHub webhooks | `github_webhook_deliveries.delivery_guid UNIQUE` |
+| Уведомления (B8) | `processed_events(notifications.project, event_id)` в одной tx с записью + `notifications UNIQUE(workspace_id, user_id, source_event_id, kind)`; клиент потока — по `event_id` (= id уведомления) |
 
 ## 6. Порядок и retention
 
@@ -539,6 +732,7 @@ UI обязан показывать «доставлено», «принято 
 | `outbox_events` (опубликованные) | 7 дней | удаление |
 | `processed_events` | 30 дней | удаление |
 | `run_event_log` | 90 дней после терминального статуса run | архив NDJSON в объектное хранилище (sha256 в `artifacts`), удаление строк |
+| `notifications` (персональные уведомления, B8) | 90 дней от создания (прочитанные и нет) | удаление (`aicd_platform.retention`, `retention_notifications_days`) |
 | `agent_activity_events` (включая `cli.*`) | 180 дней | архив + удаление |
 | `agent_messages`, `chat_messages`, `user_directives`, `directive_*` | срок жизни проекта; архив через 1 год | архив |
 | raw CLI logs (artifacts `raw_log`) | 30 дней | удаление объекта, метаданные остаются |

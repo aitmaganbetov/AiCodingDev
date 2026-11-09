@@ -94,7 +94,9 @@ async def submit_review(
     if run is None:
         raise ProblemError("not_found")
     if run["status"] in fsm.TERMINAL["run"]:
-        raise ProblemError("invalid_state_transition", detail="Run завершён", extensions={"current_status": run["status"]})
+        raise ProblemError(
+            "invalid_state_transition", detail="Run завершён", extensions={"current_status": run["status"]}
+        )
     if task_id is not None:
         task_run = (await conn.execute(text("SELECT run_id FROM tasks WHERE id = :id"), {"id": task_id})).first()
         if task_run is None:

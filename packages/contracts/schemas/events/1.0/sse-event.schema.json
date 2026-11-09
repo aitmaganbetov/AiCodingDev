@@ -43,6 +43,7 @@
         "gate.completed",
         "run.completed",
         "chat.message",
+        "review.comment",
         "heartbeat"
       ]
     },
@@ -264,6 +265,22 @@
         "properties": {
           "payload": {
             "$ref": "#/$defs/chat_message"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "review.comment"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/review_comment"
           }
         }
       }
@@ -1318,6 +1335,99 @@
           "format": "date-time"
         }
       }
+    },
+    "review_comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "thread_id",
+        "repository_id",
+        "commit_sha",
+        "side",
+        "file_path",
+        "start_line",
+        "end_line",
+        "status",
+        "actor_id",
+        "occurred_at"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "thread_created",
+            "comment_created",
+            "comment_edited",
+            "thread_resolved",
+            "thread_unresolved",
+            "review_submitted"
+          ]
+        },
+        "thread_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "comment_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "review_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "repository_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+        },
+        "side": {
+          "enum": [
+            "base",
+            "head"
+          ]
+        },
+        "file_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "OPEN",
+            "RESOLVED"
+          ]
+        },
+        "actor_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR-0015 §6: изменение треда inline-комментариев; тело комментария не передаётся (GET /review-threads/{thread_id})"
     }
   }
 }

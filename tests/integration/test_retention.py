@@ -578,3 +578,41 @@ async def test_retention_s3_archive_and_integrity_mismatch(
             (report.session_id, partition),
         ).fetchone() or (None,)
     assert meta is not None and meta["archive_ref"] == archived.storage_ref and meta["sha256"] == archived.sha256
+
+
+@pytest.mark.db
+async def test_retention_deletes_notifications_older_than_90_days(
+    database: testdb.TestDatabase, settings: Settings, maintenance_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """UI redesign B8 (миграция 0020): уведомления хранятся 90 дней от создания — прочитанные и нет; удаление
+    пакетами под aicd_maintenance с аудитом `maintenance.rows_deleted`."""
+    assert RetentionPeriods.from_settings(settings).notifications_days == 90
+    with connect_admin(database) as admin:
+        tenant = seed_tenant(admin)
+        rows = {}
+        for key, age, read in (("old_unread", 91, False), ("old_read", 120, True), ("fresh", 89, False)):
+            rows[key] = uuid7()
+            admin.execute(
+                "INSERT INTO notifications (id, workspace_id, user_id, kind, severity, title, resource_type,"
+                " resource_id, source_event_id, created_at, read_at) VALUES (%s, %s, %s, 'run.completed', 'success',"
+                " 't', 'run', %s, %s, now() - make_interval(days => %s),"
+                " CASE WHEN %s THEN now() - make_interval(days => %s) + interval '1 hour' END)",
+                (rows[key], tenant.workspace_id, tenant.owner_id, uuid7(), uuid7(), age, read, age),
+            )
+    job_settings = settings.model_copy(update={"retention_archive_root": tmp_path / "archive"})
+    report = await run_retention(maintenance_engine, job_settings, reason="notifications retention")
+    assert "notifications" not in report.skipped_tables and report.rows_deleted["notifications"] >= 2
+    with connect_admin(database) as admin:
+        left = {
+            r[0]
+            for r in admin.execute(
+                "SELECT id FROM notifications WHERE workspace_id = %s", (tenant.workspace_id,)
+            ).fetchall()
+        }
+        assert left == {rows["fresh"]}
+        audited = admin.execute(
+            "SELECT count(*) FROM audit_events WHERE action = 'maintenance.rows_deleted' AND resource_id = %s"
+            " AND metadata->>'table' = 'notifications'",
+            (report.session_id,),
+        ).fetchone()
+        assert audited is not None and audited[0] >= 1

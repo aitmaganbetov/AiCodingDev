@@ -38,6 +38,7 @@ export type Permission =
   | 'artifact:download'
   | 'artifact:download_raw'
   | 'audit:read'
+  | 'system:health'
   | 'github:read'
   | 'github:manage'
   | 'pull_request:create'
@@ -82,6 +83,8 @@ const MATRIX: Record<Permission, readonly WorkspaceRole[]> = {
   'artifact:download': ALL,
   'artifact:download_raw': ADMINS,
   'audit:read': ADMINS,
+  // UI redesign B2: состояние платформы (GET /system/health) — owner/admin workspace.
+  'system:health': ADMINS,
   // GitHub (P8): установки — owner/admin; PR и запрос merge — developer и выше (merge — через approval MERGE).
   'github:read': ALL,
   'github:manage': ADMINS,

@@ -11,6 +11,9 @@ export type EvidencePage = Schemas['EvidencePage'];
 export type ArtifactRef = Schemas['ArtifactRef'];
 export type GateExecution = Schemas['GateExecution'];
 export type QualityReport = Schemas['QualityReport'];
+export type WorkspaceTask = Schemas['WorkspaceTask'];
+export type WorkspaceTaskPage = Schemas['WorkspaceTaskPage'];
+export type ListWorkspaceTasksQuery = Query<'listTasks'>;
 
 export const taskKeys = {
   detail: (taskId: string) => ['task', taskId] as const,
@@ -19,6 +22,8 @@ export const taskKeys = {
   evidence: (taskId: string) => ['task', taskId, 'evidence'] as const,
   artifact: (artifactId: string) => ['artifact', artifactId, 'text'] as const,
   quality: (runId: string) => ['run', runId, 'quality'] as const,
+  /** Задачи workspace (GET /tasks, B1): префикс `['tasks', ws]` — общая инвалидация. */
+  workspace: (workspaceId: string, query: ListWorkspaceTasksQuery = {}) => ['tasks', workspaceId, query] as const,
 };
 
 /** Больше этого артефакт в браузере не открываем (только скачивание). */
@@ -30,6 +35,11 @@ export function artifactDownloadPath(artifactId: string): string {
 }
 
 export const tasksApi = {
+  /** Задачи всех run workspace с последней попыткой (UI redesign B1, G-01); «исполняются» — LEASED + RUNNING. */
+  listWorkspace(workspaceId: string, query: ListWorkspaceTasksQuery = {}, signal?: AbortSignal): Promise<WorkspaceTaskPage> {
+    return request({ method: 'GET', path: '/tasks', query, workspaceId, signal });
+  },
+
   get(taskId: string, signal?: AbortSignal): Promise<Task> {
     return request({ method: 'GET', path: `/tasks/${seg(taskId)}`, signal });
   },

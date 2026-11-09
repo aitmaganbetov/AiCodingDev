@@ -35,6 +35,7 @@ PERSISTED_TYPES: frozenset[str] = frozenset(
         "gate.completed",
         "run.completed",
         "chat.message",
+        "review.comment",  # inline-комментарии ревью кода (ADR-0015, миграция 0019)
     }
 )
 # Доменные события, проецируемые в SSE под другим типом (EVENT_SCHEMAS §2): изменение ack поручения —
@@ -168,6 +169,25 @@ _ALLOWED: dict[str, frozenset[str]] = {
             "findings",
             "duration_ms",
             "tool",
+        }
+    ),
+    # ADR-0015 §6: без тела комментария — клиент перечитывает тред по REST.
+    "review.comment": frozenset(
+        {
+            "action",
+            "thread_id",
+            "comment_id",
+            "review_id",
+            "repository_id",
+            "task_id",
+            "commit_sha",
+            "side",
+            "file_path",
+            "start_line",
+            "end_line",
+            "status",
+            "actor_id",
+            "occurred_at",
         }
     ),
     "chat.message": frozenset(

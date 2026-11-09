@@ -26,7 +26,7 @@ from tests.integration.test_sse import Env, Reader, _client, env, fast_stream, r
 from tests.support import db as testdb
 from tests.support import orchestration as orch
 from tests.support.contract import _registry, _rewrite_refs, openapi
-from tests.support.events import validate_sse
+from tests.support.events import validate_notification_event, validate_sse
 
 __all__ = ["env", "fast_stream", "redis", "server"]  # фикстуры pytest
 
@@ -50,7 +50,10 @@ def _ws_events(frames: list[dict[str, str]]) -> list[dict[str, Any]]:
         if frame.get("event") == "heartbeat":
             assert "id" not in frame
             continue
-        validate_sse(body)
+        if body["type"] == "notification.created":
+            validate_notification_event(body)
+        else:
+            validate_sse(body)
         assert frame["event"] == body["type"] and frame["id"].isdigit()
         body["_cursor"] = frame["id"]
         result.append(body)

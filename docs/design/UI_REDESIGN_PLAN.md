@@ -242,7 +242,7 @@
 | G-12 | Global search | частично (FTS) | `GET /search` | палитра по загруженным спискам | B6 |
 | G-13 | Профили агентов | `agent_profiles` | `GET /agent-profiles` | статические описания из документации | B7 (опц.) |
 | G-14 | Quality Score | — | **решение владельца о формуле** | измеренные доли (pass_rate, verified rate) | D-6 |
-| G-15 | Уведомления (прочитано/история) | нет | `notifications` (опц.) | localStorage-курсор на устройстве | B8 (опц.) |
+| G-15 | Уведомления (прочитано/история) | нет → **B8 выполнена 2026-11-09** (ADR-0016, миграция 0020): `GET /notifications`, `GET /notifications/unread-count`, `POST /notifications/mark-read`, кадры `notification.created` в `GET /workspaces/{id}/events` | `notifications` | localStorage-курсор на устройстве (до перехода UI на B8) | B8 |
 | G-16 | Remediation в Finding | нет | поле `remediation` (опц.) | ссылка на ACP FIX_REQUEST | B1 (опц.) |
 
 **Ни один GAP не закрывается выдуманными значениями.** Состояние «нет источника» — компонент `DataUnavailable` с причиной и ссылкой на документацию, а не «0», «OK» или «—» без пояснения.
@@ -656,6 +656,8 @@ Lucide (`lucide-react`), stroke 1,75, размеры 16/20/24; цвет `current
 | **B8. Notifications** | хранение/прочитано | G-15 | малое (таблица) | 3–4 д | серверные уведомления |
 
 Рекомендуемый порядок: F0 → F1 → F2 → F3 (с GAP-состояниями) ‖ B1, B2 → F4 → F5 → F6 → F7 ‖ B3 → F8 → F9; B4–B8 — по решению владельца.
+
+**B5 — выполнена 2026-11-09** (D-9, ADR-0015 «Inline-комментарии ревью кода», миграция 0019): треды/комментарии/история правок/ревью, 10 операций `reviews` (API_DESIGN §2.1, §5.6), SSE `review.comment`; комментарии агентам не доставляются — «Request changes» = поручение `CHANGE_REQUEST`, «Approve» = решение существующего approval. G-11 закрыт.
 
 ---
 

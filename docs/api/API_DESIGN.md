@@ -78,6 +78,8 @@ flowchart LR
 | Code Intelligence **(доп., UI redesign B3, G-06…G-09)** | `GET /projects/{project_id}/repositories/{repository_id}/symbols` (`listRepositorySymbols`: поиск символов READY-снимка — имя/префикс/подстрока/pg_trgm/FTS, ранжирование, курсор по снимку), `.../dependencies` (`getRepositoryDependencies`: подграф файлов вокруг `path`/`symbol`, `depth` ≤ 3, `direction`, ≤ 200 узлов / 500 рёбер, `truncated`), `.../indexing-jobs` (`listIndexingJobs`: статус, тайминги, безопасная ошибка), `GET /tasks/{task_id}/attempts/{attempt_id}/context-pack` (`getAttemptContextPack`: manifest без текста фрагментов) |
 | Worktrees **(доп., UI redesign B4, G-10)** | `GET /projects/{project_id}/worktrees` (`listProjectWorktrees`: ветка, base/head commit, run/задача, статус, время; пути хоста не отдаются) |
 | Search **(доп., UI redesign B6, G-12)** | `GET /search` (`searchWorkspace`: проекты, runs, задачи, находки, approvals, источники документации, сообщения чата — только типы, на которые есть право; trigram-индексы миграции 0018, FTS чата) |
+| Notifications **(доп., UI redesign B8, G-15)** | `GET /notifications` (`listNotifications`: персональные уведомления, непрочитанные, курсор), `GET /notifications/unread-count` (`getNotificationUnreadCount`), `POST /notifications/mark-read` (`markNotificationsRead`: по id, до уведомления включительно или все); live — кадры `notification.created` потока `GET /workspaces/{id}/events` (§13.1–13.2) |
+| Reviews **(доп., UI redesign B5, G-11; ADR-0015)** | `GET/POST /projects/{project_id}/repositories/{repository_id}/review-threads` (`listReviewThreads`/`createReviewThread`: треды inline-комментариев — якорь commit/сторона diff/файл/строки, опционально run/задача/находка; `outdated` относительно `head_sha` или последнего worktree), `GET /review-threads/{thread_id}` (`getReviewThread`, ETag), `POST /review-threads/{thread_id}/comments` (`replyReviewThread`), `POST /review-threads/{thread_id}/resolve|unresolve`, `PATCH /review-comments/{comment_id}` (`editReviewComment`: только автор, история правок), `GET /review-comments/{comment_id}/revisions`, `GET/POST /runs/{run_id}/reviews` (`listReviews`/`submitReview`: APPROVE — решение существующего approval, REQUEST_CHANGES — поручение `CHANGE_REQUEST`, COMMENT; §5.6). Комментарии агентам не доставляются |
 
 Обоснование дополнений: auth — без них невозможна cookie-сессия (ADR-0009); members — RBAC требует управления ролями (AC-12); `GET /runs`, `GET .../repositories`, `GET .../directives`, `GET /tasks/{id}/attempts`, `GET /approvals/{id}`, `GET /evidence/{id}` — экраны Dashboard/Run Graph/Task Detail/Evidence (ТЗ §11) без них не строятся; `confirm`/`cancel` директивы — шаг «confirm» из ТЗ §8.2 не имеет эндпоинта в таблице; artifacts download — evidence ссылается на artifact (AC-14); health — эксплуатация (ТЗ §16); findings/transitions, review контроля и применимость контролей проекта — экраны Quality/Standards & Compliance Phase 7: жизненный цикл находок и вердикт человека по контролю (QUALITY_GATES §5.3, §8.2) и утверждение применимости admin (ТЗ §13) без них невыполнимы (OQ-43 (d)).
 
@@ -96,7 +98,7 @@ flowchart LR
 
 | Случай | Источник workspace |
 |---|---|
-| `/projects/{id}`, `/runs/{id}`, `/tasks/{id}`, `/evidence/{id}`, `/artifacts/{id}`, `/approvals/{id}`, `/documentation/sources/{id}`, вложенные коллекции | Колонка `workspace_id` ресурса (денормализована, ADR-0008) |
+| `/projects/{id}`, `/runs/{id}`, `/tasks/{id}`, `/evidence/{id}`, `/artifacts/{id}`, `/approvals/{id}`, `/documentation/sources/{id}`, `/review-threads/{id}`, `/review-comments/{id}` (резолверы миграции 0019), вложенные коллекции | Колонка `workspace_id` ресурса (денормализована, ADR-0008) |
 | `POST /runs` | `projects.workspace_id` по `project_id` из тела |
 | `/workspaces/{workspace_id}/members` | Путь |
 | `GET/POST /projects`, `GET /runs`, `GET /approvals`, `GET/POST /documentation/sources`, `GET /technologies`, `GET /providers`, `POST /providers/{id}/probe`, `GET /providers/{id}/probes/{probe_request_id}`, `PATCH /providers/{id}/settings`, `GET /audit-events`, `GET /tasks`, `GET /findings`, `GET /providers/{id}/executions`, `GET /activity`, `GET /system/health`, `GET /agent-profiles` (UI redesign B1/B2/B7), `GET /search` (B6) | Заголовок `X-Workspace-Id` (обязателен) |
@@ -148,6 +150,10 @@ flowchart LR
 | `github:read` | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `github:manage` | ✔ | ✔ | — | — | — |
 | `pull_request:create`, `pull_request:merge` (запрос merge; решение — approval `MERGE`, §5.3) | ✔ | ✔ | ✔ | — | — |
+| `notification:read`, `notification:update` (только свои уведомления, UI redesign B8, §13.2) | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `review:read` (inline-комментарии ревью, UI redesign B5, ADR-0015) | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `review:write` (тред, ответ, правка **своего**, resolve/unresolve) | ✔ | ✔ | ✔ | ✔ | — |
+| `review:submit` (`x-permission-depends-on: verdict`, §5.6) | ✔ | ✔ | ✔ | ✔ без `REQUEST_CHANGES` | — |
 
 ¹ Любой аутентифицированный пользователь; инсталляционная настройка `allow_workspace_creation` (по умолчанию `true` для single-team self-hosted) может ограничить создание.
 ² `APPROVE`/`REJECT` через чат — только для approvals, которые пользователь вправе решать (§5.3).
@@ -200,6 +206,12 @@ flowchart LR
 | `GET /findings` (UI redesign B1) | quality:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /providers/{id}/executions` (UI redesign B1) | provider:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /system/health` (UI redesign B2) | system:health | ✔ | ✔ | — | — | — |
+| `GET /notifications`, `GET /notifications/unread-count` (UI redesign B8; только свои) | notification:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST /notifications/mark-read` (UI redesign B8; только свои) | notification:update | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `GET …/repositories/{repository_id}/review-threads`, `GET /review-threads/{id}`, `GET /review-comments/{id}/revisions`, `GET /runs/{id}/reviews` (UI redesign B5) | review:read | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `POST …/review-threads`, `POST /review-threads/{id}/comments|resolve|unresolve` (B5) | review:write | ✔ | ✔ | ✔ | ✔ | — |
+| `PATCH /review-comments/{id}` (B5) | review:write | своё | своё | своё | своё | — |
+| `POST /runs/{id}/reviews` (B5) | review:submit (§5.6) | ✔ | ✔ | ✔ | частично | — |
 | `GET /search` (UI redesign B6; дополнительно право на каждый тип результата: run:read, quality:read, approval:read, documentation:read, chat:read — типы без права пропускаются, `skipped_types`) | project:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `GET /integrations/github/installations`, `GET /projects/{id}/pull-requests` (P8) | github:read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `POST /integrations/github/installations[/setup]`, `DELETE …/installations/{id}` (P8) | github:manage | ✔ | ✔ | — | — | — |
@@ -245,6 +257,16 @@ flowchart LR
 Причина (`reason`) обязательна для любого перехода; `FIXED`/`VERIFIED_FIXED` выставляет только Verification Engine (QUALITY_GATES §5.3). Переход вне FSM ⇒ `409 invalid_state_transition` (`current_status`). Решение записывает пользователь сессии (`resolved_by`, триггер БД 0008), ETag находки — `findings.version` (миграция 0010), `If-Match` обязателен. Отказ по роли аудируется (`authz.denied`, `permission = finding:triage:<to_status>`).
 
 `compliance:review` (reviewer+; роль проверяется и в БД — `sys_record_compliance_review`, ≥ `approval_min_role('MANUAL_REVIEW')`): вердикт `PASS`/`FAIL` с обоснованием и evidence этого run для контроля `manual`/`document_check`/`agent_review` в `MANUAL_REVIEW`/`UNVERIFIED` или переопределение `UNVERIFIED` автоматического контроля. Контроль, вердикт которого выставил gate (`PASS`/`FAIL`), `NOT_APPLICABLE`, неутверждённая применимость или терминальный run ⇒ `409 invalid_state_transition`; evidence не этого run / не `VERIFIED` для `PASS` ⇒ `422`. Применимость и `blocking` контроля утверждает `admin` (`project:update`, ТЗ §13).
+
+### 5.6 Ревью кода (`review:submit`, `x-permission-depends-on: verdict`; UI redesign B5, ADR-0015)
+
+| `verdict` | reviewer | developer / admin / owner | Действие |
+|---|:-:|:-:|---|
+| `COMMENT` | ✔ | ✔ | только запись ревью (`review_submissions`) |
+| `APPROVE` | ✔ если §5.3 разрешает | ✔ если §5.3 разрешает | решение существующего `PENDING` approval этого run (`approval_id` обязателен) тем же путём, что `POST /approvals/{id}/decision`: роль по `action_type`, four-eyes, step-up |
+| `REQUEST_CHANGES` | — | ✔ | поручение `CHANGE_REQUEST` (как §5.4; цель — `task_id` или run) с замечаниями открытых тредов как недоверенным текстом |
+
+Комментарии (`review:write`) агентам **не доставляются**: воздействие на исполнение — только `submitReview` через конвейер поручений/approvals (impact analysis, подтверждение, ограждение `fence_untrusted`). Правка комментария — только автор (`403`, аудит `authz.denied` `review:write:own`); удаления нет, прежние редакции — `GET /review-comments/{id}/revisions`. Отказ по вердикту — `403`, аудит `authz.denied` (`review:submit:<verdict>`).
 
 ## 6. Ошибки: RFC 7807 `application/problem+json`
 
@@ -298,7 +320,7 @@ flowchart LR
 
 ## 8. Idempotency-Key
 
-- **Обязателен** на всех POST-командах: `/workspaces`, `/workspaces/{id}/members`, `/projects`, `/projects/{id}/repositories`, `/runs`, `/runs/{id}/pause|resume|cancel`, `/runs/{id}/chat/messages`, `/runs/{id}/directives`, `.../directives/{id}/confirm|cancel`, `/providers/{id}/probe`, `/approvals/{id}/decision`, `/documentation/sources`, `/documentation/sources/{id}/refresh`, `/findings/{id}/transitions`, `/runs/{id}/compliance/{control_id}/review`, `/projects/{id}/controls/{control_id}/approval`. Не требуется: `/auth/login`, `/auth/logout`, все `GET`, `PATCH` (защищены `If-Match`), `DELETE` (идемпотентен по семантике + `If-Match`).
+- **Обязателен** на всех POST-командах: `/workspaces`, `/workspaces/{id}/members`, `/projects`, `/projects/{id}/repositories`, `/runs`, `/runs/{id}/pause|resume|cancel`, `/runs/{id}/chat/messages`, `/runs/{id}/directives`, `.../directives/{id}/confirm|cancel`, `/providers/{id}/probe`, `/approvals/{id}/decision`, `/documentation/sources`, `/documentation/sources/{id}/refresh`, `/findings/{id}/transitions`, `/runs/{id}/compliance/{control_id}/review`, `/projects/{id}/controls/{control_id}/approval`, `…/repositories/{repository_id}/review-threads`, `/review-threads/{id}/comments|resolve|unresolve`, `/runs/{id}/reviews` (B5). Не требуется: `/auth/login`, `/auth/logout`, все `GET`, `PATCH` (защищены `If-Match`), `DELETE` (идемпотентен по семантике + `If-Match`).
 - Формат: 8–255 символов `[A-Za-z0-9._:-]`; рекомендуется UUIDv4/v7, генерируемый клиентом на «намерение пользователя» (одна кнопка — один ключ, переиспользуется при повторах после сетевой ошибки).
 - **Scope и хранение:** таблица `idempotency_keys`, `UNIQUE (workspace_id, user_id, key)` — для `POST /workspaces` `workspace_id IS NULL`, поэтому ограничение объявляется `UNIQUE NULLS NOT DISTINCT` (PostgreSQL ≥ 15). `request_hash` = SHA-256 от `method + path-template + resolved path params + canonical JSON тела (RFC 8785) + If-Match`. Хранение **24 ч** (`expires_at`), очистка retention-джобом.
 - **Алгоритм:**
@@ -313,7 +335,7 @@ flowchart LR
 
 ## 9. Оптимистичная конкурентность: ETag / If-Match / version
 
-- Ресурсы с версией отдают **сильный** `ETag: "v<version>"`: `Workspace` (`workspaces.version`, getWorkspace/updateWorkspace; поле `Workspace.version` в этих ответах, OQ-45 (f)), `Project` (`projects.version` — см. §19), `DocumentationPolicy` и `ProviderSettings` (`settings_version`), `Run`, `Task`, `Directive`, `Approval`, `Member`, `Finding` (`findings.version`, миграция 0010).
+- Ресурсы с версией отдают **сильный** `ETag: "v<version>"`: `Workspace` (`workspaces.version`, getWorkspace/updateWorkspace; поле `Workspace.version` в этих ответах, OQ-45 (f)), `Project` (`projects.version` — см. §19), `DocumentationPolicy` и `ProviderSettings` (`settings_version`), `Run`, `Task`, `Directive`, `Approval`, `Member`, `Finding` (`findings.version`, миграция 0010), `ReviewThread` (`review_threads.version`) и `ReviewComment` (`review_comments.revision`) — миграция 0019; `POST /review-threads/{id}/resolve|unresolve` и `PATCH /review-comments/{id}` требуют `If-Match`.
 - `PATCH` и `DELETE` **требуют** `If-Match` (нет ⇒ `428 precondition_required`, не совпал ⇒ `412 precondition_failed` с актуальным `ETag`).
 - `POST /approvals/{id}/decision`, `.../directives/{id}/confirm|cancel`, `POST /findings/{id}/transitions` также требуют `If-Match` — решение принимается по той версии, которую видел человек.
 - `POST /runs/{id}/pause|resume|cancel` — `If-Match` необязателен (команда «остановить всё» должна работать и из устаревшего UI); если передан и не совпал — `412`.
@@ -337,6 +359,8 @@ flowchart LR
 | Неаутентифицированные (кроме health) | IP | 60/мин |
 | `GET /system/health` (UI redesign B2; поверх лимита чтения; ответ кэшируется на сервере 10 с) | user | 30/мин |
 | `GET /search` (UI redesign B6; поверх лимита чтения; `rate_limit_search_per_minute`) | user | 60/мин |
+| Inline-комментарии ревью (UI redesign B5: создание треда, ответ, правка, resolve/unresolve) | user | 60/мин |
+| Отправка ревью `POST /runs/{id}/reviews` (B5) | user + run | 30/мин |
 | SSE-подключения | user | 5 одновременных; 30 подключений/мин |
 
 ## 11. Асинхронные команды и `202 Accepted`
@@ -445,7 +469,34 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 - **Возобновление:** `Last-Event-ID` = последний принятый `cursor`. `seq` разных run не упорядочен, а `created_at` строки (= начало транзакции worker-outbox) может оказаться меньше уже отданного, пока транзакция не зафиксирована, поэтому сервер повторяет события с **перекрытием 60 с** (`created_at ≥ cursor − 60 с`, keyset `(created_at, event_id)`): в пределах соединения дубли отсекаются по `event_id`, между соединениями клиент **обязан** дедуплицировать по `event_id`. Гарантия — at-least-once при задержке фиксации транзакции worker-outbox < 60 с. Без `Last-Event-ID` — от текущего момента минус перекрытие. Курсор старше **24 ч** ⇒ `410 replay_window_exceeded` (до начала потока): клиент перечитывает REST и подключается без `Last-Event-ID`; неверный формат ⇒ `422`.
 - **Пробуждение:** Redis pub/sub `aicd:ws:<workspace_id>` (worker-outbox публикует после commit пачки, `dispatch_batch(notify_workspace=…)`); потеря сигнала компенсируется опросом раз в 5 с. Данные — только из PostgreSQL.
 - **Доступ и лимиты:** `run:read` в workspace пути (не член ⇒ `404`); повторная проверка членства каждые 60 с и по сигналу `aicd:access:<user_id>` (удаление участника закрывает поток); heartbeat каждые 15 с — `event: heartbeat`, `data: {"type":"heartbeat","workspace_id":…,"timestamp":…}` без `id:`; общий с потоками run лимит 5 соединений на пользователя (6-й ⇒ `429`) и 250 на процесс; max lifetime 30 мин; `sse.connect` (resource `workspace`) агрегируется — одно событие на сессию+workspace в час.
-- **Индекс:** выборка идёт по `workspace_id` (префикс `ix_run_event_log_ws_run`) с фильтром `created_at`; отдельный индекс `(workspace_id, created_at)` — кандидат в миграцию при росте журнала (без новой миграции в Phase 8).
+- **Индекс:** выборка идёт по `workspace_id` (префикс `ix_run_event_log_ws_run`) с фильтром `created_at`; отдельный индекс `(workspace_id, created_at)` — кандидат в миграцию при росте журнала (без новой миграции в Phase 8). Миграция 0017 добавила `ix_run_event_log_ws_created (workspace_id, created_at, event_id)`.
+- **Персональные уведомления (UI redesign B8, §13.2):** тип `notification.created` (входит в поток по умолчанию, принимается фильтром `types`) — новые строки `notifications` **текущего пользователя** (RLS; другие участники их не получают). Источники выбираются одним запросом `UNION ALL` в порядке `(created_at, event_id)`, поэтому курсор, перекрытие 60 с и окно 24 ч общие; `data` — `SseNotificationCreated` (`seq = null`, `event_id` = id уведомления, `payload` = `Notification`). Пробуждение — тот же канал `aicd:ws:<workspace_id>`: worker-outbox подаёт его после публикации outbox-события `notification.created`.
+
+### 13.2 Персональные уведомления: `/notifications` (доп., UI redesign B8, G-15; ADR-0016)
+
+Серверная история уведомлений с отметкой «прочитано» (раньше — только курсор в `localStorage` устройства). Уведомление принадлежит одному пользователю в одном workspace; видит и отмечает его только он (RLS `notifications`: `user_id = app_current_user()`).
+
+**Генерация** — только воркер: потребитель outbox `notifications.project` (очередь `notifications`, воркер orchestrator; `aicd_orchestration.notifications`) перечитывает состояние агрегата и пишет по строке на получателя + outbox `notification.created` в одной транзакции с отметкой `processed_events` (at-least-once; второй барьер — `UNIQUE (workspace_id, user_id, source_event_id, kind)`). Минимальный набор:
+
+| Событие outbox | Условие | `kind` (`severity`) | Получатели |
+|---|---|---|---|
+| `approval.requested` | approval ещё `PENDING` и не истёк | `approval.requested` (`warning`; `error` при `risk_level = critical`) | участники, которые **могут решить** его (§5.3: роль ≥ `required_role`, four-eyes — без инициатора, исключение single-member) — то же правило, что `listApprovals?decidable_by_me`; включая approvals без run (`DOCS_DOWNLOAD`, `VULN_DB_UPDATE`) |
+| `approval.decided` | `APPROVED` / `REJECTED` / `EXPIRED` | `approval.decided` (`success` / `warning`) | инициатор-пользователь (`requested_by_type = user`), если решал не он сам |
+| `run.completed` | `final_status = COMPLETED` / `FAILED` | `run.completed` (`success`) / `run.failed` (`error`) | автор run (`runs.requested_by`) |
+| `run.state_changed` | переход в `BLOCKED` (не `BLOCKED → BLOCKED`) | `run.blocked` (`warning`, `data.blocked_reason`) | автор run |
+| `directive.state_changed` | `AWAITING_CONFIRMATION` / `ACKNOWLEDGED` / `COMPLETED` / `FAILED`, `REJECTED` | `directive.awaiting_confirmation` / `.acknowledged` / `.completed` / `.failed` | автор поручения (`submitted_by`) |
+| `external_action.state_changed` | `pr_merge → CONFIRMED`; `pr_create`/`pr_merge → FAILED` | `pull_request.merged` (`success`) / `pull_request.failed` (`error`) | автор run |
+| `gate.completed` | `findings.critical > 0` | `finding.critical` (`error`, `data.critical`, `data.gate_type`) | автор run |
+
+Не уведомляют: отмена run (`CANCELLED` — инициирует сам пользователь или каскад), прочие переходы; наблюдателей run и упоминаний пользователей в v1 нет (упоминания чата адресованы ролям агентов) — расширение набора = новое значение `NotificationKind` + миграция CHECK. Персональные настройки (отключение видов) в v1 не реализованы.
+
+**Содержимое:** шаблонный `title`, `body` — редактированная (`redact_text`) однострочная выжимка ≤ 300 символов (цель run или описание запроса approval), идентификаторы для ссылок (`project_id`, `run_id`, `task_id`, `resource_type` + `resource_id`) и `data` — ≤ 12 скаляров (`action_type`, `status`, `final_status`, `blocked_reason`, `directive_type`, `critical`, `gate_type`, `external_ref`). Payload доменных событий, вывод CLI, тексты агентов и секреты не копируются. Хранение — 90 дней от создания (`retention_notifications_days`); при удалении участника его уведомления в workspace удаляются (FK `ON DELETE CASCADE`).
+
+**API** (заголовок `X-Workspace-Id`; не член ⇒ `404`):
+
+- `GET /notifications` (`notification:read`) — новые сверху, keyset `(created_at, id)` desc, `unread_only`, `kind[]` (≤ 12), `cursor`/`limit`; ответ `NotificationPage` с `unread_count`;
+- `GET /notifications/unread-count` (`notification:read`) — `{unread_count, latest_unread_at}`;
+- `POST /notifications/mark-read` (`notification:update`, `Idempotency-Key`) — ровно одно из `notification_ids` (≤ 100; чужие/несуществующие игнорируются), `up_to` (все до уведомления включительно по `(created_at, id)`; чужое/несуществующее ⇒ `404`, неотличимо), `all: true`; уже прочитанные не меняются (`read_at` — первое прочтение), «непрочитано» не поддерживается; ответ `{marked, unread_count}`; аудит `notification.marked_read` (metadata: режим и число, без id).
 
 ## 14. Санитизация вывода и artifacts
 
@@ -505,6 +556,9 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 | `repository.attach` | repositories | `repository` |
 | `run.create`, `run.pause_requested`, `run.resume_requested`, `run.cancel_requested` | runs | `run` |
 | `chat.message.create` | chat/messages | `chat_message` |
+| `review.thread.create`, `review.thread.resolve`, `review.thread.unresolve` (metadata — якорь, `from`/`to`; без тела) | review-threads (B5) | `review_thread` |
+| `review.comment.create`, `review.comment.edit` (metadata `thread_id`, `revision`; без тела) | review-threads/comments, review-comments (B5) | `review_comment` |
+| `review.submit` (metadata `verdict`, `thread_ids`, `approval_id`/`directive_id`; вложенные `approval.decide`/`directive.submit`) | `POST /runs/{id}/reviews` (B5) | `review_submission` |
 | `directive.submit`, `directive.confirm`, `directive.cancel` | directives | `user_directive` |
 | `approval.decide` | decision | `approval` |
 | `finding.transition` | findings/transitions (metadata `from`/`to`/`severity`) | `finding` |
@@ -517,6 +571,7 @@ data: {"event_id":"0193...","run_id":"0193...","seq":42,"type":"task.state_chang
 | `artifact.download` | artifacts | `artifact` |
 | `audit.query` | `GET /audit-events` | `audit_log` |
 | `sse.connect` (агрегировано) | events | `run`; поток workspace — `workspace` |
+| `notification.marked_read` (metadata `mode` = `ids`/`up_to`/`all`, `marked`) | `POST /notifications/mark-read` | `workspace` |
 | `authz.denied` | любой `403` на небезопасном методе | целевой ресурс |
 
 Чтения (`x-audit-action: none`) не аудируются, кроме чувствительных (artifact download, audit query). `404` на чужие ресурсы и `403` на `GET` идут в метрики безопасности (`authz_denied_total`), а не в audit, чтобы исключить флуд. Действия воркеров (FSM-переходы, запуск CLI, gates, external actions) пишут audit сами (ТЗ §23 «Аудит»), API их не дублирует.

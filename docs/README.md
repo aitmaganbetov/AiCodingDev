@@ -87,7 +87,7 @@
 | `auth_status` (CLI) | `UNKNOWN`, `AUTHENTICATED`, `AUTH_REQUIRED`, `EXPIRED`, `ERROR` |
 | `provider_availability` | `AVAILABLE`, `DEGRADED`, `RATE_LIMITED`, `UNAVAILABLE` |
 | `normalized_cli_event` | `started`, `output`, `tool_event`, `artifact`, `warning`, `finished` |
-| `sse_event_type` | `run.state_changed`, `task.state_changed`, `agent.message`, `cli.output`, `directive.impact_ready`, `directive.state_changed`, `approval.requested`, `approval.decided`, `gate.completed`, `run.completed`, `chat.message`, `heartbeat` |
+| `sse_event_type` | `run.state_changed`, `task.state_changed`, `agent.message`, `cli.output`, `directive.impact_ready`, `directive.state_changed`, `approval.requested`, `approval.decided`, `gate.completed`, `run.completed`, `chat.message`, `review.comment`, `heartbeat` |
 
 ## 4. Общие проектные соглашения
 

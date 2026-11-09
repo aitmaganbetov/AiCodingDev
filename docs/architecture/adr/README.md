@@ -21,3 +21,4 @@ ADR-0001…0006 зафиксированы в ТЗ §22 как утверждё�
 | [0013](ADR-0013-contracts-location-and-codegen.md) | Размещение контрактов и генерация кода | Accepted |
 | [0014](ADR-0014-frontend-architecture.md) | Архитектура frontend | Accepted |
 | [0015](ADR-0015-inline-review-comments.md) | Inline-комментарии ревью кода (UI redesign B5) | Accepted |
+| [0016](ADR-0016-server-notifications.md) | Серверные персональные уведомления (UI redesign B8) | Accepted |

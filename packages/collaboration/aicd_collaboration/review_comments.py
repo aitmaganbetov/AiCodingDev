@@ -167,7 +167,9 @@ async def load_thread(conn: AsyncConnection, thread_id: uuid.UUID) -> dict[str, 
     return dict(row) if row else None
 
 
-async def load_comments(conn: AsyncConnection, thread_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, list[dict[str, Any]]]:
+async def load_comments(
+    conn: AsyncConnection, thread_ids: Iterable[uuid.UUID]
+) -> dict[uuid.UUID, list[dict[str, Any]]]:
     ids = list(dict.fromkeys(thread_ids))
     out: dict[uuid.UUID, list[dict[str, Any]]] = {i: [] for i in ids}
     if not ids:
@@ -344,9 +346,7 @@ async def _validate_links(
     if task_id is not None and run_id is None:
         raise ProblemError("validation_error", errors=[FieldError("/run_id", "required", "обязателен при task_id")])
     if run_id is not None:
-        run_repo = (
-            await conn.execute(text("SELECT repository_id FROM runs WHERE id = :id"), {"id": run_id})
-        ).first()
+        run_repo = (await conn.execute(text("SELECT repository_id FROM runs WHERE id = :id"), {"id": run_id})).first()
         if run_repo is None:
             raise ProblemError("not_found")
         if run_repo[0] != repository_id:
@@ -653,9 +653,7 @@ async def record_submission(
     )
     for thread in threads:
         await conn.execute(
-            text(
-                "INSERT INTO review_submission_threads (workspace_id, review_id, thread_id) VALUES (:ws, :r, :t)"
-            ),
+            text("INSERT INTO review_submission_threads (workspace_id, review_id, thread_id) VALUES (:ws, :r, :t)"),
             {"ws": workspace_id, "r": review_id, "t": thread["id"]},
         )
         await emit(conn, thread, "review_submitted", actor_id=user_id, review_id=review_id)

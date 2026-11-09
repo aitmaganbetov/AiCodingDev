@@ -196,3 +196,16 @@ def test_catalog_aggregates_and_names_match_code() -> None:
         assert EVENT_TYPE_RE.fullmatch(event_type), event_type
         if event_type in code:
             assert {aggregate} == {a for a, _ in code[event_type]}, (event_type, aggregate, code[event_type])
+
+
+def test_notification_consumer_sources_and_signal_types_are_catalogued() -> None:
+    """UI redesign B8: события-источники уведомлений и `notification.created` (сигнал потоку workspace без проекции
+    в run_event_log) — строки каталога §2.2; `notification.created` не входит в типы журнала run."""
+    from aicd_orchestration.notifications import SOURCE_EVENT_TYPES
+    from aicd_platform import sse
+
+    docs = catalog()
+    assert set(SOURCE_EVENT_TYPES) <= set(docs), sorted(set(SOURCE_EVENT_TYPES) - set(docs))
+    assert sse.WORKSPACE_SIGNAL_TYPES.issubset(docs)
+    assert not sse.WORKSPACE_SIGNAL_TYPES & sse.PROJECTED_TYPES
+    assert docs["notification.created"] == "notification"

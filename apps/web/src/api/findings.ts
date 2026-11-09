@@ -9,6 +9,7 @@ export type FindingStatus = Schemas['FindingStatus'];
 export type FindingTransitionRequest = JsonBody<'transitionFinding'>;
 export type FindingTargetStatus = FindingTransitionRequest['to_status'];
 export type ListFindingsQuery = Query<'listRunFindings'>;
+export type ListWorkspaceFindingsQuery = Query<'listFindings'>;
 
 export const FINDING_SEVERITIES: readonly FindingSeverity[] = ['critical', 'high', 'medium', 'low', 'info'];
 export const FINDING_STATUSES: readonly FindingStatus[] = ['OPEN', 'ACKNOWLEDGED', 'FIXED', 'VERIFIED_FIXED', 'FALSE_POSITIVE', 'ACCEPTED_RISK'];
@@ -17,6 +18,8 @@ export const findingKeys = {
   list: (runId: string, query: ListFindingsQuery = {}) => ['findings', runId, query] as const,
   all: (runId: string) => ['findings', runId] as const,
   detail: (findingId: string) => ['finding', findingId] as const,
+  /** Находки workspace (GET /findings, B1). */
+  workspace: (workspaceId: string, query: ListWorkspaceFindingsQuery = {}) => ['findings', 'workspace', workspaceId, query] as const,
 };
 
 /**
@@ -48,6 +51,11 @@ export function acceptedRiskBlockedByProfile(severity: FindingSeverity, profile:
 }
 
 export const findingsApi = {
+  /** Находки всех run workspace (UI redesign B1, G-02): порядок — severity desc, затем created_at, id. */
+  listWorkspace(workspaceId: string, query: ListWorkspaceFindingsQuery = {}, signal?: AbortSignal): Promise<FindingPage> {
+    return request({ method: 'GET', path: '/findings', query, workspaceId, signal });
+  },
+
   list(runId: string, query: ListFindingsQuery = {}, signal?: AbortSignal): Promise<FindingPage> {
     return request({ method: 'GET', path: `/runs/${seg(runId)}/findings`, query, signal });
   },

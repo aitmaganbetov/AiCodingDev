@@ -86,6 +86,8 @@ CONTROLS: Final[dict[str, Control]] = {
             I + "test_runs_api.py::test_runs_are_tenant_isolated_and_role_checked",
             I + "test_api_projects.py::test_role_restrictions",
             I + "test_workspace_aggregates_api.py::test_rbac_matrix",
+            I + "test_review_comments_api.py::test_rbac_matrix",
+            I + "test_notifications.py::test_rbac_every_role_reads_and_marks_own",
         )
     ),
     "SC-IAM-08": Control((S + "test_step_up.py",)),
@@ -98,7 +100,10 @@ CONTROLS: Final[dict[str, Control]] = {
             S + "test_rls.py",
             M + "test_orchestration_invariants.py::test_tenant_tables_isolated",
             M + "test_security_hardening_migration.py::test_verification_table_rls_grants_and_terminal_states",
+            M + "test_review_comments_migration.py::test_review_tables_forced_rls_and_grants",
+            M + "test_review_comments_migration.py::test_rls_isolates_review_rows_between_workspaces",
             M + "test_workspace_read_models_migration.py::test_sys_outbox_backlog_returns_only_aggregate",
+            M + "test_notifications_migration.py::test_rls_owner_sees_only_own_rows_and_only_marks_read",
         ),
         tz20=("cross-tenant",),
     ),
@@ -114,6 +119,7 @@ CONTROLS: Final[dict[str, Control]] = {
         (
             S + "test_rls.py::test_composite_fk_blocks_cross_tenant_reference",
             M + "test_orchestration_invariants.py::test_cross_run_dependency_rejected",
+            M + "test_review_comments_migration.py::test_thread_anchor_author_and_fsm_invariants",
         ),
         tz20=("cross-tenant",),
     ),
@@ -121,6 +127,7 @@ CONTROLS: Final[dict[str, Control]] = {
         (
             S + "test_cross_tenant_all_operations.py",
             S + "test_cross_tenant_api.py",
+            I + "test_review_comments_api.py::test_cross_workspace_is_indistinguishable",
             I + "test_artifact_download.py::test_expired_missing_foreign_and_unknown_are_404",
             I + "test_sse.py::test_non_member_gets_404_and_activity",
             I + "test_workspace_events.py::test_workspace_stream_errors_and_isolation",
@@ -128,6 +135,8 @@ CONTROLS: Final[dict[str, Control]] = {
             I + "test_findings_standards_api.py::test_non_members_get_404_and_anonymous_401",
             I + "test_repository_explorer.py::test_workspace_isolation",
             I + "test_workspace_aggregates_api.py::test_foreign_workspace_is_404_and_foreign_filters_are_empty",
+            I + "test_notifications.py::test_foreign_workspace_and_anonymous",
+            I + "test_notifications.py::test_list_filters_pagination_and_isolation",
         ),
         tz20=("cross-tenant",),
     ),
@@ -143,6 +152,7 @@ CONTROLS: Final[dict[str, Control]] = {
         (
             I + "test_sse.py::test_revoked_member_stream_closes",
             I + "test_workspace_events.py::test_workspace_stream_closes_after_member_removed",
+            I + "test_notifications.py::test_notification_frames_on_workspace_stream",
         ),
         "partial",
         "Данные клиенту — только из run_event_log после authz (проверено); префиксы ключей Redis по workspace "
@@ -304,6 +314,9 @@ CONTROLS: Final[dict[str, Control]] = {
             U + "test_redaction.py",
             I + "test_fake_adapter.py::test_secrets_redacted_in_events_and_raw_log",
             I + "test_quality_api.py::test_evidence_fields_links_and_redaction",
+            I + "test_review_comments_api.py::test_secrets_redacted_on_write_and_read",
+            I + "test_notifications.py::test_approval_recipients_follow_decider_rules",
+            I + "test_notifications.py::test_run_gate_and_pr_events",
         ),
         tz20=("secret leakage",),
     ),
@@ -328,7 +341,12 @@ CONTROLS: Final[dict[str, Control]] = {
     ),
     # --- INJ ---------------------------------------------------------------------------------------------
     "SC-INJ-01": Control(
-        (U + "test_prompt_injection_corpus.py", U + "test_prompt_assembly.py"), tz20=("prompt injection",)
+        (
+            U + "test_prompt_injection_corpus.py",
+            U + "test_prompt_assembly.py",
+            I + "test_review_request_changes_flow.py",  # комментарий ревью → поручение: ограждение (ADR-0015)
+        ),
+        tz20=("prompt injection",),
     ),
     "SC-INJ-02": Control(
         (
@@ -352,6 +370,9 @@ CONTROLS: Final[dict[str, Control]] = {
     "SC-INJ-05": Control(
         (
             I + "test_directives.py::test_rbac_version_mismatch_and_idempotency",
+            I + "test_review_comments_api.py::test_submit_review_paths",
+            I + "test_review_request_changes_flow.py",
+            U + "test_rbac.py::test_review_rules",
             U + "test_rbac.py::test_directive_rules",
         ),
         tz20=("prompt injection",),
@@ -506,7 +527,15 @@ CONTROLS: Final[dict[str, Control]] = {
     "SC-AUD-02": Control(
         (), "manual", "Hash chain + WORM-якорь — P9 приоритет P2, не реализовано (THREAT_MODEL TH-34 residual)."
     ),
-    "SC-AUD-03": Control((S + "test_audit_coverage.py", I + "test_api_projects.py::test_audit_trail_records_actions")),
+    "SC-AUD-03": Control(
+        (
+            S + "test_audit_coverage.py",
+            I + "test_api_projects.py::test_audit_trail_records_actions",
+            I + "test_review_comments_api.py::test_thread_lifecycle_contract_audit_and_sse",
+            M + "test_review_comments_migration.py::test_comment_edit_history_is_append_only",
+            I + "test_notifications.py::test_mark_read_is_audited",
+        )
+    ),
     "SC-AUD-04": Control(
         (S + "test_cross_tenant_api.py::test_foreign_workspace_is_invisible",),
         "partial",
@@ -558,7 +587,7 @@ CONTROLS: Final[dict[str, Control]] = {
     ),
     "SC-DATA-02": Control((), "manual", "Шифрование at rest — doctor/ops (P9-05)."),
     "SC-DATA-03": Control((U + "test_backup_crypto.py",), "partial", "Restore drill — ops (P9-05)."),
-    "SC-DATA-04": Control((I + "test_retention.py",)),
+    "SC-DATA-04": Control((I + "test_retention.py",)),  # в т.ч. уведомления 90 дней (миграция 0020)
     "SC-DATA-05": Control(
         (
             U + "test_artifacts_fs.py::test_immutable_and_integrity",
@@ -623,6 +652,7 @@ CONTROLS: Final[dict[str, Control]] = {
             I + "test_runs_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
             I + "test_github_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
             I + "test_workspace_aggregates_api.py::test_contract_fuzz_never_5xx_and_responses_conform",
+            I + "test_notifications.py::test_contract_fuzz_never_5xx_and_responses_conform",
         )
     ),
     "SC-API-02": Control(

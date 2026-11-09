@@ -264,8 +264,9 @@ flowchart LR
 | TH-63 | P2 → worker проверки GitHub | D | **Флуд запросов проверки GitHub** / вечный PENDING | 2 | 2 | medium | SC-API-02, терминальный `FAILED github_unavailable` | low | Integration: `test_github_api` |
 | TH-64 | P2 `POST /auth/reauthenticate` | S, D | **Подбор пароля через step-up** живой сессией; блокировка владельца | 2 | 3 | high | SC-IAM-06 (общий счётчик блокировки), SC-API-02 (5/мин на пользователя + лимит IP), SC-AUD-03 | low | Security: `test_step_up::test_reauthenticate_is_rate_limited_per_user`, `test_rate_limits` |
 | TH-65 | P2 приём вебхуков | D, T | **Поддельные доставки с GUID будущих подлинных** (блокировка обработки), флуд неподписанных вебхуков | 3 | 2 | high | SC-GH-01, SC-GH-02 (строка REJECTED не блокирует подлинную доставку), SC-API-02 | low | Integration: `test_github_api::test_webhook_signature_dedup_replay_and_limits` |
+| TH-66 | P2 Code Review: inline-комментарии (UI redesign B5, ADR-0015) | T, E, I, R | **Инъекция и обход через inline-комментарий ревью**: текст комментария (скопирован из чужого PR, поддельные ограждения, «approve yourself», запрос секретов) доставляется агенту в обход impact analysis/подтверждения или исполняется; «Approve» в редакторе утверждает merge/план/gates в обход approvals; IDOR чужих тредов, подмена автора, правка чужого комментария, стирание сказанного, секреты в теле | 2 | 4 | high | SC-INJ-05 (комментарий агенту — только поручением `CHANGE_REQUEST` через `submitReview`; у `aicd_worker` нет прав на таблицы), SC-INJ-01 (`fence_untrusted` + nonce-ограждение, сканер инъекций), SC-INJ-02, SC-IAM-07 (`review:*`, REQUEST_CHANGES — developer+, APPROVE — только существующий approval по §5.3), SC-TEN-01, SC-TEN-04, SC-SEC-03 (редакция при записи и чтении), SC-AUD-03 (аудит без тела; правки версионируются, удаления нет) | low | Integration: `test_review_request_changes_flow`, `test_review_comments_api`; Migration: `test_review_comments_migration`; Security: `test_cross_tenant_all_operations` |
 
-Итого: **65 угроз** (TH-01…TH-65; TH-53…TH-65 — пересмотр P9).
+Итого: **66 угроз** (TH-01…TH-66; TH-53…TH-65 — пересмотр P9; TH-66 — UI redesign B5, ADR-0015).
 
 ---
 
@@ -404,8 +405,9 @@ flowchart LR
 | TH-63 | medium | low | `monitored` | SC-API-02 |
 | TH-64 | high | low | `closed` | SC-IAM-06, SC-API-02, SC-AUD-03 |
 | TH-65 | high | low | `closed` | SC-GH-01, SC-GH-02, SC-API-02 |
+| TH-66 | high | low | `closed` | SC-INJ-05, SC-INJ-01, SC-INJ-02, SC-IAM-07, SC-TEN-01, SC-TEN-04, SC-SEC-03, SC-AUD-03 |
 
-**Сводка (P9):** угроз — 65; high/critical (inherent или residual) — 53; открытых — 0; принятых рисков, ожидающих решения владельца, — 3 (OQ-48).
+**Сводка (P9, дополнено UI redesign B5):** угроз — 66; high/critical (inherent или residual) — 54; открытых — 0; принятых рисков, ожидающих решения владельца, — 3 (OQ-48).
 
 ## 11. Пересмотр Phase 9 (P9-07)
 

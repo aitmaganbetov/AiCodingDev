@@ -43,7 +43,7 @@ router = APIRouter(tags=["runs"])
 SseEventType = Literal[
     "run.state_changed", "task.state_changed", "agent.message", "cli.output", "directive.impact_ready",
     "directive.state_changed", "approval.requested", "approval.decided", "gate.completed", "run.completed",
-    "chat.message", "heartbeat",
+    "chat.message", "review.comment", "heartbeat",
 ]  # fmt: skip
 Limit = Annotated[int, Query(ge=1, le=MAX_LIMIT)]
 Cursor = Annotated[str | None, Query(max_length=1024)]

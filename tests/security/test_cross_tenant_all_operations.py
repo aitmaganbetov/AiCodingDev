@@ -96,6 +96,19 @@ async def victim(admin: psycopg.Connection, app_engine: AsyncEngine) -> Victim:
         " VALUES (%s, %s, 'installation', '{\"installation_id\": 1}', %s)",
         (verification, tenant.workspace_id, tenant.owner_id),
     )
+    # Тред и комментарий ревью жертвы (ADR-0015): автор — пользователь сессии (триггер миграции 0019).
+    thread, comment = uuid7(), uuid7()
+    admin.execute("SELECT set_config('app.user_id', %s, false)", (str(tenant.owner_id),))
+    admin.execute(
+        "INSERT INTO review_threads (id, workspace_id, repository_id, run_id, task_id, commit_sha, file_path,"
+        " start_line, end_line, created_by) VALUES (%s, %s, %s, %s, %s, %s, 'src/app.py', 1, 2, %s)",
+        (thread, tenant.workspace_id, tenant.repository_id, run, task, commit, tenant.owner_id),
+    )
+    admin.execute(
+        "INSERT INTO review_comments (id, workspace_id, thread_id, author_id, body) VALUES (%s, %s, %s, %s, 'victim')",
+        (comment, tenant.workspace_id, thread, tenant.owner_id),
+    )
+    admin.execute("SELECT set_config('app.user_id', '', false)")
     provider = admin.execute("SELECT id FROM cli_providers ORDER BY code LIMIT 1").fetchone()
     assert provider is not None
     ids = {
@@ -120,6 +133,9 @@ async def victim(admin: psycopg.Connection, app_engine: AsyncEngine) -> Victim:
         "pull_request_id": str(uuid7()),
         # Попытка задачи жертвы (getAttemptContextPack): `task_id` пути — тоже ресурс жертвы.
         "attempt_id": str(attempt),
+        # Inline-комментарии ревью (UI redesign B5): настоящие тред и комментарий жертвы.
+        "thread_id": str(thread),
+        "comment_id": str(comment),
     }
     return Victim(tenant, ids)
 
@@ -225,7 +241,12 @@ async def test_victim_data_unchanged(victim: Victim, admin: psycopg.Connection) 
     row = admin.execute(
         "SELECT (SELECT status FROM approvals WHERE id = %s), (SELECT status FROM runs WHERE id = %s),"
         " (SELECT count(*) FROM workspace_members WHERE workspace_id = %s),"
-        " (SELECT status FROM findings WHERE id = %s)",
-        (victim.ids["approval_id"], victim.ids["run_id"], victim.ids["workspace_id"], victim.ids["finding_id"]),
-    ).fetchone()
-    assert row == ("PENDING", "RUNNING", 1, "OPEN")
+        " (SELECT status FROM findings WHERE id = %s),"
+        " (SELECT status || ':' || version FROM review_threads WHERE id = %s),"
+        " (SELECT body || ':' || revision FROM review_comments WHERE id = %s),"
+        " (SELECT count(*) FROM review_comments WHERE thread_id = %s),"
+        " (SELECT count(*) FROM review_submissions WHERE run_id = %s)",
+        (victim.ids["approval_id"], victim.ids["run_id"], victim.ids["workspace_id"], victim.ids["finding_id"],
+         victim.ids["thread_id"], victim.ids["comment_id"], victim.ids["thread_id"], victim.ids["run_id"]),
+    ).fetchone()  # fmt: skip
+    assert row == ("PENDING", "RUNNING", 1, "OPEN", "OPEN:1", "victim:1", 1, 0)
