@@ -31,6 +31,7 @@ tags:
 - {name: system}
 - {name: agents}
 - {name: search}
+- {name: notifications}
 paths:
   /auth/login:
     post:
@@ -326,12 +327,15 @@ paths:
       summary: SSE-поток уведомлений workspace (approvals, статусы run) [дополнение к ТЗ]
       tags: [workspaces]
       description: 'Уведомления workspace (API_DESIGN §13.1, EVENT_SCHEMAS §5.1): события `approval.requested`, `approval.decided`,
-        `run.state_changed`, `run.completed` всех run workspace из `run_event_log`. Кадр: `id: <cursor>` (UTC-время записи события в
-        журнал, микросекунды epoch), `event: <type>`, `data: SseEnvelope` (поле `seq` — номер события в его run). Возобновление —
+        `run.state_changed`, `run.completed` всех run workspace из `run_event_log` и `notification.created` — новые персональные
+        уведомления текущего пользователя (строки notifications, только свои; данные — SseNotificationCreated, без seq).
+        Кадр: `id: <cursor>` (UTC-время записи события в журнал или создания уведомления, микросекунды epoch; общий порядок обоих
+        источников), `event: <type>`, `data: SseEnvelope` (поле `seq` — номер события в его run). Возобновление —
         `Last-Event-ID`: сервер повторяет события с перекрытием 60 с, клиент обязан дедуплицировать по `event_id`. Без `Last-Event-ID`
         — с текущего момента (минус перекрытие); состояние экрана клиент берёт из REST. Курсор старше 24 ч ⇒ 410 (перечитать REST и
         подключиться без Last-Event-ID). Heartbeat каждые 15 с без `id:`. Доступ проверяется при подключении, каждые 60 с и по сигналу
-        отзыва; лимиты — общие с потоками run (5 на пользователя, 30 мин). Approvals вне run (`DOCS_DOWNLOAD` без run) в поток не попадают.'
+        отзыва; лимиты — общие с потоками run (5 на пользователя, 30 мин). Approvals вне run (`DOCS_DOWNLOAD` без
+        run) в поток не попадают как события run, но уведомление `approval.requested` тем, кто может решить, приходит.'
       parameters:
       - {$ref: '#/components/parameters/WorkspaceId'}
       - name: Last-Event-ID
@@ -1657,6 +1661,126 @@ paths:
       - cookieAuth: []
       x-required-permission: run:read
       x-audit-action: none
+      x-tz-addition: true
+  /notifications:
+    get:
+      operationId: listNotifications
+      summary: Персональные уведомления в workspace [дополнение к ТЗ]
+      tags: [notifications]
+      description: 'Уведомления текущего пользователя в workspace (UI redesign B8, API_DESIGN §13.2): новые сверху, keyset по (created_at,
+        id) desc. Создаёт их только воркер из доменных событий (набор видов и получателей — API_DESIGN §13.2); видны только собственные
+        (RLS по пользователю), другие участники workspace их не видят. Содержимое — шаблонный заголовок, редактированная выжимка и
+        идентификаторы для ссылок, без секретов. `unread_count` — счётчик непрочитанных на момент ответа. Хранятся 90 дней.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - name: unread_only
+        in: query
+        schema: {type: boolean, default: false}
+        description: Только непрочитанные
+      - name: kind
+        in: query
+        schema:
+          type: array
+          items: {$ref: '#/components/schemas/NotificationKind'}
+          maxItems: 12
+        description: Повторяемый параметр
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationPage'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: notification:read
+      x-audit-action: none
+      x-tz-addition: true
+  /notifications/unread-count:
+    get:
+      operationId: getNotificationUnreadCount
+      summary: Счётчик непрочитанных уведомлений [дополнение к ТЗ]
+      tags: [notifications]
+      description: 'Число непрочитанных уведомлений текущего пользователя в workspace и время самого нового из них (бейдж колокольчика;
+        live-обновление — кадры notification.created потока streamWorkspaceEvents).'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationUnreadCount'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: notification:read
+      x-audit-action: none
+      x-tz-addition: true
+  /notifications/mark-read:
+    post:
+      operationId: markNotificationsRead
+      summary: Отметить уведомления прочитанными [дополнение к ТЗ]
+      tags: [notifications]
+      description: 'Ровно одно из: `notification_ids` (≤ 100; чужие и несуществующие id игнорируются), `up_to` (все уведомления до
+        указанного включительно по (created_at, id) — «прочитано всё, что видел»; чужой или несуществующий id ⇒ 404), `all: true`.
+        Уже прочитанные не меняются (read_at — время первого прочтения); отметку «непрочитано» API не даёт. Ответ — число отмеченных
+        и новый счётчик непрочитанных. Аудит notification.marked_read (режим и число, без id).'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NotificationMarkReadRequest'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationMarkReadResult'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: notification:update
+      x-audit-action: notification.marked_read
       x-tz-addition: true
   /runs/{run_id}/chat:
     get:
@@ -7203,8 +7327,9 @@ components:
       description: 'Значение поля data: SSE-кадра. event: = type.'
     WorkspaceSseEventType:
       type: string
-      enum: [run.state_changed, approval.requested, approval.decided, run.completed]
-      description: Подмножество SseEventType, доставляемое потоком уведомлений workspace (streamWorkspaceEvents).
+      enum: [run.state_changed, approval.requested, approval.decided, run.completed, notification.created]
+      description: 'Типы потока уведомлений workspace (streamWorkspaceEvents): подмножество SseEventType и notification.created
+        (персональные уведомления, не тип журнала run).'
     WorkspaceSseHeartbeat:
       type: object
       properties:
@@ -7219,5 +7344,112 @@ components:
       - {$ref: '#/components/schemas/SseApprovalRequested'}
       - {$ref: '#/components/schemas/SseApprovalDecided'}
       - {$ref: '#/components/schemas/SseRunCompleted'}
+      - {$ref: '#/components/schemas/SseNotificationCreated'}
       - {$ref: '#/components/schemas/WorkspaceSseHeartbeat'}
       description: 'Значение поля data: кадра потока workspace (streamWorkspaceEvents). event: = type; id: = курсор потока.'
+    NotificationKind:
+      type: string
+      enum: [approval.requested, approval.decided, run.completed, run.failed, run.blocked, directive.awaiting_confirmation, directive.acknowledged,
+        directive.completed, directive.failed, pull_request.merged, pull_request.failed, finding.critical]
+      x-proposed-enum: true
+      description: 'Вид уведомления (CHECK notifications.kind, миграция 0020). Источники и получатели — API_DESIGN §13.2.'
+    NotificationSeverity:
+      type: string
+      enum: [info, success, warning, error]
+      x-proposed-enum: true
+      description: Важность уведомления для UI.
+    NotificationResourceType:
+      type: string
+      enum: [approval, run, directive, gate_execution, external_action]
+      x-proposed-enum: true
+      description: Тип ресурса, на который ссылается уведомление (resource_id).
+    Notification:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        kind: {$ref: '#/components/schemas/NotificationKind'}
+        severity: {$ref: '#/components/schemas/NotificationSeverity'}
+        title: {type: string, minLength: 1, maxLength: 200, description: Шаблонный заголовок}
+        body: {type: string, maxLength: 1000, description: 'Редактированная выжимка (цель run, описание запроса); без секретов'}
+        project_id:
+          type: [string, 'null']
+          format: uuid
+        run_id:
+          type: [string, 'null']
+          format: uuid
+        task_id:
+          type: [string, 'null']
+          format: uuid
+        resource_type: {$ref: '#/components/schemas/NotificationResourceType'}
+        resource_id: {type: string, format: uuid}
+        data:
+          type: object
+          additionalProperties:
+            type: [string, number, integer, boolean, 'null']
+          maxProperties: 12
+          description: 'Скалярные подробности вида (action_type, status, final_status, blocked_reason, directive_type, critical, gate_type,
+            external_ref)'
+        created_at: {type: string, format: date-time}
+        read_at:
+          type: [string, 'null']
+          format: date-time
+        read: {type: boolean}
+      required: [id, kind, severity, title, body, project_id, run_id, task_id, resource_type, resource_id, data, created_at, read_at,
+        read]
+      additionalProperties: false
+    NotificationPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Notification'}
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque base64url cursor; null — конец выборки.
+        unread_count: {type: integer, minimum: 0}
+      required: [items, next_cursor, unread_count]
+      description: Страница уведомлений (cursor pagination), новые сверху.
+    NotificationUnreadCount:
+      type: object
+      properties:
+        unread_count: {type: integer, minimum: 0}
+        latest_unread_at:
+          type: [string, 'null']
+          format: date-time
+      required: [unread_count, latest_unread_at]
+    NotificationMarkReadRequest:
+      type: object
+      properties:
+        notification_ids:
+          type: array
+          items: {type: string, format: uuid}
+          minItems: 1
+          maxItems: 100
+        up_to: {type: string, format: uuid, description: 'Отметить все уведомления до этого включительно (created_at, id)'}
+        all: {type: boolean, const: true}
+      minProperties: 1
+      maxProperties: 1
+      additionalProperties: false
+      description: Ровно одно из полей.
+    NotificationMarkReadResult:
+      type: object
+      properties:
+        marked: {type: integer, minimum: 0, description: Число уведомлений, отмеченных этим запросом}
+        unread_count: {type: integer, minimum: 0}
+      required: [marked, unread_count]
+    SseNotificationCreated:
+      type: object
+      properties:
+        event_id: {type: string, format: uuid, description: '= Notification.id (дедупликация клиентом)'}
+        run_id:
+          type: [string, 'null']
+          format: uuid
+        seq: {type: 'null', description: Уведомления не имеют seq run}
+        type: {const: notification.created}
+        timestamp: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z (= created_at)'}
+        schema_version: {type: string, const: '1.0'}
+        payload: {$ref: '#/components/schemas/Notification'}
+      required: [event_id, run_id, seq, type, timestamp, schema_version, payload]
+      additionalProperties: false
+      description: 'Кадр потока workspace с новым уведомлением текущего пользователя (схема packages/contracts/schemas/events/1.0/notification-event.schema.json).
+        id: = курсор потока (время создания уведомления, микросекунды epoch).'
