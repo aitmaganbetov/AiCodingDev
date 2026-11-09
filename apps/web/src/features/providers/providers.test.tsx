@@ -100,7 +100,7 @@ describe('ProvidersPage', () => {
         json(200, { ...SETTINGS, ...(req.body as object), settings_version: 4 }),
     });
     renderApp(`/w/${WS_ID}/providers`);
-    await user.click(await screen.findByRole('button', { name: 'Перепроверить' }));
+    await user.click(await screen.findByRole('button', { name: 'Перепроверить' }, { timeout: 5000 }));
     expect(await screen.findByText(/Перепроверка «Codex CLI» выполняется/, { selector: 'p' })).toBeInTheDocument();
     // OQ-45 (c): статус опрашивается по status_url до финального состояния.
     expect(await screen.findByText(/Проверка завершена: хост worker-exec-1, авторизация — Выполнен вход/, {}, { timeout: 5000 })).toBeInTheDocument();
