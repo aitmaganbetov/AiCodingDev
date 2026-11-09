@@ -456,7 +456,7 @@ test('threads: add on a line, reply, edit own comment with history, resolve and 
 
   // Правка своего комментария: If-Match — revision, история правок.
   await mine.getByRole('button', { name: 'Изменить' }).click();
-  await mine.getByLabel('Изменить комментарий').fill('Добавьте тест на разделитель «;»');
+  await mine.getByRole('textbox', { name: 'Изменить комментарий' }).fill('Добавьте тест на разделитель «;»');
   await mine.getByRole('button', { name: 'Сохранить' }).click();
   await expect(mine.getByTestId('comment-body')).toHaveText('Добавьте тест на разделитель «;»');
   await expect(mine.getByTestId('comment-edited')).toBeVisible();

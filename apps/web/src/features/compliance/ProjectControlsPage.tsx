@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 import { IdempotentIntent } from '../../api/client';
@@ -29,6 +29,8 @@ import { can } from '../../lib/permissions';
 import { mapProblemToFields } from '../../lib/problem';
 import { useCurrentWorkspace } from '../../workspace';
 import { useWorkspaceRole } from '../quality/shared';
+import { ComplianceDisclaimer } from './ComplianceDisclaimer';
+import { filterControls, type ControlFilters } from './model';
 
 export const CONTROLS_PAGE_SIZE = 100;
 export const RATIONALE_MAX = 4000;
@@ -186,7 +188,11 @@ export function ProjectControlsPage() {
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
   const first = controls.data?.pages[0];
-  const rows = controls.data?.pages.flatMap((p) => p.items) ?? [];
+  const all = useMemo(() => controls.data?.pages.flatMap((p) => p.items) ?? [], [controls.data]);
+  const [filters, setFilters] = useState<ControlFilters>({ standard: '', applicability: '', blocking: '', q: '' });
+  const rows = useMemo(() => filterControls(all, filters), [all, filters]);
+  const standards = useMemo(() => [...new Set(all.map((c) => c.standard_code))].sort(), [all]);
+  const setFilter = <K extends keyof ControlFilters>(key: K, value: ControlFilters[K]) => setFilters((f) => ({ ...f, [key]: value }));
 
   const columns: Column<ProjectControl>[] = [
     {
@@ -283,6 +289,7 @@ export function ProjectControlsPage() {
   return (
     <section aria-labelledby="page-title">
       <PageHeading title={project.data ? t('compliance.controls.titleWithProject', { project: project.data.name }) : t('compliance.controls.title')} />
+      <ComplianceDisclaimer className="mb-4" />
       <div className="mb-4 flex flex-col gap-3">
         <p className="text-sm text-fg-muted">{t('compliance.controls.description')}</p>
         {first?.quality_profile ? (
@@ -296,23 +303,72 @@ export function ProjectControlsPage() {
           </Callout>
         ) : null}
         {!canApprove ? <p className="text-sm text-fg-muted">{t('compliance.controls.readOnly')}</p> : null}
-        <div className="flex flex-col gap-1 self-start">
-          <label htmlFor="controls-approval-state" className="text-sm font-medium">
-            {t('compliance.controls.approvalState')}
-          </label>
-          <select
-            id="controls-approval-state"
-            className="input"
-            value={approvalState}
-            onChange={(e) => setApprovalState(e.target.value as ControlApprovalState | '')}
-          >
-            <option value="">{t('quality.finding.any')}</option>
-            {APPROVAL_STATES.map((s) => (
-              <option key={s} value={s}>
-                {t(`compliance.enums.approval_state.${s}`)}
-              </option>
-            ))}
-          </select>
+        <div role="group" aria-label={t('compliance.index.controlFilters')} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="controls-approval-state" className="text-sm font-medium">
+              {t('compliance.controls.approvalState')}
+            </label>
+            <select
+              id="controls-approval-state"
+              className="input"
+              value={approvalState}
+              onChange={(e) => setApprovalState(e.target.value as ControlApprovalState | '')}
+            >
+              <option value="">{t('quality.finding.any')}</option>
+              {APPROVAL_STATES.map((s) => (
+                <option key={s} value={s}>
+                  {t(`compliance.enums.approval_state.${s}`)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="controls-standard" className="text-sm font-medium">
+              {t('compliance.col.standard')}
+            </label>
+            <select id="controls-standard" className="input" value={filters.standard} onChange={(e) => setFilter('standard', e.target.value)}>
+              <option value="">{t('quality.finding.any')}</option>
+              {standards.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="controls-q" className="text-sm font-medium">
+              {t('compliance.index.controlSearch')}
+            </label>
+            <input id="controls-q" type="search" className="input" value={filters.q} onChange={(e) => setFilter('q', e.target.value)} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="controls-applicability" className="text-sm font-medium">
+              {t('compliance.col.applicability')}
+            </label>
+            <select id="controls-applicability" className="input" value={filters.applicability} onChange={(e) => setFilter('applicability', e.target.value)}>
+              <option value="">{t('quality.finding.any')}</option>
+              {(['APPLICABLE', 'NOT_APPLICABLE', 'PENDING_REVIEW'] as const).map((a) => (
+                <option key={a} value={a}>
+                  {t(`compliance.enums.applicability.${a}`)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label htmlFor="controls-blocking" className="text-sm font-medium">
+              {t('compliance.controls.blocking')}
+            </label>
+            <select
+              id="controls-blocking"
+              className="input"
+              value={filters.blocking}
+              onChange={(e) => setFilter('blocking', e.target.value as ControlFilters['blocking'])}
+            >
+              <option value="">{t('quality.finding.any')}</option>
+              <option value="yes">{t('compliance.controls.blocks')}</option>
+              <option value="no">{t('compliance.controls.notBlocks')}</option>
+            </select>
+          </div>
         </div>
       </div>
       {controls.isPending ? (

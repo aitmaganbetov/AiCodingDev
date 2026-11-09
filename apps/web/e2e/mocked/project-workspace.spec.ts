@@ -269,7 +269,7 @@ test('worktrees (B4, no host paths), branches → files of a branch, status filt
   const branches = page.getByRole('table', { name: 'Ветки repos/payments' });
   await expect(branches.getByRole('row')).toHaveCount(3);
   await expect(branches).toContainText('по умолчанию');
-  await branches.getByRole('button', { name: 'Открыть файлы: feature/export' }).click();
+  await branches.getByRole('button', { name: /Открыть файлы\W+feature\/export/ }).click();
   await expect(page).toHaveURL(/tab=files/);
   await expect(page.getByTestId('explorer-branch')).toHaveValue('feature/export');
   await expect(page.getByTestId('explorer-resolved-commit')).toContainText('eeeeeeeeeeee');

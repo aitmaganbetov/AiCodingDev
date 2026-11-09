@@ -483,11 +483,13 @@ test('old URLs keep working: providers/audit → Settings sections (query preser
   await page.goto(`/w/${ws.id}/mission-control?run=01900000-0000-7000-8000-00000000dead`);
   await expect(page.getByTestId('error-state')).toContainText('Запуск не найден');
 
-  await page.goto(`/w/${ws.id}/security`);
+  // F8: Code Intelligence — пока «Раздел в разработке» со ссылками (Центр безопасности — экран F7).
+  await page.goto(`/w/${ws.id}/code`);
   await expect(page.getByTestId('area-placeholder')).toContainText('Раздел в разработке');
-  await expect(page.getByTestId('area-placeholder')).toContainText('F7');
-  await page.getByRole('navigation', { name: 'Связанные разделы' }).getByRole('link', { name: /Гейты качества/ }).click();
-  await expect(page).toHaveURL(`/w/${ws.id}/quality`);
+  await expect(page.getByTestId('area-placeholder')).toContainText('F8');
+  await page.goto(`/w/${ws.id}/security`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Центр безопасности' })).toBeVisible();
+  await expect(page.getByTestId('area-placeholder')).toHaveCount(0);
 });
 
 test('no horizontal page overflow at 375/768/1366/1920 (shell + Mission Control + settings), both themes; mobile drawer at 375', async ({ page, api }) => {

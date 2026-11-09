@@ -23,6 +23,7 @@ const EXPECTED = [
   'missionControl',
   'review',
   'agents',
+  'security',
 ];
 
 function leafKeys(value: unknown, prefix = ''): string[] {
@@ -45,7 +46,7 @@ describe('i18n namespaces', () => {
         owner.set(group, ns);
       }
     }
-    for (const area of ['approvals', 'providers', 'quality', 'compliance', 'knowledge', 'settings', 'audit', 'dashboard', 'chat', 'tasks', 'directives', 'projects', 'runs']) {
+    for (const area of ['approvals', 'providers', 'quality', 'compliance', 'security', 'knowledge', 'settings', 'audit', 'dashboard', 'chat', 'tasks', 'directives', 'projects', 'runs']) {
       expect(owner.get(area)).toBe(area);
     }
   });

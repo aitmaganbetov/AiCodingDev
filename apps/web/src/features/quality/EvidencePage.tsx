@@ -59,6 +59,7 @@ export function EvidencePage() {
         </span>
         <span className="font-mono text-xs">{e.kind}</span>
         <TextLink to={workspacePath(workspaceId, `quality/runs/${e.run_id}?tab=evidence`)}>{t('quality.finding.backToRun')}</TextLink>
+        <TextLink to={workspacePath(workspaceId, `compliance/runs/${e.run_id}`)}>{t('quality.openCompliance')}</TextLink>
       </div>
       {e.verification_status !== 'VERIFIED' ? (
         <Callout tone="warning" className="mb-4">
@@ -74,52 +75,62 @@ export function EvidencePage() {
           <p data-testid="evidence-complete">{t('quality.evidence.complete')}</p>
         </Callout>
       )}
-      <div className="card mb-6 flex flex-col gap-4">
-        <h2 className="text-lg font-semibold">{t('quality.evidence.execution')}</h2>
-        <FieldList label={t('quality.evidence.execution')}>
-          <Field label={t('quality.evidence.producer')}>{e.producer}</Field>
-          <Field label={t('quality.evidence.commit')} testId="evidence-commit">
-            {e.commit_sha ? <code className="break-all font-mono text-xs">{e.commit_sha}</code> : null}
-          </Field>
-          <Field label={t('quality.evidence.exitCode')} testId="evidence-exit-code">
-            {e.exit_code === null || e.exit_code === undefined ? null : String(e.exit_code)}
-          </Field>
-          <Field label={t('quality.evidence.startedAt')}>{e.started_at ? <Timestamp value={e.started_at} /> : null}</Field>
-          <Field label={t('quality.evidence.finishedAt')}>{e.finished_at ? <Timestamp value={e.finished_at} /> : null}</Field>
-          <Field label={t('quality.evidence.createdAt')}>
-            <Timestamp value={e.created_at} />
-          </Field>
-        </FieldList>
-        {e.command ? <CodeBlock code={e.command} label={t('quality.evidence.command')} wrap /> : null}
-        {e.environment && Object.keys(e.environment).length > 0 ? (
-          <CodeBlock code={JSON.stringify(e.environment, null, 2)} label={t('quality.evidence.environment')} language="json" maxHeightClass="max-h-64" />
-        ) : null}
-      </div>
-      <div className="card mb-6 flex flex-col gap-4">
-        <h2 className="text-lg font-semibold">{t('quality.evidence.artifact')}</h2>
-        <FieldList label={t('quality.evidence.artifact')}>
-          <Field label={t('quality.evidence.artifactKind')}>{e.artifact.kind}</Field>
-          <Field label={t('quality.evidence.sha256')} testId="evidence-sha256">
-            <code className="break-all font-mono text-xs">{e.artifact.sha256}</code>
-          </Field>
-          <Field label={t('quality.evidence.size')}>{formatBytes(e.artifact.size_bytes, i18n.language)}</Field>
-          <Field label={t('quality.evidence.mime')}>{e.artifact.mime_type}</Field>
-        </FieldList>
-        {canDownload ? (
-          <a className="btn-secondary self-start" href={artifactDownloadHref(e.artifact.id)}>
-            {t('quality.evidence.download')}
-          </a>
-        ) : (
-          <p className="text-sm text-fg-muted">{t('quality.evidence.downloadForbidden')}</p>
-        )}
+      <p className="mb-4 max-w-prose text-sm text-fg-muted">{t('quality.evidence.proofRule')}</p>
+      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="card flex min-w-0 flex-col gap-4">
+          <h2 className="text-lg font-semibold">{t('quality.evidence.execution')}</h2>
+          <FieldList label={t('quality.evidence.execution')}>
+            <Field label={t('quality.evidence.producer')}>{e.producer}</Field>
+            <Field label={t('quality.evidence.commit')} testId="evidence-commit">
+              {e.commit_sha ? <code className="break-all font-mono text-xs">{e.commit_sha}</code> : null}
+            </Field>
+            <Field label={t('quality.evidence.exitCode')} testId="evidence-exit-code">
+              {e.exit_code === null || e.exit_code === undefined ? null : String(e.exit_code)}
+            </Field>
+            <Field label={t('quality.evidence.startedAt')}>{e.started_at ? <Timestamp value={e.started_at} /> : null}</Field>
+            <Field label={t('quality.evidence.finishedAt')}>{e.finished_at ? <Timestamp value={e.finished_at} /> : null}</Field>
+            <Field label={t('quality.evidence.createdAt')}>
+              <Timestamp value={e.created_at} />
+            </Field>
+          </FieldList>
+          {e.command ? <CodeBlock code={e.command} label={t('quality.evidence.command')} wrap /> : null}
+          {e.environment && Object.keys(e.environment).length > 0 ? (
+            <CodeBlock code={JSON.stringify(e.environment, null, 2)} label={t('quality.evidence.environment')} language="json" maxHeightClass="max-h-64" />
+          ) : null}
+        </div>
+        <div className="card flex min-w-0 flex-col gap-4">
+          <h2 className="text-lg font-semibold">{t('quality.evidence.artifact')}</h2>
+          <FieldList label={t('quality.evidence.artifact')}>
+            <Field label={t('quality.evidence.artifactKind')}>{e.artifact.kind}</Field>
+            <Field label={t('quality.evidence.sha256')} testId="evidence-sha256">
+              <code className="break-all font-mono text-xs">{e.artifact.sha256}</code>
+            </Field>
+            <Field label={t('quality.evidence.size')}>{formatBytes(e.artifact.size_bytes, i18n.language)}</Field>
+            <Field label={t('quality.evidence.mime')}>{e.artifact.mime_type}</Field>
+          </FieldList>
+          {canDownload ? (
+            <a className="btn-secondary self-start" href={artifactDownloadHref(e.artifact.id)}>
+              {t('quality.evidence.download')}
+            </a>
+          ) : (
+            <p className="text-sm text-fg-muted">{t('quality.evidence.downloadForbidden')}</p>
+          )}
+        </div>
       </div>
       {e.links && e.links.length > 0 ? (
         <div className="card flex flex-col gap-2">
           <h2 className="text-lg font-semibold">{t('quality.evidence.links')}</h2>
           <ul className="flex flex-col gap-1 text-sm">
             {e.links.map((l) => (
-              <li key={`${l.target_type}:${l.target_id}:${l.relation}`}>
-                <span className="font-mono text-xs">{l.relation}</span> → {l.target_type} <code className="font-mono text-xs">{l.target_id}</code>
+              <li key={`${l.target_type}:${l.target_id}:${l.relation}`} className="break-words">
+                <span className="font-mono text-xs">{l.relation}</span> → {l.target_type}{' '}
+                {l.target_type === 'finding' ? (
+                  <TextLink to={workspacePath(workspaceId, `quality/findings/${l.target_id}`)}>
+                    <code className="break-all font-mono text-xs">{l.target_id}</code>
+                  </TextLink>
+                ) : (
+                  <code className="break-all font-mono text-xs">{l.target_id}</code>
+                )}
               </li>
             ))}
           </ul>

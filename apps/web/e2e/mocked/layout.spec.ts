@@ -20,11 +20,8 @@ const SECTIONS = [
   { name: 'Настройки', path: 'settings' },
 ];
 
-/** Разделы, экраны которых появятся в следующих фазах (F7, F8): «Раздел в разработке» + ссылки на существующие экраны. Агенты — экран F5 (agents.spec). */
-const PLACEHOLDERS = [
-  { path: 'code', title: 'Code Intelligence' },
-  { path: 'security', title: 'Центр безопасности' },
-];
+/** Разделы, экраны которых появятся в следующих фазах (F8): «Раздел в разработке» + ссылки на существующие экраны. Агенты — экран F5 (agents.spec), Центр безопасности — F7 (security-center.spec). */
+const PLACEHOLDERS = [{ path: 'code', title: 'Code Intelligence' }];
 
 for (const scheme of ['light', 'dark'] as const) {
   test(`a11y (${scheme}): layout and every Phase 7 placeholder route, 404 and 403 have no serious/critical axe violations`, async ({

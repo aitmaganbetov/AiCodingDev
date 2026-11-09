@@ -109,7 +109,7 @@ export function ProjectOverviewPanel({ project, workspaceId, role }: { project: 
   });
   const runsHref = `/w/${workspaceId}/projects/${project.id}/runs`;
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
       <Card as="section" id="project-overview" title={t('projects.detail.overview')} headingLevel={2}>
         {project.description ? <p className="mb-3 whitespace-pre-line break-words">{project.description}</p> : null}
         <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">

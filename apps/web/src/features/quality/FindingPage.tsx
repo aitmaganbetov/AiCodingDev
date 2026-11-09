@@ -1,163 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
-import { IdempotentIntent, isApiError } from '../../api/client';
-import {
-  acceptedRiskBlockedByProfile,
-  allowedFindingTransitions,
-  canTransitionFinding,
-  findingKeys,
-  findingsApi,
-  type Finding,
-  type FindingTargetStatus,
-} from '../../api/findings';
-import { qualityKeys } from '../../api/quality';
+import { findingKeys, findingsApi } from '../../api/findings';
 import { runKeys, runsApi } from '../../api/runs';
-import { FormAlert, TextAreaField } from '../../components/form';
 import { PageHeading } from '../../components/PageHeading';
 import { ErrorState, LoadingState } from '../../components/states';
 import { StatusBadge } from '../../components/StatusBadge';
 import { Callout } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
-import { Dialog, DialogClose, DialogContent } from '../../components/ui/Dialog';
 import { Timestamp } from '../../components/ui/Time';
-import { useToast } from '../../components/ui/Toast';
-import { problemMessage } from '../../lib/problem';
 import { useCurrentWorkspace } from '../../workspace';
-import { Field, FieldList, Hash, SeverityBadge, TextLink, useWorkspaceRole, workspacePath } from './shared';
-
-export const REASON_MAX = 4000;
-
-function TransitionDialog({
-  finding,
-  to,
-  open,
-  onOpenChange,
-}: {
-  finding: Finding;
-  to: FindingTargetStatus;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  const toast = useToast();
-  const queryClient = useQueryClient();
-  const intent = useRef(new IdempotentIntent());
-  const [reason, setReason] = useState('');
-  const [fieldError, setFieldError] = useState<string | undefined>();
-  const [formErrors, setFormErrors] = useState<string[]>([]);
-  const version = finding.version ?? 0;
-
-  const mutation = useMutation({
-    mutationFn: (body: { to_status: FindingTargetStatus; reason: string }) =>
-      findingsApi.transition(finding.id, body, intent.current.keyFor({ id: finding.id, version, ...body }), version),
-    onSuccess: (updated) => {
-      intent.current.complete();
-      queryClient.setQueryData(findingKeys.detail(finding.id), updated);
-      void queryClient.invalidateQueries({ queryKey: findingKeys.all(finding.run_id ?? '') });
-      void queryClient.invalidateQueries({ queryKey: qualityKeys.run(finding.run_id ?? '') });
-      toast({ title: t('quality.transition.done', { status: t(`quality.enums.finding_status.${updated.status}`) }), tone: 'success' });
-      onOpenChange(false);
-    },
-    onError: (error) => {
-      // 409 (FSM ушла вперёд) / 412 (версия устарела): показать причину и перечитать находку.
-      if (isApiError(error) && (error.status === 409 || error.status === 412)) {
-        void queryClient.invalidateQueries({ queryKey: findingKeys.detail(finding.id) });
-      }
-      const fe = isApiError(error) ? error.errors.find((e) => e.pointer === '/reason') : undefined;
-      setFieldError(fe ? t(`fieldError.${fe.code}`, { defaultValue: fe.message ?? t('fieldError.invalid') }) : undefined);
-      setFormErrors(fe ? [] : [problemMessage(t, error)]);
-    },
-  });
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    const trimmed = reason.trim();
-    if (!trimmed) {
-      setFieldError(t('validation.required'));
-      return;
-    }
-    if (trimmed.length > REASON_MAX) {
-      setFieldError(t('validation.maxLength', { max: REASON_MAX }));
-      return;
-    }
-    setFieldError(undefined);
-    setFormErrors([]);
-    mutation.mutate({ to_status: to, reason: trimmed });
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        title={t('quality.transition.dialogTitle', { status: t(`quality.enums.finding_status.${to}`) })}
-        description={t(`quality.transition.hint.${to}`)}
-      >
-        <form onSubmit={submit} noValidate className="flex flex-col gap-4">
-          <FormAlert messages={formErrors} />
-          <TextAreaField
-            id="finding-reason"
-            label={t('quality.transition.reason')}
-            hint={t('quality.transition.reasonHint')}
-            error={fieldError}
-            value={reason}
-            maxLength={REASON_MAX}
-            required
-            onChange={(e) => setReason(e.target.value)}
-          />
-          <div className="flex flex-wrap justify-end gap-3">
-            <DialogClose asChild>
-              <Button>{t('action.cancel')}</Button>
-            </DialogClose>
-            <Button type="submit" variant={to === 'ACCEPTED_RISK' ? 'danger' : 'primary'} loading={mutation.isPending}>
-              {t(`quality.transition.to.${to}`)}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function TransitionActions({ finding, profile }: { finding: Finding; profile: string | undefined }) {
-  const { t } = useTranslation();
-  const role = useWorkspaceRole();
-  const [target, setTarget] = useState<FindingTargetStatus | null>(null);
-  const allowed = allowedFindingTransitions(finding.status);
-
-  if (allowed.length === 0) return <p className="text-sm text-fg-muted">{t('quality.transition.engineOnly')}</p>;
-  const permitted = allowed.filter((to) => canTransitionFinding(role, to));
-  if (permitted.length === 0) return <p className="text-sm text-fg-muted">{t('quality.transition.noRole')}</p>;
-  if (finding.version === undefined) return <p className="text-sm text-fg-muted">{t('quality.transition.noVersion')}</p>;
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div role="group" aria-label={t('quality.transition.group')} className="flex flex-wrap gap-3">
-        {permitted.map((to) => {
-          const blocked = to === 'ACCEPTED_RISK' && acceptedRiskBlockedByProfile(finding.severity, profile);
-          return (
-            <Button
-              key={to}
-              variant={to === 'ACCEPTED_RISK' ? 'danger' : 'secondary'}
-              disabled={blocked}
-              aria-describedby={blocked ? 'accepted-risk-blocked' : undefined}
-              onClick={() => setTarget(to)}
-            >
-              {t(`quality.transition.to.${to}`)}
-            </Button>
-          );
-        })}
-      </div>
-      {permitted.includes('ACCEPTED_RISK') && acceptedRiskBlockedByProfile(finding.severity, profile) ? (
-        <p id="accepted-risk-blocked" className="text-sm text-fg-muted">
-          {t('quality.transition.profileBlocked')}
-        </p>
-      ) : null}
-      {allowed.length > permitted.length ? <p className="text-sm text-fg-muted">{t('quality.transition.someNeedAdmin')}</p> : null}
-      {target ? <TransitionDialog key={target} finding={finding} to={target} open onOpenChange={(o) => !o && setTarget(null)} /> : null}
-    </div>
-  );
-}
+import { FindingTransitionActions } from './FindingTransitions';
+import { Field, FieldList, Hash, SeverityBadge, TextLink, workspacePath } from './shared';
 
 export function FindingPage() {
   const { t } = useTranslation();
@@ -235,7 +88,7 @@ export function FindingPage() {
           {t('quality.transition.profileUnknown')}
         </Callout>
       ) : null}
-      <TransitionActions finding={f} profile={run.data?.quality_profile} />
+      <FindingTransitionActions finding={f} profile={run.data?.quality_profile} />
     </section>
   );
 }

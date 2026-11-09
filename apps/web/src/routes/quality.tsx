@@ -3,12 +3,13 @@ import { lazyPage } from './lazyPage';
 import type { AreaModule } from './types';
 
 const EvidencePage = lazyPage(() => import('../features/quality/EvidencePage'), 'EvidencePage', ['quality']);
-const FindingPage = lazyPage(() => import('../features/quality/FindingPage'), 'FindingPage', ['quality']);
-const QualityIndexPage = lazyPage(() => import('../features/quality/RunQualityPage'), 'QualityIndexPage', ['quality']);
+const FindingPage = lazyPage(() => import('../features/quality/FindingPage'), 'FindingPage', ['quality', 'settings']);
+const QualityOverviewPage = lazyPage(() => import('../features/quality/QualityOverviewPage'), 'QualityOverviewPage', ['quality']);
 const RunQualityPage = lazyPage(() => import('../features/quality/RunQualityPage'), 'RunQualityPage', ['quality']);
 
 /**
- * P7-10 Evidence & Quality (FR-QG-07): выбор run → сводка verdict/gates (SKIPPED/ERROR ≠ PASS),
+ * P7-10 Evidence & Quality (FR-QG-07) → F7 «Гейты качества»: обзор workspace (analytics gates в пяти
+ * состояниях D-8 по группам и типам), отчёт run (группы lint … security, verdict, SKIPPED/ERROR ≠ PASS),
  * находки и решения по ним, evidence (AC-14), отчёт run. Живые обновления — SSE run.
  */
 export const qualityArea: AreaModule = {
@@ -19,7 +20,7 @@ export const qualityArea: AreaModule = {
       path: 'quality',
       element: (
         <RequirePermission permission="quality:read">
-          <QualityIndexPage />
+          <QualityOverviewPage />
         </RequirePermission>
       ),
     },

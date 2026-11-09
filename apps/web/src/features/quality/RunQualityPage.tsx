@@ -12,12 +12,10 @@ import {
   type FindingStatus,
 } from '../../api/findings';
 import {
-  artifactDownloadHref,
   gateCountsAsPass,
   GATE_NOT_PASS_LOOKALIKE,
   qualityApi,
   qualityKeys,
-  type ArtifactRef,
   type EvidenceVerificationStatus,
   type GateExecution,
   type QualityReport,
@@ -28,14 +26,16 @@ import { PageHeading } from '../../components/PageHeading';
 import { ErrorState, LoadingState } from '../../components/states';
 import { RUN_TERMINAL, StatusBadge } from '../../components/StatusBadge';
 import { Callout } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
 import { Table, type Column } from '../../components/ui/Table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Tabs';
 import { Timestamp } from '../../components/ui/Time';
-import { problemMessage } from '../../lib/problem';
 import { useCurrentWorkspace } from '../../workspace';
+import { VerificationBadge } from '../../components/ui/VerificationBadge';
+import { categorySummaries, gateRows, type CategorySummary, type GateRow } from './gatesModel';
 import { LiveStatus, useRunInvalidation } from './live';
-import { Field, FieldList, GateStatusBadge, Hash, RecentRuns, runViewPath, SeverityBadge, TextLink, workspacePath } from './shared';
+import { ReportPanel } from './ReportPanel';
+import { Field, FieldList, GateStatusBadge, Hash, runViewPath, SeverityBadge, TextLink, workspacePath } from './shared';
+import { useRunEvidenceStatus } from './useRunEvidenceStatus';
 
 export const FINDINGS_PAGE_SIZE = 50;
 export const EVIDENCE_PAGE_SIZE = 50;
@@ -89,16 +89,56 @@ function VerdictSummary({ report }: { report: QualityReport }) {
   );
 }
 
-function GatesTable({ gates, workspaceId }: { gates: GateExecution[]; workspaceId: string }) {
+/** Сводка по группам проверок run (lint … security): худшее состояние D-8 среди gates группы. */
+function CategoryOverview({ summaries, evidenceComplete }: { summaries: CategorySummary[]; evidenceComplete: boolean }) {
   const { t } = useTranslation();
-  const columns: Column<GateExecution>[] = [
-    { id: 'gate', header: t('quality.gate.type'), cell: (g) => <span className="font-mono text-xs">{g.gate_type}</span>, sortValue: (g) => g.gate_type, rowHeader: true },
-    { id: 'required', header: t('quality.gate.required'), cell: (g) => (g.required ? t('quality.gate.requiredYes') : t('quality.gate.requiredNo')), sortValue: (g) => (g.required ? 0 : 1) },
-    { id: 'status', header: t('quality.gate.status'), cell: (g) => <GateStatusBadge status={g.status} />, sortValue: (g) => g.status },
+  return (
+    <section aria-labelledby="gate-categories-heading" className="mb-6 flex flex-col gap-3">
+      <h2 id="gate-categories-heading" className="text-lg font-semibold">
+        {t('quality.gates.categoriesTitle')}
+      </h2>
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5" aria-label={t('quality.gates.categoriesTitle')}>
+        {summaries.map((c) => (
+          <li key={c.category} className="flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-surface p-3" data-category={c.category}>
+            <span className="text-sm font-semibold text-fg">{t(`quality.gates.categories.${c.category}`)}</span>
+            {c.state ? (
+              <VerificationBadge result={{ state: c.state, source: c.gates.map((g) => `${g.gate.gate_type}: ${g.gate.status}`).join(', ') }} />
+            ) : (
+              <span className="text-xs text-fg-muted" data-verification="none">
+                {t('quality.gates.noGatesInRun')}
+              </span>
+            )}
+            {c.gates.length > 0 ? <span className="break-words font-mono text-xs text-fg-muted">{c.gates.map((g) => g.gate.gate_type).join(', ')}</span> : null}
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-fg-muted">{t(evidenceComplete ? 'quality.gates.d8Note' : 'quality.gates.d8NoteIncomplete')}</p>
+    </section>
+  );
+}
+
+function GatesTable({ rows, workspaceId }: { rows: GateRow[]; workspaceId: string }) {
+  const { t } = useTranslation();
+  const columns: Column<GateRow>[] = [
+    { id: 'gate', header: t('quality.gate.type'), cell: ({ gate: g }) => <span className="font-mono text-xs">{g.gate_type}</span>, sortValue: ({ gate: g }) => g.gate_type, rowHeader: true },
+    { id: 'required', header: t('quality.gate.required'), cell: ({ gate: g }) => (g.required ? t('quality.gate.requiredYes') : t('quality.gate.requiredNo')), sortValue: ({ gate: g }) => (g.required ? 0 : 1) },
+    {
+      id: 'category',
+      header: t('quality.gates.category'),
+      cell: (r) => t(`quality.gates.categories.${r.category}`),
+      sortValue: (r) => r.category,
+    },
+    {
+      id: 'state',
+      header: t('quality.gates.state'),
+      cell: (r) => <VerificationBadge result={r.verification} />,
+      sortValue: (r) => r.verification.state,
+    },
+    { id: 'status', header: t('quality.gate.status'), cell: ({ gate: g }) => <GateStatusBadge status={g.status} />, sortValue: ({ gate: g }) => g.status },
     {
       id: 'counts',
       header: t('quality.gate.countsAsPass'),
-      cell: (g) =>
+      cell: ({ gate: g }) =>
         gateCountsAsPass(g.status) ? (
           t('quality.gate.countsYes')
         ) : (
@@ -110,18 +150,18 @@ function GatesTable({ gates, workspaceId }: { gates: GateExecution[]; workspaceI
     {
       id: 'reason',
       header: t('quality.gate.reason'),
-      cell: (g) => (
+      cell: ({ gate: g }) => (
         <span className="break-words">
           {[g.error_code, g.not_applicable_reason].filter(Boolean).join(' · ') || '—'}
         </span>
       ),
     },
-    { id: 'commit', header: t('quality.gate.commit'), cell: (g) => (g.commit_sha ? <Hash value={g.commit_sha} /> : '—') },
-    { id: 'finished', header: t('quality.gate.finished'), cell: (g) => (g.finished_at ? <Timestamp value={g.finished_at} /> : '—'), sortValue: (g) => g.finished_at ?? null },
+    { id: 'commit', header: t('quality.gate.commit'), cell: ({ gate: g }) => (g.commit_sha ? <Hash value={g.commit_sha} /> : '—') },
+    { id: 'finished', header: t('quality.gate.finished'), cell: ({ gate: g }) => (g.finished_at ? <Timestamp value={g.finished_at} /> : '—'), sortValue: ({ gate: g }) => g.finished_at ?? null },
     {
       id: 'evidence',
       header: t('quality.gate.evidence'),
-      cell: (g) =>
+      cell: ({ gate: g }) =>
         g.evidence_id ? (
           <TextLink to={workspacePath(workspaceId, `quality/evidence/${g.evidence_id}`)} srSuffix={g.gate_type}>
             {t('quality.gate.openEvidence')}
@@ -135,11 +175,11 @@ function GatesTable({ gates, workspaceId }: { gates: GateExecution[]; workspaceI
     <Table
       caption={t('quality.gate.caption')}
       columns={columns}
-      rows={gates}
-      rowKey={(g) => g.id}
-      rowProps={(g) => ({ 'data-gate-status': g.status })}
+      rows={rows}
+      rowKey={(r) => r.gate.id}
+      rowProps={(r) => ({ 'data-gate-status': r.gate.status, 'data-verification-state': r.verification.state })}
       empty={t('quality.gate.empty')}
-      minWidthClass="min-w-[56rem]"
+      minWidthClass="min-w-[72rem]"
     />
   );
 }
@@ -372,104 +412,6 @@ function EvidencePanel({ runId, workspaceId, gates }: { runId: string; workspace
   );
 }
 
-/** Сохранение текста в файл через object URL (без внешних зависимостей). */
-function saveFile(content: string, type: string, filename: string): void {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function saveJson(data: unknown, filename: string): void {
-  saveFile(JSON.stringify(data, null, 2), 'application/json', filename);
-}
-
-type ReportFormat = 'json' | 'markdown';
-
-function ReportPanel({ runId }: { runId: string }) {
-  const { t } = useTranslation();
-  const [state, setState] = useState<{
-    loading: ReportFormat | null;
-    error: unknown;
-    artifact: ArtifactRef | null;
-    generatedAt: string | null;
-    disclaimer: string | null;
-    markdownReady: boolean;
-  }>({ loading: null, error: null, artifact: null, generatedAt: null, disclaimer: null, markdownReady: false });
-  // OQ-45 (d): тот же отчёт в text/markdown (Accept) — сервер рендерит и экранирует содержимое; UI только сохраняет файл.
-  const downloadMarkdown = async () => {
-    setState((s) => ({ ...s, loading: 'markdown', error: null }));
-    try {
-      const report = await qualityApi.runReportMarkdown(runId);
-      saveFile(report.text, 'text/markdown;charset=utf-8', report.filename ?? `run-${runId}-report.md`);
-      setState((s) => ({ ...s, loading: null, markdownReady: true }));
-    } catch (error) {
-      setState((s) => ({ ...s, loading: null, error }));
-    }
-  };
-  const download = async () => {
-    setState((s) => ({ ...s, loading: 'json', error: null }));
-    try {
-      const report = await qualityApi.runReport(runId);
-      saveJson(report, `run-${runId}-report.json`);
-      setState((s) => ({
-        ...s,
-        loading: null,
-        error: null,
-        artifact: report.report_artifact ?? null,
-        generatedAt: report.generated_at,
-        disclaimer: report.disclaimer ?? null,
-      }));
-    } catch (error) {
-      setState((s) => ({ ...s, loading: null, error }));
-    }
-  };
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm text-fg-muted">{t('quality.report.description')}</p>
-      <div className="flex flex-wrap gap-3">
-        <Button variant="primary" loading={state.loading === 'json'} disabled={state.loading !== null} onClick={() => void download()}>
-          {t('quality.report.download')}
-        </Button>
-        <Button loading={state.loading === 'markdown'} disabled={state.loading !== null} onClick={() => void downloadMarkdown()}>
-          {t('quality.report.downloadMarkdown')}
-        </Button>
-      </div>
-      <p role="status" className="text-sm text-fg-muted">
-        {state.generatedAt ? (
-          <>
-            {t('quality.report.ready')} <Timestamp value={state.generatedAt} />
-          </>
-        ) : null}
-        {state.markdownReady ? <span className="ml-2">{t('quality.report.markdownReady')}</span> : null}
-      </p>
-      {state.error ? (
-        <p role="alert" className="text-sm font-medium text-danger-text">
-          {problemMessage(t, state.error)}
-        </p>
-      ) : null}
-      {state.disclaimer ? <Callout tone="info">{state.disclaimer}</Callout> : null}
-      {state.artifact ? (
-        <FieldList label={t('quality.report.artifact')}>
-          <Field label={t('quality.report.artifact')}>
-            <a className="font-medium text-link underline" href={artifactDownloadHref(state.artifact.id)}>
-              {t('quality.report.artifactDownload')}
-            </a>
-          </Field>
-          <Field label={t('quality.evidence.sha256')}>
-            <code className="break-all font-mono text-xs">{state.artifact.sha256}</code>
-          </Field>
-        </FieldList>
-      ) : null}
-    </div>
-  );
-}
-
 function RunContext({ run, workspaceId }: { run: Run | undefined; workspaceId: string }) {
   const { t } = useTranslation();
   if (!run) return null;
@@ -499,10 +441,13 @@ export function RunQualityPage() {
   useEffect(() => {
     runRef.current = run.data;
   });
-  const keys = useMemo(() => [qualityKeys.run(runId), findingKeys.all(runId), runKeys.detail(runId)], [runId]);
+  const keys = useMemo(() => [qualityKeys.run(runId), findingKeys.all(runId), runKeys.detail(runId), ['evidence', 'run', runId]], [runId]);
   // Завершённому run поток не нужен (сервер закрывает его после run.completed).
   const liveRunId = run.data && !RUN_TERMINAL.includes(run.data.status) ? runId : null;
   const live = useRunInvalidation(liveRunId, QUALITY_EVENT_TYPES, keys, () => RUN_TERMINAL.includes(runRef.current?.status ?? ''));
+  const evidenceStatus = useRunEvidenceStatus(runId);
+  const gates = quality.data?.gate_executions;
+  const rows = useMemo(() => gateRows(gates ?? [], evidenceStatus.statusOf), [gates, evidenceStatus.statusOf]);
 
   if (!workspaceId) return null;
   return (
@@ -518,6 +463,7 @@ export function RunQualityPage() {
       ) : (
         <>
           <VerdictSummary report={quality.data} />
+          <CategoryOverview summaries={categorySummaries(rows)} evidenceComplete={evidenceStatus.complete} />
           <Tabs
             value={tab}
             onValueChange={(v) => {
@@ -534,7 +480,7 @@ export function RunQualityPage() {
               ))}
             </TabsList>
             <TabsContent value="gates">
-              <GatesTable gates={quality.data.gate_executions} workspaceId={workspaceId} />
+              <GatesTable rows={rows} workspaceId={workspaceId} />
             </TabsContent>
             <TabsContent value="findings">
               <FindingsPanel runId={runId} workspaceId={workspaceId} />
@@ -549,39 +495,5 @@ export function RunQualityPage() {
         </>
       )}
     </section>
-  );
-}
-
-export function QualityIndexPage() {
-  const { t } = useTranslation();
-  const { workspaceId } = useCurrentWorkspace();
-  if (!workspaceId) return null;
-  return (
-    <section aria-labelledby="page-title">
-      <PageHeading title={t('quality.title')} />
-      <p className="mb-4 text-fg-muted">{t('quality.indexDescription')}</p>
-      <h2 className="mb-3 text-lg font-semibold">{t('quality.runs.title')}</h2>
-      <RecentRunsForQuality workspaceId={workspaceId} />
-    </section>
-  );
-}
-
-function RecentRunsForQuality({ workspaceId }: { workspaceId: string }) {
-  const { t } = useTranslation();
-  return (
-    <RecentRuns
-      workspaceId={workspaceId}
-      label={t('quality.runs.listLabel')}
-      actions={(r) => (
-        <>
-          <TextLink to={workspacePath(workspaceId, `quality/runs/${r.id}`)} srSuffix={r.objective.slice(0, 80)}>
-            {t('quality.runs.openQuality')}
-          </TextLink>
-          <TextLink to={workspacePath(workspaceId, `compliance/runs/${r.id}`)} srSuffix={r.objective.slice(0, 80)}>
-            {t('quality.openCompliance')}
-          </TextLink>
-        </>
-      )}
-    />
   );
 }

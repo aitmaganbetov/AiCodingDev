@@ -627,7 +627,10 @@ export class MockApi {
         return { ...stored.reply, headers: { ...stored.reply.headers, 'Idempotency-Replayed': 'true' } };
       }
       const reply = this.execute(operationId, url, headers, body, id);
-      if (reply.status < 500) this.idempotency.set(scoped, { body: JSON.stringify(body), reply });
+      // Как сервер: отказ step-up (403 step_up_required) не сохраняется — повтор после POST /auth/reauthenticate
+      // идёт с тем же Idempotency-Key (src/auth/StepUp.tsx) и выполняется заново.
+      const stepUp = (reply.body as { code?: string } | undefined)?.code === 'step_up_required';
+      if (reply.status < 500 && !stepUp) this.idempotency.set(scoped, { body: JSON.stringify(body), reply });
       return reply;
     }
     return this.execute(operationId, url, headers, body, id);

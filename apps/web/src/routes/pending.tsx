@@ -3,7 +3,7 @@ import { AreaPlaceholderPage } from '../pages/AreaPlaceholderPage';
 import type { AreaModule } from './types';
 
 /**
- * Разделы нового IA (план §6.1, D-3), экраны которых появятся в следующих фазах. До тех пор —
+ * Раздел нового IA (план §6.1, D-3), экран которого появится в следующей фазе (F8). До тех пор —
  * честное состояние «Раздел в разработке» с фазой и ссылками на существующие экраны с теми же
  * данными (никакого демо-содержимого, принцип 2 плана).
  */
@@ -23,26 +23,6 @@ export const codeIntelligenceArea: AreaModule = {
               { to: 'projects', labelKey: 'shell.pending.toProjects' },
               { to: 'knowledge', labelKey: 'shell.pending.toKnowledge' },
             ]}
-          />
-        </RequirePermission>
-      ),
-    },
-  ],
-};
-
-export const securityArea: AreaModule = {
-  id: 'security',
-  nav: { labelKey: 'nav.security', path: 'security', icon: 'security', group: 'code', order: 20, shortcut: 'y', permission: 'quality:read' },
-  workspaceRoutes: [
-    {
-      path: 'security',
-      element: (
-        <RequirePermission permission="quality:read">
-          <AreaPlaceholderPage
-            titleKey="nav.security"
-            phase="F7"
-            descriptionKey="shell.pending.security"
-            related={[{ to: 'quality', labelKey: 'shell.pending.toQuality' }]}
           />
         </RequirePermission>
       ),

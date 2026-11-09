@@ -1,7 +1,7 @@
 {
   "quality": {
     "title": "Гейты качества",
-    "indexDescription": "Выберите запуск, чтобы увидеть вердикт quality gates, находки, evidence и отчёт. Вердикт выносит Verification Engine по сохранённым результатам проверок, а не по словам агента.",
+    "indexDescription": "Исходы quality gates рабочего пространства и отчёты каждого запуска. Вердикт выносит Verification Engine по сохранённым результатам проверок, а не по словам агента: «Пройдено» — только PASS с подтверждённым (VERIFIED) evidence.",
     "runTitle": "Качество запуска",
     "loading": "Загрузка сводки качества…",
     "notRecorded": "не записано",
@@ -149,7 +149,8 @@
       "mime": "MIME-тип",
       "download": "Скачать артефакт",
       "downloadForbidden": "Скачивание сырого лога CLI доступно только администратору или владельцу.",
-      "links": "Связи"
+      "links": "Связи",
+      "proofRule": "Evidence засчитывается как доказательство прохождения gate только в статусе «Подтверждено» (VERIFIED) — его проверил Verification Engine, а не агент."
     },
     "report": {
       "description": "Полный отчёт run: run, задачи, gates, находки, evidence, подтверждения и матрица соответствия (JSON или Markdown).",
@@ -166,7 +167,8 @@
       "loading": "Загрузка запусков…",
       "emptyTitle": "Запусков пока нет",
       "emptyDescription": "Отчёты о качестве появятся после первого запуска в одном из проектов.",
-      "openQuality": "Качество и evidence"
+      "openQuality": "Качество и evidence",
+      "openSecurity": "Находки безопасности"
     },
     "enums": {
       "gate_status": {
@@ -211,6 +213,48 @@
         "REJECTED": "Отклонено",
         "UNVERIFIED": "Не подтверждено"
       }
+    },
+    "gates": {
+      "categoriesTitle": "Группы проверок",
+      "category": "Группа",
+      "state": "Состояние",
+      "noGatesInRun": "В запуске нет gates этой группы",
+      "d8Note": "Состояние группы — худшее среди её gates. «Пройдено» — только PASS с подтверждённым evidence; SKIPPED — «Не запускалось», ERROR — «Заблокировано». Исходный статус — в подсказке.",
+      "d8NoteIncomplete": "Состояние группы — худшее среди её gates. Статусы evidence загружены не полностью: PASS с evidence вне выборки показан как «Недостаточно доказательств».",
+      "categories": {
+        "lint": "Lint и формат",
+        "typecheck": "Проверка типов",
+        "build": "Сборка",
+        "unit": "Unit-тесты",
+        "integration": "Интеграционные тесты",
+        "e2e": "E2E-тесты",
+        "review": "Code review",
+        "coverage": "Покрытие",
+        "security": "Проверки безопасности",
+        "other": "Прочие проверки"
+      }
+    },
+    "overview": {
+      "filters": "Фильтры обзора качества",
+      "project": "Проект",
+      "allProjects": "Все проекты",
+      "projectsError": "Не удалось загрузить список проектов.",
+      "window": "Окно",
+      "days_one": "{{count}} день",
+      "days_few": "{{count}} дня",
+      "days_many": "{{count}} дней",
+      "days_other": "{{count}} дня",
+      "outcomes": "Исходы проверок",
+      "donut": "Исходы quality gates: {{summary}}",
+      "executions": "выполнений",
+      "noGates": "За последние {{days}} дн. gates не выполнялись.",
+      "d8": "«Пройдено» — PASS с подтверждённым evidence (passed_verified); PASS без него — «Недостаточно доказательств»; ERROR — «Заблокировано»; SKIPPED и неприменимые — «Не запускалось». Сводной оценки качества нет.",
+      "byCategory": "По группам проверок",
+      "byType": "По типам gates",
+      "noExecutions": "нет выполнений в окне",
+      "verifiedRate": "Доля «Пройдено»",
+      "source": "GET /analytics/summary, окно",
+      "runsHint": "Отчёт качества запуска: группы проверок, gates, находки, evidence и отчёт (JSON/Markdown)."
     }
   }
 }

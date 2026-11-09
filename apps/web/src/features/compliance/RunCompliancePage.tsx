@@ -19,16 +19,22 @@ import { LoadMore } from '../../components/LoadMore';
 import { PageHeading } from '../../components/PageHeading';
 import { ErrorState, LoadingState } from '../../components/states';
 import { RUN_TERMINAL, StatusBadge } from '../../components/StatusBadge';
-import { Callout } from '../../components/ui/Badge';
+import { Badge, Callout } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Dialog, DialogClose, DialogContent } from '../../components/ui/Dialog';
 import { Table, type Column } from '../../components/ui/Table';
 import { Timestamp } from '../../components/ui/Time';
 import { useToast } from '../../components/ui/Toast';
+import { VerificationBadge } from '../../components/ui/VerificationBadge';
+import { Icon } from '../../components/ui/Icon';
 import { mapProblemToFields } from '../../lib/problem';
 import { useCurrentWorkspace } from '../../workspace';
 import { LiveStatus, useRunInvalidation } from '../quality/live';
+import { ReportPanel } from '../quality/ReportPanel';
 import { Hash, runViewPath, TextLink, useWorkspaceRole, workspacePath } from '../quality/shared';
+import { useRunEvidenceStatus } from '../quality/useRunEvidenceStatus';
+import { ComplianceDisclaimer } from './ComplianceDisclaimer';
+import { evidenceGap, filterRows, rowVerification, type EvidenceGap } from './model';
 
 export const COMPLIANCE_PAGE_SIZE = 100;
 export const NOTES_MAX = 4000;
@@ -195,6 +201,9 @@ function Matrix({ runId, workspaceId, terminal }: { runId: string; workspaceId: 
   const [status, setStatus] = useState<ComplianceStatus | ''>('');
   const [standard, setStandard] = useState('');
   const [reviewRow, setReviewRow] = useState<ComplianceRow | null>(null);
+  const [controlQuery, setControlQuery] = useState('');
+  const [missingOnly, setMissingOnly] = useState(false);
+  const evidence = useRunEvidenceStatus(runId);
   const query = { ...(status ? { status } : {}), ...(standard ? { standard_code: standard } : {}) };
   const matrix = useInfiniteQuery({
     queryKey: complianceKeys.run(runId, query),
@@ -206,6 +215,19 @@ function Matrix({ runId, workspaceId, terminal }: { runId: string; workspaceId: 
   const first = matrix.data?.pages[0];
   const rows = useMemo(() => matrix.data?.pages.flatMap((p) => p.items) ?? [], [matrix.data]);
   const standards = useMemo(() => [...new Set(rows.map((r) => r.standard_code))].sort(), [rows]);
+  const statusOf = evidence.statusOf;
+  const gapOf = (r: ComplianceRow): EvidenceGap => evidenceGap(r, r.evidence_id ? statusOf(r.evidence_id) : undefined);
+  const visible = useMemo(() => filterRows(rows, { q: controlQuery, missingOnly }, statusOf), [rows, controlQuery, missingOnly, statusOf]);
+  const gaps = useMemo(() => {
+    let missing = 0;
+    let unverified = 0;
+    for (const r of rows) {
+      const g = evidenceGap(r, r.evidence_id ? statusOf(r.evidence_id) : undefined);
+      if (g === 'missing') missing += 1;
+      if (g === 'unverified') unverified += 1;
+    }
+    return { missing, unverified };
+  }, [rows, statusOf]);
   const mayReview = canReviewCompliance(role) && !terminal;
 
   const columns: Column<ComplianceRow>[] = [
@@ -249,14 +271,39 @@ function Matrix({ runId, workspaceId, terminal }: { runId: string; workspaceId: 
     {
       id: 'evidence',
       header: t('compliance.col.evidence'),
-      cell: (r) =>
-        r.evidence_id ? (
-          <TextLink to={workspacePath(workspaceId, `quality/evidence/${r.evidence_id}`)} srSuffix={r.control_code}>
-            {t('quality.gate.openEvidence')}
-          </TextLink>
-        ) : (
-          <span className="text-fg-muted">{t('quality.gate.noEvidence')}</span>
-        ),
+      cell: (r) => {
+        const gap = gapOf(r);
+        return (
+          <div className="flex flex-col items-start gap-1" data-evidence-gap={gap}>
+            {r.evidence_id ? (
+              <TextLink to={workspacePath(workspaceId, `quality/evidence/${r.evidence_id}`)} srSuffix={r.control_code}>
+                {t('quality.gate.openEvidence')}
+              </TextLink>
+            ) : gap === 'missing' ? null : (
+              <span className="text-fg-muted">{t('quality.gate.noEvidence')}</span>
+            )}
+            {gap === 'missing' ? (
+              <Badge tone="warning" icon="verifyInsufficient">
+                {t('compliance.evidence.missing')}
+              </Badge>
+            ) : gap === 'unverified' ? (
+              <Badge tone="warning" icon="verifyInsufficient">
+                {t('compliance.evidence.unverified', { status: t(`quality.enums.verification.${statusOf(r.evidence_id ?? '') ?? 'PENDING'}`) })}
+              </Badge>
+            ) : gap === 'unknown' ? (
+              <span className="text-xs text-fg-muted">{t('compliance.evidence.unknown')}</span>
+            ) : null}
+            {r.gate_execution_id ? <span className="font-mono text-xs text-fg-muted">{t('compliance.evidence.gateExecution', { id: r.gate_execution_id.slice(0, 8) })}</span> : null}
+          </div>
+        );
+      },
+      sortValue: (r) => gapOf(r),
+    },
+    {
+      id: 'state',
+      header: t('compliance.col.state'),
+      cell: (r) => <VerificationBadge result={rowVerification(r, r.evidence_id ? statusOf(r.evidence_id) : undefined)} />,
+      sortValue: (r) => rowVerification(r, r.evidence_id ? statusOf(r.evidence_id) : undefined).state,
     },
     {
       id: 'verdict',
@@ -298,6 +345,22 @@ function Matrix({ runId, workspaceId, terminal }: { runId: string; workspaceId: 
           <p data-testid="compliance-disclaimer">{first.disclaimer}</p>
         </Callout>
       ) : null}
+      {!matrix.isPending && rows.length > 0 ? (
+        <div
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-3 text-sm"
+          data-testid="evidence-gaps"
+          data-missing={gaps.missing}
+          data-unverified={gaps.unverified}
+        >
+          <Icon name={gaps.missing + gaps.unverified > 0 ? 'verifyInsufficient' : 'verifyPass'} className="h-4 w-4 shrink-0" />
+          <span>
+            {gaps.missing + gaps.unverified > 0
+              ? t('compliance.evidence.gapsSummary', { missing: gaps.missing, unverified: gaps.unverified })
+              : t('compliance.evidence.noGaps')}
+          </span>
+          {!evidence.complete && !evidence.query.isPending ? <span className="text-xs text-fg-muted">{t('compliance.evidence.partial')}</span> : null}
+        </div>
+      ) : null}
       {first?.summary ? (
         <ul aria-label={t('compliance.summary')} className="flex flex-wrap gap-3" data-testid="compliance-summary">
           {COMPLIANCE_STATUSES.map((s) => (
@@ -335,6 +398,21 @@ function Matrix({ runId, workspaceId, terminal }: { runId: string; workspaceId: 
             ))}
           </select>
         </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="compliance-control" className="text-sm font-medium">
+            {t('compliance.filterControl')}
+          </label>
+          <input id="compliance-control" type="search" className="input" value={controlQuery} onChange={(e) => setControlQuery(e.target.value)} />
+        </div>
+        <button
+          type="button"
+          className="btn-secondary aria-pressed:border-border-active aria-pressed:bg-accent-soft aria-pressed:text-accent-soft-fg"
+          aria-pressed={missingOnly}
+          onClick={() => setMissingOnly((v) => !v)}
+        >
+          {missingOnly ? <Icon name="check" className="h-4 w-4" /> : null}
+          {t('compliance.evidence.missingOnly')}
+        </button>
       </div>
       {terminal ? <p className="text-sm text-fg-muted">{t('compliance.review.terminal')}</p> : null}
       {!canReviewCompliance(role) ? <p className="text-sm text-fg-muted">{t('compliance.review.noRole')}</p> : null}
@@ -347,11 +425,19 @@ function Matrix({ runId, workspaceId, terminal }: { runId: string; workspaceId: 
           <Table
             caption={t('compliance.caption')}
             columns={columns}
-            rows={rows}
+            rows={visible}
             rowKey={(r) => r.control_id}
-            rowProps={(r) => ({ 'data-control': r.control_code, 'data-status': r.status })}
+            rowProps={(r) => {
+              const gap = gapOf(r);
+              return {
+                'data-control': r.control_code,
+                'data-status': r.status,
+                'data-evidence-gap': gap,
+                ...(gap === 'missing' || gap === 'unverified' ? { className: 'border-t border-l-4 border-border border-l-warning align-top' } : {}),
+              };
+            }}
             empty={t('compliance.empty')}
-            minWidthClass="min-w-[64rem]"
+            minWidthClass="min-w-[76rem]"
           />
           <LoadMore
             shown={rows.length}
@@ -392,8 +478,15 @@ export function RunCompliancePage() {
           </div>
         </div>
       ) : null}
+      <ComplianceDisclaimer className="mb-4" />
       <p className="mb-4 text-sm text-fg-muted">{t('compliance.trace')}</p>
       <Matrix runId={runId} workspaceId={workspaceId} terminal={terminal} />
+      <section aria-labelledby="compliance-reports" className="mt-8 flex flex-col gap-3">
+        <h2 id="compliance-reports" className="text-lg font-semibold">
+          {t('compliance.reports.title')}
+        </h2>
+        <ReportPanel runId={runId} />
+      </section>
     </section>
   );
 }

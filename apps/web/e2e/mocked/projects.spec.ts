@@ -87,8 +87,10 @@ test('repository explorer: project overview, repository with index snapshot, no 
   }
 
   // Вкладки — стрелками (APG Tabs).
-  await page.getByRole('tab', { name: 'Pull requests' }).focus();
-  await page.keyboard.press('ArrowRight');
+  await page.getByRole('tab', { name: 'Репозитории' }).focus();
+  await page.keyboard.press('Home');
+  await expect(page.getByRole('tab', { name: 'Обзор' })).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('End');
   await expect(page.getByRole('tab', { name: 'Технологии' })).toHaveAttribute('aria-selected', 'true');
   const techTable = page.getByRole('table', { name: /Технологии/ });
   await expect(techTable.getByRole('row')).toHaveCount(2);
@@ -96,7 +98,6 @@ test('repository explorer: project overview, repository with index snapshot, no 
   await expectNoSeriousA11yViolations(page, 'project technologies');
 
   // Привязка локального репозитория с клавиатуры, ошибка сервера по полю, затем успех.
-  await page.keyboard.press('End');
   await page.keyboard.press('Home');
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: 'Репозитории' })).toHaveAttribute('aria-selected', 'true');

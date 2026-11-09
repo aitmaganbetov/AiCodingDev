@@ -145,7 +145,10 @@ export function SubmitReviewPanel({
 
   const canSubmit = can(role, 'review:submit');
   const terminal = RUN_TERMINAL.includes(run.status);
-  const blockedOf = (v: ReviewVerdict) => options.find((o) => o.verdict === v)?.blocked ?? 'role';
+  const blockedOf = (v: ReviewVerdict) => {
+    const option = options.find((o) => o.verdict === v);
+    return option ? option.blocked : 'role';
+  };
   const effectiveApproval = approvalId || (decidable.length === 1 ? (decidable[0]?.id ?? '') : '');
   const chosenApproval = pending.find((a) => a.id === effectiveApproval) ?? null;
 

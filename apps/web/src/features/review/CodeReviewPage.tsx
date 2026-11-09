@@ -684,10 +684,10 @@ export function CodeReviewPage() {
         </p>
       </div>
 
-      <div className="grid min-w-0 gap-4 md:grid-cols-[14rem,minmax(0,1fr)] xl:grid-cols-[16rem,minmax(0,1fr),24rem]">
+      <div className="grid min-w-0 gap-4 md:grid-cols-[14rem,minmax(0,1fr)] 3xl:grid-cols-[16rem,minmax(0,1fr),24rem]" data-testid="review-layout">
         {isDesktop ? <div className="min-w-0">{files.length > 0 ? explorer : null}</div> : null}
         <div className="min-w-0">{diffBody}</div>
-        <aside aria-label={t('review.panels.label')} className="min-w-0 md:col-span-2 xl:col-span-1">
+        <aside aria-label={t('review.panels.label')} className="min-w-0 md:col-span-2 3xl:col-span-1">
           {side}
         </aside>
       </div>
