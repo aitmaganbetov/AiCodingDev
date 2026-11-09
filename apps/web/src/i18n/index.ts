@@ -21,7 +21,7 @@ export const DEFAULT_NS = 'common';
  * догружаются в фоне после старта. Полнота объявлений проверяется тестом `routes/namespaces.test.ts`.
  */
 export const EAGER_NAMESPACES = ['common', 'nav', 'ds'] as const;
-export const SHELL_DEFERRED_NAMESPACES = ['approvals', 'providers'] as const;
+export const SHELL_DEFERRED_NAMESPACES = ['providers'] as const;
 
 const eager = import.meta.glob<{ default: ResourceLanguage }>(['./common.json', './nav.json', './ds.json'], { eager: true });
 const deferred = import.meta.glob<{ default: ResourceLanguage }>(['./*.json', '!./common.json', '!./nav.json', '!./ds.json']);

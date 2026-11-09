@@ -124,7 +124,7 @@ const ROUTES: { method: string; path: string; operationId: string }[] = [
  * Операции, которые вызывает оболочка на каждом экране (F2: чипы CLI, счётчик approvals, поиск) и
  * стартовый экран Dashboard (F3). Ответ по умолчанию — пустой; spec переопределяет его через `api.route(...)` (приоритет у spec).
  */
-const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply: () => Reply }[] = [
+const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply: (id: string | undefined) => Reply }[] = [
   { method: 'GET', path: '/api/v1/providers', operationId: 'listProviders', reply: () => ({ status: 200, body: { items: [] } }) },
   { method: 'GET', path: '/api/v1/approvals', operationId: 'listApprovals', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
   // F3 Bento Dashboard — стартовый экран после входа в каждом spec: пустые, но валидные ответы
@@ -151,6 +151,20 @@ const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply
       } satisfies S['SystemHealth'],
     }),
   },
+  // F4 AI Mission Control — центральный экран run, на него ведут поиск, палитра, уведомления и старые
+  // пути run/графа/чата: пустые валидные ответы (отчёт качества без gates, без evidence, пустая лента).
+  // missionControl.spec и другие spec переопределяют их через api.route.
+  {
+    method: 'GET',
+    path: '/api/v1/runs/{id}/quality',
+    operationId: 'getRunQuality',
+    reply: (id) => ({
+      status: 200,
+      body: { run_id: id ?? '', quality_profile: 'strict', verdict: 'PENDING', gate_executions: [], findings_summary: {}, findings: [], findings_total: 0 } satisfies S['QualityReport'],
+    }),
+  },
+  { method: 'GET', path: '/api/v1/runs/{id}/evidence', operationId: 'listRunEvidence', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
+  { method: 'GET', path: '/api/v1/runs/{id}/chat', operationId: 'getRunChat', reply: () => ({ status: 200, body: { items: [], threads: [], next_cursor: null } }) },
 ];
 
 /** Сводка analytics workspace без данных за окно (нули и null-доли — как у сервера). */
@@ -782,7 +796,7 @@ export class MockApi {
         const extra = this.extraRoutes.find((r) => r.operationId === operationId);
         if (extra) return extra.handler({ url, headers, body, id, workspaceId: headers['x-workspace-id'] });
         const fallback = SHELL_DEFAULTS.find((r) => r.operationId === operationId);
-        return fallback ? fallback.reply() : problem(404, 'not_found');
+        return fallback ? fallback.reply(id) : problem(404, 'not_found');
       }
     }
   }
