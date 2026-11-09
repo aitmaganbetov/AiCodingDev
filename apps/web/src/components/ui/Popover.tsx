@@ -17,8 +17,15 @@ export function PopoverContent({
   align = 'start',
   label,
   className,
+  returnFocus,
 }: {
   children: ReactNode;
+  /**
+   * Возвращать ли фокус на кнопку при закрытии (по умолчанию — да, если фокус не ушёл сам).
+   * Панели-навигаторы возвращают `false` после перехода по ссылке: фокус переносит новый экран
+   * (PageHeading → h1), а запоздалый возврат на кнопку отнял бы его.
+   */
+  returnFocus?: () => boolean;
   align?: 'start' | 'center' | 'end';
   /** Доступное имя панели (role=dialog у Radix Popover). */
   label: string;
@@ -32,7 +39,7 @@ export function PopoverContent({
         collisionPadding={8}
         aria-label={label}
         onCloseAutoFocus={(e) => {
-          if (focusMovedElsewhere()) e.preventDefault();
+          if (focusMovedElsewhere() || (returnFocus && !returnFocus())) e.preventDefault();
         }}
         className={cx(
           'glass z-modal w-72 max-w-[calc(100vw-1rem)] rounded-lg p-2 text-fg shadow-e2 animate-fade-in',
