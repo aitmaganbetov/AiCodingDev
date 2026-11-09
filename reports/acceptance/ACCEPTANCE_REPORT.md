@@ -2,20 +2,20 @@
 
 > Сгенерировано `scripts/run_acceptance.py` из junit-отчётов прогона — не редактировать вручную.
 
-- **Дата (UTC):** 2026-11-09T09:07:41.024604Z
-- **Commit:** `ce61c2e62c923bfe9c963b293d9ebf4f0443a080` (ветка `ccr-69fbf9a8-p2650i`)
-- **Рабочее дерево:** изменено (5 путей; sha256 `git diff HEAD` = `a04b3c8fbcf1ab87c506769424cf60d77f6f2742387c9cd099ee40bfbaeddbaa`)
+- **Дата (UTC):** 2026-11-09T11:09:06.282340Z
+- **Commit:** `b381d1afbc758daba55294474fc9df3aaaf95bf9` (ветка `ccr-69fbf9a8-p2650i`)
+- **Рабочее дерево:** чистое
 - **Окружение:** Python 3.13.18, Linux-6.18.44-fc-v310-x86_64-with-glibc2.39; исполнитель агентов — Fake CLI; реальные CLI — BLOCKED
-- **Матрица:** `tests/acceptance/matrix.yaml` (sha256 `4929531ecfa5b3cae906207f0a025c633614fad9c810a5f0253095493976bcdc`)
+- **Матрица:** `tests/acceptance/matrix.yaml` (sha256 `cb62e44bb023f5631c928da0f629f66b84bc3627aa922b6e0bdff655f5667750`)
 - **Итог:** 16/16 AC PASS (Fake), FAIL 0, INCOMPLETE 0; real-CLI часть BLOCKED у 4 AC. **100% обязательных acceptance-тестов (Fake) проходят.**
 
 ## Прогоны
 
 | Набор | Команда | Каталог | Exit | Начало | Длительность, с | Тесты (passed/failed/skipped) | junit sha256 |
 |---|---|---|---|---|---|---|---|
-| python | `/home/user/AiCodingDev/.venv/bin/python3 -m pytest -m acceptance -p no:cacheprovider -q -rs -o junit_family=xunit1 --junitxml=/home/user/AiCodingDev/reports/acceptance/junit/python.xml` | `.` | 0 | 2026-11-09T08:55:48.538599Z | 270.7 | 356/0/0 из 356 | `6fc1f9b7092daef6…` |
-| live | `pnpm exec playwright test -c playwright.live.config.ts --trace off --reporter=list,junit` | `apps/web` | 0 | 2026-11-09T09:00:19.228841Z | 94.8 | 4/0/0 из 4 | `e306d4f488afae78…` |
-| mocked | `pnpm exec playwright test -c playwright.mocked.config.ts --trace off --reporter=list,junit` | `apps/web` | 0 | 2026-11-09T09:01:54.035239Z | 326.6 | 144/0/2 из 146 | `a5875db62376dd88…` |
+| python | `/home/user/AiCodingDev/.venv/bin/python3 -m pytest -m acceptance -p no:cacheprovider -q -rs -o junit_family=xunit1 --junitxml=/home/user/AiCodingDev/reports/acceptance/junit/python.xml` | `.` | 0 | 2026-11-09T10:57:33.554657Z | 272.1 | 356/0/0 из 356 | `5fe4d393ff65c9cd…` |
+| live | `pnpm exec playwright test -c playwright.live.config.ts --trace off --reporter=list,junit` | `apps/web` | 0 | 2026-11-09T11:02:05.699703Z | 93.8 | 4/0/0 из 4 | `7e1c0665eff86321…` |
+| mocked | `pnpm exec playwright test -c playwright.mocked.config.ts --trace off --reporter=list,junit` | `apps/web` | 0 | 2026-11-09T11:03:39.462593Z | 326.8 | 148/0/1 из 149 | `318a6f249f164dc9…` |
 
 ## Матрица AC
 
@@ -305,8 +305,8 @@
    - `PASSED` [python] `tests/unit/test_routing.py::test_both_unavailable_blocks_with_right_reason_ac16`
 2. **PASS** — Причина видна в API и UI
    - `PASSED` [python] `tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround` (2 случ.)
-   - `PASSED` [mocked] `mocked:workflows.spec.ts::workflows: mode, FSM stage, verified progress, duration, blocked reason, Mission Control links, mode filter (light/dark axe)`
-   - `PASSED` [mocked] `mocked:app-shell.spec.ts::CLI status chips: real provider data (ready / AUTH_REQUIRED / unknown / not detected), tooltip with version and last check, link to Settings`
+   - `PASSED` [mocked] `mocked:ac16-blocked-reason.spec.ts::AC-16: blocked reason AUTH_REQUIRED is visible in Workflows, Mission Control and Task Detail`
+   - `PASSED` [mocked] `mocked:ac16-blocked-reason.spec.ts::AC-16: blocked reason PROVIDER_UNAVAILABLE is visible in Workflows, Mission Control and Task Detail`
 3. **PASS** — Нет попыток обходной авторизации и обращений к AI API
    - `PASSED` [python] `tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround` (2 случ.)
    - `PASSED` [python] `tests/unit/test_cli_core.py::test_env_built_from_allowlist_and_api_keys_refused`

@@ -1,0 +1,26 @@
+<testsuites id="" name="" tests="4" failures="0" skipped="0" errors="0" time="92.781323">
+<testsuite name="mission-control.spec.ts" timestamp="2026-11-09T11:02:36.755Z" hostname="chromium" tests="3" failures="0" skipped="0" time="53.933" errors="0">
+<testcase name="AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into Live Agent Chat; graph statuses progress live" classname="mission-control.spec.ts" time="12.774">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
+</testcase>
+<testcase name="AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; CHANGE_REQUEST impact preview → confirm → replan (new plan version) → acknowledged by agents → completed" classname="mission-control.spec.ts" time="16.188">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
+</testcase>
+<testcase name="AC-08: server-side SSE drop mid-run — the UI resumes with Last-Event-ID, every event exactly once and without gaps" classname="mission-control.spec.ts" time="24.971">
+<properties>
+<property name="serial" value="">
+</property>
+</properties>
+</testcase>
+</testsuite>
+<testsuite name="smoke.spec.ts" timestamp="2026-11-09T11:02:36.755Z" hostname="chromium" tests="1" failures="0" skipped="0" time="5.067" errors="0">
+<testcase name="live smoke: login → workspace → projects → create project → logout" classname="smoke.spec.ts" time="5.067">
+</testcase>
+</testsuite>
+</testsuites>
