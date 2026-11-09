@@ -3,7 +3,7 @@ import type { AreaModule, RouteHandle } from './types';
 
 const ProjectsPage = lazyPage(() => import('../pages/ProjectsPage'), 'ProjectsPage', ['projects']);
 const ProjectCreatePage = lazyPage(() => import('../pages/ProjectCreatePage'), 'ProjectCreatePage', ['projects']);
-const ProjectDetailPage = lazyPage(() => import('../features/projects/ProjectDetailPage'), 'ProjectDetailPage', ['projects', 'integrations']);
+const ProjectDetailPage = lazyPage(() => import('../features/projects/ProjectDetailPage'), 'ProjectDetailPage', ['projects', 'integrations', 'runs']);
 
 /** Проекты (P1-13) + P7-04 Repository Explorer: `projects/:projectId` (репозитории, индекс, стек). */
 export const projectsArea: AreaModule = {

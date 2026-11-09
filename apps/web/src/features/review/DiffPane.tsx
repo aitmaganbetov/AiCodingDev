@@ -142,7 +142,7 @@ export function DiffPane({
               onSelectionChange={onSelection}
             />
           </Suspense>
-          {draftKey && mode !== 'text' ? form : null}
+          {draftKey ? form : null}
         </>
       )}
       {listed.length > 0 ? (

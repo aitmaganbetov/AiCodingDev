@@ -68,7 +68,7 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
   it('shows repositories with index state, no-local-copy notice and the stack', async () => {
     const user = userEvent.setup();
     mockFetch({ ...base, [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [REPO], next_cursor: null }) });
-    renderApp(`/w/${WS_ID}/projects/${P1.id}`);
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
     expect(await screen.findByRole('heading', { level: 1, name: 'Проект 1' })).toBeInTheDocument();
     const list = await screen.findByRole('list', { name: 'Репозитории проекта' });
     expect(within(list).getByText('https://github.com/acme/payments')).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
         return json(201, repos[0]);
       },
     });
-    renderApp(`/w/${WS_ID}/projects/${P1.id}`);
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
     expect(await screen.findByText('Репозиторий не привязан')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Привязать репозиторий' }));
     const dialog = await screen.findByRole('dialog', { name: 'Привязка репозитория' });
@@ -134,7 +134,7 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
           content: '<img src=x>\n<i>x</i>\n',
         }),
     });
-    renderApp(`/w/${WS_ID}/projects/${P1.id}`);
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
     await user.click(await screen.findByRole('button', { name: 'Открыть дерево файлов' }));
     await user.click(await screen.findByRole('button', { name: /a\.html/ }));
     const region = await screen.findByRole('region', { name: 'Содержимое файла a.html' });
@@ -184,7 +184,7 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
           next_cursor: null,
         }),
     });
-    renderApp(`/w/${WS_ID}/projects/${P1.id}`);
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
     await user.click(await screen.findByRole('button', { name: 'Открыть дерево файлов' }));
     const branch = await screen.findByLabelText('Ветка');
     await waitFor(() => expect(within(branch).getAllByRole('option')).toHaveLength(2));
@@ -208,5 +208,44 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
     renderApp(`/w/${WS_ID}/projects/${P1.id}`);
     expect(await screen.findByText('Проект не найден')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Привязать репозиторий' })).toBeNull();
+  });
+
+  it('workspace tabs: worktrees (B4) without host paths link to Mission Control, task and Code Review', async () => {
+    const run = '01900000-0000-7000-b000-000000000001';
+    const task = '01900000-0000-7000-b000-000000000002';
+    const { calls } = mockFetch({
+      'GET /api/v1/auth/session': () => json(200, session('developer')),
+      [`GET /api/v1/projects/${P1.id}`]: () => json(200, P1),
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [REPO], next_cursor: null }),
+      [`GET /api/v1/projects/${P1.id}/worktrees`]: () =>
+        json(200, {
+          items: [
+            {
+              id: '01900000-0000-7000-b000-000000000003',
+              repository_id: REPO.id,
+              run_id: run,
+              task_id: task,
+              branch_name: 'aicd/run/export',
+              base_commit_sha: 'c'.repeat(40),
+              head_commit_sha: 'd'.repeat(40),
+              status: 'ACTIVE',
+              created_at: '2026-11-08T09:00:00Z',
+              updated_at: '2026-11-08T09:05:00Z',
+              removed_at: null,
+            },
+          ],
+          next_cursor: null,
+        }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=worktrees`);
+    const table = await screen.findByRole('table', { name: 'Worktrees' });
+    expect(within(table).getByText('aicd/run/export')).toBeInTheDocument();
+    expect(within(table).getByText('Активен')).toBeInTheDocument();
+    expect(within(table).getByText('cccccccccccc')).toBeInTheDocument();
+    expect(within(table).getByRole('link', { name: /^Ревью кода/ })).toHaveAttribute('href', `/w/${WS_ID}/projects/${P1.id}/review/${run}?task=${task}`);
+    expect(within(table).getByRole('link', { name: /^Mission Control/ })).toHaveAttribute('href', `/w/${WS_ID}/mission-control?run=${run}&task=${task}`);
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Статус'), 'REMOVED');
+    await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith('/worktrees') && c.url.searchParams.get('status') === 'REMOVED')).toBe(true));
   });
 });

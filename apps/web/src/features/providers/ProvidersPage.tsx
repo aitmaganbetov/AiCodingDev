@@ -414,15 +414,21 @@ function ProviderCard({
             {t('providers.untested', { hosts: untested.map((i) => `${i.host} (${i.detected_version ?? '—'})`).join(', ') })}
           </Callout>
         ) : null}
-        <div className="grid min-w-0 grid-cols-1 gap-6 2xl:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-6">
-            <section aria-labelledby={`${sid}-overview`} className="min-w-0">
-              <SectionTitle id={`${sid}-overview`} icon="terminal">
-                {t('providers.sections.overview')}
+        <div className="flex min-w-0 flex-col gap-6">
+          <section aria-labelledby={`${sid}-overview`} className="min-w-0">
+            <SectionTitle id={`${sid}-overview`} icon="terminal">
+              {t('providers.sections.overview')}
+            </SectionTitle>
+            <InstallationsTable provider={provider} />
+            <h4 className="mb-2 mt-4 text-sm font-semibold text-fg">{t('providers.capabilities')}</h4>
+            <Capabilities provider={provider} />
+          </section>
+          <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-2">
+            <section aria-labelledby={`${sid}-usage`} className="min-w-0">
+              <SectionTitle id={`${sid}-usage`} icon="analytics">
+                {t('providers.sections.usage')}
               </SectionTitle>
-              <InstallationsTable provider={provider} />
-              <h4 className="mb-2 mt-4 text-sm font-semibold text-fg">{t('providers.capabilities')}</h4>
-              <Capabilities provider={provider} />
+              <ProviderUsage provider={provider} analytics={analytics} window={window} />
             </section>
             <section aria-labelledby={`${sid}-routing`} className="min-w-0">
               <SectionTitle id={`${sid}-routing`} icon="settings">
@@ -431,20 +437,12 @@ function ProviderCard({
               {canEdit ? <SettingsForm workspaceId={workspaceId} provider={provider} /> : <SettingsView settings={provider.workspace_settings} />}
             </section>
           </div>
-          <div className="flex min-w-0 flex-col gap-6">
-            <section aria-labelledby={`${sid}-usage`} className="min-w-0">
-              <SectionTitle id={`${sid}-usage`} icon="analytics">
-                {t('providers.sections.usage')}
-              </SectionTitle>
-              <ProviderUsage provider={provider} analytics={analytics} window={window} />
-            </section>
-            <section aria-labelledby={`${sid}-history`} className="min-w-0">
-              <SectionTitle id={`${sid}-history`} icon="history">
-                {t('providers.sections.history')}
-              </SectionTitle>
-              <ExecutionHistory workspaceId={workspaceId} provider={provider} />
-            </section>
-          </div>
+          <section aria-labelledby={`${sid}-history`} className="min-w-0">
+            <SectionTitle id={`${sid}-history`} icon="history">
+              {t('providers.sections.history')}
+            </SectionTitle>
+            <ExecutionHistory workspaceId={workspaceId} provider={provider} />
+          </section>
         </div>
       </Card>
     </li>

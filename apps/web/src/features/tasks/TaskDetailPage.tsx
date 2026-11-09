@@ -175,6 +175,11 @@ export function TaskDetailPage() {
           <Link to={`/w/${workspaceId}/mission-control?${new URLSearchParams({ run: runId, task: taskId }).toString()}`} className="btn-secondary">
             {t('tasks.backToGraph')}
           </Link>
+          {can(role, 'review:read') ? (
+            <Link to={`/w/${workspaceId}/projects/${projectId}/review/${runId}?${new URLSearchParams({ task: taskId }).toString()}`} className="btn-secondary">
+              {t('tasks.openReview')}
+            </Link>
+          ) : null}
           {can(role, 'chat:read') ? (
             <Link
               to={`/w/${workspaceId}/mission-control?${new URLSearchParams({ run: runId, task: taskId, stream: 'task', ctask: taskId }).toString()}`}

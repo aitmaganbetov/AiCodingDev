@@ -142,11 +142,12 @@ function EntryRow({ entry, selected, onOpen }: { entry: RepositoryTreeEntry; sel
 }
 
 /** Дерево файлов репозитория с выбором commit и просмотром файла как текста с номерами строк. */
-export function RepositoryExplorer({ projectId, repo }: { projectId: string; repo: Repository }) {
+export function RepositoryExplorer({ projectId, repo, initialBranch }: { projectId: string; repo: Repository; initialBranch?: string | undefined }) {
   const { t } = useTranslation();
   const uid = useId();
   const snapshot = repo.latest_index_snapshot ?? null;
-  const [branch, setBranch] = useState(repo.default_branch);
+  // F6: «Открыть файлы ветки» со вкладки «Ветки» (вызывающий меняет key при смене ветки).
+  const [branch, setBranch] = useState(initialBranch || repo.default_branch);
   const [choice, setChoice] = useState<CommitChoice>('');
   const [draft, setDraft] = useState('');
   const [draftError, setDraftError] = useState<string | undefined>(undefined);
@@ -172,6 +173,7 @@ export function RepositoryExplorer({ projectId, repo }: { projectId: string; rep
   });
   const branchNames = branches.data?.items.map((b) => b.name) ?? [];
   if (!branchNames.includes(repo.default_branch)) branchNames.unshift(repo.default_branch);
+  if (!branchNames.includes(branch)) branchNames.push(branch);
   const recentCommits = recent.data?.items ?? [];
 
   const tree = useInfiniteQuery({

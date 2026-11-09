@@ -89,6 +89,12 @@
       "repository_provider": {
         "local": "Локальный",
         "github": "GitHub"
+      },
+      "worktree_status": {
+        "ACTIVE": "Активен",
+        "LOCKED": "Заблокирован",
+        "REMOVED": "Удалён",
+        "ORPHANED": "Без задачи"
       }
     },
     "explorer": {
@@ -130,6 +136,93 @@
         "symlink": "символическая ссылка",
         "submodule": "подмодуль"
       }
+    },
+    "workspace": {
+      "tab": {
+        "overview": "Обзор",
+        "repositories": "Репозитории",
+        "files": "Файлы и изменения",
+        "branches": "Ветки",
+        "worktrees": "Worktrees",
+        "runs": "Запуски",
+        "technologies": "Технологии"
+      },
+      "none": "нет",
+      "loading": "Загрузка…",
+      "unavailable": "нет данных",
+      "repositories": "Репозитории",
+      "repositoriesCount_one": "{{count}} репозиторий",
+      "repositoriesCount_few": "{{count}} репозитория",
+      "repositoriesCount_many": "{{count}} репозиториев",
+      "repositoriesCount_other": "{{count}} репозитория",
+      "attachFirst": "Сначала привяжите репозиторий на вкладке «Репозитории».",
+      "qualityTitle": "Политика качества",
+      "securityProfile": "Профиль безопасности",
+      "notSet": "не задан",
+      "routingPolicy": "Политика маршрутизации",
+      "routingDefault": "по умолчанию workspace",
+      "qualityHint": "Профиль определяет обязательные проверки (Quality Gates) каждого запуска проекта; изменить его могут владелец и администраторы.",
+      "controlsLink": "Контроли стандартов проекта",
+      "qualityLink": "Гейты качества",
+      "modesTitle": "Режимы разработки",
+      "modesHint": "Режим выбирается при создании запуска: он задаёт конвейер агентов и обязательные проверки.",
+      "newRun": "Новый запуск",
+      "executorsTitle": "AI-исполнители",
+      "executorsHint": "Настройки CLI-провайдеров рабочего пространства: какие роли агентов исполняет провайдер, лимиты сессий. Квоты CLI не сообщают — здесь их нет.",
+      "providersLink": "Настройки CLI-провайдеров",
+      "noProviders": "Провайдеры не зарегистрированы.",
+      "providerOn": "Включён",
+      "providerOff": "Выключен",
+      "providerLimits": "До {{parallel}} параллельных сессий · тайм-аут {{timeout}} мин",
+      "rolesNone": "Роли не назначены — задачи не исполняет.",
+      "roles": "Роли: {{roles}}",
+      "recentRuns": "Последние запуски",
+      "allRuns": "Все запуски и новый запуск",
+      "noRunsTitle": "Запусков пока нет",
+      "noRuns": "Запусков пока нет.",
+      "col": {
+        "status": "Статус",
+        "mode": "Режим",
+        "objective": "Цель",
+        "created": "Создан",
+        "actions": "Действия",
+        "branch": "Ветка",
+        "commit": "Commit",
+        "committed": "Последний commit",
+        "commits": "База → head",
+        "run": "Запуск",
+        "updated": "Изменён"
+      },
+      "openMc": "Mission Control",
+      "openReview": "Ревью кода",
+      "openTask": "Задача",
+      "runsTitle": "История запусков",
+      "runsHint": "Ход исполнения — в AI Mission Control, изменения и обсуждение — в Code Review.",
+      "branchesTitle": "Ветки",
+      "branchesNoLocal": "Ветки читаются из локальной рабочей копии на сервере; у этого репозитория её нет.",
+      "defaultBranch": "по умолчанию",
+      "openFiles": "Открыть файлы",
+      "branchesCaption": "Ветки {{repo}}",
+      "noBranches": "Веток нет.",
+      "branchesTruncated": "Показаны не все ветки (ограничение выборки сервера).",
+      "repository": "Репозиторий",
+      "worktreesTitle": "Worktrees",
+      "worktreesHint": "Изолированные рабочие копии задач: ветка, base/head commit, запуск и задача. Пути на хосте не показываются.",
+      "to": "до",
+      "statusFilter": "Статус",
+      "allStatuses": "Все статусы",
+      "noWorktreesTitle": "Worktree нет",
+      "noWorktrees": "Worktree появляются, когда задачи запуска начинают исполняться.",
+      "removedAt": "удалён",
+      "filesTitle": "Файлы и изменения",
+      "filesHint": "Дерево файлов по ветке и commit; изменения задач и обсуждения — в Code Review (вкладка «Запуски»)."
+    },
+    "list": {
+      "search": "Поиск по названию",
+      "searchHint": "Фильтр среди загруженных проектов.",
+      "noMatch": "Нет проектов с таким названием среди загруженных.",
+      "files": "Файлы",
+      "filesLabel": "Файлы проекта «{{name}}»"
     }
   }
 }

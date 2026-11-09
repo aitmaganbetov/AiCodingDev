@@ -353,7 +353,7 @@ export function CodeReviewPage() {
     </>
   );
 
-  if (run.run.isPending) {
+  if (run.isPending) {
     return (
       <section aria-labelledby="page-title" aria-busy="true">
         {heading}
@@ -361,20 +361,20 @@ export function CodeReviewPage() {
       </section>
     );
   }
-  if (run.run.isError) {
-    const notFound = isApiError(run.run.error) && run.run.error.status === 404;
+  if (run.isError) {
+    const notFound = isApiError(run.error) && run.error.status === 404;
     return (
       <section aria-labelledby="page-title">
         {heading}
         {notFound ? (
           <EmptyState title={t('review.notFoundTitle')} description={t('review.notFound')} />
         ) : (
-          <ErrorState error={run.run.error} onRetry={() => void run.run.refetch()} />
+          <ErrorState error={run.error} onRetry={() => void run.refetch()} />
         )}
       </section>
     );
   }
-  const runData = run.run.data;
+  const runData = run.data;
 
   // --- diff ----------------------------------------------------------------------------------------
   const commentReason = !canWrite

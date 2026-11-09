@@ -21,6 +21,7 @@ const EXPECTED = [
   'integrations',
   'ds',
   'missionControl',
+  'review',
   'agents',
 ];
 

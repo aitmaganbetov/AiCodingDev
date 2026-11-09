@@ -1,6 +1,8 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { components } from '../../src/api/schema';
 import { expectNoHorizontalScroll, expectNoSeriousA11yViolations } from '../support/a11y';
-import { problem, type MockApi } from '../support/mockApi';
+import { emptyAnalyticsSummary, problem, type MockApi } from '../support/mockApi';
 import { login } from '../support/session';
 import { expect, test } from './fixtures';
 
@@ -202,4 +204,141 @@ test('providers: probe rate limit (429) is shown next to the button', async ({ p
   const codex = page.locator('#provider-codex');
   await codex.getByRole('button', { name: 'Перепроверить' }).click();
   await expect(codex.getByRole('status').filter({ hasText: 'Слишком много запросов' })).toBeVisible();
+});
+
+/* ── F5: история исполнений (B1), измеренное использование, предупреждение UNTESTED, адаптивность ── */
+
+function execution(i: number, providerCode: S['CliProvider'], status: S['ExecutionStatus']): S['ProviderExecution'] {
+  const failed = status === 'TIMED_OUT' || status === 'CRASHED';
+  return {
+    id: `01900000-0000-7000-f000-${String(i).padStart(12, '0')}`,
+    provider: providerCode,
+    installation_id: '01900000-0000-7000-b000-000000000011',
+    task_attempt_id: `01900000-0000-7000-e000-${String(i).padStart(12, '0')}`,
+    attempt_no: 1 + (i % 2),
+    task_id: `01900000-0000-7000-c000-${String(i).padStart(12, '0')}`,
+    run_id: '01900000-0000-7000-d000-000000000001',
+    agent_role: i % 3 === 0 ? 'reviewer' : 'developer',
+    status,
+    exit_code: failed ? null : 0,
+    failure_category: failed ? 'TIMEOUT' : null,
+    timeout_seconds: 1800,
+    output_artifact_id: null,
+    created_at: new Date(Date.parse('2026-11-08T09:00:00Z') - i * 60_000).toISOString().replace('.000Z', 'Z'),
+    started_at: '2026-11-08T08:00:00Z',
+    finished_at: '2026-11-08T08:01:05Z',
+    duration_ms: 65_000,
+  };
+}
+
+const SHOTS = process.env.AICD_E2E_SCREENSHOTS_DIR;
+
+test('providers: execution history (virtualized, status filter), measured usage without quotas, UNTESTED warning; viewer read-only (axe light/dark)', async ({ page, api }) => {
+  const ws = api.addWorkspace('Команда', 'team', 'owner');
+  const ro = api.addWorkspace('Наблюдатели', 'ro', 'viewer');
+  const items = providers();
+  mockProviders(api, items);
+  const all = Array.from({ length: 150 }, (_, i) => execution(i + 1, 'codex', i % 10 === 0 ? 'TIMED_OUT' : 'COLLECTED'));
+  api.route('GET', '/api/v1/providers/{id}/executions', 'listProviderExecutions', ({ id, url }) => {
+    const statuses = url.searchParams.getAll('status');
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    const start = Number(url.searchParams.get('cursor') ? Buffer.from(url.searchParams.get('cursor') ?? '', 'base64url').toString('utf8') : 0);
+    const own = id === items[0]?.provider_id ? all.filter((e) => statuses.length === 0 || statuses.includes(e.status)) : [];
+    const page = own.slice(start, start + limit);
+    const end = start + limit;
+    return { status: 200, body: { items: page, next_cursor: end < own.length ? Buffer.from(String(end)).toString('base64url') : null } };
+  });
+  api.route('GET', '/api/v1/analytics/summary', 'getAnalyticsSummary', () => {
+    const summary = emptyAnalyticsSummary();
+    summary.providers = [
+      {
+        provider: 'codex',
+        executions: 150,
+        collected: 135,
+        errors: 15,
+        rate_limited: 0,
+        auth_required: 0,
+        cancelled: 0,
+        in_progress: 0,
+        success_rate: 0.9,
+        avg_duration_seconds: 65,
+        failures_by_category: { TIMEOUT: 15 },
+        tokens: { total: null, source: 'not_exposed_by_cli', executions_reported: 0 },
+      },
+    ];
+    return { status: 200, body: summary };
+  });
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/settings/providers`);
+  const codex = page.locator('#provider-codex');
+  const claude = page.locator('#provider-claude');
+  await expect(codex.getByTestId('provider-state-codex')).toHaveAttribute('data-state', 'ready');
+  await expect(codex.getByTestId('provider-state-codex')).toContainText('Проверено');
+  // UNTESTED — предупреждение о непроверенной версии.
+  await expect(claude).toContainText('Версия CLI не проверена на совместимость');
+  await expect(claude).toContainText('worker-exec-2 (2.0.1)');
+  await expect(codex).not.toContainText('Версия CLI не проверена');
+
+  // Использование: только измеренное; токены — «CLI не сообщает», квоты не показываются.
+  const usage = codex.getByTestId('usage-codex');
+  await expect(usage.locator('[data-metric="executions"]')).toHaveText('150');
+  await expect(usage.locator('[data-metric="successRate"]')).toHaveText('90%');
+  await expect(usage.locator('[data-metric="tokens"]')).toHaveText('CLI не сообщает токены');
+  await expect(usage).toContainText('Тайм-аут: 15');
+  await expect(usage).toContainText('Квоты, лимиты и остаток подписки CLI не сообщают');
+  await expect(page.locator('main')).not.toContainText(/остаток\s+\d|квота:\s*\d/i);
+  await expect(claude.getByTestId('usage-none')).toHaveText('Нет исполнений в окне analytics.');
+
+  // История: виртуализация (в DOM — только окно из 50 загруженных), подгрузка, фильтр статуса на сервере.
+  const history = codex.getByRole('list', { name: 'История исполнений Codex CLI' });
+  await expect(history).toBeVisible();
+  await expect(history.getByRole('listitem').first()).toHaveAttribute('aria-setsize', '50');
+  expect(await history.getByRole('listitem').count()).toBeLessThan(50);
+  await expect(history.getByRole('listitem').first()).toContainText('Тайм-аут');
+  await expect(history.getByRole('listitem').first().getByRole('link', { name: /Mission Control/ })).toHaveAttribute(
+    'href',
+    `/w/${ws.id}/mission-control?run=01900000-0000-7000-d000-000000000001&task=01900000-0000-7000-c000-000000000001`,
+  );
+  await codex.getByRole('button', { name: 'Загрузить ещё' }).click();
+  await expect(history.getByRole('listitem').first()).toHaveAttribute('aria-setsize', '100');
+  await codex.getByLabel('Статус исполнения').selectOption({ label: 'Только сбои' });
+  await expect(history.getByRole('listitem').first()).toHaveAttribute('aria-setsize', '15');
+  const lastHistory = api.requests.filter((r) => r.operationId === 'listProviderExecutions').at(-1);
+  expect(lastHistory?.headers['x-workspace-id']).toBe(ws.id);
+  await expect(claude.getByTestId('executions-empty')).toHaveText('Исполнений нет.');
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expectNoSeriousA11yViolations(page, `providers F5 (${scheme})`);
+  }
+
+  // RBAC: viewer — история и использование видны, перепроверки и формы нет.
+  await page.goto(`/w/${ro.id}/settings/providers`);
+  await expect(page.locator('#provider-codex').getByRole('list', { name: 'История исполнений Codex CLI' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Перепроверить' })).toHaveCount(0);
+  await expect(page.getByRole('form')).toHaveCount(0);
+  await expectNoSeriousA11yViolations(page, 'providers F5 viewer');
+});
+
+test('providers: 375/768/1366/1920 without horizontal overflow in both themes', async ({ page, api }) => {
+  const ws = api.addWorkspace('Команда', 'team', 'admin');
+  mockProviders(api, providers());
+  api.route('GET', '/api/v1/providers/{id}/executions', 'listProviderExecutions', ({ id }) => ({
+    status: 200,
+    body: { items: id === '01900000-0000-7000-b000-000000000001' ? Array.from({ length: 8 }, (_, i) => execution(i + 1, 'codex', 'COLLECTED')) : [], next_cursor: null },
+  }));
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/settings/providers`);
+  await expect(page.locator('#provider-codex').getByRole('list', { name: 'История исполнений Codex CLI' })).toBeVisible();
+  for (const width of [375, 768, 1366, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const scheme of ['dark', 'light'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expectNoHorizontalScroll(page);
+      if (SHOTS && (width === 1366 || width === 375)) {
+        mkdirSync(SHOTS, { recursive: true });
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({ path: join(SHOTS, `providers-${scheme}-${width}.png`), fullPage: true });
+      }
+    }
+  }
 });

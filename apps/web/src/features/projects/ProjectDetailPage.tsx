@@ -3,14 +3,14 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 import { isApiError } from '../../api/client';
-import { projectKeys, projectsApi, type Project, type Repository, type Technology } from '../../api/projects';
+import { projectKeys, projectsApi, type Repository, type Technology } from '../../api/projects';
 import { PageHeading } from '../../components/PageHeading';
 import { EmptyState, ErrorState, LoadingState } from '../../components/states';
 import {
   Badge,
   Button,
+  ButtonLink,
   Callout,
-  Card,
   Dialog,
   DialogContent,
   DialogTrigger,
@@ -30,36 +30,15 @@ import { PullRequestsPanel } from '../integrations/PullRequestsPanel';
 import { VerificationStatus } from '../integrations/VerificationStatus';
 import { AttachRepositoryForm } from './AttachRepositoryForm';
 import { RepositoryExplorer } from './RepositoryExplorer';
+import { BranchesPanel, FilesPanel, ProjectOverviewPanel, ProjectRunsPanel, WorktreesPanel } from './ProjectWorkspacePanels';
+import { useInPageSearchParams } from '../runs/useInPageSearchParams';
+
+/** Вкладки рабочего пространства проекта (F6); выбранная — в `?tab=` (deep link). */
+export const PROJECT_TABS = ['overview', 'repositories', 'files', 'branches', 'worktrees', 'runs', 'pull-requests', 'technologies'] as const;
+export type ProjectTab = (typeof PROJECT_TABS)[number];
 
 export const REPOSITORIES_PAGE_SIZE = 50;
 export const TECHNOLOGIES_PAGE_SIZE = 50;
-
-function ProjectOverview({ project }: { project: Project }) {
-  const { t } = useTranslation();
-  const mode = project.settings.documentation_mode;
-  const profile = project.settings.quality_profile;
-  return (
-    <Card as="section" id="project-overview" title={t('projects.detail.overview')}>
-      {project.description ? <p className="mb-3 whitespace-pre-line break-words">{project.description}</p> : null}
-      <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
-        <dt className="text-fg-muted">{t('projects.status')}</dt>
-        <dd>{t(`enums.project_status.${project.status}`, { defaultValue: project.status })}</dd>
-        <dt className="text-fg-muted">{t('projects.documentationMode')}</dt>
-        <dd>{t(`enums.documentation_mode.${mode}`, { defaultValue: mode })}</dd>
-        <dt className="text-fg-muted">{t('projects.qualityProfile')}</dt>
-        <dd>{t(`enums.quality_profile.${profile}`, { defaultValue: profile })}</dd>
-        <dt className="text-fg-muted">{t('common.createdAt')}</dt>
-        <dd>
-          <Timestamp value={project.created_at} />
-        </dd>
-        <dt className="text-fg-muted">{t('projects.detail.updatedAt')}</dt>
-        <dd>
-          <Timestamp value={project.updated_at} />
-        </dd>
-      </dl>
-    </Card>
-  );
-}
 
 function RepositoryCard({ projectId, repo }: { projectId: string; repo: Repository }) {
   const { t } = useTranslation();
@@ -262,11 +241,16 @@ function TechnologiesPanel({ projectId }: { projectId: string }) {
   );
 }
 
-/** P7-04: проект — обзор, Repository Explorer (репозитории и индекс), определённый стек. */
+/**
+ * Рабочее пространство проекта (F6, план §3.5; прежде P7-04): обзор (режимы, AI-исполнители, политика качества,
+ * последние запуски), репозитории (привязка local/GitHub с проверкой 202), файлы и изменения, ветки, worktrees (B4),
+ * запуски (Mission Control, Code Review), pull requests, технологии. Вкладка — в URL (`?tab=`).
+ */
 export function ProjectDetailPage() {
   const { t } = useTranslation();
   const { projectId = '' } = useParams();
   const { workspaceId, membership } = useCurrentWorkspace();
+  const [params, setParams] = useInPageSearchParams();
   const query = useQuery({
     queryKey: projectKeys.detail(projectId),
     queryFn: ({ signal }) => projectsApi.get(projectId, signal),
@@ -275,6 +259,14 @@ export function ProjectDetailPage() {
 
   if (!workspaceId || !membership) return <WorkspaceNotFound />;
   const listPath = `/w/${workspaceId}/projects`;
+  const tabParam = params.get('tab');
+  const tab: ProjectTab = (PROJECT_TABS as readonly string[]).includes(tabParam ?? '') ? (tabParam as ProjectTab) : 'overview';
+  const setTab = (next: string, extra: Record<string, string> = {}) => {
+    const p = new URLSearchParams();
+    if (next !== 'overview') p.set('tab', next);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    setParams(p);
+  };
 
   if (query.isPending) {
     return (
@@ -308,34 +300,66 @@ export function ProjectDetailPage() {
 
   const project = query.data;
   return (
-    <section aria-labelledby="page-title" className="flex flex-col gap-6">
+    <section aria-labelledby="page-title" className="flex flex-col gap-4">
       <div>
         <Link to={listPath} className="text-sm font-medium text-link underline">
           {t('projects.backToList')}
         </Link>
         <div className="mt-2">
           <PageHeading title={project.name}>
-            <Link to={`${listPath}/${project.id}/runs`} className="btn-secondary">
-              {t('projects.runsLink')}
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <ButtonLink to={`${listPath}/${project.id}/runs`} variant="secondary" icon="play">
+                {t('projects.runsLink')}
+              </ButtonLink>
+            </div>
           </PageHeading>
         </div>
+        <p className="flex flex-wrap items-center gap-2 text-sm" data-testid="project-badges">
+          <Badge tone={project.status === 'ACTIVE' ? 'success' : 'neutral'}>{t(`enums.project_status.${project.status}`, { defaultValue: project.status })}</Badge>
+          <Badge tone="info">
+            {t('projects.qualityProfile')}: {t(`enums.quality_profile.${project.settings.quality_profile}`, { defaultValue: project.settings.quality_profile })}
+          </Badge>
+          <Badge tone="neutral">
+            {t('projects.documentationMode')}: {t(`enums.documentation_mode.${project.settings.documentation_mode}`, { defaultValue: project.settings.documentation_mode })}
+          </Badge>
+        </p>
       </div>
-      <ProjectOverview project={project} />
-      <Tabs defaultValue="repositories">
+      <Tabs value={tab} onValueChange={(v) => setTab(v)}>
         <TabsList label={t('projects.detail.tabs')}>
-          <TabsTrigger value="repositories">{t('projects.repo.title')}</TabsTrigger>
-          <TabsTrigger value="technologies">{t('projects.tech.title')}</TabsTrigger>
-          <TabsTrigger value="pull-requests">{t('integrations.pr.title')}</TabsTrigger>
+          {PROJECT_TABS.map((x) => (
+            <TabsTrigger key={x} value={x}>
+              {x === 'pull-requests' ? t('integrations.pr.title') : t(`projects.workspace.tab.${x}`)}
+            </TabsTrigger>
+          ))}
         </TabsList>
+        <TabsContent value="overview">
+          <ProjectOverviewPanel project={project} workspaceId={workspaceId} role={membership.role} />
+        </TabsContent>
         <TabsContent value="repositories">
-          <RepositoriesPanel workspaceId={workspaceId ?? ''} projectId={project.id} canAttach={can(membership.role, 'repository:attach')} />
+          <RepositoriesPanel workspaceId={workspaceId} projectId={project.id} canAttach={can(membership.role, 'repository:attach')} />
+        </TabsContent>
+        <TabsContent value="files">
+          <FilesPanel
+            projectId={project.id}
+            repoId={params.get('repo')}
+            branch={params.get('branch')}
+            onRepoChange={(repo) => setTab('files', { repo })}
+          />
+        </TabsContent>
+        <TabsContent value="branches">
+          <BranchesPanel projectId={project.id} onOpenFiles={(repo, branch) => setTab('files', { repo, branch })} />
+        </TabsContent>
+        <TabsContent value="worktrees">
+          <WorktreesPanel workspaceId={workspaceId} projectId={project.id} />
+        </TabsContent>
+        <TabsContent value="runs">
+          <ProjectRunsPanel workspaceId={workspaceId} projectId={project.id} role={membership.role} />
+        </TabsContent>
+        <TabsContent value="pull-requests">
+          <PullRequestsPanel workspaceId={workspaceId} projectId={project.id} role={membership.role} />
         </TabsContent>
         <TabsContent value="technologies">
           <TechnologiesPanel projectId={project.id} />
-        </TabsContent>
-        <TabsContent value="pull-requests">
-          <PullRequestsPanel workspaceId={workspaceId ?? ''} projectId={project.id} role={membership.role} />
         </TabsContent>
       </Tabs>
     </section>

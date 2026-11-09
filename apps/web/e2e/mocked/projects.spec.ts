@@ -70,6 +70,11 @@ test('repository explorer: project overview, repository with index snapshot, no 
   await expect(page).toHaveURL(`/w/${ws.id}/projects/${project.id}`);
   await expect(page.getByRole('heading', { level: 1, name: 'Платёжный шлюз' })).toBeFocused();
   await expect(page.getByText('Сервис платежей')).toBeVisible();
+  // F6: рабочее пространство проекта открывается на «Обзоре»; репозитории — своя вкладка.
+  await expect(page.getByRole('tab', { name: 'Обзор' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('overview-repositories')).toHaveText('1 репозиторий');
+  await page.getByRole('tab', { name: 'Репозитории' }).click();
+  await expect(page).toHaveURL(/\?tab=repositories$/);
 
   const repos = page.getByRole('list', { name: 'Репозитории проекта' });
   await expect(repos.getByRole('listitem')).toHaveCount(1);
@@ -82,7 +87,7 @@ test('repository explorer: project overview, repository with index snapshot, no 
   }
 
   // Вкладки — стрелками (APG Tabs).
-  await page.getByRole('tab', { name: 'Репозитории' }).focus();
+  await page.getByRole('tab', { name: 'Pull requests' }).focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: 'Технологии' })).toHaveAttribute('aria-selected', 'true');
   const techTable = page.getByRole('table', { name: /Технологии/ });
@@ -91,7 +96,10 @@ test('repository explorer: project overview, repository with index snapshot, no 
   await expectNoSeriousA11yViolations(page, 'project technologies');
 
   // Привязка локального репозитория с клавиатуры, ошибка сервера по полю, затем успех.
-  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Home');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Репозитории' })).toHaveAttribute('aria-selected', 'true');
   const attach = page.getByRole('button', { name: 'Привязать репозиторий' });
   await tabTo(page, attach, { backwards: true });
   await page.keyboard.press('Enter');
@@ -119,7 +127,7 @@ test('repository explorer: viewer is read-only, empty states, unknown project; 3
   const project = api.addProject(ro.id, 'Сервис');
   mockExplorer(api, project.id, [], []);
   await login(page, api);
-  await page.goto(`/w/${ro.id}/projects/${project.id}`);
+  await page.goto(`/w/${ro.id}/projects/${project.id}?tab=repositories`);
   await expect(page.getByRole('heading', { level: 1, name: 'Сервис' })).toBeFocused();
   await expect(page.getByTestId('empty-state')).toContainText('Привязывать репозитории могут владелец и администраторы');
   await expect(page.getByRole('button', { name: 'Привязать репозиторий' })).toHaveCount(0);
@@ -241,7 +249,7 @@ test('repository explorer: file tree by commit, text view with line numbers, tru
   mockExplorer(api, project.id, [local], []);
   mockRepositoryFiles(api, project.id);
   await login(page, api);
-  await page.goto(`/w/${ws.id}/projects/${project.id}`);
+  await page.goto(`/w/${ws.id}/projects/${project.id}?tab=repositories`);
 
   const toggle = page.getByRole('button', { name: 'Открыть дерево файлов' });
   await toggle.focus();

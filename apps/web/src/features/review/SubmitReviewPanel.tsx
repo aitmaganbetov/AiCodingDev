@@ -162,10 +162,12 @@ export function SubmitReviewPanel({
     const req: ReviewSubmitRequest = {
       verdict,
       expected_run_version: run.version,
+      // По контракту поле со значением по умолчанию true; значимо только для REQUEST_CHANGES.
+      requires_impact_preview: verdict === 'REQUEST_CHANGES' ? preview : true,
       ...(text ? { body: text } : {}),
       ...(verdict !== 'APPROVE' && chosen.length > 0 ? { thread_ids: chosen } : {}),
       ...(verdict === 'APPROVE' ? { approval_id: effectiveApproval } : {}),
-      ...(verdict === 'REQUEST_CHANGES' ? { requires_impact_preview: preview, ...(target === 'task' && scopeTask ? { task_id: scopeTask.id } : {}) } : {}),
+      ...(verdict === 'REQUEST_CHANGES' && target === 'task' && scopeTask ? { task_id: scopeTask.id } : {}),
     };
     submit.mutate(req);
   };

@@ -683,8 +683,15 @@ export class MockApi {
         if (!ws) return problem(404, 'not_found');
         const projectId = url.searchParams.get('project_id');
         const statuses = url.searchParams.getAll('status');
+        const mode = url.searchParams.get('mode');
         const items = this.runs
-          .filter((r) => r.workspace_id === ws.id && (!projectId || r.project_id === projectId) && (statuses.length === 0 || statuses.includes(r.status)))
+          .filter(
+            (r) =>
+              r.workspace_id === ws.id &&
+              (!projectId || r.project_id === projectId) &&
+              (statuses.length === 0 || statuses.includes(r.status)) &&
+              (!mode || r.mode === mode),
+          )
           .map((r) => {
             const summary: S['RunSummary'] = {
               id: r.id,

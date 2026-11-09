@@ -141,41 +141,42 @@ function ProfileSection({ profile }: { profile: AgentProfile }) {
   );
 }
 
-function EligibilityTable({ rows, name }: { rows: EligibilityRow[]; name: string }) {
+/** Провайдеры × роль: список (без горизонтальной прокрутки на узких экранах), итог — с сервера. */
+function EligibilityList({ rows, name }: { rows: EligibilityRow[]; name: string }) {
   const { t } = useTranslation();
-  const yesNo = (v: boolean) => (
-    <Badge tone={v ? 'success' : 'neutral'} icon={v ? 'check' : 'statusNeutral'}>
-      {v ? t('agents.detail.yes') : t('agents.detail.no')}
-    </Badge>
+  if (rows.length === 0) return <p className="text-sm text-fg-muted">{t('agents.detail.providersEmpty')}</p>;
+  const fact = (label: string, v: boolean) => (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt className="text-xs text-fg-muted">{label}</dt>
+      <dd>
+        <Badge tone={v ? 'success' : 'neutral'} icon={v ? 'check' : 'statusNeutral'}>
+          {v ? t('agents.detail.yes') : t('agents.detail.no')}
+        </Badge>
+      </dd>
+    </div>
   );
-  const columns: Column<EligibilityRow>[] = [
-    { id: 'provider', header: t('agents.detail.colProvider'), rowHeader: true, cell: (r) => r.displayName },
-    { id: 'platform', header: t('agents.detail.colPlatform'), cell: (r) => yesNo(r.enabledGlobally) },
-    { id: 'workspace', header: t('agents.detail.colWorkspace'), cell: (r) => yesNo(r.enabledInWorkspace) },
-    { id: 'allowed', header: t('agents.detail.colAllowed'), cell: (r) => yesNo(r.allowed) },
-    {
-      id: 'eligible',
-      header: t('agents.detail.colEligible'),
-      cell: (r) =>
-        r.eligible === null ? (
-          t('agents.notMeasured')
-        ) : (
-          <Badge tone={r.eligible ? 'success' : 'warning'} icon={r.eligible ? 'statusSuccess' : 'alert'} data-eligible={String(r.eligible)}>
-            {r.eligible ? t('agents.detail.eligible') : t('agents.detail.notEligible')}
-          </Badge>
-        ),
-    },
-  ];
   return (
-    <Table
-      caption={t('agents.detail.providersCaption', { name })}
-      columns={columns}
-      rows={rows}
-      rowKey={(r) => r.code}
-      rowProps={(r) => ({ 'data-provider': r.code })}
-      empty={t('agents.detail.providersEmpty')}
-      density="compact"
-    />
+    <ul aria-label={t('agents.detail.providersCaption', { name })} className="flex flex-col divide-y divide-border rounded-lg border border-border">
+      {rows.map((r) => (
+        <li key={r.code} className="flex min-w-0 flex-col gap-2 p-3" data-provider={r.code}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium text-fg">{r.displayName}</span>
+            {r.eligible === null ? (
+              <span className="text-sm text-fg-muted">{t('agents.notMeasured')}</span>
+            ) : (
+              <Badge tone={r.eligible ? 'success' : 'warning'} icon={r.eligible ? 'statusSuccess' : 'alert'} data-eligible={String(r.eligible)}>
+                {t('agents.detail.colEligible')}: {r.eligible ? t('agents.detail.eligible') : t('agents.detail.notEligible')}
+              </Badge>
+            )}
+          </div>
+          <dl className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {fact(t('agents.detail.colPlatform'), r.enabledGlobally)}
+            {fact(t('agents.detail.colWorkspace'), r.enabledInWorkspace)}
+            {fact(t('agents.detail.colAllowed'), r.allowed)}
+          </dl>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -201,11 +202,11 @@ function HistoryTable({ workspaceId, tasks, name }: { workspaceId: string; tasks
         const links = taskLinks(workspaceId, task);
         return (
           <span className="flex flex-wrap gap-x-3">
-            <Link to={links.detail} className="link inline-flex min-h-target items-center">
+            <Link to={links.detail} className="link inline-block min-h-target leading-6">
               {t('agents.detail.openTask')}
               <span className="sr-only">: {task.title}</span>
             </Link>
-            <Link to={links.mission} className="link inline-flex min-h-target items-center">
+            <Link to={links.mission} className="link inline-block min-h-target leading-6">
               {t('agents.detail.openMission')}
               <span className="sr-only">: {task.title}</span>
             </Link>
@@ -352,7 +353,7 @@ function RoleDetail({ workspaceId, role, memberRole }: { workspaceId: string; ro
           source={t('agents.detail.providersSource')}
         >
           {profile ? <ProviderChipsList providers={profile.eligible_providers} emptyText={t('agents.card.noProviders')} /> : null}
-          <EligibilityTable rows={eligibilityRows(role, providers.data?.items ?? [], profile)} name={name} />
+          <EligibilityList rows={eligibilityRows(role, providers.data?.items ?? [], profile)} name={name} />
           <Link to={`/w/${workspaceId}/settings/providers`} className="link inline-flex min-h-target w-fit items-center gap-1 text-sm">
             {canEditProviders ? t('agents.detail.toProvidersEdit') : t('agents.detail.toProviders')}
             <Icon name="chevronRight" className="h-4 w-4" />

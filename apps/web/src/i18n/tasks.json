@@ -177,6 +177,7 @@
         "applicability_report": "Применимость",
         "signature": "Подпись"
       }
-    }
+    },
+    "openReview": "Ревью кода"
   }
 }
