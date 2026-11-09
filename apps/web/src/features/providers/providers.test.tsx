@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { Provider } from '../../api/providers';
 import { json, mockFetch, renderApp, session, WS_ID } from '../../test/utils';
+import { executionStatusFilter } from './ExecutionHistory';
+import { providerStats, tokensText } from './ProviderUsage';
 import { buildSettingsPatch, draftFrom } from './settingsForm';
 
 const SETTINGS: Provider['workspace_settings'] = {
@@ -49,6 +51,38 @@ describe('buildSettingsPatch', () => {
       default_timeout_seconds: 'range',
     });
     expect(buildSettingsPatch(SETTINGS, { ...draft, maxParallel: '1.5' }).errors.max_parallel_sessions).toBe('range');
+  });
+});
+
+describe('provider usage and history (F5)', () => {
+  const stats = {
+    provider: 'codex',
+    executions: 10,
+    collected: 8,
+    errors: 1,
+    rate_limited: 1,
+    auth_required: 0,
+    cancelled: 0,
+    in_progress: 0,
+    success_rate: 0.8,
+    avg_duration_seconds: 42,
+    failures_by_category: {},
+    tokens: { total: null, source: 'not_exposed_by_cli' as const, executions_reported: 0 },
+  };
+  const t = (key: string, o?: Record<string, unknown>) => `${key}${o ? JSON.stringify(o) : ''}`;
+
+  it('tokens only when reported by CLI; never invented', () => {
+    expect(tokensText(t, stats)).toBe('providers.usage.tokensNotExposed');
+    expect(tokensText(t, { ...stats, tokens: { total: 1200, source: 'cli_reported', executions_reported: 10 } })).toContain('tokensReported');
+    expect(tokensText(t, { ...stats, tokens: { total: 600, source: 'mixed', executions_reported: 5 } })).toContain('"reported":5');
+    expect(providerStats(undefined, 'codex')).toBeNull();
+  });
+
+  it('execution status filter maps to repeated status values', () => {
+    expect(executionStatusFilter('')).toBeUndefined();
+    expect(executionStatusFilter('failures')).toEqual(['TIMED_OUT', 'CRASHED', 'AUTH_REQUIRED', 'RATE_LIMITED']);
+    expect(executionStatusFilter('COLLECTED')).toEqual(['COLLECTED']);
+    expect(executionStatusFilter('nope')).toBeUndefined();
   });
 });
 

@@ -22,6 +22,9 @@ export type RepositoryBranch = Schemas['RepositoryBranch'];
 export type RepositoryCommitSummary = Schemas['RepositoryCommitSummary'];
 export type RepositoryBranchesQuery = Query<'listRepositoryBranches'>;
 export type RepositoryCommitsQuery = Query<'listRepositoryCommits'>;
+export type Worktree = Schemas['Worktree'];
+export type WorktreeStatus = Schemas['WorktreeStatus'];
+export type ProjectWorktreesQuery = Query<'listProjectWorktrees'>;
 
 export const projectKeys = {
   list: (workspaceId: string) => ['projects', workspaceId] as const,
@@ -38,6 +41,8 @@ export const projectKeys = {
   branches: (projectId: string, repositoryId: string) => ['project', projectId, 'repository', repositoryId, 'branches'] as const,
   commits: (projectId: string, repositoryId: string, ref: string) =>
     ['project', projectId, 'repository', repositoryId, 'commits', ref] as const,
+  /** Worktrees проекта (B4, только чтение). */
+  worktrees: (projectId: string, query: ProjectWorktreesQuery = {}) => ['project', projectId, 'worktrees', query] as const,
 };
 
 export const projectsApi = {
@@ -87,6 +92,11 @@ export const projectsApi = {
   /** OQ-45 (c): история от ветки/SHA (без commit — HEAD ветки по умолчанию), глубина ≤ 1000. */
   commits(projectId: string, repositoryId: string, query: RepositoryCommitsQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listRepositoryCommits', 200>> {
     return request({ method: 'GET', path: `/projects/${seg(projectId)}/repositories/${seg(repositoryId)}/commits`, query, signal });
+  },
+
+  /** B4: git worktree задач (ветка, base/head commit, run/задача, статус); пути хоста API не отдаёт. */
+  worktrees(projectId: string, query: ProjectWorktreesQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listProjectWorktrees', 200>> {
+    return request({ method: 'GET', path: `/projects/${seg(projectId)}/worktrees`, query, signal });
   },
 
   technologies(projectId: string, query: ListTechnologiesQuery = {}, signal?: AbortSignal): Promise<JsonResponse<'listTechnologies', 200>> {

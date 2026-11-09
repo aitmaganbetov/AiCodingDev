@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { analyticsApi, analyticsKeys, type AnalyticsSummary } from '../../api/analytics';
 import { IdempotentIntent } from '../../api/client';
 import {
   providerKeys,
@@ -16,13 +17,17 @@ import {
 import { FormAlert, TextField } from '../../components/form';
 import { PageHeading } from '../../components/PageHeading';
 import { EmptyState, ErrorState, LoadingState } from '../../components/states';
-import { Badge, Button, Callout, Card, CodeBlock, Table, Timestamp, useToast, type Column, type Tone } from '../../components/ui';
+import { Badge, Button, Callout, Card, CodeBlock, Icon, RelativeTime, Table, Timestamp, useToast, type Column, type IconName, type Tone } from '../../components/ui';
+import { CHIP_STATE_ICON, CHIP_STATE_TONE, providerChipModel } from '../../layout/providerStatus';
 import { can } from '../../lib/permissions';
 import { mapProblemToFields, problemMessage } from '../../lib/problem';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
 import { AGENT_ROLES, MAX_PARALLEL, TIMEOUT_SECONDS, buildSettingsPatch, draftFrom, type SettingsDraft, type SettingsField } from './settingsForm';
 import { useStepUp } from '../../auth/StepUp';
+import { dashboardWindow } from '../dashboard/model';
+import { ExecutionHistory } from './ExecutionHistory';
+import { ProviderUsage } from './ProviderUsage';
 
 const AUTH_TONE: Record<AuthStatus, Tone> = {
   AUTHENTICATED: 'success',
@@ -340,20 +345,48 @@ function ProbeAction({ workspaceId, provider }: { workspaceId: string; provider:
   );
 }
 
-function ProviderCard({ workspaceId, provider, role }: { workspaceId: string; provider: Provider; role: string }) {
+function SectionTitle({ id, icon, children }: { id: string; icon: IconName; children: ReactNode }) {
+  return (
+    <h3 id={id} className="mb-2 flex items-center gap-2 font-semibold text-fg">
+      <Icon name={icon} className="h-4 w-4 text-fg-muted" />
+      {children}
+    </h3>
+  );
+}
+
+function ProviderCard({
+  workspaceId,
+  provider,
+  role,
+  analytics,
+  window,
+}: {
+  workspaceId: string;
+  provider: Provider;
+  role: string;
+  analytics: UseQueryResult<AnalyticsSummary>;
+  window: { from: string; to: string };
+}) {
   const { t } = useTranslation();
   const needsLogin = provider.installations.filter((i) => NEEDS_LOGIN.includes(i.auth_status));
+  const untested = provider.installations.filter((i) => i.compatibility === 'UNTESTED');
+  const unsupported = provider.installations.filter((i) => i.compatibility === 'UNSUPPORTED');
+  const chip = providerChipModel(provider);
   const canProbe = can(role, 'provider:probe');
   const canEdit = can(role, 'provider:settings');
+  const sid = `provider-${provider.code}`;
   return (
     <li>
       <Card
         as="article"
-        id={`provider-${provider.code}`}
+        id={sid}
         title={provider.display_name}
         actions={canProbe ? <ProbeAction workspaceId={workspaceId} provider={provider} /> : undefined}
       >
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mb-4 flex flex-wrap items-center gap-2" data-testid={`provider-state-${provider.code}`} data-state={chip.state}>
+          <Badge tone={CHIP_STATE_TONE[chip.state]} icon={CHIP_STATE_ICON[chip.state]}>
+            {t('providers.status.label')}: {t(`shell.cli.state.${chip.state}`)}
+          </Badge>
           <Badge tone="neutral">{provider.code}</Badge>
           <Badge tone={provider.enabled_globally ? 'success' : 'danger'}>
             {provider.enabled_globally ? t('providers.enabledGlobally') : t('providers.disabledGlobally')}
@@ -361,6 +394,9 @@ function ProviderCard({ workspaceId, provider, role }: { workspaceId: string; pr
           <Badge tone={provider.workspace_settings.enabled ? 'success' : 'neutral'}>
             {provider.workspace_settings.enabled ? t('providers.enabledInWorkspace') : t('providers.disabledInWorkspace')}
           </Badge>
+          <span className="text-xs text-fg-muted">
+            {t('providers.status.checked')}: {chip.checkedAt ? <RelativeTime value={chip.checkedAt} /> : t('providers.neverChecked')}
+          </span>
         </div>
         {needsLogin.length > 0 ? (
           <Callout tone="warning" title={t('providers.loginRequiredTitle')} className="mb-4">
@@ -368,18 +404,60 @@ function ProviderCard({ workspaceId, provider, role }: { workspaceId: string; pr
             <p className="mt-1">{t('providers.noSecrets')}</p>
           </Callout>
         ) : null}
-        <h3 className="mb-2 font-semibold">{t('providers.installations')}</h3>
-        <InstallationsTable provider={provider} />
-        <h3 className="mb-2 mt-4 font-semibold">{t('providers.capabilities')}</h3>
-        <Capabilities provider={provider} />
-        <h3 className="mb-2 mt-4 font-semibold">{t('providers.settings.title')}</h3>
-        {canEdit ? <SettingsForm workspaceId={workspaceId} provider={provider} /> : <SettingsView settings={provider.workspace_settings} />}
+        {unsupported.length > 0 ? (
+          <Callout tone="danger" title={t('providers.unsupportedTitle')} className="mb-4">
+            {t('providers.unsupported', { hosts: unsupported.map((i) => `${i.host} (${i.detected_version ?? '—'})`).join(', ') })}
+          </Callout>
+        ) : null}
+        {untested.length > 0 ? (
+          <Callout tone="warning" title={t('providers.untestedTitle')} className="mb-4">
+            {t('providers.untested', { hosts: untested.map((i) => `${i.host} (${i.detected_version ?? '—'})`).join(', ') })}
+          </Callout>
+        ) : null}
+        <div className="grid min-w-0 grid-cols-1 gap-6 2xl:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-6">
+            <section aria-labelledby={`${sid}-overview`} className="min-w-0">
+              <SectionTitle id={`${sid}-overview`} icon="terminal">
+                {t('providers.sections.overview')}
+              </SectionTitle>
+              <InstallationsTable provider={provider} />
+              <h4 className="mb-2 mt-4 text-sm font-semibold text-fg">{t('providers.capabilities')}</h4>
+              <Capabilities provider={provider} />
+            </section>
+            <section aria-labelledby={`${sid}-routing`} className="min-w-0">
+              <SectionTitle id={`${sid}-routing`} icon="settings">
+                {t('providers.sections.routing')}
+              </SectionTitle>
+              {canEdit ? <SettingsForm workspaceId={workspaceId} provider={provider} /> : <SettingsView settings={provider.workspace_settings} />}
+            </section>
+          </div>
+          <div className="flex min-w-0 flex-col gap-6">
+            <section aria-labelledby={`${sid}-usage`} className="min-w-0">
+              <SectionTitle id={`${sid}-usage`} icon="analytics">
+                {t('providers.sections.usage')}
+              </SectionTitle>
+              <ProviderUsage provider={provider} analytics={analytics} window={window} />
+            </section>
+            <section aria-labelledby={`${sid}-history`} className="min-w-0">
+              <SectionTitle id={`${sid}-history`} icon="history">
+                {t('providers.sections.history')}
+              </SectionTitle>
+              <ExecutionHistory workspaceId={workspaceId} provider={provider} />
+            </section>
+          </div>
+        </div>
       </Card>
     </li>
   );
 }
 
-/** P7-09 CLI Providers: health, авторизация (только статус), capabilities, probe, безопасные настройки. */
+/**
+ * Настройки › CLI-провайдеры (P7-09 → F5, план §3.9): по каждому провайдеру — установки (версия,
+ * совместимость с предупреждением UNTESTED, авторизация — только статус и подсказка официального входа
+ * CLI, доступность, последняя ошибка, «проверено N назад»), перепроверка, измеренное использование
+ * (analytics; токены — только сообщённые CLI, без квот), история исполнений (B1, виртуализация),
+ * маршрутизация (безопасные настройки с step-up).
+ */
 export function ProvidersPage() {
   const { t } = useTranslation();
   const { workspaceId, membership } = useCurrentWorkspace();
@@ -387,6 +465,13 @@ export function ProvidersPage() {
     queryKey: providerKeys.list(workspaceId ?? ''),
     queryFn: ({ signal }) => providersApi.list(workspaceId ?? '', signal),
     enabled: Boolean(workspaceId && membership),
+  });
+  const window = useMemo(() => dashboardWindow(), []);
+  const analytics = useQuery({
+    queryKey: analyticsKeys.summary(workspaceId ?? '', window),
+    queryFn: ({ signal }) => analyticsApi.summary(workspaceId ?? '', window, signal),
+    enabled: Boolean(workspaceId && membership),
+    staleTime: 60_000,
   });
   if (!workspaceId || !membership) return <WorkspaceNotFound />;
 
@@ -398,7 +483,14 @@ export function ProvidersPage() {
     body = (
       <ul className="flex flex-col gap-6" aria-label={t('providers.listLabel')}>
         {query.data.items.map((p) => (
-          <ProviderCard key={`${workspaceId}-${p.provider_id}`} workspaceId={workspaceId} provider={p} role={membership.role} />
+          <ProviderCard
+            key={`${workspaceId}-${p.provider_id}`}
+            workspaceId={workspaceId}
+            provider={p}
+            role={membership.role}
+            analytics={analytics}
+            window={window}
+          />
         ))}
       </ul>
     );
@@ -406,7 +498,14 @@ export function ProvidersPage() {
   return (
     <section aria-labelledby="page-title">
       <PageHeading title={t('providers.title')}>
-        <Button onClick={() => void query.refetch()} loading={query.isFetching && !query.isPending}>
+        <Button
+          icon="refresh"
+          onClick={() => {
+            void query.refetch();
+            void analytics.refetch();
+          }}
+          loading={query.isFetching && !query.isPending}
+        >
           {t('providers.refresh')}
         </Button>
       </PageHeading>

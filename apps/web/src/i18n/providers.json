@@ -1,7 +1,7 @@
 {
   "providers": {
     "title": "CLI-провайдеры",
-    "intro": "Mission Control показывает состояние установленных CLI (Codex, Claude Code) и никогда не запрашивает и не хранит их учётные данные. Вход в CLI выполняет оператор официальной командой CLI на хосте исполнения.",
+    "intro": "Mission Control показывает состояние установленных CLI (Codex, Claude Code), историю их исполнений и измеренное использование. Учётные данные CLI интерфейс никогда не запрашивает и не хранит: вход в CLI выполняет оператор официальной командой CLI на хосте исполнения. Квоты и остаток подписки CLI не сообщают — они не показываются.",
     "loading": "Загрузка провайдеров…",
     "refresh": "Обновить статус",
     "listLabel": "Провайдеры",
@@ -91,7 +91,74 @@
         "OUTPUT_PARSE_ERROR": "Не удалось разобрать вывод",
         "UNSUPPORTED_VERSION": "Неподдерживаемая версия",
         "CANCELLED": "Отменено"
+      },
+      "execution_status": {
+        "QUEUED": "В очереди",
+        "STARTING": "Запускается",
+        "RUNNING": "Выполняется",
+        "EXITED": "Процесс завершён",
+        "COLLECTED": "Результат собран",
+        "TIMED_OUT": "Тайм-аут",
+        "CANCELLED": "Отменено",
+        "CRASHED": "Аварийное завершение",
+        "AUTH_REQUIRED": "Требуется вход",
+        "RATE_LIMITED": "Лимит CLI"
       }
+    },
+    "status": {
+      "label": "Состояние",
+      "checked": "Проверено",
+      "hostsLabel": "Хосты: {{count}}"
+    },
+    "untestedTitle": "Версия CLI не проверена на совместимость",
+    "untested": "Хосты с непроверенной версией: {{hosts}}. Исполнение возможно, но поведение CLI этой версии платформой не подтверждено — обновите CLI до поддерживаемой версии или учитывайте риск.",
+    "unsupportedTitle": "Версия CLI не поддерживается",
+    "unsupported": "Хосты с неподдерживаемой версией: {{hosts}}. Маршрутизатор не направляет на них задачи.",
+    "sections": {
+      "overview": "Установки и авторизация",
+      "usage": "Использование (измерено)",
+      "history": "История исполнений",
+      "routing": "Маршрутизация и настройки"
+    },
+    "usage": {
+      "source": "analytics.providers за {{days}} дней ({{from}} — {{to}}). Квоты, лимиты и остаток подписки CLI не сообщают — не показываются.",
+      "none": "Нет исполнений в окне analytics.",
+      "error": "Не удалось загрузить analytics.",
+      "executions": "Исполнений",
+      "collected": "Результат собран",
+      "successRate": "Успешных",
+      "avgDuration": "Средняя длительность",
+      "errors": "Сбоев (тайм-аут, крах)",
+      "rateLimited": "Отказов по лимиту CLI",
+      "authRequired": "Требовали входа",
+      "inProgress": "Выполняются",
+      "tokens": "Токены",
+      "tokensNotExposed": "CLI не сообщает токены",
+      "tokensMixed": "{{total}} — сообщили {{reported}} исполнений из {{executions}}",
+      "tokensReported": "{{total}} (сообщено CLI)",
+      "failures": "Ошибки по категориям",
+      "noFailures": "Ошибок нет.",
+      "seconds": "{{value}} с",
+      "notMeasured": "нет данных"
+    },
+    "history": {
+      "label": "История исполнений {{name}}",
+      "filter": "Статус исполнения",
+      "anyStatus": "Все статусы",
+      "failuresOnly": "Только сбои",
+      "empty": "Исполнений нет.",
+      "emptyFiltered": "Нет исполнений с выбранным статусом.",
+      "source": "GET /providers/{id}/executions — новые сверху; без вывода CLI, команд и путей хоста.",
+      "attempt": "попытка {{n}}",
+      "exitCode": "код выхода {{code}}",
+      "noExitCode": "без кода выхода",
+      "duration": "{{value}}",
+      "timeout": "тайм-аут {{value}} с",
+      "openMission": "Mission Control",
+      "openMissionLabel": "Открыть задачу исполнения в Mission Control",
+      "ms": "{{value}} мс",
+      "sec": "{{value}} с",
+      "min": "{{m}} мин {{s}} с"
     }
   }
 }

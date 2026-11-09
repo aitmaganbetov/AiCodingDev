@@ -46,6 +46,8 @@ import {
   Keyboard,
   Layers,
   LayoutDashboard,
+  LayoutGrid,
+  LayoutList,
   ListChecks,
   LoaderCircle,
   Lock,
@@ -157,6 +159,9 @@ const ICONS = {
   palette: Palette,
   activity: Activity,
   listChecks: ListChecks,
+  // Переключатель вида (сетка / список) — F5 Агенты.
+  viewGrid: LayoutGrid,
+  viewList: LayoutList,
   // Статусы (§5.2) и 5 состояний верификации.
   statusNeutral: Circle,
   statusRunning: LoaderCircle,

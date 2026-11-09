@@ -7,29 +7,6 @@ import type { AreaModule } from './types';
  * честное состояние «Раздел в разработке» с фазой и ссылками на существующие экраны с теми же
  * данными (никакого демо-содержимого, принцип 2 плана).
  */
-export const agentsArea: AreaModule = {
-  id: 'agents',
-  nav: { labelKey: 'nav.agents', path: 'agents', icon: 'bot', group: 'execution', order: 20, shortcut: 'e', permission: 'run:read' },
-  workspaceRoutes: [
-    {
-      path: 'agents',
-      element: (
-        <RequirePermission permission="run:read">
-          <AreaPlaceholderPage
-            titleKey="nav.agents"
-            phase="F5"
-            descriptionKey="shell.pending.agents"
-            related={[
-              { to: 'analytics', labelKey: 'shell.pending.toAnalytics' },
-              { to: 'runs', labelKey: 'shell.pending.toRuns' },
-            ]}
-          />
-        </RequirePermission>
-      ),
-    },
-  ],
-};
-
 export const codeIntelligenceArea: AreaModule = {
   id: 'code',
   nav: { labelKey: 'nav.code', path: 'code', icon: 'code', group: 'code', order: 10, shortcut: 'x', permission: 'project:read' },

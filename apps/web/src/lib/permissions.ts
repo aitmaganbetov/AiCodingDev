@@ -44,7 +44,10 @@ export type Permission =
   | 'pull_request:create'
   | 'pull_request:merge'
   | 'notification:read'
-  | 'notification:update';
+  | 'notification:update'
+  | 'review:read'
+  | 'review:write'
+  | 'review:submit';
 
 const ALL: readonly WorkspaceRole[] = ['owner', 'admin', 'developer', 'reviewer', 'viewer'];
 const ADMINS: readonly WorkspaceRole[] = ['owner', 'admin'];
@@ -95,6 +98,11 @@ const MATRIX: Record<Permission, readonly WorkspaceRole[]> = {
   // UI redesign B8 (§13.2): только собственные уведомления — любой участник workspace.
   'notification:read': ALL,
   'notification:update': ALL,
+  // UI redesign B5 (ADR-0015, §5.6): треды ревью — читают все; пишут reviewer+ (правка — только автор, решает
+  // сервер); отправка ревью зависит от verdict — см. canSubmitReview.
+  'review:read': ALL,
+  'review:write': PARTICIPANTS,
+  'review:submit': PARTICIPANTS,
 };
 
 /** Неизвестная роль (расширение enum) трактуется как отсутствие права. */
@@ -110,4 +118,13 @@ export function can(role: string | null | undefined, permission: Permission): bo
 export function canTriageFinding(role: string | null | undefined, toStatus: string): boolean {
   if (!can(role, 'finding:triage')) return false;
   return toStatus !== 'ACCEPTED_RISK' || (ADMINS as readonly string[]).includes(role ?? '');
+}
+
+/**
+ * `review:submit` с учётом вердикта (API_DESIGN §5.6, `x-permission-rules` submitReview): reviewer — COMMENT и
+ * APPROVE (APPROVE дополнительно решает §5.3 по approval), REQUEST_CHANGES — как поручение CHANGE_REQUEST (developer+).
+ */
+export function canSubmitReview(role: string | null | undefined, verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'): boolean {
+  if (!can(role, 'review:submit')) return false;
+  return verdict !== 'REQUEST_CHANGES' || (WRITERS as readonly string[]).includes(role ?? '');
 }

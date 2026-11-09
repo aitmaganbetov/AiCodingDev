@@ -1,0 +1,16 @@
+/* Маркеры строк в Monaco (Code Review, F6): треды и находки. Цвет дублируется формой (полоса/точка). */
+.aicd-line-thread {
+  background: rgb(var(--color-highlight) / 0.12);
+}
+.aicd-glyph-thread {
+  border-left: 3px solid rgb(var(--color-highlight));
+  margin-left: 4px;
+}
+.aicd-glyph-finding {
+  margin-left: 4px;
+  border-radius: 9999px;
+  width: 8px !important;
+  height: 8px !important;
+  margin-top: 6px;
+  background: rgb(var(--color-warning));
+}

@@ -38,7 +38,7 @@
       }
     },
     "all": {
-      "description": "Все запуски рабочего пространства — от новых к старым.",
+      "description": "Процессы рабочего пространства — запуски от новых к старым: режим, этап, прогресс по подтверждённым задачам, длительность и причины блокировки. Ход каждого процесса — в AI Mission Control.",
       "filters": "Фильтры запусков",
       "anyStatus": "Любой статус",
       "active": "Активные",
@@ -50,6 +50,45 @@
       "emptyDescription": "Запуск создаётся на странице проекта.",
       "emptyFilteredTitle": "Нет запусков по фильтру",
       "emptyFilteredDescription": "Измените или сбросьте фильтры."
+    },
+    "workflows": {
+      "anyMode": "Любой режим",
+      "stage": "Этап {{n}} из {{total}}: {{stage}}",
+      "stageSpecial": "Остановлен на этапе {{n}} из {{total}}: {{stage}}",
+      "progress": "Подтверждено задач",
+      "progressValue": "{{verified}} из {{total}}",
+      "progressHint": "В работе: {{inProgress}} · с ошибкой: {{failed}} · заблокировано: {{blocked}}",
+      "noPlan": "План задач ещё не построен.",
+      "detailsError": "Не удалось загрузить прогресс процесса.",
+      "progressInMissionControl": "Прогресс — в AI Mission Control.",
+      "pendingApprovals_one": "{{count}} ожидает одобрения",
+      "pendingApprovals_few": "{{count}} ожидают одобрения",
+      "pendingApprovals_many": "{{count}} ожидают одобрения",
+      "pendingApprovals_other": "{{count}} ожидают одобрения",
+      "blockedReason": "Причина блокировки",
+      "duration": "Длительность",
+      "notStarted": "не начат",
+      "durationHm": "{{h}} ч {{m}} мин",
+      "durationMs": "{{m}} мин {{s}} с",
+      "durationS": "{{s}} с",
+      "durationRunning": "{{duration}} (идёт)",
+      "source": "Прогресс — только подтверждённые задачи (статус «Успешно») из сведений run (GET /runs/{id}) для первых {{limit}} загруженных процессов; остальные — в AI Mission Control.",
+      "pipelines": "Конвейеры ролей по режимам (справка)",
+      "pipelinesFor": "Конвейер ролей режима «{{mode}}» (справка)",
+      "pipelinesSource": "Шаблоны по умолчанию из документации ролей (AGENT_ROLES §4): planner строит по ним DAG, уровень L1–L5 добавляет или убирает проверяющие шаги; [условие] — включается при условии, ‖ — параллельно. Фактический план процесса — в AI Mission Control.",
+      "pipeline": {
+        "CREATE": "requirements → architect → planner → [database] → developer ‖ qa (тест-план) → reviewer ‖ security → devops → documentation",
+        "DEVELOP": "[requirements, если критерии не заданы] → planner → [database] → developer → qa → reviewer (L3+) → [security: риск ≥ high] → [documentation: изменён публичный API]",
+        "DEBUG": "planner → maintenance (воспроизведение + падающий тест) → developer (исправление) → qa (регрессия) → reviewer (L3+)",
+        "AUDIT": "planner → architect ‖ security ‖ qa ‖ performance (анализ без записи) → reviewer (сведение, независимый провайдер) → documentation (отчёт)",
+        "MODERNIZE": "requirements → architect → planner → maintenance (влияние) → [database] → developer → qa → reviewer ‖ security → devops → documentation",
+        "SECURITY": "planner → security (threat model + разбор сканеров) → developer (исправления) → security (повторная проверка) → qa → reviewer",
+        "OPTIMIZE": "planner → performance (baseline) → developer → performance (повторное измерение) → qa → reviewer (L3+)",
+        "TEST": "planner → qa (тест-план + тесты) → [developer: нужны test hooks] → reviewer (L3+)",
+        "MAINTAIN": "planner → maintenance (влияние + обновления) → developer → qa → security (разбор SCA) → reviewer (L3+) → [devops]",
+        "DOCUMENT": "planner → documentation ‖ [architect: ADR] → reviewer (L3+)",
+        "REVIEW": "planner → reviewer ‖ security ‖ [qa] (без записи) → documentation (сводный отчёт)"
+      }
     }
   },
   "run": {

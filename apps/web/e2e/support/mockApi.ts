@@ -165,6 +165,15 @@ const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply
   },
   { method: 'GET', path: '/api/v1/runs/{id}/evidence', operationId: 'listRunEvidence', reply: () => ({ status: 200, body: { items: [], next_cursor: null } }) },
   { method: 'GET', path: '/api/v1/runs/{id}/chat', operationId: 'getRunChat', reply: () => ({ status: 200, body: { items: [], threads: [], next_cursor: null } }) },
+  // F5: экран «Агенты» (профили B7) и Настройки › CLI-провайдеры (история исполнений B1) — пустые валидные
+  // ответы; agents.spec / providers.spec и другие spec переопределяют их через api.route.
+  { method: 'GET', path: '/api/v1/agent-profiles', operationId: 'listAgentProfiles', reply: () => ({ status: 200, body: { items: [] } }) },
+  {
+    method: 'GET',
+    path: '/api/v1/providers/{id}/executions',
+    operationId: 'listProviderExecutions',
+    reply: () => ({ status: 200, body: { items: [], next_cursor: null } }),
+  },
 ];
 
 /** Сводка analytics workspace без данных за окно (нули и null-доли — как у сервера). */
