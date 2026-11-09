@@ -190,6 +190,9 @@ test('standards & compliance: certification disclaimer, standards registry from 
   await expect(page).toHaveURL(`/w/${ws.id}/compliance/projects/${project.id}/controls`);
   await expect(page.getByTestId('certification-disclaimer')).toBeVisible();
   const controls = page.getByRole('table', { name: 'Контроли стандартов проекта' });
+  // URL меняется раньше, чем отрисуется ленивый экран: у предыдущего экрана тоже есть фильтр «Стандарт».
+  // Ждать таблицу нового экрана, иначе под нагрузкой фильтр выставляется на уходящем экране.
+  await expect(controls.locator('tbody tr').first()).toBeVisible();
   await page.getByLabel('Стандарт', { exact: true }).selectOption('NIST-SSDF');
   await expect(controls.locator('tbody tr')).toHaveCount(1);
   await expectNoSeriousA11yViolations(page, 'project controls with filters');
