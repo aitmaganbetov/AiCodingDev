@@ -27,6 +27,12 @@ const RUN_EVENTS = new Set(['run.state_changed', 'run.completed', 'approval.requ
 const TASK_EVENTS = new Set(['task.state_changed', 'gate.completed']);
 const DIRECTIVE_EVENTS = new Set(['directive.state_changed', 'directive.impact_ready']);
 const REFRESH_DELAY_MS = 400;
+/**
+ * После `run.completed` сервер закрывает поток, а проекции сообщений агентов в чат (worker, outbox) могут
+ * дописаться позже — их `chat.message` уже не придёт. Поэтому ленту дочитываем REST-ом несколько раз
+ * в ограниченном окне после завершения (итоговое сообщение агента не теряется без перезагрузки).
+ */
+export const FINAL_CHAT_REFRESH_MS: readonly number[] = [400, 2_000, 6_000, 15_000];
 
 /**
  * Данные одного run для всех панелей Mission Control: run (getRun), DAG (getRunTasks), один общий
@@ -48,9 +54,11 @@ export function useMissionControlRun(runId: string, role: string | null | undefi
   }, [selectedTaskId]);
 
   const chatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(
     () => () => {
       if (chatTimer.current) clearTimeout(chatTimer.current);
+      for (const timer of finalTimers.current) clearTimeout(timer);
     },
     [],
   );
@@ -77,6 +85,11 @@ export function useMissionControlRun(runId: string, role: string | null | undefi
         void queryClient.invalidateQueries({ queryKey: ['evidence', 'run', runId] });
       }
       if (has(DIRECTIVE_EVENTS)) void queryClient.invalidateQueries({ queryKey: directiveKeys.all(runId) });
+      if (events.some((e) => e.type === 'run.completed') && finalTimers.current.length === 0) {
+        finalTimers.current = FINAL_CHAT_REFRESH_MS.map((ms) =>
+          setTimeout(() => void queryClient.invalidateQueries({ queryKey: chatKeys.all(runId) }), ms),
+        );
+      }
       const selected = selectedRef.current;
       if (selected) {
         const mine = events.filter((e) => e.payload.task_id === selected);

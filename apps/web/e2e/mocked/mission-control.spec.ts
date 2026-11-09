@@ -234,7 +234,7 @@ function seed(api: MockApi, role: S['WorkspaceRole'] = 'developer') {
     update(d, { status: 'CONFIRMED' });
     return { status: 202, body: d };
   });
-  return { ws, project, run, a, b, c, directives, update, cli };
+  return { ws, project, run, a, b, c, directives, update, cli, chat, thread };
 }
 
 async function openRun(page: Page, ws: S['Workspace'], run: S['Run'], query = '') {
@@ -512,4 +512,34 @@ test('responsive: 1920/1366 three panes, 768 two panes with tabs, 375 one pane �
   await expect(page.getByTestId('run-graph-canvas').locator('.aicd-node-active')).toHaveCount(1);
   const running = await page.evaluate(() => document.getAnimations().filter((x) => Number(x.effect?.getComputedTiming().duration ?? 0) > 1).length);
   expect(running).toBe(0);
+});
+
+test('run.completed: a chat message projected after the stream closed still appears (final REST re-reads, no reload)', async ({ page, api }) => {
+  await page.setViewportSize({ width: 1366, height: 900 });
+  const { ws, run, c, chat, thread } = seed(api);
+  await login(page, api);
+  await openRun(page, ws, run);
+  const timeline = page.getByTestId('chat-timeline');
+  await expect(timeline.getByTestId('chat-item')).toHaveCount(2);
+  // Run завершается: сервер присылает run.completed и закрывает поток.
+  api.route('GET', '/api/v1/projects/{id}/pull-requests', 'listPullRequests', () => ({ status: 200, body: { items: [], next_cursor: null } }));
+  api.addEvent(run, 'run.completed', { final_status: 'COMPLETED', required_gates_total: 3, required_gates_passed: 3 });
+  // Итог ревьюера проецируется в чат ПОСЛЕ закрытия потока: только REST, без SSE-события.
+  await page.waitForTimeout(1_000); // имитация задержки проекции (outbox → worker), уже после run.completed
+  chat.push({
+    id: '01900000-0000-7000-c000-0000000000ff',
+    item_type: 'agent_message',
+    thread_id: thread,
+    task_id: c.id,
+    sender_type: 'agent',
+    sender: { user: null, role: 'reviewer', provider: 'claude' },
+    recipient_role: null,
+    message_kind: 'agent_relay',
+    acp_type: 'TASK_COMPLETED',
+    body: 'Ревью завершено: замечаний нет',
+    mentions: [],
+    created_at: '2026-11-08T09:59:00Z',
+  });
+  await expect(timeline.getByTestId('chat-item').filter({ hasText: 'Ревью завершено: замечаний нет' })).toBeVisible({ timeout: 20_000 });
+  expect(await page.evaluate(() => performance.getEntriesByType('navigation').length)).toBe(1);
 });
