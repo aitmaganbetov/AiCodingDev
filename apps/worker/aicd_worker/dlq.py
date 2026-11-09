@@ -25,10 +25,17 @@ from dramatiq import Message
 from redis import Redis
 
 from aicd_platform.config import Settings
-from aicd_worker.broker import DOCS_QUEUE, EXEC_QUEUE, GITHUB_QUEUE, ORCHESTRATOR_QUEUE, build_broker
+from aicd_worker.broker import (
+    DOCS_QUEUE,
+    EXEC_QUEUE,
+    GITHUB_QUEUE,
+    NOTIFICATIONS_QUEUE,
+    ORCHESTRATOR_QUEUE,
+    build_broker,
+)
 
 NAMESPACE = "aicd-dramatiq"
-QUEUES = (ORCHESTRATOR_QUEUE, EXEC_QUEUE, DOCS_QUEUE, GITHUB_QUEUE)
+QUEUES = (ORCHESTRATOR_QUEUE, EXEC_QUEUE, DOCS_QUEUE, GITHUB_QUEUE, NOTIFICATIONS_QUEUE)
 SAFE_ARG_KEYS = ("event_type", "run_id", "task_id", "workspace_id", "event_id", "execution_id")
 
 

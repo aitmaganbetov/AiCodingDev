@@ -248,6 +248,10 @@ def workspace_channel(workspace_id: uuid.UUID | str) -> str:
 
 # Поток уведомлений workspace (`GET /workspaces/{id}/events`, API_DESIGN §13.1): подмножество типов run_event_log.
 WORKSPACE_TYPES: tuple[str, ...] = ("run.state_changed", "approval.requested", "approval.decided", "run.completed")
+# Outbox-события без проекции в run_event_log, после публикации которых worker-outbox будит поток workspace:
+# `notification.created` — поток читает строки `notifications` пользователя (UI redesign B8, API_DESIGN §13.1).
+WORKSPACE_SIGNAL_TYPES: frozenset[str] = frozenset({"notification.created"})
+NOTIFICATION_TYPE = "notification.created"
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 

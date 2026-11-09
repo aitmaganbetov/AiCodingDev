@@ -28,6 +28,7 @@ from aicd_api.routers import (
     github,
     health,
     metrics,
+    notifications,
     projects,
     providers,
     quality,
@@ -123,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         aggregates.router,
         system.router,
         agent_profiles.router,
+        notifications.router,
     ):
         app.include_router(router, prefix=API_PREFIX)
     app.include_router(metrics.router)  # /metrics вне /api/v1: только внутренняя сеть (P8-06)

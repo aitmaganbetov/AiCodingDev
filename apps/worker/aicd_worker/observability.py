@@ -28,14 +28,14 @@ from aicd_platform import metrics, worker_hosts
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.outbox_dispatcher import sample_gauges
 from aicd_platform.telemetry import configure_tracing
-from aicd_worker.broker import DOCS_QUEUE, EXEC_QUEUE, ORCHESTRATOR_QUEUE
+from aicd_worker.broker import DOCS_QUEUE, EXEC_QUEUE, NOTIFICATIONS_QUEUE, ORCHESTRATOR_QUEUE
 from aicd_worker.settings import WorkerSettings
 
 log = logging.getLogger("aicd.worker.metrics")
 
 SAMPLE_INTERVAL_SECONDS = 15.0
 DRAMATIQ_NAMESPACE = "aicd-dramatiq"
-QUEUES = (ORCHESTRATOR_QUEUE, EXEC_QUEUE, DOCS_QUEUE)
+QUEUES = (ORCHESTRATOR_QUEUE, EXEC_QUEUE, DOCS_QUEUE, NOTIFICATIONS_QUEUE)
 
 
 def start(settings: WorkerSettings, kind: str) -> WSGIServer | None:

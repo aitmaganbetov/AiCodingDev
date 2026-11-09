@@ -64,7 +64,7 @@ SYSTEM_HEALTH_PER_MINUTE: Final = 30
 CHECK_TIMEOUT_SECONDS: Final = 2.0
 # Очереди Dramatiq (namespace брокера и имена очередей — aicd_worker.broker / aicd_worker.dlq; тест сверяет).
 DRAMATIQ_NAMESPACE: Final = "aicd-dramatiq"
-QUEUES: Final = ("orchestrator", "exec", "docs", "github")
+QUEUES: Final = ("orchestrator", "exec", "docs", "github", "notifications")
 QUEUE_BACKLOG_DEGRADED: Final = 500  # как алерт AicdQueueBacklog
 OUTBOX_AGE_DEGRADED_SECONDS: Final = 60.0
 OUTBOX_AGE_DOWN_SECONDS: Final = 300.0  # как алерт AicdOutboxLag (critical)

@@ -20,3 +20,4 @@ ADR-0001…0006 зафиксированы в ТЗ §22 как утверждё�
 | [0012](ADR-0012-external-actions-ledger.md) | Журнал внешних действий (side-effect ledger) | Accepted |
 | [0013](ADR-0013-contracts-location-and-codegen.md) | Размещение контрактов и генерация кода | Accepted |
 | [0014](ADR-0014-frontend-architecture.md) | Архитектура frontend | Accepted |
+| [0015](ADR-0015-inline-review-comments.md) | Inline-комментарии ревью кода (UI redesign B5) | Accepted |

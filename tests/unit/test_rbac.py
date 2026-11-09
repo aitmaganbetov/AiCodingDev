@@ -50,6 +50,8 @@ EXPECTED = {
     "github:manage": {O, A},
     "pull_request:create": {O, A, D},
     "pull_request:merge": {O, A, D},
+    "notification:read": {O, A, D, R, V},
+    "notification:update": {O, A, D, R, V},
 }
 
 

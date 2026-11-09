@@ -1,6 +1,6 @@
-# apps/web — Mission Control (P1-13, P3-15, P7-01, P7-02, редизайн F1)
+# apps/web — Mission Control (P1-13, P3-15, P7-01, P7-02, редизайн F1–F2)
 
-SPA AiCodingDev: вход, каркас Mission Control (боковая навигация по всем разделам Phase 7, переключатель workspace, клавиатурные сочетания, тёмная (по умолчанию)/светлая/системная тема), рабочие пространства, проекты, запуски и экран run с лентой событий SSE. Экраны Phase 7, ещё не реализованные, открываются как заглушки «Раздел в разработке». Архитектура — ADR-0014; правила API — `docs/api/API_DESIGN.md`; контракт — `packages/contracts/openapi.yaml` (единственный источник, ADR-0013).
+SPA AiCodingDev: вход, оболочка «Neural Engineering Command Center» (F2: боковая навигация по IA редизайна, верхняя панель с поиском, Command Palette, статусом CLI и уведомлениями, правая контекстная панель; клавиатурные сочетания, тёмная (по умолчанию)/светлая/системная тема), рабочие пространства, проекты, запуски и экран run с лентой событий SSE. Экраны Phase 7, ещё не реализованные, открываются как заглушки «Раздел в разработке». Архитектура — ADR-0014; правила API — `docs/api/API_DESIGN.md`; контракт — `packages/contracts/openapi.yaml` (единственный источник, ADR-0013).
 
 ## Команды (pnpm, Node ≥ 22.12)
 
@@ -22,8 +22,11 @@ SPA AiCodingDev: вход, каркас Mission Control (боковая нави
 src/
   App.tsx                 дерево маршрутов из реестра областей + провайдеры (Query, SSE, Tooltip, Toast)
   routes/<area>.tsx       область = маршруты + пункт навигации (AreaModule); routes/index.ts — список областей
-  layout/                 AppLayout (skip link, sidebar/drawer, шапка), Sidebar, WorkspaceSwitcher (Popover),
-                          UserMenu (DropdownMenu: тема, выход), ShortcutsDialog, WorkspaceGuard (/w/:workspaceId)
+  layout/                 оболочка F2: AppLayout (skip link → верхняя панель → sidebar/drawer → main → контекстная
+                          панель), Sidebar (группы, rail, счётчик approvals), WorkspaceSwitcher, ProjectSwitcher,
+                          GlobalSearch (+ searchModel), CommandPalette (cmdk, ленивый чанк), ProviderChips (+ providerStatus),
+                          Notifications, ContextPanel (slot), shellData (данные оболочки, лидер потока уведомлений),
+                          UserMenu (тема, выход), ShortcutsDialog, WorkspaceGuard (/w/:workspaceId)
   pages/                  страницы; AreaPlaceholderPage (заглушка), NotFoundPage (404), ForbiddenPage (403)
   components/ui/          дизайн-система (импорт из components/ui): Button/ButtonLink/IconButton, Badge/Callout,
                           Card, Table (сортируемые заголовки), CodeBlock, Timestamp/RelativeTime, Toolbar, Kbd, Icon,
@@ -42,14 +45,14 @@ src/
                           api/workspaceEvents.ts — поток уведомлений workspace (resume 'cursor': Last-Event-ID = id:,
                           дедуп по event_id; инвалидация экранов — useWorkspaceInvalidation в features/quality/live.tsx)
   i18n/<area>.json        строки UI (namespace = имя файла), i18n/index.ts подхватывает файлы сам
-  lib/                    permissions (полный каталог прав §5.1), theme, shortcuts, format, problem, storage,
+  lib/                    permissions (полный каталог прав §5.1), theme, layoutPrefs (раскладка оболочки), shortcuts, format, problem, storage,
                           verification (5 состояний, D-8), agentRoles (идентичность 12 ролей)
 ```
 
 ### Как добавить экран (параллельная работа без правки общих файлов)
 
 1. **Маршрут и меню.** Заменить содержимое своего `src/routes/<area>.tsx` (файлы есть для всех областей Phase 7: dashboard, projects, runs, chat, tasks, approvals, quality, compliance, knowledge, providers, settings, audit): `workspaceRoutes` — пути относительно `/w/:workspaceId/` (членство уже проверено `WorkspaceGuard`), `nav` — пункт меню (группа, порядок, буква `g`-сочетания, `permission`). Право по роли — `<RequirePermission permission="…">`. Тяжёлые экраны (React Flow, Monaco) — `lazy(() => import(...))`: `Suspense` уже есть в `AppRoutes`. Экран «домой» после входа — `home: { path, priority }` (сейчас projects с priority 0; Dashboard ставит больше). Новая область (которой нет в списке) — новый файл + одна строка в `routes/index.ts`.
-2. **Страницы** — `src/pages/<area>/…` (или `src/features/<area>/`), компоненты — из `components/ui` и `components/states.tsx`; заголовок — `PageHeading` (title документа + фокус на h1).
+2. **Страницы** — `src/pages/<area>/…` (или `src/features/<area>/`), компоненты — из `components/ui` и `components/states.tsx`; заголовок — `PageHeading` (title документа + фокус на h1). Ширина рабочей области — `handle: { width: 'standard' | 'form' | 'full' }` маршрута; правая панель — `<ContextPanel id title>` из `layout/ContextPanel.tsx` (по желанию экрана); split view — `components/ui/Resizable` (импорт напрямую, только из ленивых экранов).
 3. **API** — новый файл `src/api/<area>.ts` по образцу `runs.ts`: типы из `Schemas[...]`/`JsonBody<'op'>`/`JsonResponse<'op', 200>`/`Query<'op'>`, вызовы через `request()`, ключи кэша `<area>Keys`. `client.ts` не меняется.
 4. **Строки** — только в своём `src/i18n/<area>.json`, под группой с именем области (`{ "approvals": { … } }`): ключ `approvals.title` работает через `t()` из любого компонента. Свои перечисления — `<area>.enums.*` (общие `enums.*` в common.json не трогать).
 5. **События run** — `useRunEvents(runId, { filters, onEvents, onResync })`: экраны одного run (граф, чат, лента) делят одно соединение; фильтр `types`/`task_id` — отдельный поток.
@@ -72,6 +75,19 @@ src/
 - Клавиатура: `?` — справка, `g` + буква — раздел, Esc — закрыть слой; односимвольные сочетания отключаются в справке (WCAG 2.1.4). Мобильная навигация (< 768px) — Dialog-drawer.
 - Radix-обёртки задают доступные имена и классы; меню немодальные (модальный режим Radix скрывает `#root` через aria-hidden → axe `aria-hidden-focus`).
 
+### Оболочка (F2 редизайна)
+
+Фаза F2 плана `docs/design/UI_REDESIGN_PLAN.md` (§3.1, §5.8, §5.9, §6.1; D-3, D-5).
+
+- **Навигация (IA, D-3)** — 14 пунктов в 4 группах: *Обзор* (Обзор, Проекты), *Исполнение* (AI Mission Control `g m`, Агенты `g e`, Процессы = запуски `g r`, Одобрения `g a` со счётчиком «ожидают вашего решения»), *Код и качество* (Code Intelligence `g x`, Центр безопасности `g y`, Гейты качества `g q`, Стандарты и соответствие `g s`), *Платформа* (Интеграция с GitHub `g i`, Аналитика `g n`, Документация `g k`, Настройки `g o`). Состав и порядок — в файлах `src/routes/<area>.tsx` (`nav.group/order`); пункты скрываются по правам (`permission`, `lib/permissions.ts`). CLI-провайдеры и аудит — подразделы Настроек (`settings/providers`, `settings/audit`; также `settings/appearance`); прежние `providers`, `audit` — редиректы с сохранением query/hash (`routes/redirect.tsx`), прежние сочетания `g c`/`g u` убраны. Агенты (F5), Code Intelligence (F8), Центр безопасности (F7) — пока «Раздел в разработке» с фазой и ссылками на существующие экраны с теми же данными (без демо-содержимого). AI Mission Control (`mission-control`) — выбор активного run (split view, задачи выбранного run, сводка в контекстной панели); `mission-control?run=<id>` — переход к run по одному id (уведомления/поиск); объединённый экран — F4.
+- **Sidebar** — развёрнут (240 px) или rail (64 px: иконки, подпись — доступное имя ссылки + подсказка при наведении/фокусе); кнопка внизу, выбор сохраняется (`aicd.layout.shell.sidebar`); без выбора — rail на 768–1279 px. Переход 250 мс (`--dur-slow`, 0 при reduced motion). < 768 px — drawer (Radix Dialog) с переключателями workspace/проекта и статусом CLI.
+- **Верхняя панель** (стекло) — знак + название, workspace/проект (Popover-списки ссылок; проект — из URL, список — `listProjects` при открытии), глобальный поиск `GET /search` (B6; ARIA combobox: ≥ 2 символов, задержка 250 мс, группы по типам, ↑/↓/Enter/Esc, 429 и пропущенные по правам типы подписаны; < 768 px — через палитру), Command Palette, чипы **Codex CLI / Claude Code CLI** (только `listProviders`: auth/availability/compatibility, подсказка — хост, версия, последняя ошибка, «проверено N назад»; опрос 60 с; «нет данных» ≠ «готов»; квоты не показываются — CLI их не сообщают; < 1536 px — компактный чип), справка, уведомления, кнопка контекстной панели, профиль (тема, выход).
+- **Command Palette** — Ctrl/⌘+K или кнопка; `cmdk` 1.1.1 в ленивом чанке (≈ 7 kB gzip) внутри Radix Dialog (ловушка фокуса, Esc, возврат фокуса). Переходы (разделы + подразделы Настроек), недавние запуски, проекты, результаты `GET /search`, тема, свернуть навигацию, справка. Никаких shell-команд.
+- **Уведомления** — поток `GET /workspaces/{id}/events` (approval.*, run.*) + `listApprovals?status=PENDING&decidable_by_me` (опрос 60 с — approvals без run в поток не попадают). Отметка «прочитано» — время последнего события в localStorage **этого браузера** (`aicd.notifications.read.<ws>`; серверных уведомлений нет до B8 — подписано в панели). Поток держит одна вкладка (Web Locks, лидер) и раздаёт события остальным через BroadcastChannel — лимит сервера 5 SSE на пользователя; экраны workspace (approvals) подписываются тем же набором типов и делят соединение.
+- **Рабочая область** — без общего `max-w-6xl`: ширина по типу экрана из `handle.width` маршрута (`standard` до 1600 px, `form` ≈ 56rem, `full` — граф, задача, Mission Control). Split view экрана — `components/ui/Resizable` (импорт напрямую, размеры `aicd.layout.<id>`, клавиатура и кнопка сброса). Переход между экранами — Web Animations API (opacity/transform 180 мс), без перемонтирования, при reduced motion — нет.
+- **Контекстная панель** — экран включает её сам: `<ContextPanel id title>{содержимое | null}</ContextPanel>` (portal-slot, `layout/ContextPanel.tsx`); `null` — «Нет выбранного контекста». ≥ 1280 px — в раскладке, ширина 280–560 px разделителем (мышь, ←/→/Home/End, Enter — скрыть; кнопка «Сбросить ширину»); уже — поверх (фокус внутрь, Esc возвращает на кнопку). Открытость сохраняется по экрану, ширина — общая. Сброс раскладки — Настройки › Внешний вид.
+- **Данные оболочки** — `layout/shellData.ts`; загрузка — скелеты, ошибки — явные состояния (чип «статус недоступен», ошибка поиска/списка проектов). Поздний 401 фонового запроса на странице входа не перезаписывает `next=` (`auth/UnauthorizedBridge.tsx`).
+
 ### SSE (P7-02)
 
 `StreamManager` (один на вкладку) держит по одному `EventStream` на (путь + фильтры). Подписчики делят соединение (ref-counting, закрытие через 1,5 с после последней отписки), поздний подписчик получает буфер принятых событий (до 1000). Не более 5 одновременных потоков (API_DESIGN §13: 6-й ⇒ 429) — лишние ждут в очереди (`queued`). `EventStream`: `Last-Event-ID` = последний принятый seq при любом переподключении, дедуп по seq/event_id, `retry:` сервера, экспоненциальный backoff с джиттером при ошибках подряд (429/503 — по Retry-After), watchdog 45 с без байтов (heartbeat 15 с), `410 replay_window_exceeded` → `onResync` (перечитать REST) и продолжение с `after_seq = last_seq` (OQ-35, вариант a), 401/403/404 — `failed`. `offline` разрывает потоки (без попыток), `online` переподключает сразу; вкладка скрыта > 60 с — потоки на паузе (`paused`), при возврате — возобновление.
@@ -81,6 +97,8 @@ src/
 - `src/api/client.test.ts`, `runEvents.test.ts`, `streamManager.test.ts`, `useRunEvents.test.tsx` — транспорт, парсер, дедуп, реконнект, ref-counting, лимит, offline/online, видимость, 410, restart.
 - `src/components/ui/ui.test.tsx` — Table (сортировка, aria-sort), Toolbar (roving tabindex), Dialog/Menu/Tabs/Toast, CodeBlock, время; `src/components/ui/ds.test.tsx` — Icon (Lucide), статусы/5 состояний (иконка + текст + паттерн), AgentBadge (12 ролей, «Система»), DataUnavailable, Card/Logo/Table density, VirtualList (окно, aria-posinset, клавиатура), Resizable; `src/lib/verification.test.ts` (D-8), `src/lib/theme.test.ts`; `src/i18n/i18n.test.ts`, `src/routes/routes.test.ts`, `src/styles/tokens.test.ts` (WCAG 2.2 AA обеих тем).
 - `e2e/mocked/design-system.spec.ts` — тема по умолчанию (тёмная), переключение тёмная/светлая/как в системе с сохранением, Inter загружен; `prefers-reduced-motion` (токены 0 мс, слои без анимации); нет горизонтальной прокрутки на 375/768/1366/1920 (Обзор, Проекты, справочник; обе темы); справочник: axe в обеих темах, VirtualList и разделитель панелей с клавиатуры, сохранение размера после перезагрузки и сброс; forced-colors smoke. Фикстура `e2e/mocked/fixtures.ts` по умолчанию выбирает «Как в системе», чтобы `emulateMedia({ colorScheme })` в остальных спеках проверял обе темы (`test.use({ themeDefault: 'app' })` — настоящее значение по умолчанию).
+- `src/layout/shell.test.tsx` — статус чипов CLI (все комбинации, агрегация хостов), маршруты результатов поиска, непрочитанные уведомления, раскладка (clamp, сброс), рендер оболочки: чипы AUTH_REQUIRED/не обнаружен/ошибка, счётчик approvals, сворачивание sidebar с сохранением, Ctrl+K → палитра → переход.
+- `e2e/mocked/app-shell.spec.ts` (F2) — sidebar (14 пунктов, rail, подсказка, сохранение, авто-rail на 1024), Command Palette (Ctrl/⌘+K, только клавиатура, тема, недавние запуски/проекты, поиск, возврат фокуса), глобальный поиск (минимум символов, группы, ↑/↓/Enter, 429, пропущенные типы), чипы CLI (готов / AUTH_REQUIRED / неизвестно / не обнаружен, подсказка, компактный режим), уведомления (поток workspace, непрочитанные, «прочитано» после перезагрузки), контекстная панель (по умолчанию «нет контекста», выбор run, ширина с клавиатуры и сохранение, скрытие по экрану, наложение < 1280 px с Esc), редиректы старых путей и `mission-control?run=`, нет горизонтального переполнения 375/768/1366/1920 в обеих темах, drawer 375, reduced motion, axe light/dark.
 - `e2e/mocked/layout.spec.ts` — axe (serious/critical) в светлой и тёмной теме для layout, всех заглушек, 404/403, диалога справки, меню и переключателя; клавиатура через sidebar и диалоги; мобильный drawer; тема.
 - `e2e/mocked/sse.spec.ts` — обрыв сети (`context.setOffline`): поток `offline` без попыток подключения, после `online` — `Last-Event-ID`, сервер повторяет часть событий, в ленте каждое событие ровно один раз и без пропусков; обрыв посреди кадра.
 - `e2e/support/contract.ts` — ajv (JSON Schema 2020-12) по схемам самого контракта: тела запросов UI, обязательные заголовки, CSRF и тела ответов моков; SSE-кадры мока — по `packages/contracts/schemas/events/1.0/sse-event.schema.json`; нарушения валят тест.
@@ -123,7 +141,10 @@ Dev:
 - `@tanstack/react-virtual` 3.14.22 (MIT) — `VirtualList` (логи, CLI Output, чат, аудит — подключение к экранам в F4+).
 - `react-resizable-panels` 4.15.0 (MIT) — `Resizable` (панели Mission Control/Code Review в F2+); только в ленивых чанках.
 
-Бюджет начального JS — ≤ 260 kB gzip (план §4.3); после F1: `index-*.js` 790 kB / **232,4 kB gzip** (до F1 — 222 kB), CSS 57 kB / 9,8 kB gzip. `cmdk` 1.1.1 (D-5) будет добавлен в F2 вместе с Command Palette (в F1 не используется). Отклонены (D-10): Recharts, Motion, Zustand; shadcn/ui — только как образцы вариантов, без CLI и кода под Tailwind v4.
+Добавлены в F2 редизайна (D-5):
+- `cmdk` 1.1.1 (MIT, 2025-03-14; React ^18) — Command Palette (combobox + listbox). Зависимости Radix (`react-dialog` ^1.1.6 и др.) совпадают с уже установленными — в lockfile добавлен один пакет. Только в ленивом чанке `CommandPalette` (≈ 19 kB / 7 kB gzip).
+
+Бюджет начального JS — ≤ 260 kB gzip (план §4.3); после F1: 232,4 kB gzip; **после F2: `index-*.js` 839 kB / 246,8 kB gzip** (оболочка, иконки, строки; `cmdk`, Mission Control, Внешний вид и `react-resizable-panels` — ленивые чанки), CSS 61 kB / 10,5 kB gzip. Отклонены (D-10): Recharts, Motion, Zustand; shadcn/ui — только как образцы вариантов, без CLI и кода под Tailwind v4.
 
 Не добавлены: `openapi-fetch` — свой клиент закрывает CSRF/idempotency/problem; Radix Toolbar — `Toolbar` на roving tabindex в ~60 строк.
 

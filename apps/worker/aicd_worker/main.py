@@ -1,7 +1,8 @@
 """Точки входа воркеров: `aicd-worker outbox|orchestrator|exec|index`.
 
 * `outbox` — опрос outbox (0,5 с без LISTEN), проекция в run_event_log, публикация в Dramatiq, сигнал SSE;
-* `orchestrator` — Dramatiq-консьюмер очередей `orchestrator` и `docs` (загрузка документации через
+* `orchestrator` — Dramatiq-консьюмер очередей `orchestrator`, `github`, `notifications` (персональные
+  уведомления, `aicd_worker.notifications`) и `docs` (загрузка документации через
   `security.ssrf`, `aicd_worker.docs`; шаги поручений `directive.state_changed` → `directives.process`)
   + периодический tick/повторная постановка READY;
 * `exec` — консьюмер очереди `exec` (исполнение задач через CLI Gateway; fake-адаптер запрещён в production)
@@ -43,6 +44,7 @@ from aicd_worker.broker import (
     DOCS_QUEUE,
     EXEC_QUEUE,
     GITHUB_QUEUE,
+    NOTIFICATIONS_QUEUE,
     ORCHESTRATOR_QUEUE,
     Actors,
     build_broker,
@@ -157,7 +159,9 @@ async def run_consumers(
     runtime.install(rt)
     scheduler = maintenance.Scheduler()  # exec: reconcile при старте, далее reap 15 с / reconcile 60 с
     github_recovery = maintenance.GitHubRecoverySchedule()  # orchestrator: сверка GitHub-действий (OQ-47 (7))
-    queues = {ORCHESTRATOR_QUEUE, DOCS_QUEUE, GITHUB_QUEUE} if kind == "orchestrator" else {EXEC_QUEUE}
+    queues = (
+        {ORCHESTRATOR_QUEUE, DOCS_QUEUE, GITHUB_QUEUE, NOTIFICATIONS_QUEUE} if kind == "orchestrator" else {EXEC_QUEUE}
+    )
     worker = dramatiq.Worker(actors.broker, queues=queues, worker_threads=settings.worker_threads)
     worker.start()
     try:

@@ -79,6 +79,16 @@ PERMISSIONS: Final[dict[str, frozenset[Role]]] = {
     "github:manage": _ADMIN_UP,
     "pull_request:create": _DEV_UP,
     "pull_request:merge": _DEV_UP,
+    # Inline-комментарии ревью кода (UI redesign B5, ADR-0015 §2): чтение — все; треды, ответы, правка своего,
+    # resolve/unresolve — reviewer+ (как chat:write); отправка ревью — reviewer+ с уточнением по вердикту
+    # (`can_submit_review`: REQUEST_CHANGES — как поручение CHANGE_REQUEST, APPROVE — правила approval §5.3).
+    "review:read": _ALL,
+    "review:write": _REVIEWER_UP,
+    "review:submit": _REVIEWER_UP,
+    # Персональные уведомления (UI redesign B8, API_DESIGN §13.2): каждый участник читает и отмечает прочитанными
+    # только свои (RLS по user_id), поэтому право есть у всех ролей.
+    "notification:read": _ALL,
+    "notification:update": _ALL,
 }
 
 # API_DESIGN §5.3 — минимальная роль для решения по approval (иерархия ролей).
@@ -170,6 +180,16 @@ def can_transition_finding(role: Role | str, to_status: str) -> bool:
     """`finding:triage` с учётом целевого статуса (§5.5); неизвестный статус — запрещён."""
     min_role = FINDING_TRANSITION_MIN_ROLE.get(to_status)
     return min_role is not None and RANK[Role(role)] >= RANK[min_role]
+
+
+def can_submit_review(role: Role | str, verdict: str) -> bool:
+    """`review:submit` с учётом вердикта (ADR-0015 §2): COMMENT/APPROVE — reviewer+ (APPROVE дополнительно
+    проверяется правилами решения approval §5.3), REQUEST_CHANGES — как поручение CHANGE_REQUEST (§5.4)."""
+    if not has_permission(role, "review:submit"):
+        return False
+    if verdict == "REQUEST_CHANGES":
+        return can_submit_directive(role, "CHANGE_REQUEST")
+    return verdict in ("COMMENT", "APPROVE")
 
 
 def can_submit_directive(role: Role | str, directive_type: str) -> bool:

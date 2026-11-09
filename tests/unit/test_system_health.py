@@ -59,4 +59,6 @@ def test_queue_names_match_worker_broker() -> None:
     """API читает те же ключи Redis, что и воркеры (`aicd_worker.dlq`, `aicd_worker.observability`)."""
     assert system.QUEUES == dlq.QUEUES
     assert system.DRAMATIQ_NAMESPACE == dlq.NAMESPACE
-    assert {broker.ORCHESTRATOR_QUEUE, broker.EXEC_QUEUE, broker.DOCS_QUEUE, broker.GITHUB_QUEUE} == set(system.QUEUES)
+    assert {
+        broker.ORCHESTRATOR_QUEUE, broker.EXEC_QUEUE, broker.DOCS_QUEUE, broker.GITHUB_QUEUE, broker.NOTIFICATIONS_QUEUE
+    } == set(system.QUEUES)  # fmt: skip

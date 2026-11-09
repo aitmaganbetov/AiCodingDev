@@ -162,6 +162,7 @@ test('command palette: Ctrl+K, keyboard-only navigation, theme switch, recent ru
   await trigger.focus();
   await page.keyboard.press('Enter');
   await expect(palette).toBeVisible();
+  await expect(input).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(palette).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -219,6 +220,8 @@ test('global search: min length, grouped results, ↑/↓ + Enter opens the resu
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(`/w/${ws.id}/projects/${p.id}/runs/${active.id}`);
   await expect(box).toHaveValue('');
+  // Новый экран переводит фокус на свой h1 (после загрузки данных) — дождаться, прежде чем снова искать.
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
   const sent = api.requests.filter((r) => r.operationId === 'searchWorkspace').at(-1);
   expect(sent?.headers['x-workspace-id']).toBe(ws.id);
 

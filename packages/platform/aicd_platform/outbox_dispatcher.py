@@ -11,8 +11,9 @@
    повторная доставка не создаёт дубль (проверка `event_id`);
 4. `publish(event)` (Dramatiq); ошибка ⇒ `publish_attempts + 1`, экспоненциальный `available_at`,
    `last_error` (редактированный); успех ⇒ `published_at = now()`;
-5. после commit — `notify(run_id)` (Redis pub/sub: только сигнал пробуждения SSE) и доменные метрики
-   опубликованных событий (`metrics.observe_outbox_event`, P8-06).
+5. после commit — `notify(run_id)` (Redis pub/sub: только сигнал пробуждения SSE), `notify_workspace` для
+   workspace с новыми строками журнала или событиями `sse.WORKSPACE_SIGNAL_TYPES` (`notification.created`) и
+   доменные метрики опубликованных событий (`metrics.observe_outbox_event`, P8-06).
 
 Трассировка (P8-06): публикация каждого события — спан `outbox.publish`, дочерний к `traceparent` события
 (спан, записавший событие); в Dramatiq-сообщение уходит `traceparent` спана публикации.
@@ -221,6 +222,8 @@ async def dispatch_batch(
                 )
                 current.set_attribute("aicd.outcome", "published")
                 delivered.append(event)
+                if event.event_type in sse.WORKSPACE_SIGNAL_TYPES and event.workspace_id is not None:
+                    touched_workspaces.add(event.workspace_id)  # уведомление пользователя: сигнал потоку workspace
                 published += 1
     _observe(delivered, failures)
     for run_id in sorted(touched_runs):

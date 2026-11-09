@@ -27,10 +27,11 @@ from aicd_api.deps import Access, app_state, authorize, current_principal, works
 from aicd_api.responses import json_response
 from aicd_api.routers import op
 from aicd_api.sse_hub import SignalHub, Subscription
+from aicd_collaboration import notifications
 from aicd_identity import api as identity
 from aicd_identity.rbac import Role, has_permission
 from aicd_platform import audit, metrics, sse
-from aicd_platform.clock import utcnow
+from aicd_platform.clock import isoformat_z, utcnow
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
@@ -383,7 +384,9 @@ async def get_run_activity(
 
 # --- Поток уведомлений workspace (OQ-45 (c), API_DESIGN §13.1) --------------------------------------------
 
-WorkspaceSseEventType = Literal["run.state_changed", "approval.requested", "approval.decided", "run.completed"]
+WorkspaceSseEventType = Literal[
+    "run.state_changed", "approval.requested", "approval.decided", "run.completed", "notification.created"
+]  # fmt: skip
 # Перекрытие повтора: строка run_event_log получает created_at = начало транзакции worker-outbox и становится
 # видимой только после commit, поэтому событие с меньшим временем может появиться позже уже отданного.
 WORKSPACE_OVERLAP = timedelta(seconds=60)
@@ -413,24 +416,51 @@ async def _still_member(request: Request, token: str, workspace_id: uuid.UUID) -
     return role is not None and has_permission(role, "run:read")
 
 
+_WORKSPACE_LOG_SELECT = (
+    "SELECT 'run' AS source, run_id, seq, event_id, event_type::text AS event_type,"
+    " schema_version::text AS schema_version, payload, occurred_at, created_at"
+    " FROM run_event_log WHERE workspace_id = :ws AND event_type = ANY(:types)"
+)
+
+
 async def _fetch_workspace(
     request: Request, access: Access, after: tuple[datetime, uuid.UUID | None], types: list[str], limit: int
 ) -> list[dict[str, Any]]:
-    """Страница run_event_log workspace после keyset `(created_at, event_id)` (event_id None — с `created_at` включительно)."""
+    """Страница потока workspace после keyset `(created_at, event_id)` (event_id None — с `created_at` включительно):
+    строки run_event_log выбранных типов и (тип `notification.created`) уведомления текущего пользователя
+    (`notifications`, RLS: только свои) — в одном порядке, поэтому курсор `id:` общий для обоих источников."""
     state = app_state(request)
-    sql = (
-        "SELECT run_id, seq, event_id, event_type, schema_version, payload, occurred_at, created_at"
-        " FROM run_event_log WHERE workspace_id = :ws AND event_type = ANY(:types)"
-    )
-    params: dict[str, Any] = {"ws": access.workspace_id, "types": types, "n": limit, "t": after[0]}
+    log_types = [t for t in types if t != sse.NOTIFICATION_TYPE]
+    parts = [_WORKSPACE_LOG_SELECT] if log_types else []
+    if sse.NOTIFICATION_TYPE in types:
+        parts.append(notifications.SSE_SELECT)
+    if not parts:
+        return []
+    params: dict[str, Any] = {"ws": access.workspace_id, "types": log_types, "n": limit, "t": after[0]}
     if after[1] is None:
-        sql += " AND created_at >= :t"
+        cond = "created_at >= :t"
     else:
-        sql += " AND (created_at, event_id) > (:t, :id)"
+        cond = "(created_at, event_id) > (:t, :id)"
         params["id"] = after[1]
+    sql = f"SELECT * FROM ({' UNION ALL '.join(parts)}) e WHERE {cond} ORDER BY created_at, event_id LIMIT :n"  # noqa: S608
     async with transaction(state.engine, access.db()) as conn:
-        rows = (await conn.execute(text(sql + " ORDER BY created_at, event_id LIMIT :n"), params)).mappings().all()
+        rows = (await conn.execute(text(sql), params)).mappings().all()
     return [dict(r) for r in rows]
+
+
+def _workspace_envelope(row: dict[str, Any]) -> dict[str, Any]:
+    """SseEnvelope строки журнала или кадр `notification.created` (SseNotificationCreated, без seq)."""
+    if row["source"] != "notification":
+        return sse.envelope(row)
+    return {
+        "event_id": str(row["event_id"]),
+        "run_id": str(row["run_id"]) if row["run_id"] else None,
+        "seq": None,
+        "type": sse.NOTIFICATION_TYPE,
+        "timestamp": isoformat_z(row["occurred_at"]),
+        "schema_version": row["schema_version"] or sse.SCHEMA_VERSION,
+        "payload": notifications.sse_payload(row["payload"], row["created_at"]),
+    }
 
 
 async def _stream_workspace(
@@ -466,7 +496,7 @@ async def _stream_workspace(
                         continue
                     sent[event_id] = created
                     last_sent = time.monotonic()
-                    yield sse.workspace_frame(sse.envelope(row), sse.cursor_of(created))
+                    yield sse.workspace_frame(_workspace_envelope(row), sse.cursor_of(created))
                 if len(rows) < cfg.replay_batch:
                     break
             # Забываем event_id старше окна перекрытия — они больше не попадут в выборку.
@@ -548,7 +578,7 @@ async def stream_workspace_events(
     except BaseException:
         await _release_slot(state.redis, slot)
         raise
-    selected = [str(t) for t in types] if types else list(sse.WORKSPACE_TYPES)
+    selected = [str(t) for t in types] if types else [*sse.WORKSPACE_TYPES, sse.NOTIFICATION_TYPE]
     return StreamingResponse(
         _stream_workspace(request, access, since, selected, token, slot),
         media_type="text/event-stream",
