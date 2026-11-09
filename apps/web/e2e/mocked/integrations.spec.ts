@@ -204,6 +204,8 @@ test('pull requests: project tab (merge request → approval link) and completed
   );
   expect(api.requests.find((r) => r.operationId === 'requestPullRequestMerge')?.body).toEqual({ merge_method: 'squash' });
 
+  // F4: завершённый run — в AI Mission Control, панель PR — в сводке run (контекстная панель ≥ 1366 px).
+  await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto(`/w/${ws.id}/projects/${project.id}/runs/${run.id}`);
   await page.getByRole('button', { name: 'Создать pull request' }).click();
   let dialog = page.getByRole('dialog', { name: 'Создать pull request' });

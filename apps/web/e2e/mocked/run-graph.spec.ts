@@ -1,6 +1,7 @@
 /**
- * P7-05 Run Graph: DAG на @xyflow/react, живые статусы по SSE, текущий исполнитель,
- * доступная альтернатива (таблица того же графа), клавиатура и axe.
+ * P7-05 Run Graph → с F4 Workflow Navigator AI Mission Control: DAG на @xyflow/react, живые статусы по SSE,
+ * текущий исполнитель, доступная альтернатива (таблица того же графа), клавиатура и axe. Прежний путь
+ * `…/runs/:runId/graph` перенаправляется в Mission Control.
  */
 import type { Page } from '@playwright/test';
 import { expectNoSeriousA11yViolations } from '../support/a11y';
@@ -32,10 +33,12 @@ test('run graph: DAG with statuses and current executor, live update via SSE, ax
   const { run, c, url } = seed(api);
   const external = trackExternalRequests(page);
   await login(page, api);
+  await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto(url);
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Граф задач' })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Разделы run' }).getByRole('link', { name: 'Граф задач' })).toHaveAttribute('aria-current', 'page');
+  await expect(page).toHaveURL(new RegExp(`/mission-control\\?run=${run.id}$`));
+  await expect(page.getByRole('heading', { level: 1, name: 'AI Mission Control' })).toBeVisible();
+  await expect(page.getByTestId('mc-navigator').getByRole('heading', { name: 'Навигатор процесса' })).toBeVisible();
   const canvas = page.getByTestId('run-graph-canvas');
   await expect(canvas.locator('.react-flow__node')).toHaveCount(3);
   await expect(canvas.locator('.react-flow__edge')).toHaveCount(2);
@@ -56,7 +59,8 @@ test('run graph: DAG with statuses and current executor, live update via SSE, ax
     provider: 'claude',
   });
   await expect(canvas.locator(`[data-task-id="${c.id}"]`)).toHaveAttribute('data-status', 'RUNNING');
-  await expect(canvas.locator(`[data-task-id="${c.id}"]`)).toContainText('Исполняет: QA · Claude');
+  await expect(canvas.locator(`[data-task-id="${c.id}"]`)).toContainText('Claude');
+  await expect(canvas.locator(`[data-task-id="${c.id}"]`)).toHaveClass(/aicd-node-active/);
   await expect(page.getByTestId('current-executors')).toContainText('QA · Claude');
   await expect(page.getByTestId('graph-announcement')).toHaveText('«Проверить экспорт»: Ожидает → Выполняется');
   expect(external, 'no CDN/external requests').toEqual([]);
@@ -65,6 +69,7 @@ test('run graph: DAG with statuses and current executor, live update via SSE, ax
 test('run graph: accessible list view of the same DAG — keyboard only', async ({ page, api }) => {
   const { a, b, c, url, ws, project, run } = seed(api);
   await login(page, api);
+  await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto(url);
   await expect(page.getByTestId('run-graph-canvas').locator('.react-flow__node')).toHaveCount(3);
 
@@ -73,7 +78,7 @@ test('run graph: accessible list view of the same DAG — keyboard only', async 
   await tabTo(page, listButton, { max: 60 });
   await page.keyboard.press('Enter');
   await expect(listButton).toHaveAttribute('aria-pressed', 'true');
-  await expect(page).toHaveURL(/view=list/);
+  await expect(page).toHaveURL(/nav=list/);
   await expect(listButton).toBeFocused(); // смена вида не уводит фокус на h1
 
   const table = page.getByRole('table', { name: /Задачи run и их зависимости/ });
@@ -82,7 +87,7 @@ test('run graph: accessible list view of the same DAG — keyboard only', async 
   await expect(rowB).toContainText('Разработчик · Codex');
   await expect(rowB).toContainText(a.title);
   await expect(table.locator(`tr[data-task-id="${c.id}"]`)).toContainText(b.title);
-  const link = table.getByRole('link', { name: b.title });
+  const link = table.getByRole('link', { name: new RegExp(`^Карточка задачи\\s*: ${b.title}$`) });
   await expect(link).toHaveAttribute('href', `/w/${ws.id}/projects/${project.id}/runs/${run.id}/tasks/${b.id}`);
   await tabTo(page, link, { max: 40 });
   await expectNoSeriousA11yViolations(page, 'run graph list view');

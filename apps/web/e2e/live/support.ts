@@ -58,21 +58,30 @@ export async function loginLive(page: Page, fx: LiveFixture): Promise<void> {
   await expect(page).not.toHaveURL(/\/login/);
 }
 
-/** Запуск DEVELOP run через UI проекта; возвращает id run (из URL Run view). */
+/**
+ * Запуск DEVELOP run через UI проекта; возвращает id run. С F4 после запуска открывается AI Mission Control
+ * (`/w/:ws/mission-control?run=<id>`: прежний путь run перенаправляется туда).
+ */
 export async function startDevelopRun(page: Page, project: LiveProject, objective: string): Promise<string> {
   await page.goto(`/w/${project.workspace_id}/projects/${project.project_id}/runs`);
   await expect(page.getByRole('heading', { level: 1, name: `Запуски · ${project.project_name}` })).toBeVisible();
   await page.getByLabel('Режим').selectOption('DEVELOP');
   await page.getByLabel('Цель').fill(objective);
   await page.getByRole('button', { name: 'Запустить' }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${project.project_id}/runs/[0-9a-f-]{36}$`));
-  const runId = page.url().split('/').at(-1) ?? '';
+  await expect(page).toHaveURL(new RegExp(`/w/${project.workspace_id}/mission-control\\?run=[0-9a-f-]{36}`));
+  const runId = new URL(page.url()).searchParams.get('run') ?? '';
   expect(runId).toMatch(/^[0-9a-f-]{36}$/);
   return runId;
 }
 
+/** Прежний адрес экрана run (обзор/граф/чат перенаправляются в Mission Control; Task Detail — `${runBase}/tasks/:id`). */
 export function runBase(project: LiveProject, runId: string): string {
   return `/w/${project.workspace_id}/projects/${project.project_id}/runs/${runId}`;
+}
+
+/** AI Mission Control выбранного run (`view`: conversation | cli | system | directives | evidence). */
+export function missionControl(project: LiveProject, runId: string, query: Record<string, string> = {}): string {
+  return `/w/${project.workspace_id}/mission-control?${new URLSearchParams({ run: runId, ...query }).toString()}`;
 }
 
 /** Статус run на Run view (dd «Статус»), ждёт текста без перезагрузки — обновления приходят по SSE. */

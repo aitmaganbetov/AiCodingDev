@@ -223,18 +223,6 @@ function ConversationView({
           {filters.stream === 'role' && filters.role ? ` · ${roleLabel(t, filters.role)}` : ''}
           {filters.stream === 'task' && filters.task_id ? ` · ${taskTitle(filters.task_id) ?? filters.task_id.slice(0, 8)}` : ''}
         </span>
-        {filtered ? (
-          <button
-            type="button"
-            className="btn-ghost btn-sm"
-            onClick={() => {
-              onFilters({ stream: 'all_agents' });
-              onFeedFilters({});
-            }}
-          >
-            {t('chat.filters.reset')}
-          </button>
-        ) : null}
       </div>
       <div id={panelId} hidden={!showFilters} className="rounded-lg border border-border bg-surface p-3">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">

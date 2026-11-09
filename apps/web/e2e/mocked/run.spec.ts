@@ -76,6 +76,7 @@ test('run view: SSE events are shown; reconnect after a dropped connection uses 
   // 2-е: «сервер» повторяет 2..3 (at-least-once) и досылает 4..8 — клиент обязан отбросить дубли.
   api.sseScripts = [{ toSeq: 3, cut: true }, { fromSeq: 2 }];
 
+  await page.setViewportSize({ width: 1366, height: 900 });
   await login(page, api);
   // После входа открывается Dashboard (P7-03); список проектов — отдельный раздел.
   await page.goto(`/w/${ws.id}/projects`);
@@ -86,8 +87,11 @@ test('run view: SSE events are shown; reconnect after a dropped connection uses 
   await expectNoSeriousA11yViolations(page, 'runs list');
   await page.getByRole('link', { name: /Открыть run/ }).click();
 
-  await expect(page).toHaveURL(`/w/${ws.id}/projects/${project.id}/runs/${run.id}`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Run · Разработка (DEVELOP)' })).toBeVisible();
+  // F4: экран run — AI Mission Control (вид «Системные события» = журнал run целиком).
+  await expect(page).toHaveURL(`/w/${ws.id}/mission-control?run=${run.id}&view=system`);
+  await expect(page.getByRole('heading', { level: 1, name: 'AI Mission Control' })).toBeVisible();
+  await expect(page.getByTestId('mc-run-bar')).toContainText('Разработка (DEVELOP)');
+  await expect(page.getByRole('tab', { name: 'Системные события' })).toHaveAttribute('aria-selected', 'true');
 
   const feed = page.getByRole('list', { name: 'События run' });
   await expect(feed.getByRole('listitem')).toHaveCount(8);
@@ -104,9 +108,11 @@ test('run view: SSE events are shown; reconnect after a dropped connection uses 
   expect(stream?.headers.accept).toBe('text/event-stream');
 
   // События state_changed → перечитаны run и задачи.
-  await expect(page.locator('[data-status]').first()).toHaveText('Выполняется');
-  await expect(page.getByTestId('run-pending-approvals')).toHaveText('1');
-  const tasks = page.getByRole('table', { name: 'Задачи run (план v1)' });
+  await expect(page.getByTestId('run-status')).toHaveText('Выполняется');
+  await expect(page.getByTestId('mc-run-bar')).toContainText('План v1');
+  await expect(page.getByTestId('context-panel').getByTestId('run-pending-approvals')).toHaveText('1');
+  await page.getByRole('button', { name: 'Список' }).click();
+  const tasks = page.getByRole('table', { name: 'Задачи run и их зависимости' });
   await expect(tasks.getByRole('row', { name: /^Спроектировать API/ })).toContainText('Успешно');
   const rowB = tasks.getByRole('row', { name: /^Реализовать экспорт/ });
   await expect(rowB).toContainText('Выполняется');
@@ -121,7 +127,7 @@ test('run view: SSE events are shown; reconnect after a dropped connection uses 
   await expect(page.getByRole('button', { name: 'Возобновить' })).toBeVisible();
   await expect(feed.getByRole('listitem')).toHaveCount(9);
   expect(await feedSeqs(page)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  await expect(page.locator('[data-status]').first()).toHaveText('Приостановлен');
+  await expect(page.getByTestId('run-status')).toHaveText('Приостановлен');
   const pause = api.requests.find((r) => r.operationId === 'pauseRun');
   expect(pause?.headers['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
   expect(pause?.headers['if-match']).toBe('"v2"');
@@ -136,6 +142,7 @@ test('run view: 410 replay_window_exceeded → state reread, feed continues from
   api.sseScripts = [{ status: 410 }];
   // Retention удалил историю: REST уже видит итоговое состояние.
   run.status = 'RUNNING';
+  await page.setViewportSize({ width: 1366, height: 900 });
   await login(page, api);
   await page.goto(`/w/${ws.id}/projects/${project.id}/runs/${run.id}`);
 
@@ -146,7 +153,7 @@ test('run view: 410 replay_window_exceeded → state reread, feed continues from
   const feed = page.getByRole('list', { name: 'События run' });
   await expect(feed.getByRole('listitem')).toHaveCount(1);
   expect(await feedSeqs(page)).toEqual([9]);
-  await expect(page.locator('[data-status]').first()).toHaveText('Отменён');
+  await expect(page.getByTestId('run-status')).toHaveText('Отменён');
   await expect(page.getByRole('button', { name: 'Отменить run' })).toBeDisabled();
 });
 
@@ -167,7 +174,9 @@ test('start run form: creates a run and opens its page; viewer cannot start or c
   await page.getByLabel('Режим').selectOption('DEBUG');
   await page.getByLabel('Цель').fill('Найти утечку памяти');
   await page.getByRole('button', { name: 'Запустить' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Run · Отладка (DEBUG)' })).toBeVisible();
+  await expect(page).toHaveURL(/\/mission-control\?run=[0-9a-f-]{36}/);
+  await expect(page.getByTestId('mc-run-bar')).toContainText('Отладка (DEBUG)');
+  await page.getByRole('tab', { name: 'Системные события' }).click();
   await expect(page.getByText('Событий пока нет.')).toBeVisible();
   await expect(page.getByText('Задач пока нет — план ещё не построен.')).toBeVisible();
   const create = api.requests.find((r) => r.operationId === 'createRun');
@@ -180,8 +189,12 @@ test('start run form: creates a run and opens its page; viewer cannot start or c
 
   await page.setViewportSize({ width: 360, height: 800 });
   await page.goto(`/w/${ro.id}/projects/${roProject.id}/runs/${roRun.id}`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Run · Разработка (DEVELOP)' })).toBeVisible();
+  await expect(page.getByTestId('mc-run-bar')).toContainText('Разработка (DEVELOP)');
+  // < 768 px: одна панель с вкладками; у viewer в инспекторе нет команд run и командного центра.
+  await page.getByRole('tab', { name: 'Инспектор' }).click();
+  await expect(page.getByTestId('mc-run-inspector')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Приостановить' })).toHaveCount(0);
+  await expect(page.getByTestId('command-center')).toContainText('Ваша роль не позволяет создавать поручения.');
   await expectNoHorizontalScroll(page);
   await page.goto(`/w/${ro.id}/projects/${roProject.id}/runs`);
   await expect(page.getByRole('list', { name: 'Список запусков' })).toBeVisible();

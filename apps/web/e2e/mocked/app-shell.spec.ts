@@ -155,7 +155,8 @@ test('command palette: Ctrl+K, keyboard-only navigation, theme switch, recent ru
   await expect(found).toBeVisible();
   await expect.poll(() => api.requests.filter((r) => r.operationId === 'searchWorkspace').length).toBeGreaterThan(0);
   await found.click();
-  await expect(page).toHaveURL(`/w/${ws.id}/projects/${p.id}/runs/${active.id}`);
+  // Экран run с F4 — AI Mission Control (старый путь run перенаправляется туда с тем же run).
+  await expect(page).toHaveURL(new RegExp(`/w/${ws.id}/mission-control\\?run=${active.id}`));
 
   // Esc закрывает и возвращает фокус туда, где он был.
   const trigger = page.getByRole('button', { name: 'Командная палитра (Ctrl+K)' });
@@ -395,10 +396,12 @@ test('context panel on Mission Control: default "no context", selected run summa
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
   await runs.getByRole('button', { name: /Добавить экспорт отчётов в CSV/ }).click();
-  await expect(page).toHaveURL(`/w/${ws.id}/mission-control?selected=${active.id}`);
-  await expect(panel.getByTestId('mc-context')).toContainText('Добавить экспорт отчётов в CSV');
-  await expect(panel.getByRole('link', { name: /Открыть запуск/ })).toHaveAttribute('href', `/w/${ws.id}/projects/${p.id}/runs/${active.id}`);
-  await expect(page.getByRole('region', { name: /Задачи:/ }).getByRole('listitem')).toHaveCount(2);
+  // F4: выбранный run открывается в трёх панелях; сводка run — в контекстной панели (Agent Inspector).
+  await expect(page).toHaveURL(`/w/${ws.id}/mission-control?run=${active.id}`);
+  await expect(panel.getByTestId('mc-run-inspector')).toContainText('Добавить экспорт отчётов в CSV');
+  await expect(panel.getByRole('link', { name: 'Качество' })).toHaveAttribute('href', `/w/${ws.id}/quality/runs/${active.id}`);
+  await expect(panel.getByRole('link', { name: 'К списку запусков' })).toHaveAttribute('href', `/w/${ws.id}/projects/${p.id}/runs`);
+  await expect(page.getByTestId('run-graph-canvas').locator('[data-task-id]')).toHaveCount(2);
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     await expectNoSeriousA11yViolations(page, `mission control + context panel (${scheme})`);
@@ -429,7 +432,7 @@ test('context panel on Mission Control: default "no context", selected run summa
   await expect(page.getByRole('heading', { level: 2, name: 'Запуск', exact: true })).toBeFocused();
 
   // Split view экрана (Resizable): разделитель с клавиатуры, размер сохраняется.
-  const split = page.getByRole('separator', { name: 'Изменить размер: Активные запуски / Задачи запуска' });
+  const split = page.getByRole('separator', { name: 'Изменить размер: Навигатор процесса / Live Agent Chat' });
   const before = Number(await split.getAttribute('aria-valuenow'));
   await split.focus();
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
@@ -473,8 +476,10 @@ test('old URLs keep working: providers/audit → Settings sections (query preser
   await expect(page).toHaveURL(`/w/${ws.id}/settings/providers?probe=1#codex`);
   await expect(page.getByRole('heading', { level: 1, name: 'CLI-провайдеры' })).toBeVisible();
 
-  await page.goto(`/w/${ws.id}/mission-control?run=${active.id}`);
-  await expect(page).toHaveURL(`/w/${ws.id}/projects/${p.id}/runs/${active.id}`);
+  // F4: `?run=` — сам экран run в Mission Control; прежний путь run ведёт сюда же.
+  await page.goto(`/w/${ws.id}/projects/${p.id}/runs/${active.id}`);
+  await expect(page).toHaveURL(`/w/${ws.id}/mission-control?run=${active.id}&view=system`);
+  await expect(page.getByTestId('run-status')).toHaveText('Выполняется');
   await page.goto(`/w/${ws.id}/mission-control?run=01900000-0000-7000-8000-00000000dead`);
   await expect(page.getByTestId('error-state')).toContainText('Запуск не найден');
 
@@ -500,6 +505,8 @@ test('no horizontal page overflow at 375/768/1366/1920 (shell + Mission Control 
     for (const path of ['dashboard', 'mission-control', `projects/${p.id}/runs/${run.id}`]) {
       await page.goto(`/w/${ws.id}/${path}`);
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+      // Run открывается в Mission Control: проверяем после того, как панели получили данные.
+      if (path.startsWith('projects/')) await expect(page.getByTestId('mc-layout')).toBeVisible();
       for (const scheme of ['dark', 'light'] as const) {
         await page.emulateMedia({ colorScheme: scheme });
         await expectNoHorizontalScroll(page);

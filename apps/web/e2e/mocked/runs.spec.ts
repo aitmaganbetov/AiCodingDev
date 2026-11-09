@@ -82,9 +82,11 @@ test('runs: workspace list with status/project filters in the URL, pagination, l
   await expect(page.getByRole('list', { name: 'Список запусков' }).locator(':scope > li')).toHaveCount(3);
 
   // Переход в run: навигация run содержит ссылки на качество, соответствие и одобрения этого run.
+  // F4: run открывается в AI Mission Control; переходы run — в Agent Inspector (контекстная панель ≥ 1366 px).
+  await page.setViewportSize({ width: 1366, height: 900 });
   await page.locator(`[data-run-id="${running.id}"]`).getByRole('link', { name: /^Открыть run/ }).click();
-  await expect(page).toHaveURL(base);
-  const runNav = page.getByRole('navigation', { name: 'Разделы run' });
+  await expect(page).toHaveURL(`/w/${ws.id}/mission-control?run=${running.id}&view=system`);
+  const runNav = page.getByTestId('context-panel').getByRole('navigation', { name: 'Разделы run' });
   await expect(runNav.getByRole('link', { name: 'Качество' })).toHaveAttribute('href', `/w/${ws.id}/quality/runs/${running.id}`);
   await expect(runNav.getByRole('link', { name: 'Соответствие' })).toHaveAttribute('href', `/w/${ws.id}/compliance/runs/${running.id}`);
   await expect(runNav.getByRole('link', { name: 'Одобрения' })).toHaveAttribute('href', `/w/${ws.id}/approvals?run_id=${running.id}`);

@@ -1,6 +1,8 @@
 /**
  * P7-06 Live Agent Chat (AC-05) и P7-07 поручения (AC-06): моки операций chat/directives
  * регистрируются здесь (api.route) и валидируются по контракту; SSE — мок сервера (mockApi).
+ * С F4 лента — вид «Беседа агентов» AI Mission Control (прежний путь `…/chat` перенаправляется с
+ * фильтрами), список поручений — вид «Поручения»; три панели — с 1366 px.
  */
 import type { components } from '../../src/api/schema';
 import { expectNoSeriousA11yViolations } from '../support/a11y';
@@ -9,6 +11,18 @@ import { login } from '../support/session';
 import { expect, test } from './fixtures';
 
 type S = components['schemas'];
+
+test.use({ viewport: { width: 1366, height: 900 } });
+
+/** Фильтры «Беседы» свёрнуты под кнопкой «Фильтры» (экономия высоты центральной панели). */
+async function openFilters(page: import('@playwright/test').Page) {
+  const toggle = page.getByRole('button', { name: 'Фильтры', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
+async function openDirectives(page: import('@playwright/test').Page) {
+  await page.getByRole('tab', { name: 'Поручения' }).click();
+}
 
 let n = 0;
 const uid = (group: string) => `01900000-0000-7000-${group}-${String(++n).padStart(12, '0')}`;
@@ -202,7 +216,9 @@ test('AC-05: live chat shows inter-agent messages and handoffs streaming in, wit
   await login(page, api);
   await page.goto(url);
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Live Agent Chat' })).toBeVisible();
+  await expect(page).toHaveURL(/\/mission-control\?run=.*view=conversation/);
+  await expect(page.getByRole('heading', { level: 1, name: 'AI Mission Control' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Live Agent Chat' })).toBeVisible();
   const timeline = page.getByTestId('chat-timeline');
   const items = timeline.getByTestId('chat-item');
   await expect(items).toHaveCount(2);
@@ -274,6 +290,7 @@ test('AC-05: live chat shows inter-agent messages and handoffs streaming in, wit
   await expect(live).not.toHaveAttribute('data-live', 'true');
 
   // Потоки: Codex → только сообщения Codex.
+  await openFilters(page);
   await page.getByRole('combobox', { name: 'Поток', exact: true }).selectOption({ label: 'Codex' });
   await expect(page).toHaveURL(/stream=codex/);
   await expect(items).toHaveCount(1);
@@ -313,12 +330,13 @@ test('AC-05: live chat shows inter-agent messages and handoffs streaming in, wit
   await page.getByRole('button', { name: 'Сбросить фильтры' }).click();
 
   // Комментарий с упоминаниями ролей (не доставляется агентам).
+  await page.getByText('Комментарий в ленту (агентам не доставляется)').click();
   await page.getByLabel('Текст комментария').fill('Команда, проверьте @qa');
   await page.getByRole('button', { name: 'Упомянуть роль' }).click();
   await page.getByRole('dialog', { name: 'Упомянуть роли' }).getByRole('checkbox', { name: /Ревьюер/ }).check();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('composer-mentions')).toHaveText('Упомянуты: Ревьюер, QA');
-  await page.getByRole('button', { name: 'Отправить' }).click();
+  await page.getByRole('button', { name: 'Отправить', exact: true }).click();
   await expect(page.getByText('Комментарий отправлен.')).toBeVisible();
   const post = api.requests.find((r) => r.operationId === 'postChatMessage');
   expect(post?.body).toEqual({ body: 'Команда, проверьте @qa', mentions: ['reviewer', 'qa'] });
@@ -330,6 +348,7 @@ test('AC-06: CHANGE_REQUEST with impact preview → confirmation → delivered /
   const { run, b, chat, url } = seed(api);
   await login(page, api);
   await page.goto(url);
+  await openDirectives(page);
   const panel = page.getByTestId('directives-panel');
   await expect(panel.getByRole('heading', { name: 'Поручений пока нет' })).toBeVisible();
 
@@ -442,6 +461,7 @@ test('directives: stale run version (409) is reported and retried with the fresh
   const { run, chat, url } = seed(api);
   await login(page, api);
   await page.goto(url);
+  await openDirectives(page);
   const panel = page.getByTestId('directives-panel');
   await panel.getByRole('button', { name: 'Новое поручение' }).click();
   const dialog = page.getByRole('dialog', { name: 'Новое поручение' });
@@ -506,6 +526,7 @@ test('chat: reviewer command set and APPROVE target from pending approvals', asy
   });
   await login(page, api);
   await page.goto(url);
+  await openDirectives(page);
   await page.getByRole('button', { name: 'Новое поручение' }).click();
   const dialog = page.getByRole('dialog', { name: 'Новое поручение' });
   const type = dialog.getByLabel('Команда');

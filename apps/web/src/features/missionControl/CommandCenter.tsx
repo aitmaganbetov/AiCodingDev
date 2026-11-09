@@ -146,6 +146,7 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    if (create.isPending) return;
     const next: Record<string, string> = {};
     if (!message.trim()) next.message = t('directives.form.messageRequired');
     if (needsApproval && !approvalId) next.approval = t('directives.form.approvalRequired');
@@ -362,7 +363,8 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
               </p>
             </div>
           </div>
-          <button type="submit" className="btn-primary" disabled={create.isPending}>
+          {/* Не disabled во время отправки: фокус остаётся на кнопке и вернётся на неё после диалога хода. */}
+          <button type="submit" className="btn-primary" aria-disabled={create.isPending}>
             <Icon name="enter" className="h-4 w-4" />
             {create.isPending ? t('directives.form.submitting') : t('directives.form.submit')}
           </button>

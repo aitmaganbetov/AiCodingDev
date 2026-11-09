@@ -71,24 +71,14 @@ function RunChooser({ workspaceId, onSelect }: { workspaceId: string; onSelect: 
 }
 
 /** Сброс размеров обеих групп панелей (WCAG 2.5.7: альтернатива перетаскиванию — кнопка). */
-function OuterReset({ register }: { register: (fn: () => void) => void }) {
+function RegisterGroupReset({ register }: { register: (fn: () => void) => void }) {
   const { reset } = useResizableGroup();
   useEffect(() => register(reset), [register, reset]);
   return null;
 }
-function ResetLayoutButton({ outer }: { outer: { current: (() => void) | null } }) {
+function ResetLayoutButton({ resets }: { resets: { current: (() => void)[] } }) {
   const { t } = useTranslation();
-  const { reset } = useResizableGroup();
-  return (
-    <IconButton
-      icon="refresh"
-      label={t('missionControl.resetPanels')}
-      onClick={() => {
-        reset();
-        outer.current?.();
-      }}
-    />
-  );
+  return <IconButton icon="refresh" label={t('missionControl.resetPanels')} onClick={() => resets.current.forEach((fn) => fn())} />;
 }
 
 function RunBar({ run, planVersion, taskTitle, onClearTask, extra }: { run: Run; planVersion: number; taskTitle: string | null; onClearTask: () => void; extra?: ReactNode }) {
@@ -134,9 +124,13 @@ function RunWorkspace({
   const wide = useMediaQuery(MQ_MC_WIDE, true);
   const desktop = useMediaQuery(MQ_DESKTOP, true);
   const [, setContextOpen] = useContextOpenPref(wide ? MC_SCREEN_ID : null);
-  const outerReset = useRef<(() => void) | null>(null);
+  // Сброс обеих групп панелей (горизонтальной и вертикальной) одной кнопкой в строке run.
+  const resets = useRef<(() => void)[]>([]);
   const registerOuterReset = useCallback((fn: () => void) => {
-    outerReset.current = fn;
+    resets.current[0] = fn;
+  }, []);
+  const registerInnerReset = useCallback((fn: () => void) => {
+    resets.current[1] = fn;
   }, []);
   const run = data.run.data;
   const selected = useTaskSummary(data.tasks, state.taskId);
@@ -233,20 +227,16 @@ function RunWorkspace({
     layout = (
       <div className="h-[max(36rem,calc(100dvh-12.5rem))] min-h-0" data-testid="mc-layout" data-layout="three">
         <ResizableGroup id="mission-control.main" defaultLayout={{ 'mc-nav': 36, 'mc-center': 64 }}>
-          <OuterReset register={registerOuterReset} />
+          <RegisterGroupReset register={registerOuterReset} />
           <ResizablePanel id="mc-nav" defaultSize="36" minSize="22">
             <div className="h-full overflow-y-auto pr-2">{navigator}</div>
           </ResizablePanel>
           <ResizableHandle before={t('missionControl.navigator.title')} after={t('missionControl.feed.title')} />
           <ResizablePanel id="mc-center" defaultSize="64" minSize="35">
             <ResizableGroup id="mission-control.center" orientation="vertical" defaultLayout={{ 'mc-feed': 68, 'mc-command': 32 }}>
+              <RegisterGroupReset register={registerInnerReset} />
               <ResizablePanel id="mc-feed" defaultSize="68" minSize="30">
-                <div className="relative h-full overflow-y-auto pb-2 pl-2">
-                  <div className="absolute right-0 top-0 z-10">
-                    <ResetLayoutButton outer={outerReset} />
-                  </div>
-                  {feed}
-                </div>
+                <div className="h-full overflow-y-auto pb-2 pl-2">{feed}</div>
               </ResizablePanel>
               <ResizableHandle orientation="vertical" before={t('missionControl.feed.title')} after={t('missionControl.command.title')} />
               <ResizablePanel id="mc-command" defaultSize="32" minSize="14">
@@ -278,7 +268,7 @@ function RunWorkspace({
           </ResizablePanel>
           <ResizableHandle before={t('missionControl.panes.navigator')} after={t('missionControl.feed.title')} />
           <ResizablePanel id="mc-main" defaultSize="58" minSize="35">
-            <div className="flex h-full flex-col gap-3 overflow-y-auto pl-2">
+            <div className="h-full space-y-3 overflow-y-auto pl-2">
               {feed}
               {command}
             </div>
@@ -309,7 +299,13 @@ function RunWorkspace({
 
   return (
     <>
-      <RunBar run={run} planVersion={data.planVersion} taskTitle={selected?.title ?? null} onClearTask={clearTask} />
+      <RunBar
+        run={run}
+        planVersion={data.planVersion}
+        taskTitle={selected?.title ?? null}
+        onClearTask={clearTask}
+        extra={wide ? <ResetLayoutButton resets={resets} /> : null}
+      />
       <p className="sr-only" role="status" aria-live="polite" data-testid="graph-announcement">
         {data.announcement}
       </p>
@@ -340,7 +336,11 @@ export default function MissionControlPage() {
       {state.runId ? (
         <RunWorkspace key={state.runId} workspaceId={workspaceId} role={membership.role} state={state} update={update} />
       ) : (
-        <RunChooser workspaceId={workspaceId} onSelect={(id) => update({ runId: id })} />
+        <>
+          <RunChooser workspaceId={workspaceId} onSelect={(id) => update({ runId: id })} />
+          {/* Контекстная панель экрана: без выбранного run — «Нет выбранного контекста». */}
+          <ContextPanel id={MC_SCREEN_ID} title={t('missionControl.inspector.runTitle')} />
+        </>
       )}
     </section>
   );

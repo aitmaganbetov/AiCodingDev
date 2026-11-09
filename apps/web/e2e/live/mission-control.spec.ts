@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { expectNoSeriousA11yViolations } from '../support/a11y';
-import { loginLive, requireStack, runBase, stack, startDevelopRun, type LiveFixture, type LiveProject } from './support';
+import { loginLive, missionControl, requireStack, runBase, stack, startDevelopRun, type LiveFixture, type LiveProject } from './support';
 
 /**
  * P7-14: сквозные сценарии Mission Control против настоящего стенда (ТЗ §18 этап 5).
@@ -10,6 +10,8 @@ import { loginLive, requireStack, runBase, stack, startDevelopRun, type LiveFixt
  *         подтверждено агентами (directive_acks итога) → выполнено (задачи замены прошли проверки);
  * AC-08 — разрыв SSE на стороне сервера посреди run: переподключение с Last-Event-ID, без дублей и пропусков.
  * Исполнитель задач — Fake CLI (сценарий `agent`: developer → REVIEW_REQUEST → независимый reviewer).
+ * С F4 все сценарии идут на одном экране — AI Mission Control: лента «Беседа агентов», граф навигатора,
+ * поручения из User Command Center, журнал «Системные события»; Task Detail — прежний экран.
  */
 requireStack();
 test.describe.configure({ mode: 'serial' });
@@ -28,7 +30,7 @@ test.afterEach(async () => {
 });
 
 function runStatus(page: Page) {
-  return page.getByText('Статус:', { exact: true }).locator('xpath=following-sibling::*[1]');
+  return page.getByTestId('run-status');
 }
 
 /** Наблюдатель за data-status узлов графа: последовательность статусов каждой задачи (без перезагрузки). */
@@ -73,16 +75,16 @@ test('AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into
   const base = runBase(project, runId);
   await expect(runStatus(page)).toHaveText('Выполняется', { timeout: 60_000 });
 
-  // Чат и граф одного run открыты одновременно (две вкладки), до начала исполнения.
-  await page.getByRole('navigation', { name: 'Разделы run' }).getByRole('link', { name: 'Live Agent Chat' }).click();
-  await expect(page).toHaveURL(`${base}/chat`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Live Agent Chat' })).toBeVisible();
+  // Лента и граф одного run открыты одновременно (две вкладки Mission Control), до начала исполнения.
+  await page.getByRole('tab', { name: 'Беседа агентов' }).click();
+  await expect(page).toHaveURL(new RegExp(`/mission-control\\?run=${runId}`));
+  await expect(page.getByRole('heading', { level: 2, name: 'Live Agent Chat' })).toBeVisible();
   const items = page.getByTestId('chat-timeline').getByTestId('chat-item');
   await expect(items.filter({ hasText: 'Запрос ревью' })).toHaveCount(0);
   await expect(page.getByTestId('stream-state')).toHaveAttribute('data-state', 'open', { timeout: 30_000 });
 
   const graph = await context.newPage();
-  await graph.goto(`${base}/graph`);
+  await graph.goto(missionControl(project, runId));
   const canvas = graph.getByTestId('run-graph-canvas');
   await expect(canvas.locator('[data-task-id]')).toHaveCount(2, { timeout: 30_000 });
   await expect(canvas.locator('[data-task-id][data-status="SUCCEEDED"]')).toHaveCount(0);
@@ -111,12 +113,25 @@ test('AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into
     timeout: 90_000,
   });
   expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true);
+  const shots = process.env.AICD_E2E_SCREENSHOTS_DIR;
+  if (shots) {
+    for (const [width, scheme] of [
+      [1920, 'dark'],
+      [1366, 'light'],
+    ] as const) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.screenshot({ path: `${shots}/live-mc-${width}-${scheme}.png` });
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
+  }
   // AC-05: только ACP-сообщения/события — без скрытых рассуждений; каждое сообщение один раз.
   const ids = await items.evaluateAll((els) => els.map((el) => el.getAttribute('data-item-id')));
   expect(new Set(ids).size).toBe(ids.length);
   await expectNoSeriousA11yViolations(page, 'live chat (real stack)');
 
   // Отправитель и получатель: в потоке роли «Ревьюер» есть входящий запрос ревью.
+  await page.getByRole('button', { name: 'Фильтры', exact: true }).click();
   await page.getByRole('combobox', { name: 'Поток', exact: true }).selectOption({ label: 'Роль' });
   await page.getByRole('combobox', { name: 'Роль', exact: true }).selectOption({ label: 'Ревьюер' });
   await expect(page).toHaveURL(/stream=role&role=reviewer/);
@@ -131,7 +146,6 @@ test('AC-05: DEVELOP run on Fake CLI — agent messages and handoffs stream into
     expect(seq.at(-1)).toBe('SUCCEEDED');
     expect(seq.length, `live transitions: ${seq.join(' → ')}`).toBeGreaterThan(1);
   }
-  await graph.goto(base);
   await expect(runStatus(graph)).toHaveText('Завершён', { timeout: 90_000 });
   await graph.close();
 
@@ -154,18 +168,18 @@ test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; 
   await stack.stopExec(); // run RUNNING, задачи ждут исполнителя — поручения применяются к живому run
   await loginLive(page, fx);
   const runId = await startDevelopRun(page, project, 'Сервис экспорта отчётов');
-  const base = runBase(project, runId);
+  const base = missionControl(project, runId);
   await expect(runStatus(page)).toHaveText('Выполняется', { timeout: 60_000 });
 
-  await page.goto(`${base}/chat`);
-  const panel = page.getByTestId('directives-panel');
+  // Поручения — из User Command Center Mission Control (критические PAUSE/STOP — подтверждение до отправки).
+  const center = page.getByTestId('command-center');
   const sendDirective = async (type: string, message: string, preview?: boolean) => {
-    await panel.getByRole('button', { name: 'Новое поручение' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Новое поручение' });
-    await dialog.getByLabel('Команда').selectOption(type);
-    await dialog.getByLabel('Текст поручения').fill(message);
-    if (preview !== undefined) await dialog.getByLabel('Показать влияние до применения').setChecked(preview);
-    await dialog.getByRole('button', { name: 'Отправить поручение' }).click();
+    await center.getByLabel('Команда').selectOption(type);
+    await center.getByLabel('Текст поручения').fill(message);
+    if (preview !== undefined) await center.getByLabel('Показать влияние до применения').setChecked(preview);
+    await center.getByRole('button', { name: 'Отправить поручение' }).click();
+    const confirm = page.getByRole('dialog', { name: /^Отправить «/ });
+    if (type === 'PAUSE' || type === 'STOP') await confirm.getByRole('button', { name: 'Подтвердить и отправить' }).click();
   };
 
   // PAUSE: команда исполняется синхронно — доставлено → подтверждено → выполнено; run → PAUSED.
@@ -181,7 +195,6 @@ test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; 
   await expect(runStatus(page)).toHaveText('Приостановлен', { timeout: 30_000 });
 
   // RESUME — run продолжает работу.
-  await page.goto(`${base}/chat`);
   await sendDirective('RESUME', 'Продолжаем');
   track = page.getByRole('dialog', { name: 'Поручение «Продолжить (RESUME)»' });
   await expect(step('completed')).toHaveAttribute('data-state', 'done');
@@ -190,9 +203,7 @@ test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; 
   await expect(runStatus(page)).toHaveText('Выполняется', { timeout: 30_000 });
 
   // CHANGE_REQUEST: impact preview (детерминированный анализ на воркере) → подтверждение → replan.
-  await page.goto(`${base}/graph`);
-  await expect(page.getByText('План v1')).toBeVisible({ timeout: 30_000 });
-  await page.goto(`${base}/chat`);
+  await expect(page.getByTestId('mc-run-bar').getByText('План v1')).toBeVisible({ timeout: 30_000 });
   await sendDirective('CHANGE_REQUEST', 'Добавьте также экспорт в XLSX', true);
   track = page.getByRole('dialog', { name: 'Поручение «Изменение (CHANGE_REQUEST)»' });
   await expect(track).toBeVisible();
@@ -213,13 +224,12 @@ test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; 
   await expectNoSeriousA11yViolations(page, 'directive dispatched (real stack)');
   await track.getByRole('button', { name: 'Закрыть' }).first().click();
 
-  // Run реагирует: граф перестроен по новой версии плана.
-  await page.goto(`${base}/graph`);
-  await expect(page.getByText('План v2')).toBeVisible({ timeout: 30_000 });
+  // Run реагирует: граф перестроен по новой версии плана (тот же экран, без перезагрузки).
+  await expect(page.getByTestId('mc-run-bar').getByText('План v2')).toBeVisible({ timeout: 30_000 });
 
   // Исполнитель запущен: попытки задач замены получают поручение (доставлено), агенты подтверждают его в итоге
   // (directive_acks), задачи проходят обязательные проверки → «выполнено». Карточка обновляется по SSE, без перезагрузки.
-  await page.goto(`${base}/chat`);
+  await page.getByRole('tab', { name: 'Поручения' }).click();
   const card = page.getByTestId('directive-card').filter({ hasText: 'Добавьте также экспорт в XLSX' });
   const cardStep = (id: string) => card.locator(`[data-step="${id}"]`);
   await expect(card.getByTestId('directive-delivery')).toHaveText('доставлено, ждём подтверждения агентов');
@@ -232,10 +242,8 @@ test('AC-06: PAUSE/RESUME directives are delivered, acknowledged and completed; 
   await expect(card.getByTestId('directive-completion')).toHaveText('выполнено');
   await expectNoSeriousA11yViolations(page, 'directive acknowledged and completed (real stack)');
 
-  await page.goto(`${base}/graph`);
   const canvas = page.getByTestId('run-graph-canvas');
   await expect(canvas.locator('[data-task-id][data-status="SUCCEEDED"]')).toHaveCount(2, { timeout: 120_000 });
-  await page.goto(base);
   await expect(runStatus(page)).toHaveText('Завершён', { timeout: 90_000 });
 });
 
