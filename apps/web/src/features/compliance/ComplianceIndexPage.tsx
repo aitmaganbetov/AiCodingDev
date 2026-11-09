@@ -8,7 +8,6 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router';
 import { projectsApi } from '../../api/projects';
 import { standardsApi, standardsKeys, type ControlApprovalState, type ProjectControl } from '../../api/standards';
 import { LoadMore } from '../../components/LoadMore';
@@ -17,6 +16,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/states';
 import { Badge } from '../../components/ui/Badge';
 import { Table, type Column } from '../../components/ui/Table';
 import { Tile } from '../../components/ui/Tile';
+import { useLatestSearchParams } from '../../lib/useLatestSearchParams';
 import { useCurrentWorkspace } from '../../workspace';
 import { RecentRuns, TextLink, workspacePath } from '../quality/shared';
 import { ComplianceDisclaimer } from './ComplianceDisclaimer';
@@ -308,12 +308,13 @@ function useProjectPicker({ workspaceId, value, onChange }: { workspaceId: strin
 export function ComplianceIndexPage() {
   const { t } = useTranslation();
   const { workspaceId } = useCurrentWorkspace();
-  const [params, setParams] = useSearchParams();
+  const [params, updateParams] = useLatestSearchParams();
   const setParam = (key: string, value: string) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setParams(next, { replace: true });
+    updateParams((prev) => {
+      if (value) prev.set(key, value);
+      else prev.delete(key);
+      return prev;
+    });
   };
   const blocking = params.get('blocking');
   const filters = {

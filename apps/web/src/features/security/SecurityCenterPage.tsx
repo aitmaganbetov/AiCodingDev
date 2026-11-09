@@ -9,7 +9,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router';
 import { FINDING_SEVERITIES, FINDING_STATUSES, findingKeys, findingsApi, type Finding } from '../../api/findings';
 import { projectsApi } from '../../api/projects';
 import { runKeys, runsApi } from '../../api/runs';
@@ -23,6 +22,7 @@ import { Icon } from '../../components/ui/Icon';
 import { Timestamp } from '../../components/ui/Time';
 import { SeverityBadge } from '../../components/ui/VerificationBadge';
 import { VirtualList } from '../../components/ui/VirtualList';
+import { useLatestSearchParams } from '../../lib/useLatestSearchParams';
 import { useCurrentWorkspace } from '../../workspace';
 import { FindingTransitionActions } from '../quality/FindingTransitions';
 import { LiveStatus, useWorkspaceInvalidation } from '../quality/live';
@@ -321,11 +321,10 @@ function FindingDetail({
 export function SecurityCenterPage() {
   const { t } = useTranslation();
   const { workspaceId } = useCurrentWorkspace();
-  const [params, setSearchParams] = useSearchParams();
+  const [params, setParams] = useLatestSearchParams();
   const filters = useMemo(() => parseFilters(params), [params]);
   const query = useMemo(() => filtersToQuery(filters), [filters]);
   const selected = params.get('finding') ?? '';
-  const setParams = (update: (p: URLSearchParams) => URLSearchParams) => setSearchParams((p) => update(p), { replace: true });
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const listHeadingRef = useRef<HTMLHeadingElement>(null);
 

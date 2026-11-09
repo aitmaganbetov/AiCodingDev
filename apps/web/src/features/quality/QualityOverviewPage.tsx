@@ -8,7 +8,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router';
 import { analyticsApi, analyticsKeys, type AnalyticsSummary } from '../../api/analytics';
 import { projectsApi } from '../../api/projects';
 import { PageHeading } from '../../components/PageHeading';
@@ -18,6 +17,7 @@ import { Tile } from '../../components/ui/Tile';
 import { Timestamp } from '../../components/ui/Time';
 import { VerificationBadge } from '../../components/ui/VerificationBadge';
 import { gateAggregateOutcomes, VERIFICATION_STATES, type GateAggregateCounts, type VerificationState } from '../../lib/verification';
+import { useLatestSearchParams } from '../../lib/useLatestSearchParams';
 import { useCurrentWorkspace } from '../../workspace';
 import { categoryAggregates, gateTypeVerifiedRate, qualityWindow, type CategoryAggregate } from './gatesModel';
 import { RecentRuns, TextLink, workspacePath } from './shared';
@@ -193,7 +193,7 @@ function ProjectFilter({ workspaceId, value, onChange }: { workspaceId: string; 
 export function QualityOverviewPage() {
   const { t } = useTranslation();
   const { workspaceId } = useCurrentWorkspace();
-  const [params, setParams] = useSearchParams();
+  const [params, updateParams] = useLatestSearchParams();
   const projectId = params.get('project') ?? '';
   const daysParam = Number(params.get('days'));
   const days = (QUALITY_WINDOWS as readonly number[]).includes(daysParam) ? daysParam : DEFAULT_WINDOW;
@@ -205,10 +205,11 @@ export function QualityOverviewPage() {
     enabled: Boolean(workspaceId),
   });
   const setParam = (key: string, value: string) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setParams(next, { replace: true });
+    updateParams((prev) => {
+      if (value) prev.set(key, value);
+      else prev.delete(key);
+      return prev;
+    });
   };
   const aggregates = useMemo(() => (analytics.data ? categoryAggregates(analytics.data.gates) : []), [analytics.data]);
 

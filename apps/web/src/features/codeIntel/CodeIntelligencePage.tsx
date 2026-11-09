@@ -269,10 +269,11 @@ export function CodeIntelligencePage() {
               )}
             </TabsContent>
             <TabsContent value="symbols">
-              <SymbolSearch {...tabProps} />
+              {/* key: форма заново берёт значения из URL после перехода по ссылке (например, «Сделать корнем»). */}
+              <SymbolSearch key={`${params.q}\n${params.kind}\n${params.spath}`} {...tabProps} />
             </TabsContent>
             <TabsContent value="graph">
-              <DependencyGraph {...tabProps} />
+              <DependencyGraph key={`${params.groot}\n${params.gsym}\n${params.depth}\n${params.dir}`} {...tabProps} />
             </TabsContent>
             <TabsContent value="context">
               <ContextPacks {...tabProps} />

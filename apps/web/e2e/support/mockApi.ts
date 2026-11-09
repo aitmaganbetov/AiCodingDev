@@ -168,6 +168,14 @@ const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply
   // F5: экран «Агенты» (профили B7) и Настройки › CLI-провайдеры (история исполнений B1) — пустые валидные
   // ответы; agents.spec / providers.spec и другие spec переопределяют их через api.route.
   { method: 'GET', path: '/api/v1/agent-profiles', operationId: 'listAgentProfiles', reply: () => ({ status: 200, body: { items: [] } }) },
+  // F8: Code Intelligence (раздел меню; на него ведут сочетание `g x` и палитра) — проект без репозиториев.
+  // code-intelligence.spec и другие spec переопределяют ответ через api.route.
+  {
+    method: 'GET',
+    path: '/api/v1/projects/{id}/repositories',
+    operationId: 'listRepositories',
+    reply: () => ({ status: 200, body: { items: [], next_cursor: null } }),
+  },
   {
     method: 'GET',
     path: '/api/v1/providers/{id}/executions',

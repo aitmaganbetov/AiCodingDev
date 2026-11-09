@@ -24,6 +24,7 @@ const EXPECTED = [
   'review',
   'agents',
   'security',
+  'codeIntel',
 ];
 
 function leafKeys(value: unknown, prefix = ''): string[] {

@@ -24,6 +24,7 @@ import { describeEvent } from '../runs/describeEvent';
 import { enumLabel, providerLabel, TASK_ACTIVE } from '../runs/labels';
 import { durationParts, elapsedMs } from './feedModel';
 import { useNow } from './useNow';
+import { useCurrentWorkspace } from '../../workspace';
 
 /* ───────────────────────────── Run ───────────────────────────── */
 
@@ -177,8 +178,9 @@ function Section({ id, title, children }: { id: string; title: string; children:
   );
 }
 
-function ContextPackSection({ taskId, attempt }: { taskId: string; attempt: TaskAttempt | undefined }) {
+function ContextPackSection({ taskId, runId, attempt }: { taskId: string; runId: string; attempt: TaskAttempt | undefined }) {
   const { t } = useTranslation();
+  const { workspaceId } = useCurrentWorkspace();
   const pack = useQuery({
     queryKey: taskKeys.contextPack(taskId, attempt?.id ?? ''),
     queryFn: ({ signal }) => tasksApi.contextPack(taskId, attempt?.id ?? '', signal),
@@ -237,6 +239,15 @@ function ContextPackSection({ taskId, attempt }: { taskId: string; attempt: Task
           </details>
         ) : null}
         {p.warnings.length > 0 ? <p className="text-xs text-fg-muted">{t('missionControl.inspector.contextPack.warnings', { codes: p.warnings.join(', ') })}</p> : null}
+        {workspaceId && attempt ? (
+          <Link
+            className="link self-start text-xs"
+            to={`/w/${workspaceId}/code?${new URLSearchParams({ tab: 'context', run: runId, task: taskId, attempt: attempt.id }).toString()}`}
+            data-testid="context-pack-open-code"
+          >
+            {t('missionControl.inspector.contextPack.openInCode')}
+          </Link>
+        ) : null}
       </div>
     );
   }
@@ -429,7 +440,7 @@ export function TaskInspector({
         )}
       </Section>
 
-      <ContextPackSection taskId={taskId} attempt={latest} />
+      <ContextPackSection taskId={taskId} runId={data.run_id} attempt={latest} />
 
       <nav aria-label={t('missionControl.inspector.links')} className="flex flex-wrap gap-2">
         <Link className="btn-secondary btn-sm" to={taskHref(taskId)}>

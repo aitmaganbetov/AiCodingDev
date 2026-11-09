@@ -163,6 +163,7 @@
       "openDiff": "Изменения (diff)",
       "contextPack": {
         "title": "Контекст агента (Context Pack)",
+        "openInCode": "Подробно в Code Intelligence",
         "none": "Для последней попытки Context Pack не собирался.",
         "summary": "Фрагментов: {{fragments}}, пропущено: {{omitted}}, ≈ {{kb}} КБ; commit",
         "stale": "Снимок индекса на другом commit — часть фрагментов может быть устаревшей.",
