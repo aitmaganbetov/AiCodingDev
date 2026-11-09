@@ -122,6 +122,7 @@ def run_mocked(out: Path) -> dict[str, Any]:
     junit = out / "junit" / "web-mocked.xml"
     env = _web_env(junit)
     env.setdefault("AICD_E2E_PORT", "4191")
+    env.setdefault("AICD_E2E_PERF", "1")  # замер CLI 10 000 строк (порог ≥ 50 fps) — в составе прогона, не пропуск
     cmd = [
         "pnpm",
         "exec",

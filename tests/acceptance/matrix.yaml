@@ -344,8 +344,8 @@ criteria:
       - text: Причина видна в API и UI
         tests:
           - py: tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround
-          - web: "mocked:workflows.spec.ts::workflows: mode, FSM stage, verified progress, duration, blocked reason, Mission Control links, mode filter (light/dark axe)"
-          - web: "mocked:app-shell.spec.ts::CLI status chips: real provider data (ready / AUTH_REQUIRED / unknown / not detected), tooltip with version and last check, link to Settings"
+          - web: "mocked:ac16-blocked-reason.spec.ts::AC-16: blocked reason AUTH_REQUIRED is visible in Workflows, Mission Control and Task Detail"
+          - web: "mocked:ac16-blocked-reason.spec.ts::AC-16: blocked reason PROVIDER_UNAVAILABLE is visible in Workflows, Mission Control and Task Detail"
       - text: Нет попыток обходной авторизации и обращений к AI API
         tests:
           - py: tests/acceptance/test_ac03_ac16_routing_without_ai_api.py::test_ac16_no_authorized_cli_blocks_task_with_visible_reason_and_no_workaround

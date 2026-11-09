@@ -473,6 +473,10 @@ test('performance: CLI Output with 10 000 lines stays virtualized and scrolls sm
   });
   const result = { lines: LINES, loadMs, domLines, ...metrics };
   console.log(`CLI 10k perf: ${JSON.stringify(result)}`);
+  // Критерий плана F4: прокрутка 10 000 строк без деградации — ≥ 50 fps при равномерной прокрутке.
+  // Протяжка ползунка по всей ленте — худший случай: порог ниже (≥ 30 fps), фиксирует отсутствие «залипаний».
+  expect(metrics.steady.fps, 'CLI 10k: равномерная прокрутка ≥ 50 fps').toBeGreaterThanOrEqual(50);
+  expect(metrics.sweep.fps, 'CLI 10k: протяжка по всей ленте ≥ 30 fps').toBeGreaterThanOrEqual(30);
   const out = process.env.AICD_E2E_AUDIT_DIR;
   if (out) {
     mkdirSync(out, { recursive: true });
