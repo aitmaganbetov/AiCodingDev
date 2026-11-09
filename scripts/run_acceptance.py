@@ -272,8 +272,15 @@ def write_report(
     acs: list[dict[str, Any]],
     m: acceptance_matrix.Matrix,
 ) -> dict[str, Any]:
-    dirty = [line for line in _git("status", "--porcelain").splitlines() if line]
-    diff = subprocess.run(["git", "-C", str(ROOT), "diff", "HEAD"], capture_output=True, check=False).stdout  # noqa: S603, S607
+    # Собственные выходные файлы прогона (reports/acceptance/**) не считаются изменением проверяемого кода:
+    # иначе отчёт всегда помечал бы дерево «изменённым» своими же junit/runs.json.
+    own = ":(exclude)reports/acceptance"
+    dirty = [line for line in _git("status", "--porcelain", "--", ".", own).splitlines() if line]
+    diff = subprocess.run(  # noqa: S603
+        ["git", "-C", str(ROOT), "diff", "HEAD", "--", ".", own],  # noqa: S607
+        capture_output=True,
+        check=False,
+    ).stdout
     passed = sum(1 for a in acs if a["status"] == "PASS")
     doc: dict[str, Any] = {
         "report": "AiCodingDev acceptance AC-01…AC-16 (P9-01)",
