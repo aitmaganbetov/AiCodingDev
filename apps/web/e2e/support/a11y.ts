@@ -24,19 +24,56 @@ export async function settleAnimations(page: Page): Promise<void> {
   );
 }
 
+type Violation = Awaited<ReturnType<AxeBuilder['analyze']>>['violations'][number];
+
+/**
+ * axe `target-size` (2.5.8) считает цель «частично закрытой», если при текущей прокрутке её край
+ * находится под sticky верхней панелью. Это положение прокрутки, а не размер цели: такие узлы
+ * проверяются повторно после прокрутки к цели (с учётом scroll-padding, 2.4.11) — остаются только
+ * цели, недостаточные и в полностью видимом положении.
+ */
+async function recheckObscuredTargets(page: Page, violations: Violation[]): Promise<Violation[]> {
+  const out: Violation[] = [];
+  for (const v of violations) {
+    if (v.id !== 'target-size') {
+      out.push(v);
+      continue;
+    }
+    const nodes: Violation['nodes'] = [];
+    for (const node of v.nodes) {
+      const selector = node.target.join(' ');
+      if (!/obscured/.test(node.failureSummary ?? '') || typeof node.target[0] !== 'string' || node.target.length !== 1) {
+        nodes.push(node);
+        continue;
+      }
+      const y = await page.evaluate(() => window.scrollY);
+      await page.locator(selector).first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
+      const again = await new AxeBuilder({ page }).withRules(['target-size']).include(selector).analyze();
+      await page.evaluate((top) => window.scrollTo(0, top), y);
+      // Узел засчитывается только если правило реально выполнено для него (селектор нашёл цель).
+      if (again.violations.length > 0 || !again.passes.some((p) => p.id === 'target-size')) nodes.push(node);
+    }
+    if (nodes.length > 0) out.push({ ...v, nodes });
+  }
+  return out;
+}
+
 /** WCAG 2.2 A/AA (включая 2.0/2.1) через axe-core: нарушений уровня serious/critical быть не должно. */
 export async function expectNoSeriousA11yViolations(page: Page, screen: string): Promise<void> {
   await settleAnimations(page);
   const results = await new AxeBuilder({ page }).withTags([...AXE_WCAG_TAGS]).analyze();
-  const blocking = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
+  const blocking = (await recheckObscuredTargets(page, results.violations)).filter((v) => v.impact === 'serious' || v.impact === 'critical');
   expect(
-    blocking.map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`),
+    blocking.map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => `${n.target.join(' ')} — ${(n.failureSummary ?? '').replace(/\s+/g, ' ').slice(0, 300)}`).join('; ')}`),
     `axe violations on "${screen}"`,
   ).toEqual([]);
 }
 
 /** Нет горизонтальной прокрутки страницы (responsive до 360px). */
 export async function expectNoHorizontalScroll(page: Page): Promise<void> {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow).toBeLessThanOrEqual(0);
+  // После setViewportSize раскладка меняется асинхронно (media query → перерисовка React): опрос до
+  // устойчивого результата; постоянное переполнение по-прежнему падает по таймауту expect.
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth))
+    .toBeLessThanOrEqual(0);
 }

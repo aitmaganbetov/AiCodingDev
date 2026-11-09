@@ -113,7 +113,7 @@ export function ResizablePanel({ className, ...props }: PanelProps & { id: strin
 
 /**
  * Разделитель панелей: role=separator с aria-valuenow (библиотека), доступное имя, видимый фокус,
- * зона захвата ≥ 24 px (WCAG 2.5.8) при тонкой линии 1 px.
+ * зона захвата 24 px (WCAG 2.5.8 — w-6/h-6) при тонкой линии 1 px.
  */
 export function ResizableHandle({
   before,
@@ -134,7 +134,7 @@ export function ResizableHandle({
       aria-label={t('ds.resizable.handle', { before, after })}
       className={cx(
         'group relative flex shrink-0 items-center justify-center outline-none',
-        horizontal ? 'w-3 cursor-col-resize' : 'h-3 cursor-row-resize',
+        horizontal ? 'w-6 cursor-col-resize' : 'h-6 cursor-row-resize',
         'focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus',
         className,
       )}

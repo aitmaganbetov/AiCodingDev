@@ -192,7 +192,9 @@ function RunWorkspace({
   const setChat = useCallback((chat: ChatFilters) => update({ chat }), [update]);
   const setFeed = useCallback((feed: FeedFilters) => update({ feed }), [update]);
 
-  if (data.run.isError) {
+  // Ошибка фонового обновления (например, сеть пропала посреди refetch) не заменяет уже загруженный
+  // run экраном ошибки: показываются последние данные, поток событий сообщает своё состояние сам.
+  if (data.run.isError && (!run || (isApiError(data.run.error) && data.run.error.status === 404))) {
     const notFound = isApiError(data.run.error) && data.run.error.status === 404;
     return (
       <ErrorState

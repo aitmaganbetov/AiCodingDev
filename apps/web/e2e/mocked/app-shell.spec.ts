@@ -157,6 +157,8 @@ test('command palette: Ctrl+K, keyboard-only navigation, theme switch, recent ru
   await found.click();
   // Экран run с F4 — AI Mission Control (старый путь run перенаправляется туда с тем же run).
   await expect(page).toHaveURL(new RegExp(`/w/${ws.id}/mission-control\\?run=${active.id}`));
+  // Ленивый экран переводит фокус на свой h1, когда смонтируется, — дождаться, прежде чем фокусировать кнопку.
+  await expect(page.getByRole('heading', { level: 1, name: 'AI Mission Control' })).toBeFocused();
 
   // Esc закрывает и возвращает фокус туда, где он был.
   const trigger = page.getByRole('button', { name: 'Командная палитра (Ctrl+K)' });
@@ -219,7 +221,9 @@ test('global search: min length, grouped results, ↑/↓ + Enter opens the resu
   await expect(second).toHaveAttribute('aria-selected', 'true');
   await expect(box).toHaveAttribute('aria-activedescendant', (await second.getAttribute('id')) ?? '');
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(`/w/${ws.id}/projects/${p.id}/runs/${active.id}`);
+  // Результат «запуск» ведёт на старый путь run, который сразу перенаправляется в Mission Control:
+  // промежуточный URL под нагрузкой может не попасть в опрос — проверяется итоговый экран.
+  await expect(page).toHaveURL(new RegExp(`/w/${ws.id}/mission-control\\?run=${active.id}`));
   await expect(box).toHaveValue('');
   // Новый экран переводит фокус на свой h1 (после загрузки данных) — дождаться, прежде чем снова искать.
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused();

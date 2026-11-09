@@ -7,7 +7,7 @@
  * API не отдаёт и UI их не показывает.
  */
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useId, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import { chatKeys, type ChatFilters } from '../../api/chat';
@@ -318,7 +318,8 @@ function ConversationView({
 
 /* ───────────────────────────── Вывод CLI ───────────────────────────── */
 
-function CliLineView({ line, taskTitle }: { line: CliLine; taskTitle: (id: string) => string | undefined }) {
+/** Строка CLI мемоизирована: прокрутка перерисовывает окно списка, а не содержимое уже видимых строк. */
+const CliLineView = memo(function CliLineView({ line, taskTitle }: { line: CliLine; taskTitle: (id: string) => string | undefined }) {
   const { t } = useTranslation();
   const markers = [
     line.truncated ? t('missionControl.cli.truncated') : null,
@@ -347,7 +348,7 @@ function CliLineView({ line, taskTitle }: { line: CliLine; taskTitle: (id: strin
       ) : null}
     </div>
   );
-}
+});
 
 function CliView({ data, filters, onFilters }: { data: MissionControlRun; filters: FeedFilters; onFilters: (f: FeedFilters) => void }) {
   const { t } = useTranslation();

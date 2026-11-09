@@ -285,7 +285,8 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
                           if (tt === 'task' && !targetTask && selectedTask) setTargetTask(selectedTask.id);
                         }}
                       />
-                      <label htmlFor={`${id}-target-${tt}`} className="text-sm">
+                      {/* Метка — эквивалентная цель ≥ 24 px по высоте (WCAG 2.5.8): радиокнопка 16 px. */}
+                      <label htmlFor={`${id}-target-${tt}`} className="inline-flex min-h-target items-center text-sm">
                         {t(`missionControl.command.targetOption.${tt}`)}
                       </label>
                     </div>

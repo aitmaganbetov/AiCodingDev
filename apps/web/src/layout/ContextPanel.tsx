@@ -220,7 +220,7 @@ export function ShellContextPanel() {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           onKeyDown={onKeyDown}
-          className="group relative -ml-1.5 w-3 shrink-0 cursor-col-resize touch-none outline-none focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus"
+          className="group relative -ml-3 w-6 shrink-0 cursor-col-resize touch-none outline-none focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus"
         >
           <span
             aria-hidden="true"

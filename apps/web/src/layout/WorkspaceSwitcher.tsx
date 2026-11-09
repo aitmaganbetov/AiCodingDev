@@ -21,7 +21,7 @@ export function WorkspaceSwitcher({ compact = false }: { compact?: boolean }) {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger className="btn-secondary max-w-full">
+      <PopoverTrigger className="btn-secondary min-w-0 max-w-full">
         <Icon name="layers" className="h-4 w-4 shrink-0" />
         <span className={compact ? 'max-w-[7rem] truncate' : 'max-w-[9rem] truncate sm:max-w-[14rem]'}>
           <span className="sr-only">{t('layout.workspaceSwitcher')}: </span>

@@ -125,8 +125,10 @@ export function AppLayout() {
         >
           {t('layout.skipToContent')}
         </a>
-        <header className="glass sticky top-0 z-overlay border-x-0 border-t-0" data-testid="topbar">
-          <div className="flex h-topbar items-center gap-2 px-2 sm:px-3">
+        {/* Высота панели вместе с нижней границей — ровно h-topbar: sidebar и контекстная панель
+            (sticky top-topbar, высота 100dvh − topbar) не дают лишнего пикселя прокрутки. */}
+        <header className="glass sticky top-0 z-overlay h-topbar border-x-0 border-t-0" data-testid="topbar">
+          <div className="flex h-full items-center gap-2 px-2 sm:px-3">
             {!desktop ? (
               <IconButton icon="menu" label={t('layout.openNav')} onClick={() => setNavOpen(true)} aria-expanded={navOpen} aria-haspopup="dialog" />
             ) : null}
@@ -142,6 +144,9 @@ export function AppLayout() {
             ) : null}
             <div className="flex min-w-0 flex-1 justify-center px-1">{inWorkspace && desktop ? <GlobalSearch /> : null}</div>
             {inWorkspace && desktop ? <ProviderChips compact={!xwide} /> : null}
+            {/* Переключатель контекстной панели есть не на всех экранах — он стоит до справки, чтобы
+                справка, уведомления и профиль оставались на одном месте (WCAG 3.2.6 Consistent Help). */}
+            <ContextPanelToggle />
             <IconButton
               icon={desktop ? 'command' : 'search'}
               label={desktop ? t('shell.palette.open') : t('shell.palette.openMobile')}
@@ -151,8 +156,7 @@ export function AppLayout() {
             />
             <IconButton icon="keyboard" label={t('layout.shortcuts')} onClick={() => setHelpOpen(true)} className="hidden sm:inline-flex" />
             {inWorkspace ? <NotificationsBell /> : null}
-            <ContextPanelToggle />
-            <UserMenu compact={!desktop} onShowShortcuts={desktop ? undefined : openHelp} />
+            <UserMenu compact={!wide} onShowShortcuts={desktop ? undefined : openHelp} />
           </div>
         </header>
 

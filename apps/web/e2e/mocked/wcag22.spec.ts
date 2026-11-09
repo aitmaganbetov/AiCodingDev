@@ -44,7 +44,85 @@ function seed(api: MockApi) {
     attempt_no: 1,
     provider: 'codex',
   });
+  mockScreens(api, ws.id);
   return { ws, project, run, b };
+}
+
+const AT = '2026-11-08T09:00:00Z';
+const DISCLAIMER = 'Автоматические проверки не являются официальной сертификацией (ТЗ §13).';
+const TECH_VERSION = '01900000-0000-7000-a200-000000000002';
+
+/** Операции экранов вне SHELL_DEFAULTS: небольшие, валидные по контракту ответы (данные только мока). */
+function mockScreens(api: MockApi, workspaceId: string) {
+  const ok = (body: unknown) => ({ status: 200, body });
+  api.route('GET', '/api/v1/runs/{id}/findings', 'listRunFindings', () => ok({ items: [], next_cursor: null }));
+  api.route('GET', '/api/v1/projects/{id}/worktrees', 'listProjectWorktrees', () => ok({ items: [], next_cursor: null }));
+  api.route('GET', '/api/v1/projects/{id}/controls', 'listProjectControls', () =>
+    ok({ items: [], next_cursor: null, quality_profile: 'strict', disclaimer: DISCLAIMER }),
+  );
+  api.route('GET', '/api/v1/projects/{id}/technologies', 'listTechnologies', () => ok({ items: [], next_cursor: null }));
+  const installation: S['GitHubInstallation'] = {
+    id: '01900000-0000-7000-e000-000000000001',
+    installation_id: 4242,
+    account_login: 'alpha-org',
+    account_type: 'organization',
+    repository_selection: 'selected',
+    permissions: { contents: 'write', pull_requests: 'write' },
+    status: 'ACTIVE',
+    created_at: AT,
+    updated_at: AT,
+  };
+  api.route('GET', '/api/v1/integrations/github/installations', 'listGitHubInstallations', () => ok({ items: [installation] }));
+  const source: S['DocumentationSource'] = {
+    id: '01900000-0000-7000-d000-000000000001',
+    workspace_id: workspaceId,
+    technology_version_id: TECH_VERSION,
+    source_type: 'url',
+    uri_or_file_ref: 'https://docs.python.org/3.12/',
+    trust_level: 'official',
+    license_info: 'PSF',
+    refresh_policy: 'manual',
+    enabled: true,
+    latest_snapshot: null,
+    created_at: '2026-11-01T00:00:00Z',
+  };
+  api.route('GET', '/api/v1/documentation/sources', 'listDocumentationSources', () => ok({ items: [source], next_cursor: null }));
+  api.route('GET', '/api/v1/technologies', 'listWorkspaceTechnologies', () =>
+    ok({
+      items: [
+        {
+          technology_id: '01900000-0000-7000-a200-000000000001',
+          name: 'Python',
+          ecosystem: 'pypi',
+          technology_version_id: TECH_VERSION,
+          version_label: '3.12',
+          support_status: 'supported',
+          project_count: 1,
+          source_count: 1,
+        },
+      ],
+      next_cursor: null,
+    }),
+  );
+  const members: S['Member'][] = [
+    { user: { id: '01900000-0000-7000-8000-0000000000aa', display_name: 'Анна' }, email: 'anna@example.com', role: 'owner', joined_at: AT, version: 0 },
+    { user: { id: '01900000-0000-7000-8000-0000000000bb', display_name: 'Борис Петров' }, email: 'boris@example.com', role: 'developer', joined_at: AT, version: 0 },
+  ];
+  api.route('GET', '/api/v1/workspaces/{id}/members', 'listMembers', () => ok({ items: members, next_cursor: null }));
+  const audit: S['AuditEvent'][] = [
+    {
+      id: '01900000-0000-7000-c000-000000000001',
+      workspace_id: workspaceId,
+      actor_type: 'user',
+      actor_id: '01900000-0000-7000-8000-0000000000aa',
+      action: 'project.create',
+      resource_type: 'project',
+      resource_id: '01900000-0000-7000-9000-000000000001',
+      metadata: { outcome: 'success', request_id: 'req-1' } as unknown as S['AuditEvent']['metadata'],
+      created_at: AT,
+    },
+  ];
+  api.route('GET', '/api/v1/audit-events', 'listAuditEvents', () => ok({ items: audit, next_cursor: null }));
 }
 
 interface Screen {
@@ -122,6 +200,8 @@ async function targetSizeIssues(page: Page): Promise<TargetIssue[]> {
       if ((el as HTMLButtonElement).disabled) return false;
       const style = getComputedStyle(el);
       if (style.visibility === 'hidden' || style.display === 'none' || style.pointerEvents === 'none') return false;
+      // Визуально скрытые (sr-only: clip) — не цели указателя, пока не получили фокус (skip link).
+      if (style.clip === 'rect(0px, 0px, 0px, 0px)' || style.clipPath === 'inset(50%)') return false;
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0;
     });
@@ -236,10 +316,10 @@ test('2.4.11 focus not obscured: Shift+Tab from the end of a long screen never l
 
 test('2.4.11: the context panel overlay (< 1280 px) closes when focus moves into the main area, so it never covers the focused element', async ({ page, api }) => {
   await page.setViewportSize({ width: 1024, height: 800 });
-  const { ws, run } = seed(api);
+  const { ws } = seed(api);
   await login(page, api);
-  await page.goto(`/w/${ws.id}/mission-control?run=${run.id}`);
-  await expect(page.getByTestId('mc-layout')).toBeVisible();
+  await page.goto(`/w/${ws.id}/mission-control`);
+  await expect(page.getByRole('heading', { level: 1, name: 'AI Mission Control' })).toBeVisible();
   await page.getByRole('button', { name: 'Показать контекстную панель' }).click();
   const panel = page.getByTestId('context-panel');
   await expect(panel).toHaveAttribute('data-mode', 'overlay');
@@ -261,7 +341,8 @@ test('3.2.6 consistent help: keyboard help and user menu sit at the same place o
     const order = await bar.evaluate((el) => {
       const buttons = Array.from(el.querySelectorAll('button')).filter((b) => b.getBoundingClientRect().width > 0);
       const helpIndex = buttons.findIndex((b) => b.getAttribute('aria-label') === 'Сочетания клавиш');
-      return { fromEnd: buttons.length - helpIndex, x: Math.round(buttons[helpIndex]!.getBoundingClientRect().right - window.innerWidth) };
+      // Справа от справки — только уведомления и профиль: одинаковый порядок и место на каждом экране.
+      return { after: buttons.slice(helpIndex + 1).map((b) => b.getAttribute('aria-haspopup') ?? b.getAttribute('aria-label')), x: Math.round(buttons[helpIndex]!.getBoundingClientRect().right - window.innerWidth) };
     });
     positions.add(JSON.stringify(order));
   }
@@ -356,33 +437,39 @@ test('performance: CLI Output with 10 000 lines stays virtualized and scrolls sm
         }
       }
     }
-    const frames: number[] = [];
-    const duration = 4000;
-    const start = performance.now();
     const max = target.scrollHeight - target.clientHeight;
-    await new Promise<void>((resolve) => {
-      const step = (now: number) => {
-        frames.push(now);
-        const t = (now - start) / duration;
-        // Треугольная волна: конец → начало → конец, ≈ 2 полных прохода по 10 000 строк.
-        const phase = (t * 2) % 2;
-        target.scrollTop = max * (phase < 1 ? 1 - phase : phase - 1);
-        if (now - start < duration) requestAnimationFrame(step);
-        else resolve();
+    /** Кадры requestAnimationFrame, пока позиция прокрутки задаётся функцией времени. */
+    async function measure(duration: number, position: (ms: number) => number) {
+      const frames: number[] = [];
+      const start = performance.now();
+      await new Promise<void>((resolve) => {
+        const step = (now: number) => {
+          frames.push(now);
+          target.scrollTop = position(now - start);
+          if (now - start < duration) requestAnimationFrame(step);
+          else resolve();
+        };
+        requestAnimationFrame(step);
+      });
+      const deltas = frames.slice(1).map((f, i) => f - frames[i]!);
+      deltas.sort((x, y) => x - y);
+      const total = frames.at(-1)! - frames[0]!;
+      return {
+        fps: Math.round(((frames.length - 1) / total) * 1000 * 10) / 10,
+        p95FrameMs: Math.round(deltas[Math.floor(deltas.length * 0.95)]! * 10) / 10,
+        maxFrameMs: Math.round(deltas.at(-1)! * 10) / 10,
       };
-      requestAnimationFrame(step);
+    }
+    // 1) Равномерная быстрая прокрутка (≈ колесо/тачпад): 3000 px/с вверх от конца, 4 с.
+    target.scrollTop = max;
+    const steady = await measure(4000, (ms) => Math.max(0, max - ms * 3));
+    // 2) Худший случай: перетаскивание ползунка по всей ленте (конец → начало → конец за 4 с) —
+    //    каждый кадр — новое окно строк.
+    const sweep = await measure(4000, (ms) => {
+      const phase = ((ms / 4000) * 2) % 2;
+      return max * (phase < 1 ? 1 - phase : phase - 1);
     });
-    const deltas = frames.slice(1).map((f, i) => f - frames[i]!);
-    deltas.sort((x, y) => x - y);
-    const total = frames.at(-1)! - frames[0]!;
-    return {
-      scrollHeight: target.scrollHeight,
-      frames: frames.length,
-      fps: Math.round(((frames.length - 1) / total) * 1000 * 10) / 10,
-      p95FrameMs: Math.round(deltas[Math.floor(deltas.length * 0.95)]! * 10) / 10,
-      maxFrameMs: Math.round(deltas.at(-1)! * 10) / 10,
-      domNodes: document.getElementsByTagName('*').length,
-    };
+    return { scrollHeight: target.scrollHeight, steady, sweep, domNodes: document.getElementsByTagName('*').length };
   });
   const result = { lines: LINES, loadMs, domLines, ...metrics };
   console.log(`CLI 10k perf: ${JSON.stringify(result)}`);
@@ -392,6 +479,8 @@ test('performance: CLI Output with 10 000 lines stays virtualized and scrolls sm
     writeFileSync(join(out, 'cli-10k-perf.json'), JSON.stringify(result, null, 2));
   }
   expect(metrics.scrollHeight).toBeGreaterThan(10_000 * 10);
+  // Критерий F4/F9: ≥ 50 fps при прокрутке (замер на машине прогона, без параллельной нагрузки).
+  expect(metrics.steady.fps).toBeGreaterThanOrEqual(50);
 });
 
 test('screen audit: every main screen at 1920/1366/768/375 in dark and light (AICD_E2E_AUDIT_DIR)', async ({ page, api }) => {
@@ -417,4 +506,3 @@ test('screen audit: every main screen at 1920/1366/768/375 in dark and light (AI
   expect(overflow).toEqual([]);
 });
 
-export type { S };

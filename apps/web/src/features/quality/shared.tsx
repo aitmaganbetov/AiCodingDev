@@ -144,9 +144,10 @@ export function RecentRuns({ workspaceId, label, actions }: { workspaceId: strin
   );
 }
 
+/** Ссылка-действие (не в строке текста): высота цели ≥ 24 px (WCAG 2.5.8). */
 export function TextLink({ to, children, srSuffix }: { to: string; children: ReactNode; srSuffix?: string }) {
   return (
-    <Link to={to} className="font-medium text-link underline">
+    <Link to={to} className="inline-flex min-h-target items-center font-medium text-link underline">
       {children}
       {srSuffix ? <span className="sr-only">: {srSuffix}</span> : null}
     </Link>

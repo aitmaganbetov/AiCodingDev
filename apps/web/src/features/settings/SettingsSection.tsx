@@ -25,7 +25,7 @@ export function SettingsSection({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col gap-4">
       <nav aria-label={t('settings.sections.label')} className="-mx-1 overflow-x-auto" data-testid="settings-nav">
-        <ul className="flex min-w-max gap-1 border-b border-border px-1">
+        <ul className="flex flex-wrap gap-1 border-b border-border px-1 sm:min-w-max sm:flex-nowrap">
           {SECTIONS.filter((s) => !s.permission || can(membership?.role, s.permission)).map((s) => (
             <li key={s.path}>
               <NavLink

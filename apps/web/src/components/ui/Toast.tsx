@@ -58,7 +58,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             onOpenChange={(open) => {
               if (!open) setItems((prev) => prev.filter((x) => x.id !== item.id));
             }}
-            className={cx('flex items-start gap-3 rounded-lg border p-3 shadow-e2', TONE_CLASS[item.tone ?? 'neutral'])}
+            className={cx('pointer-events-auto flex items-start gap-3 rounded-lg border p-3 shadow-e2', TONE_CLASS[item.tone ?? 'neutral'])}
             data-testid="toast"
           >
             <Icon name={TONE_ICON[item.tone ?? 'neutral']} className="mt-0.5 h-4 w-4 shrink-0" />
@@ -73,7 +73,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         ))}
         <RadixToast.Viewport
           label={t('ui.toastRegion', { hotkey: '{hotkey}' })}
-          className="fixed bottom-0 right-0 z-toast m-0 flex w-full max-w-sm list-none flex-col gap-2 p-4 outline-none"
+          // Пустая область уведомлений не перехватывает указатель и не закрывает содержимое (WCAG 2.4.11, 2.5.8).
+          className="pointer-events-none fixed bottom-0 right-0 z-toast m-0 flex w-full max-w-sm list-none flex-col gap-2 p-4 outline-none empty:p-0"
         />
       </RadixToast.Provider>
     </ToastContext.Provider>

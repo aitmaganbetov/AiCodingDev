@@ -380,6 +380,8 @@ test('command center: rework → CHANGE_REQUEST to the selected task with impact
   await expect(text).toHaveAttribute('placeholder', 'Дайте указание своей AI-команде инженеров…');
   await text.fill('Добавьте также экспорт в XLSX');
   await center.getByRole('button', { name: 'Отправить поручение' }).click();
+  // Запрос уходит асинхронно после клика — ждать его появления, а не читать журнал сразу.
+  await expect.poll(() => api.requests.some((r) => r.operationId === 'createDirective')).toBe(true);
   const create = api.requests.find((r) => r.operationId === 'createDirective');
   expect(create?.body).toEqual({
     target: { type: 'task', task_id: b.id },

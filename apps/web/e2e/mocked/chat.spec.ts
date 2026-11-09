@@ -366,6 +366,7 @@ test('AC-06: CHANGE_REQUEST with impact preview → confirmation → delivered /
   await dialog.getByLabel('Текст поручения').fill('Добавьте также экспорт в XLSX');
   await dialog.getByRole('button', { name: 'Отправить поручение' }).click();
 
+  await expect.poll(() => api.requests.some((r) => r.operationId === 'createDirective')).toBe(true);
   const create = api.requests.find((r) => r.operationId === 'createDirective');
   expect(create?.body).toEqual({
     target: { type: 'task', task_id: b.id },
