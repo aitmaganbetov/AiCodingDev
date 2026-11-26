@@ -60,8 +60,15 @@ def test_signature_priority_and_retry_after() -> None:
 
 
 def test_compat_matrix(tmp_path: Path) -> None:
-    assert compat.load_matrix() == ()  # реальные версии не подтверждены до P2-01
-    assert compat.evaluate("codex", "codex-cli 1.2.3") == ("UNTESTED", None)
+    # Строка SUPPORTED в матрице репозитория — только с сохранённым evidence набора real-cli-smoke@1 (§5.3).
+    import yaml
+
+    for raw in (yaml.safe_load(compat.MATRIX_PATH.read_text(encoding="utf-8")) or {}).get("entries") or []:
+        if raw["status"] == "SUPPORTED":
+            assert raw.get("verified_by_suite") == "real-cli-smoke@1", raw["id"]
+            assert (compat.MATRIX_PATH.parents[2] / raw["evidence_ref"]).is_file(), f"{raw['id']}: нет evidence"
+            assert raw["version_range"].startswith("=="), f"{raw['id']}: подтверждается только проверенная версия"
+    assert compat.evaluate("codex", "codex-cli 999.2.3") == ("UNTESTED", None)
     m = tmp_path / "m.yaml"
     m.write_text(
         "entries:\n  - {id: c1, provider: codex, version_range: '>=1.0.0,<2.0.0', status: SUPPORTED}\n"

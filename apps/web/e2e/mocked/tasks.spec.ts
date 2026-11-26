@@ -17,6 +17,25 @@ const LOG_ARTIFACT = '01900000-0000-7000-d000-0000000000a2';
 const EVIDENCE_DIFF = '01900000-0000-7000-d000-0000000000e1';
 const EVIDENCE_TESTS = '01900000-0000-7000-d000-0000000000e2';
 
+const EXCERPT_ARTIFACT = '01900000-0000-7000-d000-0000000000a3';
+const EXCERPT = 'npm test: 1 failed\nDockerError: no such image';
+
+/** Конверт результата CLI (artifacts.kind = cli_output): то, что открывает «вывод» в попытках. */
+const CLI_OUTPUT = JSON.stringify({
+  contract_version: '1.0',
+  execution_id: '01900000-0000-7000-d000-0000000000c1',
+  provider: 'claude',
+  status: 'failed',
+  execution_status: 'CRASHED',
+  exit_code: 1,
+  error: { code: 'PROCESS_FAILED', message: 'сбой адаптера: DockerError', retryable: true },
+  artifacts: [
+    { type: 'output_excerpt', ref: `artifact:${EXCERPT_ARTIFACT}`, sha256: 'd'.repeat(64), size_bytes: EXCERPT.length },
+    // Сырой лог защищён отдельным правом (`artifact:download_raw`) — диалог его не открывает.
+    { type: 'raw_log', ref: '01900000-0000-7000-d000-0000000000a4', sha256: 'e'.repeat(64), size_bytes: 10, protected: true },
+  ],
+});
+
 const DIFF = `diff --git a/src/export.ts b/src/export.ts
 index 1111111..2222222 100644
 --- a/src/export.ts
@@ -202,8 +221,15 @@ function seed(api: MockApi, opts: { failTask?: boolean } = {}) {
 async function serveArtifacts(page: Page): Promise<string[]> {
   const fetched: string[] = [];
   await page.route('**/api/v1/artifacts/*/download', async (route) => {
-    fetched.push(route.request().url());
-    await route.fulfill({ status: 200, contentType: 'application/octet-stream', headers: { 'Cache-Control': 'no-store', 'Content-Disposition': 'attachment; filename="git_diff.diff"' }, body: DIFF });
+    const url = route.request().url();
+    fetched.push(url);
+    const body = url.includes(LOG_ARTIFACT) ? CLI_OUTPUT : url.includes(EXCERPT_ARTIFACT) ? EXCERPT : DIFF;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/octet-stream',
+      headers: { 'Cache-Control': 'no-store', 'Content-Disposition': 'attachment; filename="artifact.bin"' },
+      body,
+    });
   });
   return fetched;
 }
@@ -230,8 +256,26 @@ test('task detail: summary, attempts, events/logs with live CLI output, ACP mess
   await expect(attempts.getByRole('row')).toHaveCount(3);
   await expect(attempts.getByRole('row').nth(1)).toContainText('Разработчик · Codex');
   await expect(attempts.getByRole('row').nth(2)).toContainText('Проверка не пройдена');
-  await expect(attempts.getByRole('link', { name: 'вывод' })).toHaveAttribute('href', `/api/v1/artifacts/${LOG_ARTIFACT}/download`);
+  // «вывод» показывает конверт результата CLI прямо на экране (скачивание — действие в диалоге, а не
+  // единственный способ его увидеть: тихо сохранённый файл выглядит как «ничего не произошло»).
+  const served = await serveArtifacts(page);
+  await attempts.getByTestId('attempt-output-open').first().click();
+  const outputDialog = page.getByRole('dialog', { name: 'Вывод запуска CLI' });
+  await expect(outputDialog.getByTestId('attempt-output')).toContainText('CRASHED · exit 1 · сбой адаптера: DockerError');
+  await expect(outputDialog.getByTestId('attempt-output')).toContainText('npm test: 1 failed'); // сам вывод CLI, а не только конверт
+  await outputDialog.getByTestId('attempt-output-envelope').locator('summary').click();
+  await expect(outputDialog.getByTestId('attempt-output-envelope')).toContainText('"code": "PROCESS_FAILED"');
+  expect(served).toEqual([
+    expect.stringContaining(`/api/v1/artifacts/${LOG_ARTIFACT}/download`),
+    expect.stringContaining(`/api/v1/artifacts/${EXCERPT_ARTIFACT}/download`),
+  ]);
+  await expect(outputDialog.getByRole('link', { name: 'Скачать файлом' })).toHaveAttribute('href', `/api/v1/artifacts/${LOG_ARTIFACT}/download`);
+  await expectNoSeriousA11yViolations(page, 'task attempt output');
+  await outputDialog.getByRole('button', { name: 'Закрыть' }).last().click(); // кнопка в подвале (первая — ✕ в шапке)
+  await expect(outputDialog).toBeHidden();
+  await expect(attempts.getByTestId('attempt-output-open').first()).toBeFocused(); // фокус вернулся на «вывод»
   await expectNoSeriousA11yViolations(page, 'task attempts');
+  await page.getByRole('tab', { name: 'Попытки' }).focus();
 
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: 'События и логи' })).toHaveAttribute('aria-selected', 'true');

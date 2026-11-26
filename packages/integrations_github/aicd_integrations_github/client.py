@@ -5,6 +5,8 @@
 * Installation token: запрашивается на операцию для одного репозитория (`repository_ids`/`repositories`)
   с минимальными правами (`permissions.TOKEN_SCOPES`), кэшируется в памяти до `expires_at − 5 мин`
   (TTL у GitHub ≤ 1 ч). Значение не логируется (`InstallationToken.__repr__`), в БД/на диск не пишется.
+  Единственное исключение — `permissions.UNSCOPED_OPERATIONS` (операция `list`, права `metadata: read`):
+  состав установки нельзя прочитать token'ом, уже ограниченным репозиториями.
 * Ответ GitHub — недоверенные данные: числа/строки, которые попадают в БД, проверяются вызывающим.
 """
 
@@ -21,13 +23,17 @@ from urllib.parse import quote
 import httpx
 
 from aicd_integrations_github.app_auth import AppJwtSigner
-from aicd_integrations_github.permissions import TOKEN_SCOPES, Operation
+from aicd_integrations_github.permissions import TOKEN_SCOPES, UNSCOPED_OPERATIONS, Operation
 from aicd_platform.redaction import redact_text
 
 API_VERSION: Final = "2022-11-28"
 USER_AGENT: Final = "AiCodingDev-GitHub-App"
 TOKEN_REFRESH_MARGIN_SECONDS: Final = 300
 MAX_RESPONSE_BYTES: Final = 5 * 1024 * 1024
+#: `GET /installation/repositories`: размер страницы и потолок числа страниц. Потолок ограничивает
+#: работу на установке с очень большим числом репозиториев; список помечается `truncated`.
+REPOSITORIES_PAGE_SIZE: Final = 100
+REPOSITORIES_MAX_PAGES: Final = 20
 _NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _OWNER = re.compile(r"^[A-Za-z0-9-]{1,39}$")
 
@@ -121,6 +127,32 @@ class RepoInfo:
 
 
 @dataclass(frozen=True)
+class InstallationRepo:
+    """Репозиторий, доступный установке GitHub App (`GET /installation/repositories`)."""
+
+    id: int
+    owner: str
+    name: str
+    private: bool
+    archived: bool
+    default_branch: str
+    html_url: str
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.owner}/{self.name}"
+
+
+@dataclass(frozen=True)
+class InstallationRepos:
+    items: tuple[InstallationRepo, ...]
+    #: `total_count` из ответа GitHub — сколько репозиториев доступно установке всего.
+    total: int
+    #: Список оборван потолком страниц (`REPOSITORIES_MAX_PAGES`): показаны не все.
+    truncated: bool
+
+
+@dataclass(frozen=True)
 class PullInfo:
     number: int
     url: str
@@ -182,6 +214,28 @@ def _pull(data: Mapping[str, Any]) -> PullInfo:
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise GitHubError(502, "неожиданный формат PR в ответе GitHub") from exc
+
+
+def _installation_repo(data: Any) -> InstallationRepo | None:
+    """Элемент `/installation/repositories` → InstallationRepo; None — запись непригодна для привязки."""
+    if not isinstance(data, Mapping):
+        return None
+    try:
+        ref = RepoRef.parse(str(data["full_name"]))
+        url = str(data["html_url"])
+        if not url.startswith("https://"):
+            return None
+        return InstallationRepo(
+            id=int(data["id"]),
+            owner=ref.owner,
+            name=ref.name,
+            private=bool(data.get("private")),
+            archived=bool(data.get("archived")),
+            default_branch=str(data.get("default_branch") or ""),
+            html_url=url,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 class GitHubClient:
@@ -286,7 +340,7 @@ class GitHubClient:
         repositories: Sequence[str] = (),
     ) -> InstallationToken:
         """Token одной установки для заданных репозиториев с минимальными правами операции (SC-GH-04)."""
-        if not repository_ids and not repositories:
+        if not repository_ids and not repositories and operation not in UNSCOPED_OPERATIONS:
             raise ValueError("installation token запрашивается только для конкретных репозиториев")
         scope = dict(TOKEN_SCOPES[operation])
         key = (
@@ -302,8 +356,10 @@ class GitHubClient:
             body: dict[str, Any] = {"permissions": scope}
             if repository_ids:
                 body["repository_ids"] = [int(i) for i in repository_ids]
-            else:
+            elif repositories:
                 body["repositories"] = list(repositories)
+            # Без обоих ключей (только UNSCOPED_OPERATIONS) GitHub выдаёт token на все репозитории установки:
+            # именно это и нужно, чтобы прочитать её состав. Пустой список означал бы «ни одного».
             data = await self._request(
                 "POST", f"/app/installations/{int(installation_id)}/access_tokens", auth=self._jwt(), json=body,
                 ok=(201,),
@@ -323,6 +379,40 @@ class GitHubClient:
         self._cache.tokens.clear()
 
     # --- Репозиторий --------------------------------------------------------------------------------
+
+    async def installation_repositories(self, token: InstallationToken) -> InstallationRepos:
+        """Репозитории, доступные установке («что разрешено»): token операции `list` (`metadata: read`).
+
+        Ответ GitHub — недоверенные данные: записи, имена которых не проходят `RepoRef.parse`, пропускаются
+        (привязать такой репозиторий всё равно нельзя — `parse_remote_url` отвергнет его URL).
+        """
+        items: list[InstallationRepo] = []
+        total = 0
+        page = 1
+        while page <= REPOSITORIES_MAX_PAGES:
+            data = await self._request(
+                "GET",
+                "/installation/repositories",
+                auth=token.value(),
+                params={"per_page": REPOSITORIES_PAGE_SIZE, "page": page},
+            )
+            if not isinstance(data, Mapping):
+                raise GitHubError(502, "неожиданный формат списка репозиториев в ответе GitHub")
+            batch = data.get("repositories")
+            if not isinstance(batch, list):
+                raise GitHubError(502, "неожиданный формат списка репозиториев в ответе GitHub")
+            try:
+                total = int(data.get("total_count") or 0)
+            except (TypeError, ValueError) as exc:
+                raise GitHubError(502, "неожиданный формат списка репозиториев в ответе GitHub") from exc
+            for entry in batch:
+                repo = _installation_repo(entry)
+                if repo is not None:
+                    items.append(repo)
+            if len(batch) < REPOSITORIES_PAGE_SIZE:
+                return InstallationRepos(tuple(items), total=max(total, len(items)), truncated=False)
+            page += 1
+        return InstallationRepos(tuple(items), total=max(total, len(items)), truncated=True)
 
     async def repository(self, token: InstallationToken, repo: RepoRef) -> RepoInfo:
         data = await self._request("GET", repo.path, auth=token.value())

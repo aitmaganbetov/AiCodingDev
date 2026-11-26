@@ -14,7 +14,7 @@ import {
   type ProviderSettings,
   type ProviderSettingsUpdateRequest,
 } from '../../api/providers';
-import { FormAlert, TextField } from '../../components/form';
+import { FormAlert, SelectField, TextField } from '../../components/form';
 import { PageHeading } from '../../components/PageHeading';
 import { EmptyState, ErrorState, LoadingState } from '../../components/states';
 import { Badge, Button, Callout, Card, CodeBlock, Icon, RelativeTime, Table, Timestamp, useToast, type Column, type IconName, type Tone } from '../../components/ui';
@@ -23,11 +23,22 @@ import { can } from '../../lib/permissions';
 import { mapProblemToFields, problemMessage } from '../../lib/problem';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
-import { AGENT_ROLES, MAX_PARALLEL, TIMEOUT_SECONDS, buildSettingsPatch, draftFrom, type SettingsDraft, type SettingsField } from './settingsForm';
+import {
+  AGENT_ROLES,
+  MAX_PARALLEL,
+  modelChoices,
+  TIMEOUT_SECONDS,
+  buildSettingsPatch,
+  draftFrom,
+  type SettingsDraft,
+  type SettingsField,
+} from './settingsForm';
 import { useStepUp } from '../../auth/StepUp';
 import { dashboardWindow } from '../dashboard/model';
 import { ExecutionHistory } from './ExecutionHistory';
-import { ProviderUsage } from './ProviderUsage';
+import { LoginAction } from './LoginAction';
+import { ProviderUsage, TokenWindows } from './ProviderUsage';
+import { SubscriptionLimits } from './SubscriptionLimits';
 
 const AUTH_TONE: Record<AuthStatus, Tone> = {
   AUTHENTICATED: 'success',
@@ -114,6 +125,9 @@ function Capabilities({ provider }: { provider: Provider }) {
   );
 }
 
+/** Значение пункта «Другая модель…»: имя модели таким быть не может (не проходит MODEL_PATTERN). */
+const CUSTOM_MODEL = '\u0000custom';
+
 function SettingsView({ settings }: { settings: ProviderSettings }) {
   const { t } = useTranslation();
   return (
@@ -124,6 +138,8 @@ function SettingsView({ settings }: { settings: ProviderSettings }) {
       <dd>{settings.max_parallel_sessions}</dd>
       <dt className="text-fg-muted">{t('providers.settings.timeout')}</dt>
       <dd>{t('providers.settings.seconds', { count: settings.default_timeout_seconds })}</dd>
+      <dt className="text-fg-muted">{t('providers.settings.model')}</dt>
+      <dd>{settings.model ?? t('providers.settings.modelDefault')}</dd>
       <dt className="text-fg-muted">{t('providers.settings.roles')}</dt>
       <dd>
         {settings.allowed_roles.length > 0
@@ -151,6 +167,7 @@ function SettingsForm({ workspaceId, provider }: { workspaceId: string; provider
   const [errors, setErrors] = useState<Partial<Record<SettingsField, string>>>({});
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [info, setInfo] = useState<string | null>(null);
+  const [customModel, setCustomModel] = useState(false);
 
   // Политика провайдера в workspace — step-up (SC-IAM-08): при 403 step_up_required — диалог пароля и повтор.
   const stepUp = useStepUp();
@@ -160,12 +177,13 @@ function SettingsForm({ workspaceId, provider }: { workspaceId: string; provider
     onSuccess: async (updated) => {
       setSettings(updated);
       setDraft(draftFrom(updated));
+      setCustomModel(false);
       setInfo(t('providers.settings.saved'));
       toast({ title: t('providers.settings.saved'), tone: 'success' });
       await queryClient.invalidateQueries({ queryKey: providerKeys.list(workspaceId) });
     },
     onError: (error) => {
-      const mapped = mapProblemToFields(t, error, ['enabled', 'max_parallel_sessions', 'default_timeout_seconds', 'allowed_roles'] as const);
+      const mapped = mapProblemToFields(t, error, ['enabled', 'max_parallel_sessions', 'default_timeout_seconds', 'allowed_roles', 'model'] as const);
       setErrors(mapped.fields);
       setFormErrors(mapped.form);
     },
@@ -179,6 +197,7 @@ function SettingsForm({ workspaceId, provider }: { workspaceId: string; provider
     const messages: Partial<Record<SettingsField, string>> = {};
     if (v.max_parallel_sessions) messages.max_parallel_sessions = t('providers.settings.rangeError', MAX_PARALLEL);
     if (v.default_timeout_seconds) messages.default_timeout_seconds = t('providers.settings.rangeError', TIMEOUT_SECONDS);
+    if (v.model) messages.model = t('providers.settings.modelError');
     setErrors(messages);
     if (Object.keys(messages).length > 0) {
       requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
@@ -192,6 +211,9 @@ function SettingsForm({ workspaceId, provider }: { workspaceId: string; provider
   };
 
   const rolesLegend = `${uid}-roles`;
+  // Сохранённая модель, которой нет в списке CLI (введена вручную или пропала из каталога), остаётся выбранной.
+  const reported = modelChoices(provider);
+  const models = settings.model && !reported.includes(settings.model) ? [settings.model, ...reported] : reported;
   return (
     <form ref={formRef} noValidate onSubmit={onSubmit} className="flex flex-col gap-4" aria-label={t('providers.settings.formLabel', { name: provider.display_name })}>
       <FormAlert messages={formErrors} />
@@ -226,6 +248,38 @@ function SettingsForm({ workspaceId, provider }: { workspaceId: string; provider
           onChange={(e) => setDraft({ ...draft, timeout: e.target.value })}
           error={errors.default_timeout_seconds}
         />
+      </div>
+      <div className="flex flex-col gap-2">
+        <SelectField
+          id={`${uid}-model`}
+          label={t('providers.settings.model')}
+          hint={t(models.length > 0 ? 'providers.settings.modelHint' : 'providers.settings.modelHintNoList', { name: provider.display_name })}
+          value={customModel ? CUSTOM_MODEL : draft.model}
+          onChange={(e) => {
+            const value = e.target.value;
+            setCustomModel(value === CUSTOM_MODEL);
+            setDraft({ ...draft, model: value === CUSTOM_MODEL ? '' : value });
+          }}
+          error={customModel ? undefined : errors.model}
+          options={[
+            { value: '', label: t('providers.settings.modelDefault') },
+            ...models.map((m) => ({ value: m, label: m })),
+            { value: CUSTOM_MODEL, label: t('providers.settings.modelOther') },
+          ]}
+        />
+        {customModel ? (
+          <TextField
+            id={`${uid}-model-custom`}
+            label={t('providers.settings.modelCustom')}
+            hint={t('providers.settings.modelCustomHint')}
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={100}
+            value={draft.model}
+            onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+            error={errors.model}
+          />
+        ) : null}
       </div>
       <fieldset aria-describedby={errors.allowed_roles ? `${rolesLegend}-error` : undefined}>
         <legend className="mb-2 text-sm font-medium">{t('providers.settings.roles')}</legend>
@@ -373,6 +427,7 @@ function ProviderCard({
   const unsupported = provider.installations.filter((i) => i.compatibility === 'UNSUPPORTED');
   const chip = providerChipModel(provider);
   const canProbe = can(role, 'provider:probe');
+  const canLogin = can(role, 'provider:login');
   const canEdit = can(role, 'provider:settings');
   const sid = `provider-${provider.code}`;
   return (
@@ -404,6 +459,14 @@ function ProviderCard({
             <p className="mt-1">{t('providers.noSecrets')}</p>
           </Callout>
         ) : null}
+        {canLogin ? (
+          <section aria-labelledby={`${sid}-login`} className="mb-4 min-w-0">
+            <SectionTitle id={`${sid}-login`} icon="terminal">
+              {t('providers.sections.login')}
+            </SectionTitle>
+            <LoginAction workspaceId={workspaceId} provider={provider} />
+          </section>
+        ) : null}
         {unsupported.length > 0 ? (
           <Callout tone="danger" title={t('providers.unsupportedTitle')} className="mb-4">
             {t('providers.unsupported', { hosts: unsupported.map((i) => `${i.host} (${i.detected_version ?? '—'})`).join(', ') })}
@@ -428,6 +491,13 @@ function ProviderCard({
               <SectionTitle id={`${sid}-usage`} icon="analytics">
                 {t('providers.sections.usage')}
               </SectionTitle>
+              <h4 className="mb-2 text-sm font-semibold text-fg">{t('providers.sections.limits')}</h4>
+              <div className="mb-4">
+                <SubscriptionLimits workspaceId={workspaceId} provider={provider} role={role} />
+              </div>
+              <div className="mb-4">
+                <TokenWindows workspaceId={workspaceId} provider={provider} />
+              </div>
               <ProviderUsage provider={provider} analytics={analytics} window={window} />
             </section>
             <section aria-labelledby={`${sid}-routing`} className="min-w-0">

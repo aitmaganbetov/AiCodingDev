@@ -50,7 +50,9 @@ def build_executor(
     store = FileSystemArtifactStore(tmp / "artifacts")
     gateway = ExecutionGateway(engine=worker, store=store)
 
-    def factory(*, provider: str, installation_id: Any, gateway: ExecutionGateway, worktree_root: Path) -> Any:
+    def factory(
+        *, provider: str, installation_id: Any, gateway: ExecutionGateway, worktree_root: Path, model: str | None = None
+    ) -> Any:
         return FakeCLIExecutor(
             provider="claude" if provider == "claude" else "codex",
             scenario=scenario,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '../../api/runEvents';
 import type { Evidence, GateExecution } from '../../api/tasks';
+import { DIRECTIVE_TARGETS, DIRECTIVE_TYPES, allowedTarget } from '../../api/directives';
 import { needsPreConfirm, QUICK_ACTION_MAP, QUICK_ACTIONS } from './CommandCenter';
 import { cliLines, durationParts, elapsedMs, filterEvents, taskIndicators, waitingOn } from './feedModel';
 import { readMcState, sinceCutoff, writeMcState } from './mcParams';
@@ -123,5 +124,24 @@ describe('command center quick actions', () => {
     expect(needsPreConfirm('CHANGE_REQUEST', false)).toBe(true);
     expect(needsPreConfirm('ASK', false)).toBe(false);
     expect(needsPreConfirm('RESUME', false)).toBe(false);
+  });
+});
+
+describe('directive targets', () => {
+  it('offers only the recipients the server accepts for each command', () => {
+    // Зеркало серверного ALLOWED_TARGETS: «Новая задача» конкретной задаче и пауза роли — 422.
+    expect(DIRECTIVE_TARGETS.NEW_TASK).toEqual(['run', 'role']);
+    expect(DIRECTIVE_TARGETS.REVIEW).toEqual(['role', 'task']);
+    expect(DIRECTIVE_TARGETS.PAUSE).toEqual(['run']);
+    expect(Object.keys(DIRECTIVE_TARGETS).sort()).toEqual([...DIRECTIVE_TYPES].sort());
+    // Быстрые действия не должны ставить цель, которую сервер отклонит.
+    for (const a of QUICK_ACTIONS) expect(DIRECTIVE_TARGETS[QUICK_ACTION_MAP[a].type], a).toContain(QUICK_ACTION_MAP[a].target);
+  });
+
+  it('keeps the chosen recipient when it is still allowed and replaces it otherwise', () => {
+    expect(allowedTarget('ASK', 'task')).toBe('task');
+    expect(allowedTarget('NEW_TASK', 'task')).toBe('run');
+    expect(allowedTarget('REVIEW', 'run')).toBe('role');
+    expect(allowedTarget('PAUSE', 'role')).toBe('run');
   });
 });

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +24,12 @@ from aicd_security.paths import UnsafePathError, resolve_in_roots
 def _is_unique_violation(exc: IntegrityError) -> bool:
     """Только нарушение уникальности — 409; прочие нарушения ограничений — дефект/500."""
     return getattr(exc.orig, "sqlstate", None) == "23505"
+
+
+def _violated_constraint(exc: IntegrityError) -> str:
+    """Имя нарушенного ограничения: от него зависит, *что именно* занято (каталог или репозиторий)."""
+    diag = getattr(exc.orig, "diag", None)
+    return str(getattr(diag, "constraint_name", "") or "")
 
 
 # --- Workspaces -------------------------------------------------------------------------
@@ -328,7 +336,10 @@ _REPO_SELECT = (
 async def list_repositories(
     conn: AsyncConnection, project_id: uuid.UUID, after: tuple[datetime, uuid.UUID] | None, limit: int
 ) -> list[dict[str, Any]]:
-    where = " WHERE r.project_id = :p" + (" AND (r.created_at, r.id) > (:t, :id)" if after else "")
+    # Отвязанные не показываются: для проекта их нет, хотя строка жива ради истории прогонов.
+    where = " WHERE r.project_id = :p AND r.status <> 'DETACHED'" + (
+        " AND (r.created_at, r.id) > (:t, :id)" if after else ""
+    )
     rows = (
         (
             await conn.execute(
@@ -340,6 +351,79 @@ async def list_repositories(
         .all()
     )
     return [dict(r) for r in rows]
+
+
+#: Прогоны этих состояний ещё работают с репозиторием: отвязать его — оборвать их на полпути.
+_ACTIVE_RUN_STATES: Final = (
+    "CREATED", "DISCOVERY", "PLANNED", "AWAITING_APPROVAL", "RUNNING", "VERIFYING", "PAUSED", "BLOCKED",
+)  # fmt: skip
+
+
+async def detach_repository(
+    conn: AsyncConnection,
+    *,
+    project_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    repository_id: uuid.UUID,
+    actor_id: uuid.UUID,
+) -> bool:
+    """Отвязать репозиторий от проекта: `status = DETACHED` (FR-PRJ-02). Возвращает «статус изменился».
+
+    Строка остаётся: на неё ссылаются прогоны, worktrees, PR, треды ревью и снимки индекса (все FK —
+    `ON DELETE RESTRICT`), и история должна читаться после отвязки. Каталог и GitHub-репозиторий при этом
+    освобождаются (частичные уникальные индексы, миграция 0023) — тот же репозиторий можно привязать заново.
+    Файлы рабочей копии на диске платформа не трогает: она их не всегда создавала, а удаление необратимо.
+
+    Повторная отвязка — не ошибка (идемпотентно). Отвязка при незавершённых прогонах — `409`: прогон продолжил
+    бы работать с репозиторием, которого в проекте уже нет.
+    """
+    row = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT id, provider, status, local_root_ref, full_name FROM repositories"
+                    " WHERE id = :id AND project_id = :p FOR UPDATE"
+                ),
+                {"id": repository_id, "p": project_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise ProblemError("not_found")
+    if row["status"] == "DETACHED":
+        return False
+    active = (
+        await conn.execute(
+            text("SELECT count(*) FROM runs WHERE repository_id = :id AND status = ANY(:states)"),
+            {"id": repository_id, "states": list(_ACTIVE_RUN_STATES)},
+        )
+    ).scalar_one()
+    if active:
+        raise ProblemError(
+            "conflict",
+            detail=f"Репозиторий занят: незавершённых прогонов — {active}. Дождитесь их или отмените.",
+        )
+    await conn.execute(
+        text("UPDATE repositories SET status = 'DETACHED', updated_at = now() WHERE id = :id"),
+        {"id": repository_id},
+    )
+    await audit.record(
+        conn,
+        action="repository.detach",
+        resource_type="repository",
+        resource_id=repository_id,
+        actor_type="user",
+        actor_id=actor_id,
+        workspace_id=workspace_id,
+        metadata={
+            "provider": row["provider"],
+            "local_root_ref": row["local_root_ref"],
+            "full_name": row["full_name"],
+        },
+    )
+    return True
 
 
 async def attach_local_repository(
@@ -387,7 +471,11 @@ async def attach_local_repository(
     except IntegrityError as exc:
         if not _is_unique_violation(exc):
             raise
-        raise ProblemError("conflict", detail="Репозиторий уже привязан в этом workspace") from exc
+        raise ProblemError(
+            "conflict",
+            detail="Этот каталог уже привязан к репозиторию в этом рабочем пространстве",
+            errors=[FieldError("/local_path", "local_path_taken", "каталог уже привязан")],
+        ) from exc
     await audit.record(
         conn,
         action="repository.attach",
@@ -400,6 +488,66 @@ async def attach_local_repository(
     )
     row = (await conn.execute(text(_REPO_SELECT + " WHERE r.id = :id"), {"id": repo_id})).mappings().one()
     return dict(row)
+
+
+#: Обход корней репозиториев для формы привязки: насколько глубоко искать и сколько каталогов показать.
+#: Ограничения — не политика безопасности (её держит `resolve_in_roots`), а защита от долгого обхода.
+ROOT_SCAN_MAX_DEPTH: Final = 3
+ROOT_SCAN_LIMIT: Final = 200
+
+
+def scan_repository_roots(
+    roots: dict[str, Path],
+    *,
+    attached: Collection[str] = (),
+    max_depth: int = ROOT_SCAN_MAX_DEPTH,
+    limit: int = ROOT_SCAN_LIMIT,
+) -> list[dict[str, Any]]:
+    """Разрешённые корни и найденные в них Git-репозитории — «что разрешено привязать» для UI (FR-PRJ-02).
+
+    Репозиторием считается каталог с `.git` (внутрь него обход не идёт). Это быстрая подсказка: пригодность
+    каталога всё равно проверяет `git_guard.inspect_repository` при привязке. Symlink не разыменовывается
+    (каталог-symlink пропускается), чтобы обход не вышел за корень и не зациклился;
+    нечитаемые каталоги пропускаются — право видеть их у процесса API может и не быть.
+
+    `attached` — `local_root_ref` уже привязанных репозиториев workspace: такой каталог занят
+    (`uq_repositories_local_root`), и форма помечает его, чтобы выбор не приводил к `conflict`.
+
+    Возвращает по одному элементу на корень:
+    `{name, path, repositories: [{ref, path, name, attached}], truncated}`, где `ref` —
+    `<корень>/<относительный путь>`, который принимает `attachRepository`.
+    """
+    taken = set(attached)
+    result: list[dict[str, Any]] = []
+    for name, root in roots.items():
+        root_real = Path(os.path.realpath(root))
+        found: list[dict[str, Any]] = []
+        truncated = False
+        stack: list[tuple[Path, int]] = [(root_real, 0)]
+        while stack:
+            current, depth = stack.pop()
+            if len(found) >= limit:
+                truncated = True
+                break
+            try:
+                entries = sorted(current.iterdir())
+            except OSError:
+                continue
+            if (current / ".git").exists():
+                rel = "" if current == root_real else current.relative_to(root_real).as_posix()
+                ref = f"{name}/{rel}" if rel else name
+                found.append({"ref": ref, "path": str(current), "name": rel or name, "attached": ref in taken})
+                continue  # вложенные репозитории (submodules) не предлагаются отдельно
+            if depth >= max_depth:
+                continue
+            for entry in reversed(entries):
+                if entry.name.startswith(".") or entry.is_symlink() or not entry.is_dir():
+                    continue
+                stack.append((entry, depth + 1))
+        found.sort(key=lambda item: item["ref"])
+        result.append({"name": name, "path": str(root_real), "repositories": found, "truncated": truncated})
+    result.sort(key=lambda item: item["name"])
+    return result
 
 
 def validate_github_local_copy(local_path: str, default_branch: str | None, roots: dict[str, Path]) -> None:
@@ -416,6 +564,35 @@ def validate_github_local_copy(local_path: str, default_branch: str | None, root
         raise ProblemError(
             "validation_error", errors=[FieldError("/local_path", "invalid_repository", str(exc))]
         ) from exc
+
+
+def resolve_clone_target(local_path: str, default_branch: str | None, roots: dict[str, Path]) -> Path:
+    """Каталог, в котором воркер создаст рабочую копию клонированием (FR-PRJ-03, `create_local_copy`).
+
+    Требования — те же границы, что и у существующей копии, плюс «ничего не перезаписываем»: путь внутри
+    allowlist-корней, сам корень целью быть не может (в нём лежат другие копии), каталог отсутствует или пуст,
+    родительский каталог существует. Клонирование всё равно повторит проверку (`clone_repository`): между
+    этой проверкой в API и работой воркера каталог мог появиться.
+    """
+    if not roots:
+        raise ProblemError("policy_denied", detail="Корни локальных репозиториев не настроены")
+    try:
+        resolved = resolve_in_roots(local_path, roots)
+        if default_branch is not None:
+            git_guard.validate_branch_name(default_branch)
+    except (UnsafePathError, git_guard.GitRepositoryError) as exc:
+        raise ProblemError("validation_error", errors=[FieldError("/local_path", "invalid_path", str(exc))]) from exc
+    target = resolved.absolute
+    problem: str | None = None
+    if str(resolved.relative) in ("", "."):
+        problem = "корень нельзя использовать как рабочую копию: укажите каталог внутри него"
+    elif target.exists() and (not target.is_dir() or any(target.iterdir())):
+        problem = "каталог уже существует и не пуст"
+    elif not target.parent.is_dir():
+        problem = "родительский каталог не существует"
+    if problem is not None:
+        raise ProblemError("validation_error", errors=[FieldError("/local_path", "unavailable_target", problem)])
+    return target
 
 
 async def attach_github_repository(
@@ -470,7 +647,19 @@ async def attach_github_repository(
     except IntegrityError as exc:
         if not _is_unique_violation(exc):
             raise
-        raise ProblemError("conflict", detail="Репозиторий уже привязан в этом workspace") from exc
+        # Занято может быть разное, и оператору нужно знать что: каталог (uq_repositories_local_root) или
+        # сам репозиторий GitHub (uq_repositories_github_repo). Оба ограничения — в пределах workspace.
+        if _violated_constraint(exc) == "uq_repositories_local_root":
+            raise ProblemError(
+                "conflict",
+                detail="Этот каталог уже привязан к репозиторию в этом рабочем пространстве",
+                errors=[FieldError("/local_path", "local_path_taken", "каталог уже привязан")],
+            ) from exc
+        raise ProblemError(
+            "conflict",
+            detail="Этот репозиторий GitHub уже привязан в этом рабочем пространстве",
+            errors=[FieldError("/remote_url", "repository_taken", "репозиторий уже привязан")],
+        ) from exc
     await audit.record(
         conn,
         action="repository.attach",

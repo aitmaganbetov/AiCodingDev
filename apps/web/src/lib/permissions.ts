@@ -31,6 +31,7 @@ export type Permission =
   | 'approval:decide'
   | 'provider:read'
   | 'provider:probe'
+  | 'provider:login'
   | 'provider:settings'
   | 'documentation:read'
   | 'documentation:register'
@@ -51,6 +52,8 @@ export type Permission =
 
 const ALL: readonly WorkspaceRole[] = ['owner', 'admin', 'developer', 'reviewer', 'viewer'];
 const ADMINS: readonly WorkspaceRole[] = ['owner', 'admin'];
+/** Интерактивный вход CLI привязывает подписку к хосту исполнения (OQ-01/OQ-24) — только владелец. */
+const OWNERS: readonly WorkspaceRole[] = ['owner'];
 const WRITERS: readonly WorkspaceRole[] = ['owner', 'admin', 'developer'];
 const PARTICIPANTS: readonly WorkspaceRole[] = ['owner', 'admin', 'developer', 'reviewer'];
 
@@ -81,6 +84,7 @@ const MATRIX: Record<Permission, readonly WorkspaceRole[]> = {
   'approval:decide': PARTICIPANTS,
   'provider:read': ALL,
   'provider:probe': ADMINS,
+  'provider:login': OWNERS,
   'provider:settings': ADMINS,
   'documentation:read': ALL,
   'documentation:register': ADMINS,

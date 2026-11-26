@@ -9,6 +9,8 @@ import { request, seg, type JsonBody, type JsonResponse, type Query, type Schema
 export type GitHubInstallation = Schemas['GitHubInstallation'];
 export type GitHubVerification = Schemas['GitHubVerification'];
 export type GitHubInstallationSetup = Schemas['GitHubInstallationSetup'];
+export type GitHubRepositoryOption = Schemas['GitHubRepositoryOption'];
+export type GitHubRepositoryOptionList = Schemas['GitHubRepositoryOptionList'];
 export type GitHubInstallationConnectRequest = JsonBody<'connectGitHubInstallation'>;
 export type PullRequest = Schemas['PullRequest'];
 export type PullRequestState = Schemas['PullRequestState'];
@@ -20,6 +22,9 @@ export type ListPullRequestsQuery = Query<'listPullRequests'>;
 export const githubKeys = {
   installations: (workspaceId: string) => ['github', workspaceId, 'installations'] as const,
   verification: (workspaceId: string, verificationId: string) => ['github', workspaceId, 'verification', verificationId] as const,
+  /** Состав установки для выбора в форме привязки (кэш на сервере; обновляется refreshRepositories). */
+  installationRepositories: (workspaceId: string, installationId: string) =>
+    ['github', workspaceId, 'installation', installationId, 'repositories'] as const,
   pullRequests: (projectId: string, runId?: string) => ['github', 'pull-requests', projectId, runId ?? null] as const,
   pullRequestsAll: (projectId: string) => ['github', 'pull-requests', projectId] as const,
 };
@@ -45,6 +50,32 @@ export const githubApi = {
 
   disconnectInstallation(workspaceId: string, id: string): Promise<void> {
     return request({ method: 'DELETE', path: `/integrations/github/installations/${seg(id)}`, workspaceId });
+  },
+
+  /** Репозитории, доступные установке. `synced_at: null` — кэша ещё нет: вызвать refreshRepositories. */
+  installationRepositories(
+    workspaceId: string,
+    installationId: string,
+    signal?: AbortSignal,
+  ): Promise<JsonResponse<'listGitHubInstallationRepositories', 200>> {
+    return request({
+      method: 'GET',
+      path: `/integrations/github/installations/${seg(installationId)}/repositories`,
+      workspaceId,
+      signal,
+    });
+  },
+
+  /** 202: воркер перечитает состав установки у GitHub. `queued: false` — обновление погашено паузой. */
+  refreshRepositories(
+    workspaceId: string,
+    installationId: string,
+  ): Promise<JsonResponse<'refreshGitHubInstallationRepositories', 202>> {
+    return request({
+      method: 'POST',
+      path: `/integrations/github/installations/${seg(installationId)}/repositories/refresh`,
+      workspaceId,
+    });
   },
 
   verification(workspaceId: string, verificationId: string, signal?: AbortSignal): Promise<JsonResponse<'getGitHubVerification', 200>> {

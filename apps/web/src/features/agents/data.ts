@@ -10,7 +10,7 @@ import { providerKeys, providersApi } from '../../api/providers';
 import { taskKeys, tasksApi, type ListWorkspaceTasksQuery } from '../../api/tasks';
 import type { AgentRole } from '../../lib/agentRoles';
 import { dashboardWindow } from '../dashboard/model';
-import { ACTIVE_TASK_STATUSES, ACTIVE_TASKS_LIMIT, ROLE_HISTORY_PAGE } from './model';
+import { ACTIVE_TASKS_LIMIT, CATALOG_TASK_STATUSES, ROLE_HISTORY_PAGE } from './model';
 
 const ACTIVE_POLL_MS = 30_000;
 
@@ -22,9 +22,9 @@ export function useAgentProfiles(workspaceId: string) {
   });
 }
 
-/** Выполняемые задачи (LEASED/RUNNING) всего workspace или одной роли. */
+/** Задачи, определяющие состояние роли: выполняемые (LEASED/RUNNING) и ожидающие исполнения. */
 export function useActiveTasks(workspaceId: string, role?: AgentRole) {
-  const query: ListWorkspaceTasksQuery = { status: [...ACTIVE_TASK_STATUSES], limit: ACTIVE_TASKS_LIMIT, ...(role ? { agent_role: [role] } : {}) };
+  const query: ListWorkspaceTasksQuery = { status: [...CATALOG_TASK_STATUSES], limit: ACTIVE_TASKS_LIMIT, ...(role ? { agent_role: [role] } : {}) };
   return useQuery({
     queryKey: taskKeys.workspace(workspaceId, query),
     queryFn: ({ signal }) => tasksApi.listWorkspace(workspaceId, query, signal),

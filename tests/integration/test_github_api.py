@@ -3,6 +3,7 @@
 * установка GitHub App: state (CSRF, однократность, привязка к пользователю/workspace), проверка прав установки —
   на воркере (OQ-47 (2): API отвечает 202 + проверка `github.verification.requested`, ключ App читает только воркер);
 * привязка GitHub-репозитория к проекту (FR-PRJ-03): доступ установки к репозиторию проверяет воркер;
+* состав установки для выбора в форме привязки: кэш наполняет воркер, API его только читает;
 * вебхук: подпись по сырому телу, дедупликация, replay, allowlist, лимит тела, ротация секрета, аудит;
 * запрос PR / merge (approval MERGE, four-eyes), RBAC-матрица всех GitHub-операций, 404 для чужого workspace;
 * соответствие ответов контракту и fuzz (Schemathesis).
@@ -31,15 +32,16 @@ from aicd_api.main import create_app
 from aicd_integrations_github import webhooks
 from aicd_integrations_github.api import AppJwtSigner, GitHubClient
 from aicd_orchestration.github_flow import GitHubWorkflow
+from aicd_orchestration.github_repositories import SYNC_EVENT, GitHubRepositorySync
 from aicd_platform.config import Settings
 from aicd_platform.ids import uuid7
 from aicd_worker import github as worker_github
 from aicd_worker.runtime import Runtime
-from tests.conftest import UserSession, login, make_client
+from tests.conftest import REDIS_URL, UserSession, login, make_client
 from tests.support import db as testdb
 from tests.support import github as ghs
 from tests.support.contract import OPENAPI_PATH, validate_response
-from tests.support.github_double import GitHubDouble
+from tests.support.github_double import GitHubDouble, git
 from tests.support.orch_api import Team, key, make_team
 from tests.support.orchestration import connect_admin
 
@@ -121,6 +123,36 @@ async def _run_verifications(admin: psycopg.Connection, worker_engine: AsyncEngi
             outcomes.append(await worker_github.handle_event(rt, event))
     finally:
         await client.aclose()
+    return outcomes
+
+
+async def _run_repo_syncs(
+    admin: psycopg.Connection, worker_engine: AsyncEngine, env: Env, installation: uuid.UUID
+) -> list[str]:
+    """Воркер: события `github.repositories.sync` этой установки. Список попадает в Redis, а не в БД."""
+    from redis.asyncio import Redis
+
+    client = GitHubClient(api_url=env.url, signer=AppJwtSigner(env.gh.app_id, env.gh.private_key_pem))
+    workflow = GitHubWorkflow(worker_engine, client, repository_roots={"main": env.root}, git_url=env.url)
+    redis = Redis.from_url(REDIS_URL)
+    rt = Runtime(engine=worker_engine, orchestrator=None, loop=asyncio.get_running_loop(),  # type: ignore[arg-type]
+                 dispatch_execution=_noop, github=workflow,
+                 github_repositories=GitHubRepositorySync(worker_engine, client, redis, environment="test"))  # fmt: skip
+    rows = admin.execute(
+        "SELECT id, workspace_id, aggregate_id, payload FROM outbox_events"
+        " WHERE event_type = %s AND aggregate_id = %s ORDER BY id",
+        (SYNC_EVENT, installation),
+    ).fetchall()
+    outcomes = []
+    try:
+        for event_id, ws, aggregate_id, payload in rows:
+            event = {"event_id": str(event_id), "event_type": SYNC_EVENT, "workspace_id": str(ws),
+                     "aggregate_id": str(aggregate_id), "payload": payload}  # fmt: skip
+            assert worker_github.is_github_event(event)
+            outcomes.append(await worker_github.handle_event(rt, event))
+    finally:
+        await client.aclose()
+        await redis.aclose()
     return outcomes
 
 
@@ -371,6 +403,253 @@ def _events(admin: psycopg.Connection, guid: str) -> int:
         (guid,),
     ).fetchone()
     return int(row[0]) if row else 0
+
+
+async def test_installation_repositories_offer_exactly_what_can_be_attached(
+    gapp: FastAPI, app_engine: AsyncEngine, worker_engine: AsyncEngine, admin: psycopg.Connection, env: Env
+) -> None:
+    """Форма привязки предлагает выбор вместо ручного ввода URL — и предлагает только пригодное.
+
+    Проверяется полный путь: пустой кэш → refresh (API ключа App не касается) → воркер читает состав
+    установки → выбранный `remote_url` принимает `attachRepository`.
+    """
+    team = await _team(gapp, app_engine, admin)
+    owner = team.users["owner"]
+    inst = _new_installation(admin, team, env)
+    path = f"/api/v1/integrations/github/installations/{inst}/repositories"
+
+    # Кэша ещё нет: это не ошибка — пустой список со `stale`, UI предложит обновить.
+    r = await owner.client.get(path, headers={"X-Workspace-Id": team.ws})
+    validate_response("listGitHubInstallationRepositories", r)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"items": [], "total": 0, "truncated": False, "synced_at": None, "stale": True,
+                        "repository_selection": "selected"}  # fmt: skip
+
+    requests_before = len(env.gh.requests)
+    first = await owner.client.post(f"{path}/refresh", headers=owner.headers(team.ws))
+    validate_response("refreshGitHubInstallationRepositories", first)
+    assert first.status_code == 202 and first.json() == {"queued": True}
+    again = await owner.client.post(f"{path}/refresh", headers=owner.headers(team.ws))
+    assert again.status_code == 202 and again.json() == {"queued": False}, "пауза бережёт лимит GitHub API"
+    assert len(env.gh.requests) == requests_before, "API не обращается к GitHub (ключ App — только у воркера)"
+
+    assert await _run_repo_syncs(admin, worker_engine, env, inst) == ["synced"]
+    r = await owner.client.get(path, headers={"X-Workspace-Id": team.ws})
+    validate_response("listGitHubInstallationRepositories", r)
+    body = r.json()
+    assert [i["full_name"] for i in body["items"]] == ["acme/app"]
+    assert body["total"] == 1 and not body["truncated"] and not body["stale"] and body["synced_at"]
+    option = body["items"][0]
+    assert option["remote_url"] == "https://github.test/acme/app" and option["default_branch"] == "main"
+    assert option["github_repo_id"] == 1001 and option["owner"] == "acme" and option["name"] == "app"
+
+    # Значение из списка принимается привязкой без правки — иначе выбор был бы ловушкой.
+    attach = await owner.client.post(
+        f"/api/v1/projects/{team.tenant.project_id}/repositories",
+        json={"provider": "github", "remote_url": option["remote_url"], "local_path": str(env.local)},
+        headers=owner.headers(team.ws, idem=True),
+    )
+    validate_response("attachRepository", attach)
+    assert attach.status_code == 202, attach.text
+    assert await _run_verifications(admin, worker_engine, env) == ["succeeded"]
+    assert (await _verification(owner, team.ws, attach))["status"] == "SUCCEEDED"
+
+    # После привязки тот же репозиторий помечен занятым: второй раз его предлагать нельзя — ограничение
+    # уникальности workspace отклонило бы привязку уже после проверки доступа на воркере.
+    r = await owner.client.get(path, headers={"X-Workspace-Id": team.ws})
+    validate_response("listGitHubInstallationRepositories", r)
+    assert [(i["full_name"], i["attached"]) for i in r.json()["items"]] == [("acme/app", True)]
+
+
+async def test_a_directory_and_a_repository_can_each_be_attached_only_once(
+    gapp: FastAPI, app_engine: AsyncEngine, worker_engine: AsyncEngine, admin: psycopg.Connection, env: Env
+) -> None:
+    """Занятость — свойство workspace, и об ошибке надо говорить по существу.
+
+    Уникальны и локальный каталог (`uq_repositories_local_root`), и репозиторий GitHub
+    (`uq_repositories_github_repo`). Проверка на воркере должна называть занятое, а не отвечать общим
+    `conflict`: оператор видит сообщение уже после привязки и иначе не поймёт, что менять.
+    """
+    team = await _team(gapp, app_engine, admin)
+    owner = team.users["owner"]
+    project = team.tenant.project_id
+    _new_installation(admin, team, env)
+    spare = env.root / f"spare-{secrets.token_hex(3)}"
+    ghs.init_repo(spare)
+
+    taken = await owner.client.post(
+        f"/api/v1/projects/{project}/repositories",
+        json={"provider": "local", "local_path": f"main/{spare.name}"},
+        headers=owner.headers(team.ws, idem=True),
+    )
+    assert taken.status_code == 201, taken.text
+
+    # Каталог занят локальным репозиторием — для GitHub-привязки это `local_path_taken`, а не «репозиторий занят».
+    clash = await owner.client.post(
+        f"/api/v1/projects/{project}/repositories",
+        json={"provider": "github", "remote_url": "https://github.test/acme/app", "local_path": f"main/{spare.name}"},
+        headers=owner.headers(team.ws, idem=True),
+    )
+    assert clash.status_code == 202, clash.text
+    assert await _run_verifications(admin, worker_engine, env) == ["failed"]
+    failed = await _verification(owner, team.ws, clash)
+    assert failed["status"] == "FAILED" and failed["error"]["code"] == "local_path_taken", failed
+
+    ok = await owner.client.post(
+        f"/api/v1/projects/{project}/repositories",
+        json={"provider": "github", "remote_url": "https://github.test/acme/app", "local_path": str(env.local)},
+        headers=owner.headers(team.ws, idem=True),
+    )
+    assert ok.status_code == 202, ok.text
+    assert await _run_verifications(admin, worker_engine, env) == ["succeeded"]
+
+    # Тот же репозиторий в другой каталог — занят уже он сам.
+    second = env.root / f"second-{secrets.token_hex(3)}"
+    ghs.init_repo(second)
+    again = await owner.client.post(
+        f"/api/v1/projects/{project}/repositories",
+        json={"provider": "github", "remote_url": "https://github.test/acme/app", "local_path": f"main/{second.name}"},
+        headers=owner.headers(team.ws, idem=True),
+    )
+    assert again.status_code == 202, again.text
+    assert await _run_verifications(admin, worker_engine, env) == ["failed"]
+    repeated = await _verification(owner, team.ws, again)
+    assert repeated["status"] == "FAILED" and repeated["error"]["code"] == "repository_taken", repeated
+
+
+async def test_github_repository_can_be_attached_without_an_existing_local_copy(
+    gapp: FastAPI, app_engine: AsyncEngine, worker_engine: AsyncEngine, admin: psycopg.Connection, env: Env
+) -> None:
+    """FR-PRJ-03 `create_local_copy`: рабочей копии ещё нет — её создаёт воркер клонированием.
+
+    Иначе привязать репозиторий, которого нет на диске, нельзя вовсе: форма требует существующий каталог,
+    а создать его из UI было нечем. Клонирует именно воркер: installation-токен и ключ App есть только у него
+    (OQ-47 (2)), и в клоне токен не остаётся (SC-GH-04).
+    """
+    team = await _team(gapp, app_engine, admin)
+    owner = team.users["owner"]
+    project = team.tenant.project_id
+    _new_installation(admin, team, env)
+    fresh = f"clone-{secrets.token_hex(3)}"
+    target = env.root / fresh
+    payload = {
+        "provider": "github",
+        "remote_url": "https://github.test/acme/app",
+        "local_path": f"main/{fresh}",
+        "create_local_copy": True,
+    }
+
+    # Каталог назначения проверяет API: занятый каталог, сам корень и local-привязка отклоняются сразу.
+    for bad, code in (
+        ({**payload, "local_path": f"main/{env.local.name}"}, "unavailable_target"),
+        ({**payload, "local_path": "main"}, "unavailable_target"),
+        ({**payload, "local_path": "main/nope/deeper"}, "unavailable_target"),
+        ({"provider": "local", "local_path": f"main/{env.local.name}", "create_local_copy": True}, "unsupported"),
+    ):
+        r = await owner.client.post(f"/api/v1/projects/{project}/repositories", json=bad,
+                                    headers=owner.headers(team.ws, idem=True))  # fmt: skip
+        validate_response("attachRepository", r)
+        assert r.status_code == 422 and r.json()["errors"][0]["code"] == code, r.text
+    assert not target.exists(), "API ничего не создаёт: клонирует воркер"
+
+    accepted = await owner.client.post(f"/api/v1/projects/{project}/repositories", json=payload,
+                                       headers=owner.headers(team.ws, idem=True))  # fmt: skip
+    validate_response("attachRepository", accepted)
+    assert accepted.status_code == 202, accepted.text
+    assert await _run_verifications(admin, worker_engine, env) == ["succeeded"]
+    done = await _verification(owner, team.ws, accepted)
+    assert done["status"] == "SUCCEEDED", done
+
+    # Копия создана и пригодна для работы платформы: это рабочее дерево на нужном commit.
+    assert git(target, "rev-parse", "HEAD") == env.base_sha
+    config = (target / ".git" / "config").read_text(encoding="utf-8")
+    assert f"{env.url}/acme/app.git" in config and "x-access-token" not in config, "токен не остаётся на диске"
+    attached = admin.execute(
+        "SELECT local_root_ref, last_synced_commit_sha FROM repositories WHERE id = %s", (done["result_id"],)
+    ).fetchone()
+    assert attached == (f"main/{fresh}", env.base_sha)
+
+    # Повтор события (дубль Dramatiq): копия уже создана этим же запросом — клонирование не повторяется,
+    # а каталог, занятый своей же привязкой, даёт понятный `local_path_taken`, а не «каталог не пуст».
+    repeat = uuid7()
+    admin.execute(
+        "INSERT INTO github_verification_requests (id, workspace_id, kind, project_id, params, requested_by)"
+        " VALUES (%s, %s, 'repository', %s, %s, %s)",
+        (
+            repeat,
+            team.tenant.workspace_id,
+            project,
+            json.dumps(
+                {
+                    "owner": "acme",
+                    "name": "app",
+                    "full_name": "acme/app",
+                    "local_path": f"main/{fresh}",
+                    "web_url": "https://github.test",
+                    "create_local_copy": True,
+                }
+            ),
+            team.tenant.owner_id,
+        ),
+    )
+    admin.execute(
+        "INSERT INTO outbox_events (id, workspace_id, event_type, aggregate_type, aggregate_id, payload)"
+        " VALUES (%s, %s, 'github.verification.requested', 'github_verification', %s, %s)",
+        (uuid7(), team.tenant.workspace_id, repeat, json.dumps({"kind": "repository", "verification_id": str(repeat)})),
+    )
+    admin.commit()
+    assert await _run_verifications(admin, worker_engine, env) == ["failed"]
+    outcome = admin.execute("SELECT error_code FROM github_verification_requests WHERE id = %s", (repeat,)).fetchone()
+    assert outcome == ("local_path_taken",), outcome
+
+
+async def test_failed_clone_is_reported_and_leaves_no_directory(
+    gapp: FastAPI, app_engine: AsyncEngine, worker_engine: AsyncEngine, admin: psycopg.Connection, env: Env
+) -> None:
+    """Неудачное клонирование — `FAILED clone_failed`, а не вечный PENDING и не полуклон на диске."""
+    team = await _team(gapp, app_engine, admin)
+    owner = team.users["owner"]
+    project = team.tenant.project_id
+    _new_installation(admin, team, env)
+    locked = env.root / f"locked-{secrets.token_hex(3)}"
+    locked.mkdir()
+    locked.chmod(0o500)  # каталог существует и пуст — API пропустит, но git не сможет создать в нём копию
+    try:
+        accepted = await owner.client.post(
+            f"/api/v1/projects/{project}/repositories",
+            json={"provider": "github", "remote_url": "https://github.test/acme/app",
+                  "local_path": f"main/{locked.name}/copy", "create_local_copy": True},
+            headers=owner.headers(team.ws, idem=True),
+        )  # fmt: skip
+        assert accepted.status_code == 202, accepted.text
+        assert await _run_verifications(admin, worker_engine, env) == ["failed"]
+        failed = await _verification(owner, team.ws, accepted)
+        assert failed["status"] == "FAILED" and failed["error"]["code"] == "clone_failed", failed
+        assert not (locked / "copy").exists(), "каталог после неудачи не остаётся"
+    finally:
+        locked.chmod(0o700)
+
+
+async def test_installation_repositories_are_readable_by_members_and_scoped_to_workspace(
+    gapp: FastAPI, app_engine: AsyncEngine, admin: psycopg.Connection, env: Env
+) -> None:
+    """Список читает любой участник (github:read), но только своего workspace; обновлять нечего у неактивной."""
+    team = await _team(gapp, app_engine, admin)
+    other = await _team(gapp, app_engine, admin)
+    inst = _new_installation(admin, team, env)
+    path = f"/api/v1/integrations/github/installations/{inst}/repositories"
+
+    viewer = team.users["viewer"]
+    assert (await viewer.client.get(path, headers={"X-Workspace-Id": team.ws})).status_code == 200
+    stranger = other.users["owner"]
+    assert (await stranger.client.get(path, headers={"X-Workspace-Id": other.ws})).status_code == 404
+    unknown = f"/api/v1/integrations/github/installations/{uuid7()}/repositories"
+    assert (await team.users["owner"].client.get(unknown, headers={"X-Workspace-Id": team.ws})).status_code == 404
+
+    admin.execute("UPDATE github_installations SET status = 'REVOKED' WHERE id = %s", (inst,))
+    admin.commit()
+    revoked = await team.users["owner"].client.post(f"{path}/refresh", headers=team.users["owner"].headers(team.ws))
+    assert revoked.status_code == 409, revoked.text
 
 
 async def test_webhook_signature_dedup_replay_and_limits(gapp: FastAPI, admin: psycopg.Connection) -> None:

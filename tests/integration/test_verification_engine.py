@@ -409,3 +409,260 @@ async def test_semgrep_sast_in_container_offline_gets_declared_env(env: Env) -> 
         assert spec.env["HOME"] == "/home/verify"  # зарезервированные значения движка не переопределены
         assert not set(spec.env) - {*declared_gate_env(GATE_SPECS["semgrep-sast"]), *ENGINE_ENV}
     assert elapsed < PROBE_TIMEOUT_SECONDS, f"SAST офлайн занял {elapsed:.0f} с"
+
+
+# --- шаг prepare: зависимости проекта для gates (QUALITY_GATES §4.3) ------------------------------
+
+PREPARE_NETWORK = "aicd-prep-egress-test"
+_PY_PROJECT = {
+    "pyproject.toml": (
+        "[project]\nname = 'x'\nversion = '0'\n"
+        "[tool.mypy]\nmypy_path = 'pkg'\n"
+        "[tool.hatch.build.targets.wheel]\npackages = ['pkg/x']\n"
+    ),
+    "pkg/x/__init__.py": "",
+    "pkg/x/mod.py": "def add(a: int, b: int) -> int:\n    return a + b\n",
+    "tests/test_mod.py": "from x.mod import add\n\n\ndef test_add() -> None:\n    assert add(1, 2) == 3\n",
+}
+
+
+def _prepare_verifier(env: Env, runner: SandboxRunner, root: Path) -> VerificationEngine:
+    return env.verifier(
+        runner,
+        image=PY_IMAGE,
+        images=default_gate_images(),
+        prepare_root=root,
+        prepare_network=PREPARE_NETWORK,
+    )
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not _docker_available(), reason=f"Docker daemon / image {PY_IMAGE} недоступны")
+async def test_prepare_without_lockfile_blocks_dependent_gates(env: Env, tmp_path: Path) -> None:
+    """Без lock-файла установка недетерминирована: зависимые gates — ERROR, инструмент не запускается.
+
+    Проверяется fail-closed: `DEPENDENCIES_UNAVAILABLE` ≠ `PASS`, и контейнер pytest вообще не
+    создаётся (ни probe, ни прогон) — подложить результат нечем.
+    """
+    sha = commit(env.repo, _PY_PROJECT)  # uv.lock отсутствует
+    recorder = _RecordingDockerRunner(
+        f"unix://{DOCKER_SOCK}", allowed_bind_roots=[str(env.tmp), str(tmp_path)], timeout_grace_seconds=1
+    )
+    async with recorder as runner:
+        outcome = await env.verify(_prepare_verifier(env, runner, tmp_path / "deps"), sha)
+
+    rows = gate_rows(env)
+    assert rows["pytest-unit"]["status"] == "ERROR"
+    assert rows["pytest-unit"]["error_message"].startswith("DEPENDENCIES_UNAVAILABLE")
+    assert "PREPARE_NO_LOCKFILE" in rows["pytest-unit"]["error_message"]
+    assert not outcome.passed
+    assert all(s.labels.get("aicd.gate") != "pytest-unit" for s in recorder.specs)
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not _docker_available(), reason=f"Docker daemon / image {PY_IMAGE} недоступны")
+async def test_prepare_cache_is_mounted_read_only_with_dependency_env(env: Env, tmp_path: Path) -> None:
+    """Готовый кэш (по ключу содержимого) монтируется в gate ro, PATH/PYTHONPATH указывают на него."""
+    from aicd_verification import prepare as prepare_step
+
+    sha = commit(env.repo, {**_PY_PROJECT, "uv.lock": "version = 1\nrequires-python = '>=3.12'\n"})
+    images = default_gate_images()
+    deps_root = tmp_path / "deps"
+    key, _digests = prepare_step.cache_key(
+        workspace_id=str(env.tenant.workspace_id),
+        spec=prepare_step.PYTHON_SPEC,
+        image=images["prepare-python"],
+        repo=env.repo,
+        files=("uv.lock", "pyproject.toml"),
+    )
+    cache = deps_root / key  # маркер прошлой успешной подготовки → prepare не запускается (cache hit)
+    cache.mkdir(parents=True)
+    (cache / prepare_step.MARKER_NAME).write_text('{"cache": "hit"}', encoding="utf-8")
+
+    recorder = _RecordingDockerRunner(
+        f"unix://{DOCKER_SOCK}", allowed_bind_roots=[str(env.tmp), str(tmp_path)], timeout_grace_seconds=1
+    )
+    async with recorder as runner:
+        await env.verify(_prepare_verifier(env, runner, deps_root), sha)
+
+    # Контейнер prepare не создавался: ключ кэша совпал.
+    assert all(s.labels.get("aicd.kind") != prepare_step.PREPARE_KIND for s in recorder.specs)
+    pytest_specs = [s for s in recorder.specs if s.labels.get("aicd.gate") == "pytest-unit"]
+    assert pytest_specs, [s.labels for s in recorder.specs]
+    for spec in pytest_specs:
+        deps = [m for m in spec.mounts if m.target == prepare_step.DEPS_DIR]
+        assert len(deps) == 1 and deps[0].read_only and deps[0].source == cache
+        assert spec.env["PATH"].startswith(f"{prepare_step.DEPS_DIR}/venv/bin:")
+        assert spec.env["PYTHONPATH"] == "/workspace/pkg"
+        assert spec.network == "none"  # gate остаётся без сети, egress есть только у prepare
+    # Каталог кэша пуст (его содержимое в этом тесте не создаётся), поэтому gate — честный ERROR,
+    # а не PASS: смонтированный кэш сам по себе вердикта не даёт.
+    rows = gate_rows(env)
+    assert rows["pytest-unit"]["status"] == "ERROR"
+    assert rows["pytest-unit"]["error_message"].startswith("TOOL_UNAVAILABLE")
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not _docker_available(), reason=f"Docker daemon / image {PY_IMAGE} недоступны")
+async def test_project_without_dependency_manifest_gets_platform_tools_only(env: Env, tmp_path: Path) -> None:
+    """Нет ни lock-файла, ни манифеста зависимостей: не PREPARE_NO_LOCKFILE, а окружение инструментов платформы."""
+    from aicd_verification import prepare as prepare_step
+
+    sha = commit(env.repo, {"tests/test_plain.py": "def test_ok() -> None:\n    assert True\n"})
+    images = default_gate_images()
+    deps_root = tmp_path / "deps"
+    bare = prepare_step.bare_spec(prepare_step.PYTHON_SPEC)
+    assert bare is not None
+    key, _digests = prepare_step.cache_key(
+        workspace_id=str(env.tenant.workspace_id),
+        spec=bare,
+        image=images["prepare-python"],
+        repo=env.repo,
+        files=bare.manifests,
+    )
+    cache = deps_root / key  # готовый кэш: сам prepare (нужна сеть) в тесте не запускается
+    cache.mkdir(parents=True)
+    (cache / prepare_step.MARKER_NAME).write_text('{"cache": "hit"}', encoding="utf-8")
+
+    recorder = _RecordingDockerRunner(
+        f"unix://{DOCKER_SOCK}", allowed_bind_roots=[str(env.tmp), str(tmp_path)], timeout_grace_seconds=1
+    )
+    async with recorder as runner:
+        await env.verify(_prepare_verifier(env, runner, deps_root), sha)
+
+    pytest_specs = [s for s in recorder.specs if s.labels.get("aicd.gate") == "pytest-unit"]
+    assert pytest_specs, [s.labels for s in recorder.specs]
+    assert all(any(m.target == prepare_step.DEPS_DIR and m.source == cache for m in s.mounts) for s in pytest_specs)
+    assert "PREPARE_NO_LOCKFILE" not in (gate_rows(env)["pytest-unit"]["error_message"] or "")
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not _docker_available(), reason=f"Docker daemon / image {PY_IMAGE} недоступны")
+async def test_gates_without_needs_deps_never_get_the_dependency_cache(env: Env, tmp_path: Path) -> None:
+    """Кэш зависимостей не попадает в gates, которым он не нужен (SCOPE, ruff): лишних монтирований нет."""
+    from aicd_verification import prepare as prepare_step
+
+    sha = commit(env.repo, {**_PY_PROJECT, "uv.lock": "version = 1\n"})
+    recorder = _RecordingDockerRunner(
+        f"unix://{DOCKER_SOCK}", allowed_bind_roots=[str(env.tmp), str(tmp_path)], timeout_grace_seconds=1
+    )
+    async with recorder as runner:
+        await env.verify(_prepare_verifier(env, runner, tmp_path / "deps"), sha)
+    for spec in recorder.specs:
+        if spec.labels.get("aicd.gate") in ("scope", "ruff-lint", "ruff-format"):
+            assert all(m.target != prepare_step.DEPS_DIR for m in spec.mounts), spec.labels
+
+
+async def test_superseded_execution_is_not_restarted(env: Env) -> None:
+    """Параллельная верификация той же задачи: строка gate завершена и `superseded_at` проставлен,
+    пока gate ждал семафор. Повторный старт такой строки нарушал CHECK `ck_gate_executions_finished`
+    (IntegrityError в `_set_running`), gate получал ERROR(INFRA) и задача уходила на бесконечный повтор.
+    """
+    from aicd_verification.engine import _GateRun, _TaskContext
+
+    execution_id = uuid7()
+    with connect_admin(env.database) as conn:
+        gate_id = conn.execute("SELECT id FROM quality_gates WHERE name = 'scope' LIMIT 1").fetchone()[0]  # type: ignore[index]
+        conn.execute(
+            "INSERT INTO gate_executions (id, workspace_id, run_id, task_id, gate_id, gate_type, required,"
+            " status, attempt_no, commit_sha, finished_at, superseded_at)"
+            " VALUES (%s, %s, %s, %s, %s, 'SCOPE', true, 'ERROR', 1, %s, now(), now())",
+            (execution_id, env.tenant.workspace_id, env.run_id, env.task_id, gate_id, "0" * 40),
+        )
+
+    verifier = env.verifier()
+    task = _TaskContext(env.tenant.workspace_id, env.run_id, env.task_id, uuid7(), "0" * 40, env.repo)
+    gate = _GateRun(gate_id, "scope", "SCOPE", True, 60, GATE_SPECS["scope"], None, execution_id=execution_id)
+
+    assert await verifier._set_running(task, gate) is False
+    assert gate.status == "ERROR"  # вердикт принадлежит другой верификации, здесь он не перезаписан
+    with connect_admin(env.database) as conn:
+        row = conn.execute("SELECT status, started_at FROM gate_executions WHERE id = %s", (execution_id,)).fetchone()
+    assert row is not None and row[0] == "ERROR" and row[1] is None
+
+
+# --- офлайн-БД уязвимостей для gates SCA (runbook vulndb-update.md) ---------------------------------
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not _docker_available(), reason=f"Docker daemon / image {PY_IMAGE} недоступны")
+async def test_sca_gate_gets_fresh_offline_db_read_only_and_rejects_missing_one(env: Env, tmp_path: Path) -> None:
+    """Свежая БД монтируется в gate SCA только для чтения; отсутствующая — ERROR(TOOL_UNAVAILABLE), не PASS."""
+    from datetime import UTC, datetime
+
+    from aicd_verification.security_gates import CONTAINER_DB_DIR, OSV_MANIFEST_FILE
+
+    with connect_admin(env.database) as conn:
+        profile = conn.execute("SELECT id FROM quality_profiles WHERE workspace_id = %s", (env.tenant.workspace_id,))
+        profile_id = profile.fetchone()[0]  # type: ignore[index]
+        for name in ("osv-scanner-sca", "trivy-vuln"):
+            conn.execute(
+                "INSERT INTO quality_gates (id, workspace_id, profile_id, name, gate_type, required, timeout_seconds)"
+                " VALUES (%s, %s, %s, %s, 'SCA', true, 300)",
+                (uuid7(), env.tenant.workspace_id, profile_id, name),
+            )
+    sha = commit(env.repo, {**_PY_PROJECT, "uv.lock": "version = 1\nrequires-python = '>=3.12'\n"})
+    vulndb = tmp_path / "vulndb"  # есть только БД OSV; БД Trivy не выложена
+    (vulndb / "osv" / "osv-scalibr" / "PyPI").mkdir(parents=True)
+    (vulndb / "osv" / "osv-scalibr" / "PyPI" / "all.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    (vulndb / "osv" / OSV_MANIFEST_FILE).write_text(
+        json.dumps({"updated_at": datetime.now(UTC).isoformat(), "ecosystems": ["PyPI"]}), encoding="utf-8"
+    )
+    recorder = _RecordingDockerRunner(
+        f"unix://{DOCKER_SOCK}", allowed_bind_roots=[str(env.tmp), str(tmp_path)], timeout_grace_seconds=1
+    )
+    async with recorder as runner:
+        verifier = env.verifier(
+            runner, image=PY_IMAGE, images=default_gate_images(SECURITY_GATE_IMAGES), vulndb_root=vulndb
+        )
+        await env.verify(verifier, sha)
+
+    osv_specs = [s for s in recorder.specs if s.labels.get("aicd.gate") == "osv-scanner-sca"]
+    assert osv_specs, sorted({s.labels.get("aicd.gate", "") for s in recorder.specs})
+    for spec in osv_specs:
+        db = [m for m in spec.mounts if m.target == CONTAINER_DB_DIR]
+        assert len(db) == 1 and db[0].read_only and db[0].source == vulndb / "osv"
+        assert spec.network == "none"
+    rows = gate_rows(env)
+    assert "is not configured" not in (rows["osv-scanner-sca"]["error_message"] or "")
+    assert rows["trivy-vuln"]["status"] == "ERROR"
+    assert rows["trivy-vuln"]["error_message"].startswith("TOOL_UNAVAILABLE: offline trivy vulnerability DB")
+    assert all(s.labels.get("aicd.gate") != "trivy-vuln" for s in recorder.specs)
+
+
+# --- порог severity по новым находкам относительно base_commit (QUALITY_GATES §2.2) ---------------
+
+
+@pytest.mark.docker
+@pytest.mark.skipif(not _semgrep_image_present(), reason=f"Docker daemon / образ {SEMGREP.ref} недоступны")
+@pytest.mark.parametrize("adds_vulnerability", [False, True])
+async def test_scanner_blocks_only_on_findings_new_relative_to_base(env: Env, adds_vulnerability: bool) -> None:
+    """Находки, уже бывшие на base commit, показываются, но не блокируют; новая находка блокирует."""
+    fixtures = ROOT / "tests" / "fixtures" / "security" / "semgrep"
+    vulnerable = (fixtures / "vulnerable" / "vuln_handlers.py").read_text()
+    base = commit(env.repo, {"src/legacy_handlers.py": vulnerable}, "legacy code with findings")
+    with connect_admin(env.database) as conn:
+        conn.execute("UPDATE runs SET base_commit_sha = %s, version = version + 1 WHERE id = %s", (base, env.run_id))
+        profile = conn.execute("SELECT id FROM quality_profiles WHERE workspace_id = %s", (env.tenant.workspace_id,))
+        conn.execute(
+            "INSERT INTO quality_gates (id, workspace_id, profile_id, name, gate_type, required, timeout_seconds)"
+            " VALUES (%s, %s, %s, 'semgrep-sast', 'SAST', true, 300)",
+            (uuid7(), env.tenant.workspace_id, profile.fetchone()[0]),  # type: ignore[index]
+        )
+    change = {"src/safe_tasks.py": (fixtures / "clean" / "safe_tasks.py").read_text()}
+    if adds_vulnerability:
+        change["src/new_handlers.py"] = vulnerable
+    sha = commit(env.repo, change, "task change")
+    async with DockerSandboxRunner(
+        f"unix://{DOCKER_SOCK}", allowed_bind_roots=[str(env.tmp)], timeout_grace_seconds=1
+    ) as runner:
+        await env.verify(env.verifier(runner, image=PY_IMAGE, images=default_gate_images(SECURITY_GATE_IMAGES)), sha)
+
+    row = gate_rows(env)["semgrep-sast"]
+    if adds_vulnerability:
+        assert row["status"] == "FAIL", row
+        assert "already present at base" in row["error_message"] and "src/new_handlers.py" in row["error_message"]
+        assert "legacy_handlers.py" not in row["error_message"].split("):", 1)[1]
+    else:
+        assert row["status"] == "PASS", row["error_message"]
+    assert not list(env.tmp.glob("aicd-verify-base-*"))  # checkout base commit удалён

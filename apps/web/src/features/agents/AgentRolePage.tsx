@@ -279,9 +279,10 @@ function RoleDetail({ workspaceId, role, memberRole }: { workspaceId: string; ro
           <h3 className="text-sm font-semibold text-fg">{t('agents.detail.activeTasks')}</h3>
           {state === 'loading' ? (
             <span aria-hidden="true" className="skeleton block h-10 w-full" />
-          ) : activity && activity.tasks.length > 0 ? (
+          ) : activity && activity.tasks.length + activity.waiting.length > 0 ? (
+            // Выполняемые и ожидающие вместе: статус каждой задачи виден по её бейджу.
             <ul aria-label={t('agents.detail.activeTasksCaption')} className="flex flex-col gap-2 text-sm">
-              {activity.tasks.map((task) => (
+              {[...activity.tasks, ...activity.waiting].map((task) => (
                 <li key={task.id} className="flex min-w-0 flex-wrap items-center gap-2" data-task-id={task.id}>
                   <StatusBadge kind="task" status={task.status} />
                   <Link to={taskLinks(workspaceId, task).mission} className="link min-w-0 break-words">

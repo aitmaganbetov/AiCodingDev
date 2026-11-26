@@ -2,9 +2,9 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import type { AgentProfile } from '../../api/agents';
 import type { CliProvider } from '../../api/runs';
-import { Badge, Icon } from '../../components/ui';
+import { Badge, Icon, type IconName } from '../../components/ui';
 import { formatPercent } from '../dashboard/format';
-import { taskLinks, type RoleActivity, type RoleState, type RoleStats } from './model';
+import { taskLinks, waitingHighlight, type RoleActivity, type RoleState, type RoleStats } from './model';
 
 /** Подпись провайдера CLI (Codex CLI / Claude Code CLI). */
 export function useProviderLabel(): (code: CliProvider | string) => string {
@@ -13,9 +13,16 @@ export function useProviderLabel(): (code: CliProvider | string) => string {
 }
 
 /**
- * Активность роли — только из задач (LEASED/RUNNING). Не «онлайн»: роль — логический профиль.
- * Тон нейтральный/информационный (статусные зелёный/красный не используются для ролей).
+ * Активность роли — только из её задач. Не «онлайн»: роль — логический профиль.
+ * «Ожидает» показывается отдельно от «не активна»: очередь, повтор и блокировка — это работа за ролью,
+ * и молчать о них нельзя. Тон нейтральный/информационный (статусные зелёный/красный для ролей не нужны).
  */
+const ROLE_STATE_ICON: Partial<Record<RoleState, IconName>> = {
+  active: 'activity',
+  waiting: 'inbox',
+  idle: 'statusNeutral',
+};
+
 export function RoleStateBadge({ state, activity }: { state: RoleState; activity: RoleActivity | undefined }) {
   const { t } = useTranslation();
   if (state === 'loading')
@@ -25,17 +32,25 @@ export function RoleStateBadge({ state, activity }: { state: RoleState; activity
         <span className="sr-only">{t('agents.state.loading')}</span>
       </span>
     );
-  const count = activity?.tasks.length ?? 0;
+  const blocked = state === 'waiting' ? waitingHighlight(activity) : undefined;
+  const count = state === 'waiting' ? (activity?.waiting.length ?? 0) : (activity?.tasks.length ?? 0);
   const text =
     state === 'active'
       ? activity?.more
         ? t('agents.state.activeMore', { count })
         : t('agents.state.active', { count })
-      : state === 'idle'
-        ? t('agents.state.idle')
-        : t('agents.state.unknown');
+      : state === 'waiting'
+        ? blocked?.status === 'BLOCKED'
+          ? t('agents.state.blocked', {
+              count,
+              reason: t(`enums.blocked_reason.${blocked.blocked_reason}`, { defaultValue: blocked.blocked_reason ?? '' }),
+            })
+          : t('agents.state.waiting', { count })
+        : state === 'idle'
+          ? t('agents.state.idle')
+          : t('agents.state.unknown');
   return (
-    <Badge tone={state === 'active' ? 'info' : 'neutral'} icon={state === 'active' ? 'activity' : state === 'idle' ? 'statusNeutral' : 'help'} data-role-state={state}>
+    <Badge tone={state === 'active' ? 'info' : 'neutral'} icon={ROLE_STATE_ICON[state] ?? 'help'} data-role-state={state}>
       {text}
     </Badge>
   );
@@ -104,15 +119,20 @@ export function ProfileFacts({ profile }: { profile: AgentProfile }) {
 /** Текущие задачи роли: ссылки в Mission Control с выбранной задачей. */
 export function CurrentTasks({ workspaceId, activity, limit }: { workspaceId: string; activity: RoleActivity | undefined; limit: number }) {
   const { t } = useTranslation();
-  const tasks = activity?.tasks ?? [];
+  // Выполняемые — первыми, затем ожидающие: иначе карточка роли с очередью выглядела бы пустой.
+  const tasks = [...(activity?.tasks ?? []), ...(activity?.waiting ?? [])];
   if (tasks.length === 0) return <p className="text-sm text-fg-muted">{t('agents.card.noCurrentTasks')}</p>;
   const shown = tasks.slice(0, limit);
   const rest = tasks.length - shown.length;
+  const running = new Set((activity?.tasks ?? []).map((task) => task.id));
   return (
     <ul className="flex flex-col gap-1 text-sm">
       {shown.map((task) => (
         <li key={task.id} className="flex min-w-0 items-center gap-2">
-          <Icon name="statusRunning" className="h-4 w-4 shrink-0 text-info" />
+          <Icon
+            name={running.has(task.id) ? 'statusRunning' : 'inbox'}
+            className={running.has(task.id) ? 'h-4 w-4 shrink-0 text-info' : 'h-4 w-4 shrink-0 text-fg-muted'}
+          />
           <Link to={taskLinks(workspaceId, task).mission} className="link min-w-0 truncate">
             {task.title}
           </Link>

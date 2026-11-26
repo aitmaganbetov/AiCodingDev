@@ -193,12 +193,29 @@ services:
       AICD_WORKTREE_ROOT: ${AICD_WORKTREES_DIR:-/var/lib/aicd/worktrees}
       AICD_VERIFICATION_STAGING_ROOT: ${AICD_VERIFICATION_STAGING_DIR:-/var/lib/aicd/verification}
       AICD_INDEX_EXPORT_CACHE_ROOT: /var/lib/aicd/index-export
+      # Шаг prepare (QUALITY_GATES §4.3) — зависимости проверяемого проекта для gates
+      # pytest/mypy/coverage/build. Выключен по умолчанию (пустые значения): без него gate без
+      # инструмента даёт ERROR(TOOL_UNAVAILABLE), а не PASS. Включение: задать каталог кэша и имя
+      # docker-сети с доступом к реестрам пакетов; в production обязателен ещё и egress-proxy с
+      # allowlist реестров (иначе worker-exec не стартует, wiring.check_verification_runner).
+      AICD_VERIFICATION_PREPARE_ROOT: ${AICD_VERIFICATION_PREPARE_DIR:-}
+      AICD_VERIFICATION_PREPARE_NETWORK: ${AICD_VERIFICATION_PREPARE_NETWORK:-}
+      AICD_VERIFICATION_PREPARE_PROXY_URL: ${AICD_VERIFICATION_PREPARE_PROXY_URL:-}
+      AICD_VERIFICATION_PREPARE_USER: ${AICD_VERIFICATION_PREPARE_USER:-}
+      # Офлайн-БД уязвимостей для gates SCA (runbook vulndb-update.md): каталог `--db-root` шага обновления.
+      # Не задан или БД старше 7 суток — gates SCA дают ERROR(TOOL_UNAVAILABLE), а не PASS. Каталог должен
+      # быть доступен демону Docker по тому же пути хоста (gate получает `<корень>/<osv|trivy>` только для чтения).
+      AICD_VERIFICATION_VULNDB_ROOT: ${AICD_VERIFICATION_VULNDB_DIR:-}
     volumes:
       - artifacts:/var/lib/aicd/artifacts
       - index-export:/var/lib/aicd/index-export
       - ${AICD_REPOS_DIR:-./repos}:/srv/repos
       - ${AICD_WORKTREES_DIR:-/var/lib/aicd/worktrees}:${AICD_WORKTREES_DIR:-/var/lib/aicd/worktrees}
       - ${AICD_VERIFICATION_STAGING_DIR:-/var/lib/aicd/verification}:${AICD_VERIFICATION_STAGING_DIR:-/var/lib/aicd/verification}
+      # Кэш prepare монтируется по тому же пути хоста: его bind'ит демон Docker в контейнер prepare.
+      - ${AICD_VERIFICATION_PREPARE_DIR:-/var/lib/aicd/deps}:${AICD_VERIFICATION_PREPARE_DIR:-/var/lib/aicd/deps}
+      # Офлайн-БД уязвимостей: воркер проверяет свежесть, демон Docker монтирует её в gates SCA (оба — ro).
+      - ${AICD_VERIFICATION_VULNDB_DIR:-/var/lib/aicd/vulndb}:${AICD_VERIFICATION_VULNDB_DIR:-/var/lib/aicd/vulndb}:ro
 
   # worker-index: очередь indexing_jobs, определение стека, очистка кэша экспортов снимков (общий том с worker-exec).
   worker-index:

@@ -16,6 +16,7 @@ import {
   roleState,
   roleStats,
   taskLinks,
+  waitingHighlight,
 } from './model';
 
 function profile(role: AgentRole, init: Partial<AgentProfile> = {}): AgentProfile {
@@ -76,7 +77,7 @@ function wsTask(role: AgentRole, title: string, status: WorkspaceTask['status'] 
   };
 }
 
-const SETTINGS = { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, settings_version: 1 };
+const SETTINGS = { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, model: null, settings_version: 1 };
 function providers(): Provider[] {
   return [
     {
@@ -103,7 +104,7 @@ afterEach(() => {
 });
 
 describe('agents model', () => {
-  it('groups only LEASED/RUNNING tasks of the 12 roles; never "online"', () => {
+  it('splits tasks into running and waiting; finished statuses count as neither; never "online"', () => {
     const page = {
       items: [wsTask('developer', 'A', 'RUNNING', 1), wsTask('developer', 'B', 'LEASED', 2), wsTask('qa', 'C', 'SUCCEEDED', 3)],
       next_cursor: null,
@@ -115,15 +116,43 @@ describe('agents model', () => {
     expect(roleState(map?.get('qa'), { pending: false, error: false })).toBe('idle');
     expect(roleState(undefined, { pending: true, error: false })).toBe('loading');
     expect(roleState(undefined, { pending: false, error: true })).toBe('unknown');
-    expect(activeRoleCount(map)).toEqual({ count: 1, more: false });
+    expect(activeRoleCount(map)).toEqual({ count: 1, waiting: 0, more: false });
     expect(activityByRole(undefined)).toBeNull();
+  });
+
+  it('a role whose tasks only wait is "waiting", not idle; blocked task wins the label', () => {
+    const map = activityByRole({
+      items: [
+        wsTask('qa', 'В очереди', 'PENDING', 1),
+        { ...wsTask('qa', 'Заблокирована', 'BLOCKED', 2), blocked_reason: 'AUTH_REQUIRED' },
+        wsTask('reviewer', 'Ждёт повтора', 'RETRY_WAIT', 3),
+      ],
+      next_cursor: null,
+    });
+    expect(map?.get('qa')?.tasks).toEqual([]);
+    expect(map?.get('qa')?.waiting.map((t) => t.title)).toEqual(['В очереди', 'Заблокирована']);
+    expect(roleState(map?.get('qa'), { pending: false, error: false })).toBe('waiting');
+    expect(roleState(map?.get('reviewer'), { pending: false, error: false })).toBe('waiting');
+    expect(roleState(map?.get('developer'), { pending: false, error: false })).toBe('idle');
+    // Блокировка важнее очереди: её причину и показываем оператору.
+    expect(waitingHighlight(map?.get('qa'))?.blocked_reason).toBe('AUTH_REQUIRED');
+    expect(activeRoleCount(map)).toEqual({ count: 0, waiting: 2, more: false });
+  });
+
+  it('tasks of a finished run are not "waiting": that work is over', () => {
+    const map = activityByRole({
+      items: [{ ...wsTask('qa', 'Отменённый прогон', 'PENDING', 1), run_status: 'CANCELLED' }],
+      next_cursor: null,
+    });
+    expect(map?.get('qa')?.waiting).toEqual([]);
+    expect(roleState(map?.get('qa'), { pending: false, error: false })).toBe('idle');
   });
 
   it('incomplete sample: a role without tasks is "unknown", not idle; count is a lower bound', () => {
     const map = activityByRole({ items: [wsTask('developer', 'A')], next_cursor: 'abc' });
     expect(roleState(map?.get('qa'), { pending: false, error: false })).toBe('unknown');
     expect(roleState(map?.get('developer'), { pending: false, error: false })).toBe('active');
-    expect(activeRoleCount(map)).toEqual({ count: 1, more: true });
+    expect(activeRoleCount(map)).toEqual({ count: 1, waiting: 0, more: true });
   });
 
   it('view: URL wins over stored choice, grid by default', () => {
@@ -156,7 +185,15 @@ describe('AgentsPage', () => {
     const { calls } = mockFetch({
       'GET /api/v1/auth/session': () => json(200, session('viewer')),
       'GET /api/v1/agent-profiles': () => json(200, { items: AGENT_ROLE_ORDER.map((r) => profile(r)) }),
-      'GET /api/v1/tasks': () => json(200, { items: [wsTask('developer', 'Экспорт CSV')], next_cursor: null }),
+      'GET /api/v1/tasks': () =>
+        json(200, {
+          items: [
+            wsTask('developer', 'Экспорт CSV'),
+            { ...wsTask('reviewer', 'Ревью PR', 'RETRY_WAIT', 2), current_attempt: null },
+            { ...wsTask('security', 'Аудит зависимостей', 'BLOCKED', 3), blocked_reason: 'AUTH_REQUIRED', current_attempt: null },
+          ],
+          next_cursor: null,
+        }),
       'GET /api/v1/analytics/summary': () =>
         json(200, {
           tasks: { by_role: [{ role: 'developer', attempts: 4, succeeded: 3, failed: 1, retries: 1, verified_completion_rate: 0.75 }] },
@@ -170,11 +207,18 @@ describe('AgentsPage', () => {
     expect(within(dev).getByRole('link', { name: 'Экспорт CSV' })).toHaveAttribute('href', expect.stringContaining('mission-control?run='));
     expect(within(dev).getByTestId('role-results')).toHaveTextContent('75%');
     const qa = within(catalog).getByRole('article', { name: 'QA' });
-    expect(within(qa).getByText('Не активна · нет выполняемых задач')).toBeInTheDocument();
+    expect(within(qa).getByText('Не активна · нет задач')).toBeInTheDocument();
     expect(within(qa).getByTestId('role-no-attempts')).toBeInTheDocument();
+    // Задача в очереди и заблокированная — это работа за ролью, а не «не активна».
+    const reviewer = within(catalog).getByRole('article', { name: 'Ревьюер' });
+    expect(within(reviewer).getByText('Ожидает · 1 задача не запущена')).toBeInTheDocument();
+    expect(within(reviewer).getByRole('link', { name: 'Ревью PR' })).toBeInTheDocument();
+    const security = within(catalog).getByRole('article', { name: 'Безопасность' });
+    expect(within(security).getByText('Ожидает · Требуется аутентификация провайдера')).toBeInTheDocument();
+    expect(screen.getByTestId('agents-waiting-summary')).toHaveTextContent('Ещё 2 роли ожидают исполнения');
     expect(within(catalog).queryByText(/онлайн|online/i)).toBeNull();
     const tasksCall = calls.find((c) => c.url.pathname === '/api/v1/tasks');
-    expect(tasksCall?.url.searchParams.getAll('status')).toEqual(['LEASED', 'RUNNING']);
+    expect(tasksCall?.url.searchParams.getAll('status')).toEqual(['LEASED', 'RUNNING', 'PENDING', 'READY', 'RETRY_WAIT', 'BLOCKED']);
 
     await user.click(screen.getByRole('button', { name: 'Список' }));
     expect(screen.getByRole('button', { name: 'Список' })).toHaveAttribute('aria-pressed', 'true');

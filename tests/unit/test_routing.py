@@ -292,6 +292,45 @@ def test_stickiness_bonus_and_its_removal() -> None:
     assert dropped.selected is not None and dropped.selected.provider == "claude"
 
 
+def test_task_waits_for_its_own_provider_instead_of_being_redone_by_another() -> None:
+    """Преемственность: провайдер, уже ведший задачу, пригоден и лишь занят — задача ждёт его слот.
+
+    Иначе повтор ушёл бы свободному провайдеру, и тот выполнил бы ту же работу заново.
+    """
+    busy = cand("codex", active=2)  # max_concurrent=2 — слота нет
+    waiting = router.route(req(previous_provider="codex"), [busy, cand("claude")])
+    assert waiting.outcome == "WAIT" and waiting.selected is None
+    assert waiting.breakdown["continuity"] == {"provider": "codex", "action": "wait"}
+    # Первая попытка (вести задачу ещё некому) идёт свободному провайдеру, как и раньше.
+    first = router.route(req(), [busy, cand("claude")])
+    assert first.outcome == "SELECTED" and first.selected is not None and first.selected.provider == "claude"
+
+
+@pytest.mark.parametrize(
+    "unusable",
+    [{"auth_status": "AUTH_REQUIRED"}, {"availability": "RATE_LIMITED"}, {"availability": "UNAVAILABLE"}],
+)
+def test_task_moves_to_another_provider_only_when_its_own_cannot_work(unusable: dict[str, Any]) -> None:
+    """Ждать нечего, если прежний провайдер исключён фильтрами или дважды подряд упал сам."""
+    moved = router.route(req(previous_provider="codex"), [cand("codex", **unusable), cand("claude")])
+    assert moved.outcome == "SELECTED" and moved.selected is not None and moved.selected.provider == "claude"
+    twice = router.route(
+        req(previous_provider="codex", previous_failed_twice_by_provider=True),
+        [cand("codex", active=2), cand("claude")],
+    )
+    assert twice.outcome == "SELECTED" and twice.selected is not None and twice.selected.provider == "claude"
+
+
+def test_reviewer_does_not_wait_for_the_author_it_must_be_independent_of() -> None:
+    """Преемственность не отменяет независимость ревью: автор исключён, ждать его слот незачем."""
+    d = router.route(
+        req(role="reviewer", level=3, authors=frozenset({"codex"}), previous_provider="codex"),
+        [cand("codex", active=2), cand("claude")],
+    )
+    assert d.outcome == "SELECTED" and d.selected is not None and d.selected.provider == "claude"
+    assert d.review_independence == "independent"
+
+
 def test_tie_break_order() -> None:
     d = router.route(
         req(),

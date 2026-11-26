@@ -42,6 +42,7 @@ EXPECTED = {
     "finding:triage": {O, A, D, R},
     "compliance:review": {O, A, D, R},
     "provider:probe": {O, A},
+    "provider:login": {O},
     "provider:settings": {O, A},
     "documentation:register": {O, A},
     "documentation:refresh": {O, A, D},

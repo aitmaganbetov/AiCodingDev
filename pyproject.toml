@@ -130,6 +130,7 @@ markers = [
   "docker: requires a local Docker daemon (skipped when unavailable)",
   "acceptance: P9-01 acceptance suite AC-01…AC-16 (assigned from tests/acceptance/matrix.yaml)",
   "security: security suite (ТЗ §20; SECURITY_CONTROLS ST-*), `pytest -m security`; report — scripts/security_report.py",
+  "real_cli: opt-in набор real-cli-smoke@1 на официальных CLI с подпиской (AICD_REAL_CLI=1; CLI_ADAPTER_CONTRACT §13.2)",
 ]
 addopts = "-ra --strict-markers"
 

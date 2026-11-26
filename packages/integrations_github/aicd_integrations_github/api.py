@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aicd_integrations_github import install_state, permissions, store, verifications, webhooks
+from aicd_integrations_github import install_state, permissions, repo_cache, store, verifications, webhooks
 from aicd_integrations_github.app_auth import AppJwtSigner, AppKeyError
 from aicd_integrations_github.client import (
     BranchInfo,
@@ -10,6 +10,8 @@ from aicd_integrations_github.client import (
     GitHubError,
     GitHubNotConfiguredError,
     Installation,
+    InstallationRepo,
+    InstallationRepos,
     InstallationToken,
     PullInfo,
     RepoInfo,
@@ -26,6 +28,8 @@ __all__ = [
     "GitHubError",
     "GitHubNotConfiguredError",
     "Installation",
+    "InstallationRepo",
+    "InstallationRepos",
     "InstallationToken",
     "PullInfo",
     "RepoInfo",
@@ -34,6 +38,7 @@ __all__ = [
     "install_state",
     "parse_remote_url",
     "permissions",
+    "repo_cache",
     "store",
     "verifications",
     "webhooks",

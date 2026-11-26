@@ -33,7 +33,7 @@ function provider(code: Provider['code'], installations: ProviderInstallation[],
     display_name: code === 'codex' ? 'Codex CLI' : 'Claude Code CLI',
     enabled_globally: true,
     installations,
-    workspace_settings: { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, allowed_roles: [], settings_version: 1 },
+    workspace_settings: { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, model: null, allowed_roles: [], settings_version: 1 },
     ...over,
   };
 }

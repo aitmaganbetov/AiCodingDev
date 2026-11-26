@@ -6,6 +6,9 @@
   ставит проверку установки воркеру (202 + `GET …/verifications/{id}`): процесс API не держит закрытый ключ App
   (SECURITY_ARCHITECTURE §6.1, OQ-47 (2)); воркер читает установку через GitHub API (JWT App) и отклоняет
   установки с лишними правами (SC-GH-04). Привязка GitHub-репозитория — так же (проверка доступа на воркере).
+* Состав установки («что разрешено»): `GET …/installations/{id}/repositories` читает кэш Redis,
+  `POST …/repositories/refresh` просит воркер перечитать его у GitHub (202). Список — подсказка для формы
+  привязки, а не разрешение: доступ к выбранному репозиторию всё равно проверяется при привязке.
 * Вебхук `POST /integrations/github/webhook` — без сессии и CSRF: аутентификация HMAC по сырому телу
   (SC-GH-01), дедупликация GUID и событие outbox — `sys_github_webhook_receive` (SC-GH-02).
 * PR/merge: запрос PR и approval MERGE фиксируются транзакционно; внешние действия исполняет воркер через
@@ -25,6 +28,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Path as PathParam
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import Response
 
@@ -44,8 +48,9 @@ from aicd_api.routers import op
 from aicd_api.routers.runs import resolve_resource
 from aicd_identity import api as identity
 from aicd_integrations_github import api as gh
-from aicd_orchestration import github_flow, github_verification
+from aicd_orchestration import github_flow, github_repositories, github_verification
 from aicd_platform import audit, metrics
+from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, encode_cursor
@@ -96,6 +101,25 @@ def installation_view(row: dict[str, Any]) -> dict[str, Any]:
         "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+    }
+
+
+def repository_option_view(repo: gh.InstallationRepo, web_url: str, *, attached: bool = False) -> dict[str, Any]:
+    """Элемент выбора в форме привязки. `remote_url` — ровно то, что ожидает `attachRepository`.
+
+    `attached` — репозиторий уже привязан в этом workspace (`uq_repositories_github_repo`): предложить его
+    повторно значило бы предложить заведомый `conflict`.
+    """
+    return {
+        "github_repo_id": repo.id,
+        "full_name": repo.full_name,
+        "owner": repo.owner,
+        "name": repo.name,
+        "private": repo.private,
+        "archived": repo.archived,
+        "default_branch": repo.default_branch or None,
+        "remote_url": f"{web_url.rstrip('/')}/{repo.full_name}",
+        "attached": attached,
     }
 
 
@@ -227,6 +251,112 @@ async def disconnect_installation(
     return Response(status_code=204)
 
 
+@router.get(
+    "/integrations/github/installations/{github_installation_id}/repositories",
+    **op("listGitHubInstallationRepositories", "github:read"),
+)
+async def list_installation_repositories(
+    request: Request,
+    github_installation_id: Annotated[uuid.UUID, PathParam()],
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    """Репозитории, доступные установке, — для выбора в форме привязки (FR-PRJ-03).
+
+    Источник — кэш, который наполняет воркер (ключ App есть только у него, OQ-47 (2)): `synced_at` — когда
+    список прочитан у GitHub, `stale` — пора обновить, `items: []` при `synced_at: null` — кэша ещё нет
+    (UI вызывает refresh). Список ничего не разрешает: доступ проверяется заново при привязке.
+    """
+    access = await workspace_access(request, principal, parse_workspace_header(request))
+    await authorize(request, access, "github:read")
+    state = app_state(request)
+    async with transaction(state.engine, access.db()) as conn:
+        row = await gh.store.get_installation(conn, github_installation_id)
+        attached = {
+            int(r)
+            for (r,) in (
+                await conn.execute(
+                    # Отвязанный репозиторий больше не занят (0023) — его снова можно предложить в форме.
+                    text(
+                        "SELECT github_repo_id FROM repositories WHERE github_repo_id IS NOT NULL"
+                        " AND status <> 'DETACHED'"
+                    )
+                )
+            ).all()
+        }
+    if row is None:
+        raise ProblemError("not_found")
+    cached = await gh.repo_cache.load(
+        state.redis, environment=state.settings.environment, installation_id=github_installation_id
+    )
+    web_url = state.settings.github_web_url
+    if cached is None:
+        return json_response(
+            {
+                "items": [],
+                "total": 0,
+                "truncated": False,
+                "synced_at": None,
+                "stale": True,
+                "repository_selection": row["repository_selection"],
+            }
+        )
+    return json_response(
+        {
+            "items": [repository_option_view(r, web_url, attached=r.id in attached) for r in cached.items],
+            "total": cached.total,
+            "truncated": cached.truncated,
+            "synced_at": cached.synced_at,
+            "stale": not cached.fresh(utcnow()),
+            "repository_selection": row["repository_selection"],
+        }
+    )
+
+
+@router.post(
+    "/integrations/github/installations/{github_installation_id}/repositories/refresh",
+    status_code=202,
+    **op("refreshGitHubInstallationRepositories", "github:read"),
+)
+async def refresh_installation_repositories(
+    request: Request,
+    github_installation_id: Annotated[uuid.UUID, PathParam()],
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    """Попросить воркер перечитать состав установки у GitHub. `queued: false` — та же установка обновлялась
+    только что (пауза `repo_cache.REFRESH_COOLDOWN_SECONDS` бережёт лимит GitHub API от частых нажатий)."""
+    access = await workspace_access(request, principal, parse_workspace_header(request))
+    await authorize(request, access, "github:read")
+    require_github_app(request)
+    state = app_state(request)
+    async with transaction(state.engine, access.db()) as conn:
+        row = await gh.store.get_installation(conn, github_installation_id)
+        if row is None:
+            raise ProblemError("not_found")
+        if row["status"] != "ACTIVE":
+            raise ProblemError("invalid_state_transition", detail="установка GitHub App не активна")
+        queued = await gh.repo_cache.claim_refresh(
+            state.redis, environment=state.settings.environment, installation_id=github_installation_id
+        )
+        if queued:
+            await github_repositories.request_sync(
+                conn,
+                workspace_id=access.workspace_id,
+                installation_row_id=github_installation_id,
+                actor_id=principal.user_id,
+            )
+            # Небезопасная операция (SC-AUD-03): запрос уходит воркеру и расходует лимит GitHub API.
+            await audit.record(
+                conn,
+                action="github.repositories.refresh_requested",
+                resource_type="github_installation",
+                resource_id=github_installation_id,
+                actor_type="user",
+                actor_id=principal.user_id,
+                workspace_id=access.workspace_id,
+            )
+    return json_response({"queued": queued}, status_code=202)
+
+
 @router.get("/integrations/github/verifications/{verification_id}", **op("getGitHubVerification", "github:read"))
 async def get_verification(
     request: Request,
@@ -270,14 +400,25 @@ async def attach_github_repository(
     local_path: str | None,
     default_branch: str | None,
     payload: dict[str, Any],
+    create_local_copy: bool = False,
 ) -> Response:
-    """FR-PRJ-03: GitHub-репозиторий, доступный активной установке workspace, + локальная рабочая копия."""
+    """FR-PRJ-03: GitHub-репозиторий, доступный активной установке workspace, + локальная рабочая копия.
+
+    Копия либо уже есть (`local_path` — её каталог), либо её создаёт воркер клонированием
+    (`create_local_copy`): здесь проверяется только каталог назначения, сам клон делает воркер —
+    ключ GitHub App есть только у него (OQ-47 (2)).
+    """
     state = app_state(request)
     errors = []
     if not remote_url:
         errors.append(FieldError("/remote_url", "required", "обязательно для github"))
     if not local_path:
-        errors.append(FieldError("/local_path", "required", "локальная рабочая копия репозитория обязательна"))
+        detail = (
+            "каталог для рабочей копии обязателен"
+            if create_local_copy
+            else "локальная рабочая копия репозитория обязательна"
+        )
+        errors.append(FieldError("/local_path", "required", detail))
     if errors:
         raise ProblemError("validation_error", errors=errors)
     if remote_url is None or local_path is None:  # pragma: no cover — проверено выше
@@ -295,7 +436,10 @@ async def attach_github_repository(
             errors=[FieldError("/provider", "no_installation", "в workspace нет активной установки GitHub App")],
         )
     # Локальная копия проверяется сразу (422); доступ установки к репозиторию — на воркере (ключ App, OQ-47 (2)).
-    projects.validate_github_local_copy(local_path, default_branch, state.settings.repository_roots)
+    if create_local_copy:
+        projects.resolve_clone_target(local_path, default_branch, state.settings.repository_roots)
+    else:
+        projects.validate_github_local_copy(local_path, default_branch, state.settings.repository_roots)
     params: dict[str, Any] = {
         "owner": ref.owner,
         "name": ref.name,
@@ -303,6 +447,8 @@ async def attach_github_repository(
         "local_path": local_path,
         "web_url": state.settings.github_web_url,
     }
+    if create_local_copy:
+        params["create_local_copy"] = True
     if default_branch:
         params["default_branch"] = default_branch
 

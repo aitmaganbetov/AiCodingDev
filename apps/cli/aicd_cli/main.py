@@ -50,7 +50,7 @@ from aicd_projects import api as projects
 def _read_password(from_stdin: bool) -> str:
     if from_stdin:
         return sys.stdin.readline().rstrip("\n")
-    first = getpass.getpass("Пароль владельца: ")
+    first = getpass.getpass("Пароль: ")
     if getpass.getpass("Повторите пароль: ") != first:
         raise SystemExit("Пароли не совпадают")
     return first
@@ -184,6 +184,29 @@ async def _orphan_objects(args: argparse.Namespace) -> int:
     return 0 if not report.failed else 3
 
 
+async def _create_user(args: argparse.Namespace) -> int:
+    """Учётная запись без workspace: приглашений по почте в v1 нет, а добавить в пространство можно только
+    зарегистрированного пользователя (Настройки → Участники). Роль и доступ выдаёт владелец пространства."""
+    settings = get_settings()
+    password = _read_password(args.password_stdin)
+    engine = create_engine(settings.require_database_url(), pool_size=1, keepalive=TcpKeepalive.from_settings(settings))
+    try:
+        async with transaction(engine, DbContext(actor_type="system")) as conn:
+            user_id = await identity.create_user(conn, email=args.email, display_name=args.name, password=password)
+    except ProblemError as err:
+        print(f"Ошибка: {err.detail or err.title}", file=sys.stderr)
+        return 1
+    except WeakPasswordError as err:
+        print(f"Ошибка: {err}", file=sys.stderr)
+        return 1
+    finally:
+        await engine.dispose()
+    print(
+        f"Создан пользователь {args.email} (user_id={user_id}). Доступ к пространству выдаётся в Настройки → Участники"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aicd", description="Администрирование AiCodingDev")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -197,6 +220,11 @@ def build_parser() -> argparse.ArgumentParser:
     owner.add_argument("--workspace-name", required=True)
     owner.add_argument("--password-stdin", action="store_true", help="Прочитать пароль из первой строки stdin")
     owner.set_defaults(handler=_create_owner)
+    user = admin_sub.add_parser("create-user", help="Создать учётную запись без workspace (для добавления в участники)")
+    user.add_argument("--email", required=True)
+    user.add_argument("--name", required=True)
+    user.add_argument("--password-stdin", action="store_true", help="Прочитать пароль из первой строки stdin")
+    user.set_defaults(handler=_create_user)
 
     db = sub.add_parser("db", help="Обслуживание БД")
     db_sub = db.add_subparsers(dest="command", required=True)

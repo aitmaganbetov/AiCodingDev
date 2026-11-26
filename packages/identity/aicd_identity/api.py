@@ -15,7 +15,7 @@ from aicd_identity import passwords, repository, tokens
 from aicd_identity.rbac import RANK, Role, effective_role
 from aicd_platform import audit
 from aicd_platform.clock import utcnow
-from aicd_platform.errors import ProblemError
+from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.ids import uuid7
 
 
@@ -315,7 +315,18 @@ async def add_member(
     user = await repository.get_user_by_email(conn, normalize_email(email))
     if user is None or user["status"] != "ACTIVE":
         # Приглашения по email вне v1; отсутствие пользователя — ошибка валидации поля.
-        raise ProblemError("validation_error", detail="Пользователь с таким email не найден")
+        raise ProblemError(
+            "validation_error",
+            detail="Пользователь с таким email не найден",
+            errors=[
+                FieldError(
+                    "/email",
+                    "user_not_registered",
+                    "пользователь с таким адресом не зарегистрирован — учётную запись создаёт администратор"
+                    " сервера (aicd admin create-user)",
+                )
+            ],
+        )
     if await repository.get_member(conn, user["id"]) is not None:
         raise ProblemError("conflict", detail="Пользователь уже является участником")
     await repository.insert_member(conn, workspace_id, user["id"], role.value, actor_id)

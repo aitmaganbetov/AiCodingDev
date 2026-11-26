@@ -330,6 +330,32 @@ class GitHubDouble:
                 "token": value, "expires_at": expires, "permissions": perms,
                 "repositories": [{"id": i, "full_name": self.repos[i].full_name} for i in sorted(ids)],
             })  # fmt: skip
+        if path == "/installation/repositories" and method == "GET":
+            # Состав установки: token без ограничения репозиториев (операция `list`, metadata: read).
+            auth = headers.get("authorization", "")
+            issued = self.tokens.get(auth[7:] if auth.startswith(("Bearer ", "token ")) else "")
+            if issued is None or issued.expires_at < time.time():
+                self.auth_failures.append("token")
+                raise _Http(401, "Bad credentials")
+            if _RANK.get(issued.permissions.get("metadata", ""), 0) < _RANK["read"]:
+                self.auth_failures.append("scope:metadata:read")
+                raise _Http(403, "Resource not accessible by integration")
+            ordered = [self.repos[i] for i in sorted(issued.repository_ids) if i in self.repos]
+            per_page = int((query.get("per_page") or ["30"])[0])
+            page = int((query.get("page") or ["1"])[0])
+            chunk = ordered[(page - 1) * per_page : page * per_page]
+            return _json(200, {
+                "total_count": len(ordered),
+                "repositories": [
+                    {
+                        "id": r.id, "full_name": r.full_name, "name": r.name,
+                        "owner": {"login": r.owner}, "private": True, "archived": False,
+                        "default_branch": r.default_branch,
+                        "html_url": f"https://github.com/{r.full_name}",
+                    }
+                    for r in chunk
+                ],
+            })  # fmt: skip
         m = re.fullmatch(r"/repos/([^/]+)/([^/]+)(/.*)?", path)
         if m is None:
             raise _Http(404, "Not Found")

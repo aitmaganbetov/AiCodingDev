@@ -111,6 +111,13 @@ async def victim(admin: psycopg.Connection, app_engine: AsyncEngine) -> Victim:
     admin.execute("SELECT set_config('app.user_id', '', false)")
     provider = admin.execute("SELECT id FROM cli_providers ORDER BY code LIMIT 1").fetchone()
     assert provider is not None
+    # Сессия входа CLI жертвы (миграция 0022): настоящая строка, чтобы чужой запрос отличался от 404 по id.
+    login_session = uuid7()
+    admin.execute(
+        "INSERT INTO cli_login_sessions (id, workspace_id, provider_id, requested_by, expires_at)"
+        " VALUES (%s, %s, %s, %s, now() + interval '10 minutes')",
+        (login_session, tenant.workspace_id, provider[0], tenant.owner_id),
+    )
     ids = {
         "workspace_id": str(tenant.workspace_id),
         "project_id": str(tenant.project_id),
@@ -136,6 +143,8 @@ async def victim(admin: psycopg.Connection, app_engine: AsyncEngine) -> Victim:
         # Inline-комментарии ревью (UI redesign B5): настоящие тред и комментарий жертвы.
         "thread_id": str(thread),
         "comment_id": str(comment),
+        # Вход CLI из UI (P2-01): настоящая сессия жертвы.
+        "login_session_id": str(login_session),
     }
     return Victim(tenant, ids)
 

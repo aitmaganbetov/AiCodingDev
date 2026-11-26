@@ -29,7 +29,7 @@ function providers(): S['Provider'][] {
           checked_at: '2026-11-08T08:00:00Z',
         },
       ],
-      workspace_settings: { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, allowed_roles: ['developer', 'qa'], settings_version: 3 },
+      workspace_settings: { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, model: null, allowed_roles: ['developer', 'qa'], settings_version: 3 },
     },
     {
       provider_id: '01900000-0000-7000-b000-000000000002',
@@ -49,7 +49,7 @@ function providers(): S['Provider'][] {
           checked_at: '2026-11-08T07:00:00Z',
         },
       ],
-      workspace_settings: { enabled: false, max_parallel_sessions: 1, default_timeout_seconds: 3600, allowed_roles: [], settings_version: 0 },
+      workspace_settings: { enabled: false, max_parallel_sessions: 1, default_timeout_seconds: 3600, model: null, allowed_roles: [], settings_version: 0 },
     },
   ];
 }
@@ -341,4 +341,189 @@ test('providers: 375/768/1366/1920 without horizontal overflow in both themes', 
       }
     }
   }
+});
+
+/**
+ * Device-code вход CLI из UI (P2-01, cli-auth.md): владелец нажимает «Войти», платформа запускает
+ * официальную команду входа CLI на хосте исполнения, UI показывает ссылку и код, которые напечатал CLI.
+ * Проверяется и главное свойство: экран нигде не просит и не принимает токен или пароль провайдера.
+ */
+const LOGIN_ID = '01900000-0000-7000-b000-0000000000ee';
+const LOGIN_URL = 'https://claude.com/cai/oauth/authorize?code=true&code_challenge=7r2Avt&state=LYqBZu';
+
+function mockLogin(api: MockApi, items: S['Provider'][], { stepUp = false, awaitCode = false } = {}) {
+  let attempts = 0;
+  let polls = 0;
+  let cancelled = false;
+  // Claude Code завершает вход вводом кода из браузера: сессия ждёт его, пока оператор не отправит.
+  let codeSubmitted = false;
+  api.route('POST', '/api/v1/providers/{id}/login', 'loginProvider', ({ id }) => {
+    attempts += 1;
+    // Вход привязывает подписку к хосту: сервер требует подтверждения пароля (SC-IAM-08).
+    if (stepUp && attempts === 1) return problem(403, 'step_up_required', { max_age_seconds: 600 });
+    return {
+      status: 202,
+      body: {
+        provider_id: id,
+        login_session_id: LOGIN_ID,
+        accepted_at: '2026-11-08T09:00:00Z',
+        status_url: `/api/v1/providers/${id}/logins/${LOGIN_ID}`,
+      },
+    };
+  });
+  api.route('GET', `/api/v1/providers/{id}/logins/${LOGIN_ID}`, 'getProviderLogin', ({ id }) => {
+    const p = items.find((x) => x.provider_id === id);
+    if (!p) return problem(404, 'not_found');
+    polls += 1;
+    // PENDING → CHALLENGE (CLI напечатал ссылку) → AUTHENTICATED, либо CANCELLED по кнопке.
+    const waiting = awaitCode && !codeSubmitted && !cancelled;
+    const state: S['ProviderLoginStatus']['state'] = cancelled
+      ? 'CANCELLED'
+      : polls === 1
+        ? 'PENDING'
+        : waiting || polls < 4
+          ? 'CHALLENGE'
+          : 'AUTHENTICATED';
+    const awaiting = waiting && state === 'CHALLENGE';
+    return {
+      status: 200,
+      body: {
+        login_session_id: LOGIN_ID,
+        provider_id: p.provider_id,
+        state,
+        verification_url: state === 'PENDING' ? null : LOGIN_URL,
+        user_code: state === 'PENDING' ? null : 'WDJB-MJHT',
+        awaiting_code: awaiting,
+        output_tail:
+          state === 'PENDING'
+            ? ''
+            : "Opening browser to sign in…\nIf the browser didn't open, visit: " +
+              LOGIN_URL +
+              (awaiting ? '\nPaste code here if prompted >' : ''),
+        error_category: state === 'CANCELLED' ? 'CANCELLED' : null,
+        host: 'worker-exec-2',
+        created_at: '2026-11-08T09:00:00Z',
+        updated_at: '2026-11-08T09:00:06Z',
+        expires_at: '2026-11-08T09:10:00Z',
+      },
+    };
+  });
+  api.route('POST', `/api/v1/providers/{id}/logins/${LOGIN_ID}/cancel`, 'cancelProviderLogin', ({ id }) => {
+    cancelled = true;
+    return { status: 202, body: { login_session_id: LOGIN_ID, provider_id: id, state: 'CANCELLED', verification_url: LOGIN_URL, user_code: 'WDJB-MJHT', awaiting_code: false, output_tail: '', error_category: 'CANCELLED', host: 'worker-exec-2', created_at: '2026-11-08T09:00:00Z', updated_at: '2026-11-08T09:00:08Z', expires_at: '2026-11-08T09:10:00Z' } };
+  });
+  api.route('POST', `/api/v1/providers/{id}/logins/${LOGIN_ID}/code`, 'submitProviderLoginCode', ({ id }) => {
+    codeSubmitted = true;
+    return { status: 202, body: { login_session_id: LOGIN_ID, provider_id: id, state: 'CHALLENGE', verification_url: LOGIN_URL, user_code: 'WDJB-MJHT', awaiting_code: false, output_tail: '— код авторизации отправлен CLI —', error_category: null, host: 'worker-exec-2', created_at: '2026-11-08T09:00:00Z', updated_at: '2026-11-08T09:00:10Z', expires_at: '2026-11-08T09:10:00Z' } };
+  });
+  api.route('POST', '/api/v1/auth/reauthenticate', 'reauthenticate', ({ body }) =>
+    (body as S['ReauthenticateRequest']).password === 'correct horse battery staple'
+      ? { status: 200, body: { ...api.session(), reauthenticated_at: '2026-11-08T09:00:02Z' } }
+      : problem(403, 'reauthentication_failed'),
+  );
+}
+
+test('providers: owner signs the CLI in by subscription — device code from the CLI, no secrets asked (light/dark axe)', async ({ page, api }) => {
+  const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
+  const items = providers();
+  mockProviders(api, items);
+  mockLogin(api, items, { stepUp: true });
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/settings/providers`);
+
+  const claude = page.locator('#provider-claude');
+  const section = claude.getByTestId('provider-login-claude');
+  await expect(section).toContainText('Платформа не принимает и не хранит токены');
+  // Нигде не предлагается ввести секрет: ни поля пароля, ни поля для ключа.
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
+
+  await section.getByRole('button', { name: 'Войти' }).click();
+  // Step-up: сервер просит пароль пользователя платформы (не провайдера), затем запрос повторяется.
+  const stepUp = page.getByRole('dialog', { name: 'Подтвердите пароль' });
+  await expect(stepUp).toBeVisible();
+  await stepUp.getByLabel('Пароль').fill('correct horse battery staple');
+  await stepUp.getByRole('button', { name: 'Подтвердить' }).click();
+  await expect(stepUp).toBeHidden();
+
+  // CLI напечатал ссылку и код — показываем их как есть: оператор открывает ровно эту ссылку.
+  await expect(section.getByRole('link', { name: LOGIN_URL })).toHaveAttribute('href', LOGIN_URL);
+  await expect(section.getByText('WDJB-MJHT')).toBeVisible();
+  await expect(section.locator('[data-login-state]')).toHaveAttribute('data-login-state', 'CHALLENGE');
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expectNoSeriousA11yViolations(page, `providers login challenge (${scheme})`);
+  }
+  // Провайдер подтвердил вход: состояние станет AUTHENTICATED без действий оператора.
+  await expect(section.locator('[data-login-state]')).toHaveAttribute('data-login-state', 'AUTHENTICATED', { timeout: 15_000 });
+
+  const requests = api.requests.filter((r) => r.operationId === 'loginProvider');
+  expect(requests).toHaveLength(2); // первый — 403 step_up_required, повтор — тот же Idempotency-Key
+  expect(requests[0]?.headers['idempotency-key']).toBe(requests[1]?.headers['idempotency-key']);
+  expect(requests.every((r) => r.body === undefined)).toBe(true); // тело запроса пустое: передавать нечего
+  expect(api.requests.filter((r) => r.operationId === 'getProviderLogin').every((r) => r.headers['x-workspace-id'] === ws.id)).toBe(true);
+  // Список провайдеров перечитан: auth_status установки меняется после входа.
+  expect(api.requests.filter((r) => r.operationId === 'listProviders').length).toBeGreaterThanOrEqual(2);
+});
+
+/**
+ * Claude Code завершает вход вводом кода, который провайдер показал в браузере («Paste code here if
+ * prompted >»). Поле появляется только по просьбе самого CLI (`awaiting_code`), код уходит в процесс CLI
+ * на хосте исполнения и платформой не хранится (ТЗ §1): в UI это единственное поле ввода на экране.
+ */
+test('providers: operator pastes the authorization code the CLI asked for (light/dark axe)', async ({ page, api }) => {
+  const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
+  const items = providers();
+  mockProviders(api, items);
+  mockLogin(api, items, { awaitCode: true });
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/settings/providers`);
+
+  const section = page.locator('#provider-claude').getByTestId('provider-login-claude');
+  await section.getByRole('button', { name: 'Войти' }).click();
+  await expect(section.locator('[data-login-state]')).toHaveAttribute('data-login-state', 'CHALLENGE');
+
+  // Поле появилось, потому что об этом попросил сам CLI; это не пароль и не ключ провайдера.
+  const field = section.getByTestId('login-code-input');
+  await expect(field).toBeVisible();
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expectNoSeriousA11yViolations(page, `providers login code (${scheme})`);
+  }
+  await expectNoHorizontalScroll(page);
+
+  await field.fill('  ABCD-1234-EFGH  ');
+  await section.getByTestId('login-code-submit').click();
+
+  const sent = api.requests.find((r) => r.operationId === 'submitProviderLoginCode');
+  expect(sent?.body).toEqual({ code: 'ABCD-1234-EFGH' }); // пробелы по краям срезаются
+  expect(sent?.headers['idempotency-key']).toBeTruthy();
+  // CLI получил код и завершил вход; поле исчезает вместе с просьбой CLI.
+  await expect(section.locator('[data-login-state]')).toHaveAttribute('data-login-state', 'AUTHENTICATED', { timeout: 15_000 });
+  await expect(section.getByTestId('login-code-input')).toHaveCount(0);
+});
+
+test('providers: login can be cancelled, and a non-owner has no login control at all', async ({ page, api }) => {
+  const ws = api.addWorkspace('Команда Альфа', 'alpha', 'owner');
+  const items = providers();
+  mockProviders(api, items);
+  mockLogin(api, items);
+  await login(page, api);
+  await page.goto(`/w/${ws.id}/settings/providers`);
+
+  const section = page.locator('#provider-claude').getByTestId('provider-login-claude');
+  await section.getByRole('button', { name: 'Войти' }).click();
+  await expect(section.locator('[data-login-state]')).toHaveAttribute('data-login-state', 'CHALLENGE');
+  await section.getByRole('button', { name: 'Отменить вход' }).click();
+  await expect(section.locator('[data-login-state]')).toHaveAttribute('data-login-state', 'CANCELLED');
+  await expect(section.getByRole('paragraph').filter({ hasText: 'Вход отменён' })).toBeVisible();
+  const cancel = api.requests.find((r) => r.operationId === 'cancelProviderLogin');
+  expect(cancel?.headers['idempotency-key']).toBeTruthy();
+  await expectNoHorizontalScroll(page);
+
+  // admin — не владелец подписки: раздела входа нет (provider:login — только owner, OQ-01/OQ-24).
+  const other = api.addWorkspace('Команда Бета', 'beta', 'admin');
+  await page.goto(`/w/${other.id}/settings/providers`);
+  await expect(page.locator('#provider-claude')).toBeVisible();
+  await expect(page.getByTestId('provider-login-claude')).toHaveCount(0);
 });

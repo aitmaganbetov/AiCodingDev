@@ -20,6 +20,7 @@ API не держит ключ App и не обращается к GitHub API с
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Mapping
@@ -40,11 +41,14 @@ from aicd_integrations_github.api import (
     store,
     verifications,
 )
+from aicd_orchestration import github_repositories
 from aicd_platform import audit, outbox
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.errors import ProblemError
 from aicd_platform.ids import uuid7
 from aicd_projects import api as projects
+from aicd_security import git as git_guard
+from aicd_security.paths import UnsafePathError, resolve_in_roots
 
 log = logging.getLogger("aicd.github")
 
@@ -120,11 +124,15 @@ class GitHubVerifier:
         client: GitHubClient,
         *,
         repository_roots: Mapping[str, Path],
+        git_url: str = "https://github.com",
+        proxy_url: str | None = None,
     ) -> None:
         self.engine = engine
         self.client = client
         self.app_id = client.app_id
         self.repository_roots = dict(repository_roots)
+        self.git_url = git_url.rstrip("/")
+        self.proxy_url = proxy_url
 
     async def verify(self, ws: uuid.UUID, verification_id: uuid.UUID) -> str:
         ctx = DbContext(workspace_id=ws, actor_type="system")
@@ -138,6 +146,10 @@ class GitHubVerifier:
                 installation = await self._check_installation(params)
                 return await self._finish(ctx, row, lambda conn: self._connect(conn, row, installation))
             inst, info = await self._check_repository(ctx, params)
+            if params.get("create_local_copy"):
+                # Копию создаём до записи результата и вне транзакции: клонирование — сетевая операция,
+                # держать на ней транзакцию (и блокировку строки проверки) нельзя.
+                await self._create_local_copy(params, inst, info)
             return await self._finish(ctx, row, lambda conn: self._attach(conn, row, params, inst, info))
         except _Failed as failed:
             return await self._fail(ctx, row, failed)
@@ -183,6 +195,57 @@ class GitHubVerifier:
                     raise _Failed("github_unavailable", "GitHub API недоступен") from exc
                 continue
         raise _Failed("not_accessible", "репозиторий недоступен установкам GitHub App")
+
+    # --- локальная рабочая копия (FR-PRJ-03, `create_local_copy`) --------------------------------------
+
+    def _cloned_already(self, local_path: str, remote_url: str) -> bool:
+        """Копия этого же репозитория уже лежит в каталоге — повтор события после удачного клонирования.
+
+        Сверяется `remote.origin.url`: чужой репозиторий в этом каталоге копией не считается, и привязка
+        упрётся в обычную проверку каталога.
+        """
+        try:
+            resolved = resolve_in_roots(local_path, self.repository_roots)
+            git_guard.inspect_repository(resolved.absolute)
+            origin = git_guard.run_git(resolved.absolute, "config", "--get", "remote.origin.url")
+        except (UnsafePathError, git_guard.GitRepositoryError):
+            return False
+        return origin.strip() == remote_url
+
+    async def _create_local_copy(self, params: Mapping[str, Any], inst: Mapping[str, Any], info: RepoInfo) -> None:
+        """Клонировать репозиторий в каталог из allowlist-корней installation-токеном `contents:read`.
+
+        Токен живёт только в памяти процесса и в окружении git (GIT_ASKPASS): ни в argv, ни в URL, ни в
+        `.git/config` клона его нет (SC-GH-04). Каталог проверяется ещё раз здесь — между проверкой в API и
+        работой воркера он мог появиться.
+        """
+        local_path = str(params["local_path"])
+        remote_url = f"{self.git_url}/{info.full_name}.git"
+        branch = str(params.get("default_branch") or info.default_branch)
+        if await asyncio.to_thread(self._cloned_already, local_path, remote_url):
+            return
+        try:
+            target = projects.resolve_clone_target(local_path, branch, self.repository_roots)
+        except ProblemError as exc:
+            detail = exc.errors[0].message if exc.errors else (exc.detail or exc.code)
+            raise _Failed("clone_target_unavailable", detail) from exc
+        try:
+            token = await self.client.installation_token(int(inst["installation_id"]), "read", repository_ids=[info.id])
+        except GitHubError as exc:
+            raise _Failed("github_unavailable", "GitHub API недоступен") from exc
+        try:
+            await asyncio.to_thread(
+                git_guard.clone_repository,
+                remote_url=remote_url,
+                destination=target,
+                token=token.value(),
+                branch=branch,
+                proxy_url=self.proxy_url,
+            )
+        except git_guard.GitRepositoryError as exc:
+            log.info("github clone failed", extra={"full_name": info.full_name, "detail": exc.detail})
+            raise _Failed("clone_failed", str(exc)) from exc
+        log.info("github local copy created", extra={"full_name": info.full_name, "local_path": local_path})
 
     # --- запись результата -----------------------------------------------------------------------------
 
@@ -254,6 +317,14 @@ class GitHubVerifier:
                 "reconnected": not created,
                 "verification_id": str(row["id"]),
             },
+        )
+        # Установка стала ACTIVE — сразу прочитать её состав, чтобы форма привязки предлагала выбор
+        # репозиториев без отдельного нажатия «обновить» (список кэшируется, не сохраняется в БД).
+        await github_repositories.request_sync(
+            conn,
+            workspace_id=row["workspace_id"],
+            installation_row_id=inst_row["id"],
+            actor_id=row["requested_by"],
         )
         result: uuid.UUID = inst_row["id"]
         return result

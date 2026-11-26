@@ -442,3 +442,36 @@ def test_migration_destructive_sets_approval_subject_and_forward_only_rules() ->
     assert migrations.evaluate(0, up_only, GateContext("/w", "/i", facts=fwd, profile="strict")).status == "FAIL"
     basic = migrations.evaluate(0, up_only, GateContext("/w", "/i", facts=fwd, profile="basic"))
     assert basic.status == "PASS" and basic.findings[0].rule_id == "migration/irreversible"
+
+
+@pytest.mark.parametrize(
+    ("config", "whole_tree"),
+    [
+        ("[tool.mypy]\nstrict = true\n", True),
+        ('[tool.mypy]\nfiles = ["src"]\n', False),
+        ('[tool.mypy]\npackages = ["app"]\n', False),  # регрессия: охват через packages игнорировался
+        ('[tool.mypy]\nmodules = ["app.main"]\n', False),
+    ],
+)
+def test_mypy_runs_within_the_scope_declared_by_the_project(config: str, whole_tree: bool) -> None:
+    facts = RepoFacts(frozenset({"pyproject.toml", "src/app/main.py"}), {"pyproject.toml": config})
+    argv = runners._mypy_argv(ctx(facts=facts))
+    assert (argv[-1] == ".") is whole_tree
+
+
+def test_failed_gate_messages_name_what_to_fix() -> None:
+    """Сообщение gate уходит следующей попытке агента: в нём должны быть упавшие тесты и нарушения."""
+    from aicd_verification.gates import interpret_pytest
+
+    output = (
+        "FAILED tests/test_a.py::test_one - AssertionError: boom\n"
+        "ERROR tests/test_b.py::test_two - OSError: [Errno 30] Read-only file system\n"
+        "=== 1 failed, 3 passed, 1 error in 0.10s ===\n"
+    )
+    message = interpret_pytest(1, output).message
+    assert message.startswith("2 failed/errored test(s): ")
+    assert "tests/test_a.py::test_one — AssertionError: boom" in message
+    assert "tests/test_b.py::test_two — OSError: [Errno 30] Read-only file system" in message
+
+    lint = evaluate_ruff_lint(1, "src/a.py:3:1: F401 `os` imported but unused\nFound 1 error.\n", ctx())
+    assert lint.message == "1 ruff violation(s): F401 src/a.py:3"

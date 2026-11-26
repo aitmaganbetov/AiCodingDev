@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { problem, json, mockFetch, WS_ID } from '../test/utils';
 import {
   ApiError,
+  createIdempotencyKey,
   IdempotentIntent,
   parseProblem,
   readCsrfCookie,
@@ -87,6 +88,18 @@ describe('api client: Idempotency-Key and tenant header', () => {
     });
     await expect(workspacesApi.create({ name: 'Команда', slug: 'team' }, 'k-12345678')).resolves.toMatchObject({ id: WS_ID });
     expect(calls.map((c) => c.headers.get('Idempotency-Key'))).toEqual(['k-12345678', 'k-12345678']);
+  });
+
+  it('generates a UUIDv4 key without crypto.randomUUID (insecure context: http on a LAN address)', () => {
+    const original = crypto.randomUUID;
+    Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true });
+    try {
+      const key = createIdempotencyKey();
+      expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(createIdempotencyKey()).not.toBe(key);
+    } finally {
+      Object.defineProperty(crypto, 'randomUUID', { value: original, configurable: true });
+    }
   });
 
   it('does not retry POST without an Idempotency-Key (logout)', async () => {

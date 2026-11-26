@@ -48,6 +48,19 @@ curl -fsS http://localhost:8080/api/v1/health/ready
   ключа подписи API и без роли `aicd_maintenance`; rootfs только для чтения, `cap_drop: ALL`, портов не публикуют;
   healthcheck — `/metrics` воркера (`:9464`, bearer `metrics_token`), его же скрейпит Prometheus. Остановка — SIGTERM,
   текущие сообщения дорабатываются (`stop_grace_period` 60 с).
+* **Шаг `prepare`** (зависимости проверяемого проекта для gates pytest/mypy/coverage/build,
+  QUALITY_GATES §4.3) выключен по умолчанию. Включение:
+
+  ```sh
+  export AICD_VERIFICATION_PREPARE_DIR=/srv/aicd/deps      # кэш `aicd-prep-<sha256>`, монтируется в gates ro
+  export AICD_VERIFICATION_PREPARE_NETWORK=aicd-prep-egress  # сеть только для prepare; `bridge`/`host` запрещены
+  export AICD_VERIFICATION_PREPARE_PROXY_URL=http://egress-proxy:3128  # в production обязателен (allowlist реестров)
+  install -d -o 10001 -g 10001 -m 0750 "$AICD_VERIFICATION_PREPARE_DIR"
+  docker network create --internal aicd-prep-egress        # маршрут к реестрам даёт только egress-proxy
+  ```
+
+  Без `AICD_VERIFICATION_PREPARE_PROXY_URL` в production `worker-exec` не стартует: prepare — единственный
+  шаг верификации с исходящим доступом, и он допустим только через proxy с allowlist реестров пакетов.
 * **worker-exec** — единственный воркер с записью в `AICD_REPOS_DIR` (`git worktree add` пишет в `.git/worktrees`;
   каталог и клоны должны быть доступны на запись uid 10001) и с путём к Docker API — только через `docker-socket-proxy`
   оверлея `compose.sandbox.yaml` (сеть `aicd-docker-ctl`; сокет Docker в воркер не монтируется, SECURITY_ARCHITECTURE

@@ -28,6 +28,30 @@ export const DIRECTIVE_TYPES: readonly DirectiveType[] = [
   'REJECT',
 ];
 
+export type DirectiveTargetKind = 'run' | 'role' | 'task';
+/**
+ * Кому можно адресовать команду каждого типа — зеркало серверного `ALLOWED_TARGETS` (API_DESIGN §5.4).
+ * Форма не предлагает недопустимую цель: иначе сервер отвечает 422 уже после заполнения поручения.
+ * Решения по approvals (APPROVE/REJECT) адресуются approval, а не агентам.
+ */
+export const DIRECTIVE_TARGETS: Readonly<Record<DirectiveType, readonly DirectiveTargetKind[]>> = {
+  ASK: ['run', 'role', 'task'],
+  REVIEW: ['role', 'task'],
+  NEW_TASK: ['run', 'role'],
+  CHANGE_REQUEST: ['run', 'role', 'task'],
+  STOP: ['run', 'task'],
+  PAUSE: ['run'],
+  RESUME: ['run'],
+  APPROVE: [],
+  REJECT: [],
+};
+
+/** Цель, которая останется выбранной при смене типа команды: прежняя, если допустима, иначе первая допустимая. */
+export function allowedTarget(type: DirectiveType, current: DirectiveTargetKind): DirectiveTargetKind {
+  const allowed = DIRECTIVE_TARGETS[type];
+  return allowed.includes(current) ? current : (allowed[0] ?? 'run');
+}
+
 /** Типы, доступные роли (x-permission-rules createDirective; окончательно решает сервер). */
 export function directiveTypesFor(role: string | null | undefined): readonly DirectiveType[] {
   if (role === 'owner' || role === 'admin' || role === 'developer') return DIRECTIVE_TYPES;

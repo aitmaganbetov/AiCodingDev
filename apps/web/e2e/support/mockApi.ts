@@ -182,6 +182,25 @@ const SHELL_DEFAULTS: { method: string; path: string; operationId: string; reply
     operationId: 'listProviderExecutions',
     reply: () => ({ status: 200, body: { items: [], next_cursor: null } }),
   },
+  // Форма привязки репозитория показывает, что разрешено: корни сервера и состав установки GitHub App.
+  // По умолчанию — ничего не найдено (форма предлагает ручной ввод); spec переопределяют через api.route.
+  { method: 'GET', path: '/api/v1/repository-roots', operationId: 'listRepositoryRoots', reply: () => ({ status: 200, body: { items: [] } }) },
+  { method: 'GET', path: '/api/v1/integrations/github/installations', operationId: 'listGitHubInstallations', reply: () => ({ status: 200, body: { items: [] } }) },
+  {
+    method: 'GET',
+    path: '/api/v1/integrations/github/installations/{id}/repositories',
+    operationId: 'listGitHubInstallationRepositories',
+    reply: () => ({
+      status: 200,
+      body: { items: [], total: 0, truncated: false, synced_at: null, stale: true, repository_selection: 'selected' },
+    }),
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/integrations/github/installations/{id}/repositories/refresh',
+    operationId: 'refreshGitHubInstallationRepositories',
+    reply: () => ({ status: 202, body: { queued: true } }),
+  },
 ];
 
 /** Сводка analytics workspace без данных за окно (нули и null-доли — как у сервера). */

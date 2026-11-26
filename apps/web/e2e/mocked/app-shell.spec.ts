@@ -30,7 +30,7 @@ function installation(over: Partial<S['ProviderInstallation']> = {}): S['Provide
 }
 
 function providers(codex: Partial<S['ProviderInstallation']>, claude: Partial<S['ProviderInstallation']> | null): S['Provider'][] {
-  const settings: S['ProviderSettings'] = { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, allowed_roles: [], settings_version: 1 };
+  const settings: S['ProviderSettings'] = { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, model: null, allowed_roles: [], settings_version: 1 };
   return [
     { provider_id: '01900000-0000-7000-b000-000000000001', code: 'codex', display_name: 'Codex CLI', enabled_globally: true, installations: [installation(codex)], workspace_settings: settings },
     {

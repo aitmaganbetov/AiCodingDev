@@ -13,6 +13,7 @@ OWNED_TABLES = frozenset(
         "cli_sessions",
         "cli_executions",
         "provider_health",
+        "cli_login_sessions",
         "usage_metrics",
     }
 )

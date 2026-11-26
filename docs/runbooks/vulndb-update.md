@@ -47,6 +47,10 @@ $U apply --approval-id <approval_id> --db-root /var/lib/aicd/vulndb \
 * Загрузка — в staging-каталог; проверки: размер ≤ 1 GiB, md5 от сервера, целостность zip, имена записей (`*.json` без путей),
   формат OSV; для Trivy — `metadata.json` и свежесть. Затем атомарная замена `<db-root>/<osv|trivy>`; предыдущая версия —
   `<db-root>/.previous/<вид>` (откат: переименовать обратно). Итог — в аудит платформы и `<db-root>/audit.jsonl`.
+* Подключение к gates: `<db-root>` задаётся воркеру exec переменной `AICD_VERIFICATION_VULNDB_ROOT` (compose:
+  `AICD_VERIFICATION_VULNDB_DIR`); движок проверяет наличие и свежесть БД перед каждым gate SCA и монтирует
+  `<db-root>/<osv|trivy>` в контейнер как `/aicd-db` только для чтения. Переменная не задана, БД нет или она старше
+  7 суток — `ERROR(TOOL_UNAVAILABLE)`.
 * Права: каталоги `0755`, файлы `0644` (gate-контейнеры читают от непривилегированного uid), монтирование только для чтения.
 * Сеть: на хосте обновления разрешить только хосты из таблицы (egress-proxy `infrastructure/docker/egress-proxy/allowlist.d`),
   не на хостах исполнения агентов.

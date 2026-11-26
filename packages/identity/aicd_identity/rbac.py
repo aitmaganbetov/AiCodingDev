@@ -66,6 +66,9 @@ PERMISSIONS: Final[dict[str, frozenset[Role]]] = {
     "finding:triage": _REVIEWER_UP,
     "compliance:review": _REVIEWER_UP,
     "provider:probe": _ADMIN_UP,
+    # Интерактивный вход CLI по подписке (device code): действие владельца подписки, не рядового админа
+    # (cli-auth.md §0 «одна подписка — один хост исполнения», OQ-01/OQ-24).
+    "provider:login": frozenset({Role.OWNER}),
     "provider:settings": _ADMIN_UP,
     "documentation:register": _ADMIN_UP,
     "documentation:refresh": _DEV_UP,

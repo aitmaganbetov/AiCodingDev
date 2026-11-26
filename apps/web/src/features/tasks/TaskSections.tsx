@@ -1,4 +1,4 @@
-import { useInfiniteQuery, type UseInfiniteQueryResult, type InfiniteData } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, type UseInfiniteQueryResult, type InfiniteData } from '@tanstack/react-query';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { runKeys, runsApi } from '../../api/runs';
@@ -12,7 +12,21 @@ import {
   type GateExecution,
   type TaskAttempt,
 } from '../../api/tasks';
-import { Badge, CodeBlock, EmptyState, ErrorState, LoadMore, LoadingState, StatusBadge, Table, Timestamp, type Column } from '../../components/ui';
+import {
+  Badge,
+  CodeBlock,
+  Dialog,
+  DialogClose,
+  DialogContent,
+  EmptyState,
+  ErrorState,
+  LoadMore,
+  LoadingState,
+  StatusBadge,
+  Table,
+  Timestamp,
+  type Column,
+} from '../../components/ui';
 import { describeEvent } from '../runs/describeEvent';
 import { providerLabel, roleLabel } from '../runs/labels';
 
@@ -60,9 +74,97 @@ function useCursorQuery<T>(key: readonly unknown[], fetchPage: (cursor: string |
   return { query, items };
 }
 
+/** Короткая сводка по конверту результата CLI (contract 1.0): статус, код выхода, сообщение ошибки. */
+function summarizeOutput(parsed: unknown): string | null {
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const envelope = parsed as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof envelope.execution_status === 'string') parts.push(envelope.execution_status);
+  if (typeof envelope.exit_code === 'number') parts.push(`exit ${envelope.exit_code}`);
+  const error = envelope.error;
+  if (typeof error === 'object' && error !== null) {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === 'string' && message !== '') parts.push(message);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/**
+ * Ссылка на фрагмент вывода CLI внутри конверта: `artifacts[].ref` вида `artifact:<uuid>`. Сырой лог
+ * (`raw_log`, `protected: true`) отсюда не открывается — он требует отдельного права `artifact:download_raw`.
+ */
+function outputExcerptId(parsed: unknown): string | null {
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const list = (parsed as Record<string, unknown>).artifacts;
+  if (!Array.isArray(list)) return null;
+  for (const item of list) {
+    if (typeof item !== 'object' || item === null) continue;
+    const entry = item as Record<string, unknown>;
+    if (entry.type !== 'output_excerpt' || typeof entry.ref !== 'string') continue;
+    const id = entry.ref.startsWith('artifact:') ? entry.ref.slice('artifact:'.length) : null;
+    if (id !== null && id !== '') return id;
+  }
+  return null;
+}
+
+/**
+ * Вывод запуска CLI на экране. Раньше «вывод» был только ссылкой на скачивание: файл молча уходил в
+ * «Загрузки» браузера, на странице не менялось ничего, и вывод оставался недоступен там, где браузер
+ * загрузку не выпускает (политика, расширение, запрет на файлы). Показываются сам фрагмент вывода CLI
+ * (`output_excerpt`) и конверт результата (`cli_output`) — и то, и другое недоверенные данные,
+ * поэтому только как текст.
+ */
+function ExecutionOutput({ artifactId }: { artifactId: string }) {
+  const { t } = useTranslation();
+  const text = useQuery({
+    queryKey: taskKeys.artifact(artifactId),
+    queryFn: ({ signal }) => tasksApi.artifactText(artifactId, signal),
+    staleTime: Infinity,
+  });
+  const shown = useMemo(() => {
+    if (text.data === undefined) return null;
+    try {
+      const parsed: unknown = JSON.parse(text.data);
+      return { body: JSON.stringify(parsed, null, 2), summary: summarizeOutput(parsed), excerptId: outputExcerptId(parsed) };
+    } catch {
+      return { body: text.data, summary: null, excerptId: null }; // не JSON (сырой лог) — показываем как есть
+    }
+  }, [text.data]);
+  const excerptId = shown?.excerptId ?? null;
+  const excerpt = useQuery({
+    queryKey: taskKeys.artifact(excerptId ?? ''),
+    queryFn: ({ signal }) => tasksApi.artifactText(excerptId ?? '', signal),
+    enabled: excerptId !== null,
+    staleTime: Infinity,
+  });
+
+  if (text.isPending) return <LoadingState label={t('tasks.attempts.outputLoading')} />;
+  if (text.isError) return <ErrorState error={text.error} onRetry={() => void text.refetch()} title={t('tasks.attempts.outputError')} />;
+  if (shown === null || shown.body.trim() === '') return <p className="text-sm text-fg-muted">{t('tasks.attempts.outputEmpty')}</p>;
+  return (
+    <div className="flex flex-col gap-3" data-testid="attempt-output">
+      {shown.summary !== null ? <p className="text-sm">{shown.summary}</p> : null}
+      {excerptId !== null ? (
+        excerpt.isPending ? (
+          <LoadingState label={t('tasks.attempts.outputLoading')} />
+        ) : excerpt.isError ? (
+          <ErrorState error={excerpt.error} onRetry={() => void excerpt.refetch()} title={t('tasks.attempts.outputError')} />
+        ) : (
+          <CodeBlock code={excerpt.data ?? ''} label={t('tasks.attempts.outputExcerpt')} wrap maxHeightClass="max-h-[40vh]" />
+        )
+      ) : null}
+      <details data-testid="attempt-output-envelope">
+        <summary className="min-h-target cursor-pointer text-sm text-fg-muted">{t('tasks.attempts.outputEnvelope')}</summary>
+        <CodeBlock className="mt-1" code={shown.body} label={t('tasks.attempts.outputEnvelope')} wrap maxHeightClass="max-h-[40vh]" />
+      </details>
+    </div>
+  );
+}
+
 /** Попытки задачи: исполнитель (роль · CLI), время, категория ошибки, executions с выводом. */
 export function TaskAttempts({ taskId, canDownload }: { taskId: string; canDownload: boolean }) {
   const { t } = useTranslation();
+  const [output, setOutput] = useState<string | null>(null);
   const { query, items } = useCursorQuery<TaskAttempt>(taskKeys.attempts(taskId), (cursor, signal) =>
     tasksApi.attempts(taskId, { limit: PAGE, ...(cursor ? { cursor } : {}) }, signal),
   );
@@ -109,9 +211,9 @@ export function TaskAttempts({ taskId, canDownload }: { taskId: string; canDownl
                 </Badge>
                 {x.exit_code !== null && x.exit_code !== undefined ? <span>{t('tasks.attempts.exitCode', { code: x.exit_code })}</span> : null}
                 {x.output_artifact_id && canDownload ? (
-                  <a className="link" href={artifactDownloadPath(x.output_artifact_id)} download>
+                  <button type="button" className="link" data-testid="attempt-output-open" onClick={() => setOutput(x.output_artifact_id ?? null)}>
                     {t('tasks.attempts.output')}
-                  </a>
+                  </button>
                 ) : null}
               </li>
             ))}
@@ -121,9 +223,34 @@ export function TaskAttempts({ taskId, canDownload }: { taskId: string; canDownl
     { id: 'routing', header: t('tasks.attempts.routing'), cell: (a) => a.routing_reason ?? '—' },
   ];
   return (
-    <Paged query={query} items={items} loading={t('tasks.attempts.loading')} empty={<EmptyState headingLevel={3} title={t('tasks.attempts.empty')} />}>
-      <Table caption={t('tasks.attempts.caption')} columns={columns} rows={items} rowKey={(a) => a.id} minWidthClass="min-w-[56rem]" defaultSort={{ columnId: 'no', direction: 'desc' }} />
-    </Paged>
+    <>
+      <Paged query={query} items={items} loading={t('tasks.attempts.loading')} empty={<EmptyState headingLevel={3} title={t('tasks.attempts.empty')} />}>
+        <Table caption={t('tasks.attempts.caption')} columns={columns} rows={items} rowKey={(a) => a.id} minWidthClass="min-w-[56rem]" defaultSort={{ columnId: 'no', direction: 'desc' }} />
+      </Paged>
+      <Dialog
+        open={output !== null}
+        onOpenChange={(opened) => {
+          if (!opened) setOutput(null);
+        }}
+      >
+        <DialogContent
+          size="lg"
+          title={t('tasks.attempts.outputTitle')}
+          footer={
+            <div className="flex flex-wrap items-center gap-2">
+              {output !== null ? (
+                <a className="btn-secondary" href={artifactDownloadPath(output)} download>
+                  {t('tasks.attempts.outputDownload')}
+                </a>
+              ) : null}
+              <DialogClose className="btn-primary">{t('tasks.attempts.outputClose')}</DialogClose>
+            </div>
+          }
+        >
+          {output !== null ? <ExecutionOutput artifactId={output} /> : null}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

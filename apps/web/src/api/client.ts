@@ -169,8 +169,16 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler): () => void
 // Idempotency-Key
 // ---------------------------------------------------------------------------
 
+/**
+ * `crypto.randomUUID` есть только в secure context (https или localhost). Стенд, открытый
+ * по http на LAN-адресе, его не даёт — без запасного пути любая POST-команда падала бы
+ * TypeError ещё до запроса. `crypto.getRandomValues` доступен и в insecure context.
+ */
 export function createIdempotencyKey(): string {
-  return crypto.randomUUID();
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const variant = ((parseInt(hex.slice(16, 17), 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20)}`;
 }
 
 function stableStringify(value: unknown): string {

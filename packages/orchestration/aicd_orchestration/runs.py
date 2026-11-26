@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Literal
 
 from sqlalchemy import text
@@ -16,6 +18,8 @@ from aicd_orchestration import fsm, store
 from aicd_platform import audit, outbox
 from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.ids import uuid7
+from aicd_security import git as git_guard
+from aicd_security.paths import UnsafePathError, resolve_in_roots
 
 ALL_PROVIDERS = ("codex", "claude")
 
@@ -23,6 +27,25 @@ ALL_PROVIDERS = ("codex", "claude")
 def allow_untested_cli_versions(quality_profile: str) -> bool:
     """Значение политики по умолчанию (CLI_ADAPTER_CONTRACT §5.3, ROUTING_POLICY H2): `false` только для critical."""
     return quality_profile != "critical"
+
+
+def _working_copy_head(local_root_ref: str | None, roots: Mapping[str, Path] | None) -> str | None:
+    """HEAD локальной рабочей копии сейчас, а не на момент привязки.
+
+    `repositories.last_synced_commit_sha` записывается при привязке и больше ничем не обновляется, поэтому
+    без этого чтения run навсегда стартовал бы с коммита, который был HEAD в момент привязки: репозиторий,
+    привязанный пустым, остался бы неработоспособным (`no_base_commit`) даже после первого коммита.
+
+    Недоступная копия (каталог убрали, корни не настроены) — не повод отказать в создании run: возвращаем
+    None и остаёмся на сохранённом значении, а отсутствие коммита поймает движок (`no_base_commit`).
+    """
+    if not roots or not local_root_ref:
+        return None
+    try:
+        resolved = resolve_in_roots(local_root_ref, dict(roots))
+        return git_guard.inspect_repository(resolved.absolute).head_sha
+    except (UnsafePathError, git_guard.GitRepositoryError, OSError):
+        return None
 
 
 async def create_run(
@@ -37,6 +60,7 @@ async def create_run(
     approval_policy: str,
     allowed_providers: list[str] | None,
     routing_strategy: str = "adaptive",
+    repository_roots: Mapping[str, Path] | None = None,
 ) -> dict[str, Any]:
     settings = (
         (
@@ -59,7 +83,10 @@ async def create_run(
     repos = (
         (
             await conn.execute(
-                text("SELECT id, last_synced_commit_sha FROM repositories WHERE project_id = :p AND status = 'ACTIVE'"),
+                text(
+                    "SELECT id, last_synced_commit_sha, local_root_ref FROM repositories"
+                    " WHERE project_id = :p AND status = 'ACTIVE'"
+                ),
                 {"p": project_id},
             )
         )
@@ -76,6 +103,14 @@ async def create_run(
                 )
             ],
         )
+    base_commit_sha = _working_copy_head(repos[0]["local_root_ref"], repository_roots)
+    if base_commit_sha is not None and base_commit_sha != repos[0]["last_synced_commit_sha"]:
+        await conn.execute(
+            text("UPDATE repositories SET last_synced_commit_sha = :sha, last_synced_at = now() WHERE id = :id"),
+            {"sha": base_commit_sha, "id": repos[0]["id"]},
+        )
+    elif base_commit_sha is None:
+        base_commit_sha = repos[0]["last_synced_commit_sha"]
     profile_code = quality_profile or settings["quality_profile"]
     profile_id = (
         await conn.execute(
@@ -122,7 +157,7 @@ async def create_run(
             "by": requested_by,
             "mode": mode,
             "obj": objective,
-            "sha": repos[0]["last_synced_commit_sha"],
+            "sha": base_commit_sha,
             "qp": profile_code,
             "qpid": profile_id,
             "ap": approval_policy,

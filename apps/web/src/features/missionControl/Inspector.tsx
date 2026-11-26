@@ -23,6 +23,7 @@ import { PullRequestsPanel } from '../integrations/PullRequestsPanel';
 import { describeEvent } from '../runs/describeEvent';
 import { enumLabel, providerLabel, TASK_ACTIVE } from '../runs/labels';
 import { durationParts, elapsedMs } from './feedModel';
+import { FixRunAction } from './FixRunAction';
 import { useNow } from './useNow';
 import { useCurrentWorkspace } from '../../workspace';
 
@@ -123,6 +124,7 @@ export function RunInspector({ workspaceId, role, run }: { workspaceId: string; 
         ) : null}
       </dl>
       {can(role, 'run:control') ? <RunControls run={run} /> : null}
+      {can(role, 'run:create') ? <FixRunAction workspaceId={workspaceId} run={run} /> : null}
       <nav aria-label={t('runs.nav.label')}>
         <ul className="flex flex-col gap-1">
           {can(role, 'quality:read') ? (

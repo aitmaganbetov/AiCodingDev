@@ -1,4 +1,4 @@
-import type { AgentRole, ProviderSettings, ProviderSettingsUpdateRequest } from '../../api/providers';
+import type { AgentRole, Provider, ProviderSettings, ProviderSettingsUpdateRequest } from '../../api/providers';
 
 /** ProviderSettings: max_parallel_sessions 0…64, default_timeout_seconds 60…14400. */
 export const MAX_PARALLEL = { min: 0, max: 64 } as const;
@@ -18,17 +18,50 @@ export const AGENT_ROLES = [
   'documentation',
 ] as const satisfies readonly AgentRole[];
 
+/** ProviderSettings.model: идентификатор модели CLI — уходит в argv, поэтому без пробелов и не с дефиса. */
+export const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,99}$/;
+/**
+ * Модели для выбора. Их называет сам CLI — probe кладёт список в `capabilities.available_models` установки
+ * (каталог `codex debug models`, псевдонимы из справки `claude --model`). Запасной список — на случай, когда
+ * probe ещё не выполнялся: псевдонимы Claude Code из его справки; у Codex общего набора псевдонимов нет.
+ */
+export const MODEL_FALLBACK: Readonly<Record<string, readonly string[]>> = {
+  claude: ['fable', 'opus', 'sonnet'],
+  codex: [],
+};
+
+/** Список моделей провайдера: объединение по установкам в порядке CLI, без повторов и без мусора. */
+export function modelChoices(provider: Pick<Provider, 'code' | 'installations'>): string[] {
+  const found: string[] = [];
+  for (const installation of provider.installations) {
+    const reported = (installation.capabilities as { available_models?: unknown }).available_models;
+    if (!Array.isArray(reported)) continue;
+    for (const name of reported) {
+      if (typeof name === 'string' && MODEL_PATTERN.test(name) && !found.includes(name)) found.push(name);
+    }
+  }
+  return found.length > 0 ? found : [...(MODEL_FALLBACK[provider.code] ?? [])];
+}
+
 export interface SettingsDraft {
   enabled: boolean;
   maxParallel: string;
   timeout: string;
   roles: AgentRole[];
+  /** Пустая строка — модель по умолчанию самого CLI (model: null). */
+  model: string;
 }
 
-export type SettingsField = 'enabled' | 'max_parallel_sessions' | 'default_timeout_seconds' | 'allowed_roles';
+export type SettingsField = 'enabled' | 'max_parallel_sessions' | 'default_timeout_seconds' | 'allowed_roles' | 'model';
 
 export function draftFrom(s: ProviderSettings): SettingsDraft {
-  return { enabled: s.enabled, maxParallel: String(s.max_parallel_sessions), timeout: String(s.default_timeout_seconds), roles: [...s.allowed_roles] };
+  return {
+    enabled: s.enabled,
+    maxParallel: String(s.max_parallel_sessions),
+    timeout: String(s.default_timeout_seconds),
+    roles: [...s.allowed_roles],
+    model: s.model ?? '',
+  };
 }
 
 function intInRange(value: string, min: number, max: number): number | null {
@@ -44,8 +77,10 @@ function intInRange(value: string, min: number, max: number): number | null {
 export function buildSettingsPatch(
   current: ProviderSettings,
   draft: SettingsDraft,
-): { errors: Partial<Record<SettingsField, 'range' | 'integer'>>; patch: ProviderSettingsUpdateRequest | null } {
-  const errors: Partial<Record<SettingsField, 'range' | 'integer'>> = {};
+): { errors: Partial<Record<SettingsField, 'range' | 'integer' | 'invalid'>>; patch: ProviderSettingsUpdateRequest | null } {
+  const errors: Partial<Record<SettingsField, 'range' | 'integer' | 'invalid'>> = {};
+  const model = draft.model.trim();
+  if (model !== '' && !MODEL_PATTERN.test(model)) errors.model = 'invalid';
   const maxParallel = intInRange(draft.maxParallel, MAX_PARALLEL.min, MAX_PARALLEL.max);
   const timeout = intInRange(draft.timeout, TIMEOUT_SECONDS.min, TIMEOUT_SECONDS.max);
   if (maxParallel === null) errors.max_parallel_sessions = 'range';
@@ -59,5 +94,6 @@ export function buildSettingsPatch(
   const ordered = AGENT_ROLES.filter((r) => draft.roles.includes(r));
   const currentSet = new Set(current.allowed_roles);
   if (ordered.length !== currentSet.size || ordered.some((r) => !currentSet.has(r))) patch.allowed_roles = ordered;
+  if ((model || null) !== (current.model ?? null)) patch.model = model || null;
   return { errors, patch: Object.keys(patch).length > 0 ? patch : null };
 }

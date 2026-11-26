@@ -51,9 +51,10 @@ uv run python -m scripts.release.verify --release /srv/aicd-release/1.0.0-rc1 --
 | `aicd/migrations-python:17-3.12` | `infrastructure/docker/verification/migrations-python.Dockerfile` (PostgreSQL 17 из образа сервиса + Python 3.12 alpine 3.24, зависимости `--require-hashes`) | `uv run python -m scripts.release.check_migrations_image aicd/migrations-python:17-3.12` — драйвер MIGRATION gate: upgrade→downgrade→upgrade, схемы совпадают |
 | `aicd/phpstan:2.3.5` | `infrastructure/docker/verification/phpstan.Dockerfile` (php:8.3-cli-alpine по digest + phpstan.phar по sha256) | `docker run --rm --network none -v <проект>:/w:ro -w /w aicd/phpstan:2.3.5 phpstan analyse --error-format=json --no-progress` |
 | `aicd/osv-scanner:v2.7.0` | `infrastructure/docker/verification/osv-scanner.Dockerfile` | `tests/security/test_security_gates_docker.py` |
+| `aicd/verify-python:3.12-git` | `infrastructure/docker/verification/python.Dockerfile` (`python:3.12-slim` по digest + `git`; BuildKit не требуется) | `docker run --rm --network none --read-only --user 10001:10001 --tmpfs /tmp -e HOME=/tmp aicd/verify-python:3.12-git git --version` — без `git` гейты UNIT/COVERAGE/BUILD падают по причине окружения, а не по коду проекта |
 
 Подключение к воркеру: digest собранного образа (`docker image inspect --format '{{.Id}}'`) — в
-`AICD_VERIFICATION_IMAGES='{"migrations-python": "aicd/migrations-python:17-3.12@sha256:…", "php": "aicd/phpstan:2.3.5@sha256:…"}'`
+`AICD_VERIFICATION_IMAGES='{"migrations-python": "aicd/migrations-python:17-3.12@sha256:…", "php": "aicd/phpstan:2.3.5@sha256:…", "python": "aicd/verify-python:3.12-git@sha256:…"}'`
 (поверх таблицы `aicd_verification.images`; в production — только по digest). Для профиля server образы публикуются во
 внутренний реестр и digest фиксируется оттуда.
 

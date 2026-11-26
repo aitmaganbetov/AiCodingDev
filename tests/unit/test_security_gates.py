@@ -445,3 +445,40 @@ def test_declared_gate_env_rejects_reserved_secret_like_or_malformed(
     monkeypatch.setitem(sg.SECURITY_GATES, "semgrep-sast", replace(original, env=bad))
     with pytest.raises(GateEnvError):
         declared_gate_env(GATE_SPECS["semgrep-sast"])
+
+
+# --- согласованность с каноническими перечнями БД ------------------------------------------------
+
+#: `evidence.kind` (DATABASE_DESIGN §307, CHECK `evidence_kind_check` миграции 0003). Перечень закодирован
+#: здесь независимо от кода гейтов: вид вне него роняет вставку evidence с CheckViolation, и гейт отдаёт
+#: `ERROR(INFRA)` на каждом прогоне — именно так вели себя `syft-sbom` (`sbom`) и `cosign-verify`
+#: (`signature`), пока ошибка не была найдена прогоном на реальном репозитории.
+EVIDENCE_KINDS = frozenset(
+    {
+        "command_result",
+        "test_report",
+        "scan_report",
+        "diff",
+        "review_verdict",
+        "manual_attestation",
+        "benchmark",
+        "agent_claim",
+    }
+)
+
+
+def test_every_security_gate_uses_a_canonical_evidence_kind() -> None:
+    from aicd_verification.security_gates import SECURITY_GATES
+
+    wrong = {
+        name: d.spec.evidence_kind for name, d in SECURITY_GATES.items() if d.spec.evidence_kind not in EVIDENCE_KINDS
+    }
+    assert not wrong, f"виды evidence вне перечня evidence.kind: {wrong}"
+
+
+def test_quality_gate_specs_use_a_canonical_evidence_kind() -> None:
+    """Тот же инвариант для остальных гейтов реестра (LINT/UNIT/TYPECHECK/…)."""
+    from aicd_verification.gates import GATE_SPECS
+
+    wrong = {name: spec.evidence_kind for name, spec in GATE_SPECS.items() if spec.evidence_kind not in EVIDENCE_KINDS}
+    assert not wrong, f"виды evidence вне перечня evidence.kind: {wrong}"

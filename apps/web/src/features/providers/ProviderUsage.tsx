@@ -1,6 +1,7 @@
-import type { UseQueryResult } from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AnalyticsSummary } from '../../api/analytics';
+import { analyticsApi, analyticsKeys, type AnalyticsSummary } from '../../api/analytics';
 import type { Provider } from '../../api/providers';
 import { TileError } from '../../components/ui';
 import { formatDate } from '../../lib/format';
@@ -97,6 +98,79 @@ export function ProviderUsage({ provider, analytics, window }: { provider: Provi
         </p>
       )}
       <p className="text-xs text-fg-subtle">{source}</p>
+    </div>
+  );
+}
+
+/** Скользящие окна расхода токенов: последний час и последние 7 дней. */
+export const TOKEN_WINDOWS = [
+  { key: 'hour', hours: 1 },
+  { key: 'week', hours: 24 * 7 },
+] as const;
+const MINUTE_MS = 60_000;
+
+/**
+ * Окно «последние N часов»: конец — начало следующей минуты (ключ кэша стабилен в пределах минуты,
+ * а только что завершившееся исполнение уже попадает в окно).
+ */
+export function recentWindow(hours: number, now: number): { from: string; to: string } {
+  const end = Math.floor(now / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
+  return { from: new Date(end - hours * 3_600_000).toISOString(), to: new Date(end).toISOString() };
+}
+
+function TokenWindow({ workspaceId, code, hours, label, now }: { workspaceId: string; code: string; hours: number; label: string; now: number }) {
+  const { t } = useTranslation();
+  const window = recentWindow(hours, now);
+  const query = useQuery({
+    queryKey: analyticsKeys.summary(workspaceId, window),
+    queryFn: ({ signal }) => analyticsApi.summary(workspaceId, window, signal),
+    // Прежнее значение остаётся на экране, пока перечитывается окно следующей минуты.
+    placeholderData: (previous) => previous,
+  });
+  const s = providerStats(query.data, code);
+  return (
+    <div className="flex min-w-0 flex-col rounded-md border border-border p-3" data-window={hours}>
+      <dt className="text-xs text-fg-muted">{label}</dt>
+      <dd className="text-fg">
+        {query.isPending ? (
+          <span aria-hidden="true" className="skeleton block h-5 w-24" />
+        ) : query.isError ? (
+          <span className="text-sm text-danger-text">{t('providers.usage.windowError')}</span>
+        ) : s ? (
+          <>
+            <span className="block font-semibold tabular-nums" data-metric="tokens">
+              {tokensText(t, s)}
+            </span>
+            <span className="block text-xs text-fg-muted">{t('providers.usage.windowExecutions', { count: s.executions })}</span>
+          </>
+        ) : (
+          <span className="text-sm text-fg-muted">{t('providers.usage.windowNone')}</span>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * Расход токенов провайдера за последний час и за 7 дней — измеренный платформой по исполнениям её задач
+ * (только то, что сообщил сам CLI). Это не остаток лимита подписки: его CLI платформе не сообщает, а
+ * запросы вне платформы (свой терминал, другие устройства) сюда не попадают — об этом сказано в подписи.
+ */
+export function TokenWindows({ workspaceId, provider }: { workspaceId: string; provider: Provider }) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), MINUTE_MS);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="flex flex-col gap-2" data-testid={`token-windows-${provider.code}`}>
+      <dl className="grid gap-3 sm:grid-cols-2">
+        {TOKEN_WINDOWS.map((w) => (
+          <TokenWindow key={w.key} workspaceId={workspaceId} code={provider.code} hours={w.hours} label={t(`providers.usage.window.${w.key}`)} now={now} />
+        ))}
+      </dl>
+      <p className="text-xs text-fg-subtle">{t('providers.usage.windowNote')}</p>
     </div>
   );
 }
