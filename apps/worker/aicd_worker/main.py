@@ -26,15 +26,16 @@ import signal
 import sys
 import uuid
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 
 import dramatiq
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from aicd_cli_adapters import limits as cli_limits
 from aicd_cli_adapters.registry import register_host
 from aicd_orchestration import directives
-from aicd_platform import sse, worker_hosts
+from aicd_platform import login_input, sse, worker_hosts
 from aicd_platform.artifacts import build_artifact_store
 from aicd_platform.db import DbContext, TcpKeepalive, create_engine, transaction
 from aicd_platform.logging import configure_logging
@@ -53,7 +54,9 @@ from aicd_worker.broker import (
 from aicd_worker.settings import WorkerSettings
 from aicd_worker.wiring import (
     ConfigurationError,
+    build_limits_reader,
     build_orchestrator,
+    build_provider_login,
     build_provider_prober,
     build_reconciler,
     check_exec_adapter,
@@ -135,9 +138,16 @@ async def run_consumers(
     )
     store = build_artifact_store(settings)
     host_id: uuid.UUID | None = None
+    # Канал кода авторизации из UI в процесс входа CLI (только exec): pub/sub, без записи кода куда-либо.
+    login_redis: Redis | None = None
+    # Кэш состава установки GitHub App для формы привязки репозитория (только orchestrator: там очередь github).
+    github_redis: Redis | None = None
     if kind == "exec":
         async with transaction(engine, DbContext(actor_type="system")) as conn:
             host_id = await register_host(conn, "exec")
+        login_redis = Redis.from_url(settings.redis_url, socket_timeout=2.0, socket_connect_timeout=2.0)
+    if kind == "orchestrator":
+        github_redis = Redis.from_url(settings.redis_url, socket_timeout=2.0, socket_connect_timeout=2.0)
     rt = runtime.Runtime(
         engine=engine,
         orchestrator=build_orchestrator(settings, engine, store=store, worker_host_id=host_id),
@@ -147,8 +157,28 @@ async def run_consumers(
         reconciler=build_reconciler(settings, engine, host_id, store) if host_id is not None else None,
         docs_importer=docs.build_importer(settings, engine, store) if kind == "orchestrator" else None,
         provider_prober=build_provider_prober(settings, engine, store) if kind == "exec" else None,
+        provider_login=build_provider_login(settings) if kind == "exec" else None,
+        login_code_inbox=(
+            (lambda session_id: login_input.inbox(login_redis, session_id=session_id))
+            if login_redis is not None
+            else None
+        ),
         worker_host_id=host_id,
     )
+    if kind == "exec" and login_redis is not None:
+        limits_redis = login_redis
+
+        async def record_limits(installation_id: uuid.UUID, observed: dict[str, Any]) -> None:
+            await cli_limits.save(
+                limits_redis, environment=settings.environment, installation_id=installation_id, limits=observed
+            )
+
+        rt.limits_sink = record_limits
+        rt.limits_reader = build_limits_reader(settings)
+        # Попутные наблюдения: исполнитель отдаёт лимиты, которые CLI напечатал в выводе задачи.
+        executor = getattr(rt.orchestrator, "executor", None)
+        if executor is not None and hasattr(executor, "limits_sink"):
+            executor.limits_sink = record_limits
     if kind == "orchestrator":
 
         async def process_directive(ws: uuid.UUID, directive_id: uuid.UUID) -> None:
@@ -156,6 +186,7 @@ async def run_consumers(
 
         rt.process_directive = process_directive
         rt.github = github.build_workflow(settings, engine)  # None — GitHub App не настроен
+        rt.github_repositories = github.build_repository_sync(settings, rt.github, github_redis)
     runtime.install(rt)
     scheduler = maintenance.Scheduler()  # exec: reconcile при старте, далее reap 15 с / reconcile 60 с
     github_recovery = maintenance.GitHubRecoverySchedule()  # orchestrator: сверка GitHub-действий (OQ-47 (7))
@@ -180,6 +211,10 @@ async def run_consumers(
         runtime.install(None)
         if rt.github is not None:
             await rt.github.client.aclose()
+        if login_redis is not None:
+            await login_redis.aclose()
+        if github_redis is not None:
+            await github_redis.aclose()
 
 
 async def serve(kind: Kind, settings: WorkerSettings, stop: asyncio.Event | None = None) -> None:

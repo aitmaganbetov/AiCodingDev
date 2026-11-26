@@ -10,6 +10,8 @@ export type ListProjectsQuery = Query<'listProjects'>;
 export type Repository = Schemas['Repository'];
 export type RepositoryProvider = Schemas['RepositoryProvider'];
 export type RepositoryAttachRequest = JsonBody<'attachRepository'>;
+export type RepositoryRoot = Schemas['RepositoryRoot'];
+export type RepositoryRootEntry = Schemas['RepositoryRootEntry'];
 export type Technology = Schemas['Technology'];
 export type ListRepositoriesQuery = Query<'listRepositories'>;
 export type ListTechnologiesQuery = Query<'listTechnologies'>;
@@ -33,6 +35,8 @@ export const projectKeys = {
   detail: (projectId: string) => ['project', projectId] as const,
   repositories: (projectId: string) => ['project', projectId, 'repositories'] as const,
   technologies: (projectId: string) => ['project', projectId, 'technologies'] as const,
+  /** Разрешённые корни локальных репозиториев — настройка установки, не проекта (FR-PRJ-02). */
+  repositoryRoots: (workspaceId: string) => ['repository-roots', workspaceId] as const,
   /** Repository Explorer: commit '' — ветка по умолчанию (сервер разрешает в SHA). */
   tree: (projectId: string, repositoryId: string, commit: string, path: string) =>
     ['project', projectId, 'repository', repositoryId, 'tree', commit, path] as const,
@@ -54,6 +58,11 @@ export const projectsApi = {
     return request({ method: 'POST', path: '/projects', body, workspaceId, idempotencyKey });
   },
 
+  /** Корни из allowlist сервера и найденные в них репозитории: «что разрешено привязать» (repository:attach). */
+  repositoryRoots(workspaceId: string, signal?: AbortSignal): Promise<JsonResponse<'listRepositoryRoots', 200>> {
+    return request({ method: 'GET', path: '/repository-roots', workspaceId, signal });
+  },
+
   get(projectId: string, signal?: AbortSignal): Promise<JsonResponse<'getProject', 200>> {
     return request({ method: 'GET', path: `/projects/${seg(projectId)}`, signal });
   },
@@ -72,6 +81,15 @@ export const projectsApi = {
     idempotencyKey: string,
   ): Promise<JsonResponse<'attachRepository', 201> | JsonResponse<'attachRepository', 202>> {
     return request({ method: 'POST', path: `/projects/${seg(projectId)}/repositories`, body, idempotencyKey });
+  },
+
+  /**
+   * Отвязать репозиторий от проекта (204; повтор — тоже 204). Строка остаётся ради истории прогонов, но
+   * проект её больше не показывает, а каталог и GitHub-репозиторий освобождаются. Файлы на диске не удаляются;
+   * незавершённые прогоны репозитория — 409.
+   */
+  detachRepository(projectId: string, repositoryId: string): Promise<void> {
+    return request({ method: 'DELETE', path: `/projects/${seg(projectId)}/repositories/${seg(repositoryId)}` });
   },
 
   /** FR-PRJ-05: один уровень дерева каталога `path` в commit (без commit — HEAD ветки по умолчанию). */

@@ -164,3 +164,14 @@ def test_directive_fence_kept_compatible() -> None:
     # при сборке промпта инструкции с ограждением поручения повторно ограждаются nonce-маркерами
     p = build_prompt(PROFILES["developer"], TaskInput(**{**TASK.__dict__, "instructions": fenced}), nonce=NONCE)
     assert "<<<USER_DIRECTIVE" not in p.text
+
+
+def test_output_contract_carries_payload_schemas_of_allowed_acp_types() -> None:
+    """Регрессия: без схем payload реальный CLI угадывал поля, и его сообщения отклонялись (SCHEMA_INVALID)."""
+    profile = PROFILES["developer"]
+    contract = build_prompt(profile, TASK, nonce=NONCE).text.split("OUTPUT_CONTRACT")[1]
+    for message_type in profile.acp_send:
+        assert f"\n{message_type}: {{" in contract
+    assert '"question_kind"' in contract and '"needed_from"' in contract
+    assert "\n../common.schema.json: {" in contract and '"text_long"' in contract
+    assert "\nTASK_ASSIGN: {" not in contract  # тип только оркестратора агенту не описывается

@@ -104,6 +104,292 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
     await waitFor(() => expect(screen.getByText('repos/payments')).toBeInTheDocument());
   });
 
+  it('offers the allowed directories instead of asking for a path', async () => {
+    const user = userEvent.setup();
+    const { calls } = mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [], next_cursor: null }),
+      'GET /api/v1/repository-roots': () =>
+        json(200, {
+          items: [
+            {
+              name: 'repos',
+              path: '/srv/repos',
+              truncated: false,
+              repositories: [
+                { ref: 'repos/payments', path: '/srv/repos/payments', name: 'payments', attached: false },
+                { ref: 'repos/billing', path: '/srv/repos/billing', name: 'billing', attached: false },
+              ],
+            },
+          ],
+        }),
+      [`POST /api/v1/projects/${P1.id}/repositories`]: () => json(201, { ...REPO, provider: 'local', remote_url: null }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
+    await user.click(await screen.findByRole('button', { name: 'Привязать репозиторий' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязка репозитория' });
+    const select = await within(dialog).findByLabelText('Путь к каталогу');
+    expect(select.tagName).toBe('SELECT');
+    expect(within(dialog).getByText(/Разрешённые корни: repos \(\/srv\/repos\)|Найдено в разрешённых корнях сервера: repos \(\/srv\/repos\)/)).toBeInTheDocument();
+    await user.selectOptions(select, 'repos/billing');
+    await user.click(within(dialog).getByRole('button', { name: 'Привязать' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ provider: 'local', local_path: 'repos/billing' }));
+  });
+
+  it('falls back to typing a path when nothing was found in the allowed roots', async () => {
+    const user = userEvent.setup();
+    mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [], next_cursor: null }),
+      'GET /api/v1/repository-roots': () => json(200, { items: [] }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
+    await user.click(await screen.findByRole('button', { name: 'Привязать репозиторий' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязка репозитория' });
+    expect(await within(dialog).findByText('Корни репозиториев не настроены')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Путь к каталогу').tagName).toBe('INPUT');
+  });
+
+  it('offers the repositories the GitHub App installation can reach and fills the chosen one in', async () => {
+    const user = userEvent.setup();
+    const installation = '01900000-0000-7000-a300-000000000001';
+    const { calls } = mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [], next_cursor: null }),
+      'GET /api/v1/repository-roots': () =>
+        json(200, {
+          items: [{ name: 'repos', path: '/srv/repos', truncated: false, repositories: [{ ref: 'repos/payments', path: '/srv/repos/payments', name: 'payments', attached: false }] }],
+        }),
+      'GET /api/v1/integrations/github/installations': () =>
+        json(200, {
+          items: [
+            {
+              id: installation,
+              installation_id: 77,
+              account_login: 'acme',
+              account_type: 'organization',
+              repository_selection: 'selected',
+              permissions: {},
+              status: 'ACTIVE',
+              created_at: '2026-11-01T00:00:00Z',
+              updated_at: '2026-11-01T00:00:00Z',
+            },
+          ],
+        }),
+      [`GET /api/v1/integrations/github/installations/${installation}/repositories`]: () =>
+        json(200, {
+          items: [
+            {
+              github_repo_id: 1001,
+              full_name: 'acme/payments',
+              owner: 'acme',
+              name: 'payments',
+              private: true,
+              archived: false,
+              default_branch: 'release',
+              remote_url: 'https://github.com/acme/payments',
+              attached: false,
+            },
+          ],
+          total: 1,
+          truncated: false,
+          synced_at: '2026-11-10T09:00:00Z',
+          stale: false,
+          repository_selection: 'selected',
+        }),
+      [`POST /api/v1/projects/${P1.id}/repositories`]: () => json(202, { id: 'v1', kind: 'repository', status: 'PENDING' }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
+    await user.click(await screen.findByRole('button', { name: 'Привязать репозиторий' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязка репозитория' });
+    await user.click(within(dialog).getByRole('radio', { name: 'GitHub' }));
+    const picker = await within(dialog).findByLabelText('Репозиторий GitHub');
+    expect(within(picker).getByRole('option', { name: /acme\/payments · приватный/ })).toBeInTheDocument();
+    await user.selectOptions(picker, 'acme/payments');
+    await user.selectOptions(within(dialog).getByLabelText('Путь к каталогу'), 'repos/payments');
+    await user.click(within(dialog).getByRole('button', { name: 'Привязать' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.url.pathname.endsWith('/repositories'))?.body).toEqual({
+        provider: 'github',
+        remote_url: 'https://github.com/acme/payments',
+        local_path: 'repos/payments',
+        default_branch: 'release',
+      }),
+    );
+  });
+
+  it('offers to clone a working copy when there is none yet', async () => {
+    const user = userEvent.setup();
+    const installation = '01900000-0000-7000-a300-000000000004';
+    const { calls } = mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [], next_cursor: null }),
+      'GET /api/v1/repository-roots': () => json(200, { items: [{ name: 'repos', path: '/srv/repos', truncated: false, repositories: [] }] }),
+      'GET /api/v1/integrations/github/installations': () =>
+        json(200, {
+          items: [
+            {
+              id: installation,
+              installation_id: 77,
+              account_login: 'acme',
+              account_type: 'organization',
+              repository_selection: 'all',
+              permissions: {},
+              status: 'ACTIVE',
+              created_at: '2026-11-01T00:00:00Z',
+              updated_at: '2026-11-01T00:00:00Z',
+            },
+          ],
+        }),
+      [`GET /api/v1/integrations/github/installations/${installation}/repositories`]: () =>
+        json(200, {
+          items: [
+            {
+              github_repo_id: 1001,
+              full_name: 'acme/payments',
+              owner: 'acme',
+              name: 'payments',
+              private: true,
+              archived: false,
+              default_branch: 'main',
+              remote_url: 'https://github.com/acme/payments',
+              attached: false,
+            },
+          ],
+          total: 1,
+          truncated: false,
+          synced_at: '2026-11-10T09:00:00Z',
+          stale: false,
+          repository_selection: 'all',
+        }),
+      [`POST /api/v1/projects/${P1.id}/repositories`]: () => json(202, { id: 'v1', kind: 'repository', status: 'PENDING' }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
+    await user.click(await screen.findByRole('button', { name: 'Привязать репозиторий' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязка репозитория' });
+    await user.click(within(dialog).getByRole('radio', { name: 'GitHub' }));
+    await user.selectOptions(await within(dialog).findByLabelText('Репозиторий GitHub'), 'acme/payments');
+    await user.click(within(dialog).getByRole('checkbox', { name: /создать её клонированием/i }));
+    // Каталог предлагается сам: имя репозитория в первом разрешённом корне.
+    expect(within(dialog).getByLabelText('Новый каталог для рабочей копии')).toHaveValue('repos/payments');
+    await user.click(within(dialog).getByRole('button', { name: 'Привязать' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.url.pathname.endsWith('/repositories'))?.body).toEqual({
+        provider: 'github',
+        remote_url: 'https://github.com/acme/payments',
+        create_local_copy: true,
+        local_path: 'repos/payments',
+        default_branch: 'main',
+      }),
+    );
+  });
+
+  it('marks what is already attached and does not offer it again', async () => {
+    const user = userEvent.setup();
+    const installation = '01900000-0000-7000-a300-000000000003';
+    mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [], next_cursor: null }),
+      'GET /api/v1/repository-roots': () =>
+        json(200, {
+          items: [
+            {
+              name: 'repos',
+              path: '/srv/repos',
+              truncated: false,
+              repositories: [
+                { ref: 'repos/payments', path: '/srv/repos/payments', name: 'payments', attached: true },
+                { ref: 'repos/billing', path: '/srv/repos/billing', name: 'billing', attached: false },
+              ],
+            },
+          ],
+        }),
+      'GET /api/v1/integrations/github/installations': () =>
+        json(200, {
+          items: [
+            {
+              id: installation,
+              installation_id: 77,
+              account_login: 'acme',
+              account_type: 'organization',
+              repository_selection: 'all',
+              permissions: {},
+              status: 'ACTIVE',
+              created_at: '2026-11-01T00:00:00Z',
+              updated_at: '2026-11-01T00:00:00Z',
+            },
+          ],
+        }),
+      [`GET /api/v1/integrations/github/installations/${installation}/repositories`]: () =>
+        json(200, {
+          items: [
+            {
+              github_repo_id: 1001,
+              full_name: 'acme/payments',
+              owner: 'acme',
+              name: 'payments',
+              private: false,
+              archived: false,
+              default_branch: 'main',
+              remote_url: 'https://github.com/acme/payments',
+              attached: true,
+            },
+          ],
+          total: 1,
+          truncated: false,
+          synced_at: '2026-11-10T09:00:00Z',
+          stale: false,
+          repository_selection: 'all',
+        }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
+    await user.click(await screen.findByRole('button', { name: 'Привязать репозиторий' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязка репозитория' });
+    // Занятый каталог виден (понятно, почему его нет среди доступных), но выбрать его нельзя.
+    const paths = await within(dialog).findByLabelText('Путь к каталогу');
+    expect(within(paths).getByRole('option', { name: /repos\/payments.*уже привязан/ })).toBeDisabled();
+    expect(within(paths).getByRole('option', { name: /repos\/billing/ })).toBeEnabled();
+    await user.click(within(dialog).getByRole('radio', { name: 'GitHub' }));
+    const picker = await within(dialog).findByLabelText('Репозиторий GitHub');
+    expect(within(picker).getByRole('option', { name: /acme\/payments · уже привязан/ })).toBeDisabled();
+  });
+
+  it('asks the worker to re-read the installation when the list has never been loaded', async () => {
+    const user = userEvent.setup();
+    const installation = '01900000-0000-7000-a300-000000000002';
+    const { calls } = mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [], next_cursor: null }),
+      'GET /api/v1/repository-roots': () => json(200, { items: [] }),
+      'GET /api/v1/integrations/github/installations': () =>
+        json(200, {
+          items: [
+            {
+              id: installation,
+              installation_id: 77,
+              account_login: 'acme',
+              account_type: 'organization',
+              repository_selection: 'all',
+              permissions: {},
+              status: 'ACTIVE',
+              created_at: '2026-11-01T00:00:00Z',
+              updated_at: '2026-11-01T00:00:00Z',
+            },
+          ],
+        }),
+      [`GET /api/v1/integrations/github/installations/${installation}/repositories`]: () =>
+        json(200, { items: [], total: 0, truncated: false, synced_at: null, stale: true, repository_selection: 'all' }),
+      [`POST /api/v1/integrations/github/installations/${installation}/repositories/refresh`]: () => json(202, { queued: true }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
+    await user.click(await screen.findByRole('button', { name: 'Привязать репозиторий' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязка репозитория' });
+    await user.click(within(dialog).getByRole('radio', { name: 'GitHub' }));
+    // Пустой кэш — форма не оставляет оператора с пустым списком и просит воркер прочитать состав.
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.pathname.endsWith('/repositories/refresh'))).toBe(true));
+    expect(within(dialog).getByLabelText('Адрес репозитория GitHub').tagName).toBe('INPUT');
+  });
+
   it('browses the tree of a local repository and shows a file as plain text', async () => {
     const user = userEvent.setup();
     const local: Repository = { ...REPO, provider: 'local', remote_url: null, local_root_ref: 'repos/payments' };
@@ -198,6 +484,45 @@ describe('ProjectDetailPage (Repository Explorer)', () => {
     await waitFor(() => expect(calls.some((c) => c.url.pathname.endsWith('/tree') && c.url.searchParams.get('commit') === older)).toBe(true));
     expect(await screen.findByTestId('explorer-resolved-commit')).toHaveTextContent(older.slice(0, 12));
     expect(calls.find((c) => c.url.pathname.endsWith('/commits') && c.url.searchParams.get('commit') === 'feature/x')).toBeTruthy();
+  });
+
+  it('detaches a repository after confirmation and refreshes the list', async () => {
+    const user = userEvent.setup();
+    const local: Repository = { ...REPO, provider: 'local', remote_url: null, local_root_ref: 'repos/payments' };
+    let detached = false;
+    const { calls } = mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: detached ? [] : [local], next_cursor: null }),
+      [`DELETE /api/v1/projects/${P1.id}/repositories/${REPO.id}`]: () => {
+        detached = true;
+        return new Response(null, { status: 204 });
+      },
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
+    await user.click(await screen.findByRole('button', { name: 'Отвязать' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Отвязать репозиторий от проекта' });
+    // В диалоге сказано, что файлы на диске остаются: «отвязать» — это не «удалить рабочую копию».
+    expect(within(dialog).getByText(/Файлы рабочей копии на диске не удаляются/)).toBeInTheDocument();
+    await user.click(within(dialog).getByTestId('detach-confirm'));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
+    expect(await screen.findByText('Репозиторий не привязан')).toBeInTheDocument();
+  });
+
+  it('keeps the repository when detaching is refused because a run is unfinished', async () => {
+    const user = userEvent.setup();
+    const local: Repository = { ...REPO, provider: 'local', remote_url: null, local_root_ref: 'repos/payments' };
+    mockFetch({
+      ...base,
+      [`GET /api/v1/projects/${P1.id}/repositories`]: () => json(200, { items: [local], next_cursor: null }),
+      [`DELETE /api/v1/projects/${P1.id}/repositories/${REPO.id}`]: () =>
+        problem(409, 'conflict', { detail: 'Репозиторий занят: незавершённых прогонов — 1. Дождитесь их или отмените.' }),
+    });
+    renderApp(`/w/${WS_ID}/projects/${P1.id}?tab=repositories`);
+    await user.click(await screen.findByRole('button', { name: 'Отвязать' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Отвязать репозиторий от проекта' });
+    await user.click(within(dialog).getByTestId('detach-confirm'));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('незавершённых прогонов');
+    expect(screen.getByText('repos/payments')).toBeInTheDocument();
   });
 
   it('shows not found for an inaccessible project and hides attach for viewers', async () => {

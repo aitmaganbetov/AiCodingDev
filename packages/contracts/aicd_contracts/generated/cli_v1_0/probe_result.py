@@ -6,7 +6,11 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel
+
+
+class AvailableModel(RootModel[str]):
+    root: Annotated[str, Field(pattern="^[A-Za-z0-9][A-Za-z0-9._:\\[\\]-]{0,99}$")]
 
 
 class Capabilities(BaseModel):
@@ -23,6 +27,13 @@ class Capabilities(BaseModel):
     tool_events_exposed: bool | None = None
     model_selection: bool | None = None
     max_prompt_bytes: Annotated[int | None, Field(ge=0)] = None
+    available_models: Annotated[
+        list[AvailableModel] | None,
+        Field(
+            description="доп. модели, которые называет сам CLI (каталог моделей либо псевдонимы из справки) — для выбора модели в настройках провайдера; пусто/нет — CLI списка не сообщает",
+            max_length=50,
+        ),
+    ] = None
 
 
 class Error(BaseModel):

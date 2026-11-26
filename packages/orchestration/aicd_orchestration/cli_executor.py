@@ -32,7 +32,7 @@ from aicd_code_intelligence.context.retrieval import ContextPack, RetrievalReque
 from aicd_code_intelligence.context.snapshot import DEFAULT_ENSURE_TIMEOUT_SECONDS, ensure_snapshot
 from aicd_code_intelligence.context.store import StoredPack, record_retrieval, store_context_pack
 from aicd_collaboration.acp import AcpBroker
-from aicd_orchestration import agent_io, directives
+from aicd_orchestration import agent_io, coordination, directives
 from aicd_orchestration import worktrees as wt
 from aicd_orchestration.agent_io import AgentContext, AgentIoSummary, InboxMessage
 from aicd_orchestration.agents.prompt import AssembledPrompt
@@ -40,6 +40,7 @@ from aicd_orchestration.cli_output import CliOutputContext, CliOutputPublisher
 from aicd_orchestration.engine import TaskExecution
 from aicd_platform import metrics as prom
 from aicd_platform.artifacts import ArtifactStore
+from aicd_platform.clock import utcnow
 from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 from aicd_security.paths import resolve_ref
@@ -49,8 +50,16 @@ log = logging.getLogger(__name__)
 
 class AdapterFactory(Protocol):
     def __call__(
-        self, *, provider: str, installation_id: uuid.UUID, gateway: ExecutionGateway, worktree_root: Path
-    ) -> SubprocessCLIAdapter: ...
+        self,
+        *,
+        provider: str,
+        installation_id: uuid.UUID,
+        gateway: ExecutionGateway,
+        worktree_root: Path,
+        model: str | None = None,
+    ) -> SubprocessCLIAdapter:
+        """`model` — модель CLI из настроек провайдера в workspace; None — модель по умолчанию самого CLI."""
+        ...
 
 
 @dataclass
@@ -68,6 +77,8 @@ class CliTaskExecutor:
     index_export_cache_root: Path | None = None
     ensure_index_timeout_seconds: float = DEFAULT_ENSURE_TIMEOUT_SECONDS
     context_enabled: bool = True
+    #: Куда отдать лимиты подписки, которые CLI сообщил в выводе исполнения (`aicd_cli_adapters.limits`).
+    limits_sink: Callable[[uuid.UUID, dict[str, Any]], Awaitable[None]] | None = None
 
     async def _context_pack(
         self,
@@ -141,9 +152,14 @@ class CliTaskExecutor:
             inbox = await agent_io.load_inbox(conn, run_id=run["id"], task_id=task["id"], role=role)
             # Поручения, доставляемые этой попыткой (ack DELIVERED на старте): раздел directives с directive_id.
             directive_context = await directives.prompt_fragments(conn, task["id"])
+            # Согласование (`coordination`): что уже сделали предыдущие попытки этой задачи и кто ведёт остальные.
+            earlier = await coordination.previous_attempts(conn, task["id"])
+            plan = await coordination.run_plan(conn, run["id"], task["id"])
+        resume_from = coordination.resume_point(earlier)
         pack = await self._context_pack(task=task, run=run, project_id=repo_row.project_id, inbox=inbox)
         context = [
             *directive_context,
+            *coordination.fragments(earlier, plan, resumed_from=resume_from),
             *(agent_io.pack_fragments(pack.fragments, base_commit=run["base_commit_sha"]) if pack else []),
         ]
         # Промпт собирается до worktree: ошибка сборки (недопустимые поля задачи) не оставляет мусора.
@@ -152,12 +168,15 @@ class CliTaskExecutor:
         store = self.artifacts or self.gateway.store
         repo_path = resolve_ref(repo_row.local_root_ref, self.repository_roots)
         worktree_id = uuid7()
+        # Дерево продолжает предыдущую попытку (если та оставила коммит): следующий агент исправляет сделанное,
+        # а не выполняет ту же работу заново. База остаётся базой run — diff и gates видят изменение целиком.
         info = self.worktrees.create(
             repo_path,
             worktree_id=worktree_id,
             run_id=run["id"],
             task_id=task["id"],
             base_commit_sha=run["base_commit_sha"],
+            start_commit_sha=resume_from,
         )
         async with transaction(self.engine, DbContext(workspace_id=ws, actor_type="system")) as conn:
             await wt.record(
@@ -239,6 +258,7 @@ class CliTaskExecutor:
             installation_id=installation_id,
             gateway=self.gateway,
             worktree_root=self.worktrees.path_for(worktree_id).parent,
+            model=ws_settings.get("model") or None,
         )
         adapter.stage_prompt(request.execution_id, prompt.text)
 
@@ -277,12 +297,15 @@ class CliTaskExecutor:
                 outcome = await self.gateway.run(request, adapter, installation_id=installation_id, on_event=live)
             finally:
                 await live.close()
+            await self._publish_limits(adapter, installation_id)
             result = outcome.result
             # Итог агента лежит вне worktree; остатки `.aicd/`/`output/` в дереве — не изменения кода задачи.
             self.worktrees.clear_agent_io(info.path)
             head = self.worktrees.commit_snapshot(info.path, f"aicd: task {task['task_key']} attempt {attempt_id}")
             if head is None:
-                head = run["base_commit_sha"]  # изменений нет — проверки выполняются на базовом коммите
+                # Эта попытка ничего не изменила: проверки идут на том, с чего она начала, — на унаследованном
+                # коммите предыдущей попытки либо на базовом коммите run.
+                head = resume_from or run["base_commit_sha"]
             async with transaction(self.engine, DbContext(workspace_id=ws, actor_type="system")) as conn:
                 await wt.mark_status(conn, worktree_id, "LOCKED", head)
             summary = await self._agent_result(
@@ -300,6 +323,18 @@ class CliTaskExecutor:
             execution_id=request.execution_id,
             agent_io=summary,
         )
+
+    async def _publish_limits(self, adapter: SubprocessCLIAdapter, installation_id: uuid.UUID) -> None:
+        """Лимиты подписки из вывода CLI — попутное наблюдение: его сбой исполнение задачи не затрагивает."""
+        reader = getattr(adapter, "subscription_limits", None)
+        if self.limits_sink is None or reader is None:
+            return
+        try:
+            observed = reader(now=utcnow())
+            if observed:
+                await self.limits_sink(installation_id, observed)
+        except Exception:
+            log.warning("subscription limits were not recorded", exc_info=True)
 
     async def _agent_result(
         self,

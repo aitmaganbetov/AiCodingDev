@@ -302,6 +302,19 @@ async def test_no_network_on_none(runner: DockerSandboxRunner, worktree: Path) -
     assert res["direct"] != "CONNECTED" and res["dns"] != "RESOLVED"
 
 
+async def test_localhost_resolves_and_loopback_works_on_none(runner: DockerSandboxRunner, worktree: Path) -> None:
+    """Без сети остаётся loopback и имя `localhost`: тесты проверяемого проекта поднимают на нём заглушки
+    (регрессия: `NetworkDisabled: true` оставлял `/etc/hosts` пустым — «Temporary failure in name resolution»)."""
+    probe = (
+        "import socket\n"
+        "server = socket.socket(); server.bind(('127.0.0.1', 0)); server.listen()\n"
+        "family, _, _, _, addr = socket.getaddrinfo('localhost', server.getsockname()[1], socket.AF_INET)[0]\n"
+        "client = socket.socket(family); client.connect(addr); print('LOOPBACK_OK')\n"
+    )
+    r = await run(runner, make_spec(probe, worktree, network="none"))
+    assert r.code == 0 and b"LOOPBACK_OK" in r.stdout, r.stderr
+
+
 @pytest.fixture
 def internal_network() -> Iterator[str]:
     name = f"aicd-test-sbx-{secrets.token_hex(4)}"

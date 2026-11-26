@@ -8,7 +8,8 @@ Job выполняется **только** под ролью `aicd_maintenance`
   3. истёкшие партиции: `audit_events`/`agent_activity_events` — экспорт в NDJSON.gz (архив, sha256 в
      аудите) → `maint_drop_partition` (DETACH + DROP); `outbox_events` — drop, только если 0 неопубликованных;
   4. непартиционированные таблицы — пакетное удаление (`run_event_log` после терминального статуса run,
-     `processed_events`, `idempotency_keys`, `user_sessions`, `provider_health`, `notifications`) с паузами;
+     `processed_events`, `idempotency_keys`, `user_sessions`, `provider_health`, `notifications`,
+     `cli_login_sessions`) с паузами;
   5. архив run (§20.2–20.3): терминальный run старше `agent_messages_days` → один NDJSON.gz
      (`chat_threads`, `chat_messages`, `agent_messages`, `message_deliveries`, `user_directives`, `directive_*`)
      → строка `artifacts(kind='archive')` → удаление детальных строк: `chat_messages` (кроме сообщений поручений —
@@ -88,6 +89,8 @@ class RetentionPeriods:
     artifacts_standard_days: int = 180
     # UI redesign B8 (миграция 0020): персональные уведомления — 90 дней от создания (прочитанные и нет).
     notifications_days: int = 90
+    # Миграция 0022: сессии device-code входа CLI живут минутами; хранятся как след действий оператора.
+    cli_login_sessions_days: int = 30
 
     @classmethod
     def from_settings(cls, settings: Settings) -> RetentionPeriods:
@@ -109,6 +112,7 @@ class RetentionPeriods:
             artifacts_raw_log_days=settings.retention_artifacts_raw_log_days,
             artifacts_standard_days=settings.retention_artifacts_standard_days,
             notifications_days=settings.retention_notifications_days,
+            cli_login_sessions_days=settings.retention_cli_login_sessions_days,
         )
 
     def merged(self, overrides: Mapping[str, Any]) -> tuple[RetentionPeriods, list[str]]:
@@ -566,6 +570,11 @@ def _batch_deletes(periods: RetentionPeriods, now: datetime) -> list[tuple[str, 
         ),
         ("usage_metrics", "observed_at < :cutoff", {"cutoff": now - timedelta(days=periods.usage_metrics_days)}),
         ("notifications", "created_at < :cutoff", {"cutoff": now - timedelta(days=periods.notifications_days)}),
+        (
+            "cli_login_sessions",
+            "created_at < :cutoff",
+            {"cutoff": now - timedelta(days=periods.cli_login_sessions_days)},
+        ),
     ]
 
 

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, Literal, Protocol
 from uuid import UUID
 
+from aicd_cli_adapters import probe as probe_module
 from aicd_cli_adapters.errors import RETRYABLE, CliErrorCode, ErrorSignature, ExecutionStatus, classify_output
 from aicd_cli_adapters.executor import CancelReason
 from aicd_cli_adapters.models import (
@@ -69,6 +70,9 @@ class ContainerLayout:
     extra_mounts: tuple[Mount, ...] = ()
     placeholder_overrides: dict[str, str] = field(default_factory=dict)
     prompt_mount: str = "/aicd/input"
+    #: uid:gid процесса в контейнере. Нужен, когда смонтирован credential store официального CLI:
+    #: он принадлежит пользователю хоста, и под чужим uid CLI не прочитает свои учётные данные.
+    user: str | None = None
 
 
 @dataclass(frozen=True)
@@ -165,6 +169,15 @@ class SubprocessCLIAdapter:
         del request
         return {}
 
+    def _derived_placeholders(self, *, prompt_file: str, prompt_text_file: str) -> dict[str, str]:
+        """Значения, выводимые из путей файлов промпта: их знает только базовый адаптер.
+
+        Нужны адаптерам официальных CLI: те не умеют читать промпт по флагу, и в argv уходит
+        константа платформы со ссылкой на уже смонтированный файл (`real.adapter.BOOTSTRAP`).
+        """
+        del prompt_file, prompt_text_file
+        return {}
+
     def _wire_agent_io(self, ex: _Execution, cwd: Path, *, read_only: bool) -> tuple[Mount, ...]:
         """Каталог вывода исполнения вне worktree: итог агента — `<io>/.aicd/result.json`, отчёты — `<io>/.aicd/output/`.
 
@@ -224,10 +237,23 @@ class SubprocessCLIAdapter:
 
     # --- probe / auth: реализуют конкретные адаптеры --------------------------------------
     async def probe(self, *, installation_id: UUID) -> ProbeResult:
-        raise NotImplementedError
+        """Probe установки по §5.2: версия, справка, матрица совместимости, статус входа."""
+        return await probe_module.run_probe(
+            provider=self.provider,
+            binary_path=self._binary,
+            installation_id=installation_id,
+            adapter_version=self.adapter_version,
+            env_source=self._env_source,
+        )
 
     async def check_auth(self, *, installation_id: UUID) -> AuthCheckResult:
-        raise NotImplementedError
+        """Статус входа официальной status-командой CLI (§7); учётные данные не читаются."""
+        return await probe_module.check_auth(
+            provider=self.provider,
+            binary_path=self._binary,
+            installation_id=installation_id,
+            env_source=self._env_source,
+        )
 
     # --- исполнение --------------------------------------------------------------------------
     async def execute(self, request: ExecutionRequest) -> ExecutionHandle:
@@ -362,6 +388,11 @@ class SubprocessCLIAdapter:
                         **self._extra,
                         **request_values,
                     }
+                    values.update(
+                        self._derived_placeholders(
+                            prompt_file=values["prompt_file"], prompt_text_file=values["prompt_text_file"]
+                        )
+                    )
                 else:
                     os.chmod(prompt_dir, 0o755)  # noqa: S103 — каталог задачи читает uid runner; файл 0444
                     layout = self._container
@@ -373,6 +404,11 @@ class SubprocessCLIAdapter:
                         "prompt_file": f"{layout.prompt_mount}/task.json",
                         "prompt_text_file": f"{layout.prompt_mount}/{PROMPT_TEXT_FILE}",
                     }
+                    values.update(
+                        self._derived_placeholders(
+                            prompt_file=values["prompt_file"], prompt_text_file=values["prompt_text_file"]
+                        )
+                    )
                     mounts = (
                         Mount(cwd, self._profile.cwd, read_only=read_only),
                         *io_mounts,
@@ -398,6 +434,7 @@ class SubprocessCLIAdapter:
                 ),
                 labels={"aicd.execution_id": str(req.execution_id)},
                 cwd=cwd,
+                **({"user": self._container.user} if self._container and self._container.user else {}),
             )
             try:
                 ex.process = await self._runner.start(spec)

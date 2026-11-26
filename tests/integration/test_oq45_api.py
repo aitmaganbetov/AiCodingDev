@@ -600,6 +600,7 @@ async def test_provider_settings_patch_versions_audit_and_listing(app_engine: As
         "max_parallel_sessions": 2,
         "default_timeout_seconds": 1800,
         "allowed_roles": ["developer", "qa"],
+        "model": None,
         "settings_version": 1,
     }
     assert r.headers["etag"] == '"v1"'
@@ -664,6 +665,83 @@ async def test_provider_settings_patch_versions_audit_and_listing(app_engine: As
     assert [a[0]["settings_version"] for a in audits] == [1, 2]
     assert {"field": "max_parallel_sessions", "from": 1, "to": 2} in audits[0][0]["changes"]
     assert [(v[0], v[1]) for v in versions] == [(1, False), (2, True)]
+
+
+async def test_provider_model_is_chosen_cleared_and_never_a_cli_flag(user: UserSession) -> None:
+    """Модель провайдера в workspace: значение уходит в argv CLI, поэтому принимается только идентификатор."""
+    ws = await user.create_workspace()
+    provider = await _provider_id(user, ws["id"], "claude")
+    url = f"/api/v1/providers/{provider}/settings"
+    listed = await user.client.get("/api/v1/providers", headers={"X-Workspace-Id": ws["id"]})
+    validate_response("listProviders", listed)
+    claude = next(p for p in listed.json()["items"] if p["code"] == "claude")
+    assert claude["workspace_settings"]["model"] is None, "по умолчанию — модель самого CLI"
+
+    r = await user.client.patch(url, json={"model": "opus"}, headers=user.headers(ws["id"], if_match='"v0"'))
+    validate_response("updateProviderSettings", r)
+    assert r.status_code == 200 and r.json()["model"] == "opus" and r.json()["settings_version"] == 1, r.text
+    # Остальные настройки модель не сбрасывают.
+    r = await user.client.patch(url, json={"max_parallel_sessions": 2}, headers=user.headers(ws["id"], if_match='"v1"'))
+    assert r.status_code == 200 and r.json()["model"] == "opus"
+
+    for bad in ("--dangerously-skip-permissions", "-m", "opus --verbose", "", "a/b", "x" * 101, 5):
+        r = await user.client.patch(url, json={"model": bad}, headers=user.headers(ws["id"], if_match='"v2"'))
+        validate_response("updateProviderSettings", r)
+        assert r.status_code == 422, (bad, r.text)
+
+    # null — осмысленное значение: вернуть модель по умолчанию CLI.
+    r = await user.client.patch(url, json={"model": None}, headers=user.headers(ws["id"], if_match='"v2"'))
+    validate_response("updateProviderSettings", r)
+    assert r.status_code == 200 and r.json()["model"] is None and r.json()["settings_version"] == 3, r.text
+    codex = await _provider_id(user, ws["id"], "codex")
+    other = await user.client.get("/api/v1/providers", headers={"X-Workspace-Id": ws["id"]})
+    by_id = {p["provider_id"]: p for p in other.json()["items"]}
+    assert by_id[str(codex)]["workspace_settings"]["model"] is None, "модель задаётся каждому провайдеру отдельно"
+
+
+async def test_subscription_limits_refresh_is_queued_and_audited(app_engine: AsyncEngine, user: UserSession) -> None:
+    """Лимиты подписки сообщает только сам CLI: API лишь ставит запрос воркеру и показывает его наблюдение."""
+    ws = await user.create_workspace()
+    claude = await _provider_id(user, ws["id"], "claude")
+    codex = await _provider_id(user, ws["id"], "codex")
+
+    listed = await user.client.get("/api/v1/providers", headers={"X-Workspace-Id": ws["id"]})
+    validate_response("listProviders", listed)
+    for item in listed.json()["items"]:
+        assert all(i["subscription_limits"] is None for i in item["installations"]), "наблюдений ещё не было"
+
+    # Codex сообщает лимиты через app-server (без запроса к модели) — обновление принимается и для него.
+    r = await user.client.post(f"/api/v1/providers/{codex}/limits/refresh", headers=user.headers(ws["id"], idem=True))
+    validate_response("refreshProviderLimits", r)
+    assert r.status_code == 202, r.text
+
+    r = await user.client.post(f"/api/v1/providers/{claude}/limits/refresh", headers=user.headers(ws["id"], idem=True))
+    validate_response("refreshProviderLimits", r)
+    assert r.status_code == 202, r.text
+    request_id = r.json()["probe_request_id"]
+    async with transaction(
+        app_engine, DbContext(user_id=uuid.UUID(user.user_id), workspace_id=uuid.UUID(ws["id"]))
+    ) as conn:
+        audited = (
+            await conn.execute(
+                text(
+                    "SELECT metadata FROM audit_events WHERE action = 'provider.probe_requested'"
+                    " AND metadata ->> 'probe_request_id' = :rid"
+                ),
+                {"rid": request_id},
+            )
+        ).scalar_one()
+    assert audited["limits"] is True, "в аудите видно, что запрос расходует подписку"
+    status = await user.client.get(
+        f"/api/v1/providers/{claude}/probes/{request_id}", headers={"X-Workspace-Id": ws["id"]}
+    )
+    validate_response("getProviderProbe", status)
+    assert status.json()["status"] == "PENDING"
+
+    unknown = await user.client.post(
+        f"/api/v1/providers/{uuid.uuid4()}/limits/refresh", headers=user.headers(ws["id"], idem=True)
+    )
+    assert unknown.status_code == 404
 
 
 async def test_provider_settings_rbac_isolation_and_fuzz(

@@ -29,9 +29,16 @@ FORBIDDEN_PERMISSIONS: Final = frozenset(
     {"workflows", "administration", "secrets", "environments", "actions", "organization_administration"}
 )
 
-Operation = Literal["read", "push", "pr_create", "pr_comment", "status", "merge"]
+Operation = Literal["list", "read", "push", "pr_create", "pr_comment", "status", "merge"]
+
+#: Операции, которым token выдаётся без ограничения набора репозиториев. Единственная такая операция —
+#: `list` («что разрешено установке»): узнать состав установки нельзя, не имея к ней доступа целиком.
+#: Её права — минимально возможные (`metadata: read`, только чтение), поэтому исключение не расширяет
+#: возможности платформы сверх SC-GH-04: ни содержимого, ни PR, ни статусов такой token не видит.
+UNSCOPED_OPERATIONS: Final = frozenset({"list"})
 
 TOKEN_SCOPES: Final[Mapping[Operation, Mapping[str, Level]]] = {
+    "list": {"metadata": "read"},
     "read": {"metadata": "read", "pull_requests": "read", "checks": "read", "statuses": "read", "contents": "read"},
     "push": {"contents": "write", "metadata": "read"},
     "pr_create": {"pull_requests": "write", "metadata": "read"},

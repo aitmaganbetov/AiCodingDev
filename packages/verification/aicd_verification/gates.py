@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -411,6 +411,8 @@ class GateContext:
     facts: RepoFacts | None = None
     changed_files: tuple[str, ...] = ()
     nonce: str = ""  # одноразовая метка прогона (маркер отчёта драйвера; подложенный вывод не совпадёт)
+    # Каталог зависимостей проекта (шаг prepare, QUALITY_GATES §4.3), смонтированный ro; None — нет.
+    deps_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -433,6 +435,10 @@ class GateSpec:
     probe_for: Callable[[GateContext], tuple[str, ...]] | None = None  # probe, зависящий от репозитория
     container_user: str | None = None  # uid:gid в контейнере (по умолчанию — ContainerSpec.user)
     needs_input_dir: bool = False  # смонтировать staging (CONTAINER_INPUT_DIR) не только для SCOPE
+    # toolchain шага `prepare` (QUALITY_GATES §4.3): gate требует зависимостей **проекта**. Пока prepare
+    # не настроен, поведение не меняется (probe инструмента падает → ERROR(TOOL_UNAVAILABLE));
+    # при отказе prepare — ERROR(DEPENDENCIES_UNAVAILABLE), никогда PASS.
+    needs_deps: str | None = None
 
     def run_evaluate(self, code: int, output: str, ctx: GateContext) -> Verdict:
         return self.evaluate(code, output, ctx) if self.evaluate is not None else self.interpret(code, output)
@@ -534,6 +540,32 @@ def pytest_counts(output: str) -> dict[str, int]:
     return counts
 
 
+_PYTEST_SUMMARY_RE = re.compile(r"(?m)^(FAILED|ERROR) (\S+)(?: - (.*))?$")
+_DETAIL_ITEMS = 10
+_DETAIL_ITEM_CHARS = 240
+
+
+def _pytest_failures(output: str) -> str:
+    """Упавшие тесты из краткой сводки pytest — причина отказа, которую получит следующая попытка агента."""
+    items = [
+        f"{node} — {reason.strip()}"[:_DETAIL_ITEM_CHARS] if reason else node[:_DETAIL_ITEM_CHARS]
+        for _kind, node, reason in _PYTEST_SUMMARY_RE.findall(output)
+    ]
+    if not items:
+        return ""
+    more = f"; … (+{len(items) - _DETAIL_ITEMS})" if len(items) > _DETAIL_ITEMS else ""
+    return ": " + "; ".join(items[:_DETAIL_ITEMS]) + more
+
+
+def finding_list(findings: Sequence[Finding]) -> str:
+    """Первые нарушения (`правило путь:строка`) для сообщения gate: без них агент не знает, что исправлять."""
+    if not findings:
+        return ""
+    items = [f"{f.rule_id} {f.file_path or ''}:{f.line or ''}".rstrip(":").strip() for f in findings[:_DETAIL_ITEMS]]
+    more = f"; … (+{len(findings) - _DETAIL_ITEMS})" if len(findings) > _DETAIL_ITEMS else ""
+    return ": " + "; ".join(items) + more
+
+
 def interpret_pytest(code: int, output: str) -> Verdict:
     counts = pytest_counts(output)
     bad = counts.get("failed", 0) + counts.get("errors", 0)
@@ -544,7 +576,7 @@ def interpret_pytest(code: int, output: str) -> Verdict:
             return Verdict("ERROR", "REPORT_UNPARSABLE", "exit 0 without a 'passed' summary")
         return Verdict("PASS")
     if code == 1:
-        return Verdict("FAIL", message=f"{bad} failed/errored test(s)")
+        return Verdict("FAIL", message=f"{bad} failed/errored test(s){_pytest_failures(output)}")
     if code == 5:
         return Verdict("FAIL", "EMPTY_SUITE", "no tests collected")  # FP-05
     return Verdict("ERROR", "INFRA", f"pytest error (exit {code})")
@@ -595,7 +627,7 @@ def evaluate_ruff_lint(code: int, output: str, _ctx: GateContext) -> Verdict:
     if code == 1:
         if not findings and "Found" not in output:
             return Verdict("ERROR", "REPORT_UNPARSABLE", "exit 1 without violations in the report")
-        return Verdict("FAIL", message=f"{len(findings)} ruff violation(s)", findings=findings)
+        return Verdict("FAIL", message=f"{len(findings)} ruff violation(s){finding_list(findings)}", findings=findings)
     return Verdict("ERROR", "INFRA", f"tool error (exit {code})")
 
 
@@ -662,6 +694,7 @@ CORE_GATE_SPECS: dict[str, GateSpec] = {
             _pytest_argv,
             interpret_pytest,
             evaluate=evaluate_pytest,
+            needs_deps="python",
         ),
         GateSpec(
             "npm-unit",

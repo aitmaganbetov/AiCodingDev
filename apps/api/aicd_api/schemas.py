@@ -9,7 +9,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from aicd_cli_adapters import registry
 from aicd_identity.rbac import Role
+from aicd_platform import login_input
 
 DocumentationMode = Literal["OFF", "SMART", "STRICT"]
 QualityProfile = Literal["basic", "strict", "critical"]
@@ -54,6 +56,20 @@ class ProviderSettingsUpdateRequest(_Strict):
     max_parallel_sessions: Annotated[int, Field(ge=0, le=64, strict=True)] | None = None
     default_timeout_seconds: Annotated[int, Field(ge=60, le=14400, strict=True)] | None = None
     allowed_roles: list[AgentRole] | None = None
+    #: Модель CLI для задач провайдера в workspace; null — модель по умолчанию самого CLI.
+    model: Annotated[str, StringConstraints(pattern=registry.MODEL_PATTERN, strict=True)] | None = None
+
+
+class ProviderLoginCodeRequest(_Strict):
+    """Код авторизации из браузера оператора для процесса входа CLI (cli-auth.md §2a).
+
+    Это не токен и не API-ключ: одноразовый authorization code потока OAuth/PKCE, обменять который может
+    только сам CLI. Платформа его не хранит и не интерпретирует — строкой передаёт в stdin процесса.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Annotated[str, Field(min_length=1, max_length=login_input.MAX_CODE_LENGTH, strict=True)]
 
 
 class WorkspaceSettingsUpdate(_Strict):
@@ -102,3 +118,6 @@ class RepositoryAttachRequest(_Strict):
     remote_url: Annotated[str, Field(max_length=2048)] | None = None
     local_path: Annotated[str, Field(max_length=4096)] | None = None
     default_branch: Annotated[str, Field(max_length=255)] | None = None
+    #: Только github: рабочей копии ещё нет — воркер создаст её клонированием в `local_path`
+    #: installation-токеном GitHub App (ключ App есть только у воркера, OQ-47 (2)).
+    create_local_copy: bool = False

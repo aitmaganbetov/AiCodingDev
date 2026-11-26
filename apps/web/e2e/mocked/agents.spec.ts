@@ -11,7 +11,7 @@ type S = components['schemas'];
 
 /**
  * F5 «Агенты» (план §3.4, §5.7; D-2): каталог 12 ролей AgentRole — профиль (B7 `GET /agent-profiles`),
- * активность только по выполняемым задачам (B1 `GET /tasks?status=LEASED&status=RUNNING`), результаты
+ * активность по задачам роли (B1 `GET /tasks`: выполняемые и ожидающие исполнения), результаты
  * `analytics.tasks.by_role`, провайдеры по настройкам workspace; вид сетка/список (URL + устройство);
  * карточка роли `agents/:role`. Ни одна роль не показывается «онлайн». Скриншоты — при AICD_E2E_SCREENSHOTS_DIR.
  */
@@ -107,10 +107,12 @@ const TASKS: S['WorkspaceTask'][] = [
   task('reviewer', 'Ревью экспорта', 'RUNNING', 3),
   task('developer', 'Схема отчётов', 'SUCCEEDED', 4),
   task('qa', 'Тест-план экспорта', 'SUCCEEDED', 5),
+  // Работа за ролью есть, но исполнение не идёт: такая роль не «не активна», а «ожидает».
+  task('maintenance', 'Обновление зависимостей', 'RETRY_WAIT', 6),
 ];
 
 function providers(): S['Provider'][] {
-  const base = { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, settings_version: 1 };
+  const base = { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, model: null, settings_version: 1 };
   return [
     {
       provider_id: '01900000-0000-7000-b000-000000000001',
@@ -167,7 +169,8 @@ test('agents: 12 role cards with real activity, zero-stat roles, grid/list persi
 
   const catalog = page.getByRole('list', { name: 'Роли агентов' });
   await expect(catalog.getByRole('article')).toHaveCount(12);
-  await expect(page.getByTestId('agents-active-summary')).toHaveText('Активны 2 роли из 12');
+  await expect(page.getByTestId('agents-active-summary')).toContainText('Активны 2 роли из 12');
+  await expect(page.getByTestId('agents-waiting-summary')).toHaveText('Ещё 1 роль ожидает исполнения');
   const dev = catalog.getByRole('article', { name: 'Разработчик' });
   await expect(dev).toHaveAttribute('data-state', 'active');
   await expect(dev).toContainText('Активна · выполняет 2 задачи');
@@ -182,7 +185,12 @@ test('agents: 12 role cards with real activity, zero-stat roles, grid/list persi
   // Роль без задач и без попыток в окне: «не активна» и «нет попыток», никаких выдуманных нулей.
   const qa = catalog.getByRole('article', { name: 'QA' });
   await expect(qa).toHaveAttribute('data-state', 'idle');
-  await expect(qa).toContainText('Не активна · нет выполняемых задач');
+  await expect(qa).toContainText('Не активна · нет задач');
+  // Задача ждёт повторной попытки — роль занята работой, и экран об этом говорит.
+  const maintenance = catalog.getByRole('article', { name: 'Сопровождение' });
+  await expect(maintenance).toHaveAttribute('data-state', 'waiting');
+  await expect(maintenance).toContainText('Ожидает · 1 задача не запущена');
+  await expect(maintenance.getByRole('link', { name: 'Обновление зависимостей' })).toBeVisible();
   await expect(qa.getByTestId('role-no-attempts')).toHaveText('Нет попыток в окне analytics.');
   await expect(catalog.getByRole('article', { name: 'Безопасность' })).toContainText('Нет разрешённых провайдеров');
   await expect(catalog).not.toContainText(/онлайн|online/i);

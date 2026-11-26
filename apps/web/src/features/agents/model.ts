@@ -1,7 +1,12 @@
 /**
  * Модель экрана «Агенты» (F5, план §3.4, §5.7; D-2). Роли — логические профили (AgentRole), а не
- * постоянно работающие сервисы: «активна» = есть задача роли в статусе LEASED/RUNNING (B1 `GET /tasks`).
- * Никаких «онлайн»-статусов, нулей вместо отсутствующих данных и выдуманных значений.
+ * постоянно работающие сервисы, поэтому «онлайн»-статусов нет, а состояние берётся только из задач
+ * (B1 `GET /tasks`): нулей вместо отсутствующих данных и выдуманных значений не показываем.
+ *
+ * Состояний три, потому что двух было мало: роль с задачами в очереди, в ожидании повтора или в блоке
+ * выглядела как «не активна · нет выполняемых задач», и экран умалчивал о том, что работа за ролью есть.
+ * «Активна» — LEASED/RUNNING; «ожидает» — PENDING/READY/RETRY_WAIT/BLOCKED в незавершённом прогоне;
+ * «не активна» — задач нет вовсе.
  */
 import type { AgentProfile } from '../../api/agents';
 import type { AnalyticsSummary } from '../../api/analytics';
@@ -11,7 +16,13 @@ import type { WorkspaceTask, WorkspaceTaskPage } from '../../api/tasks';
 import { AGENT_ROLE_ORDER, isAgentRole, type AgentRole } from '../../lib/agentRoles';
 
 export const ACTIVE_TASK_STATUSES = ['LEASED', 'RUNNING'] as const;
-/** Одна страница выполняемых задач на весь каталог (максимум контракта — 200). */
+/** Работа за ролью есть, но исполнение ещё не идёт: очередь, ожидание повтора, блокировка. */
+export const WAITING_TASK_STATUSES = ['PENDING', 'READY', 'RETRY_WAIT', 'BLOCKED'] as const;
+/** Что запрашивается у `GET /tasks` для каталога ролей. */
+export const CATALOG_TASK_STATUSES = [...ACTIVE_TASK_STATUSES, ...WAITING_TASK_STATUSES] as const;
+/** Прогон завершился — его незапущенные задачи уже ничего не ждут и в «ожидает» не попадают. */
+const FINISHED_RUN_STATUSES: readonly string[] = ['COMPLETED', 'FAILED', 'CANCELLED'];
+/** Одна страница задач каталога (максимум контракта — 200). */
 export const ACTIVE_TASKS_LIMIT = 200;
 export const ROLE_HISTORY_PAGE = 25;
 /** Сколько текущих задач показывать в карточке роли. */
@@ -51,26 +62,36 @@ export function resolveView(param: string | null, stored: AgentsView | null): Ag
 /* ── Активность ролей ───────────────────────────────────────────────────────────────────────── */
 
 export interface RoleActivity {
-  /** Выполняемые задачи роли (из загруженной выборки). */
+  /** Выполняемые задачи роли (LEASED/RUNNING) из загруженной выборки. */
   tasks: WorkspaceTask[];
+  /** Задачи роли, которые ждут исполнения: очередь, повтор, блокировка (прогон не завершён). */
+  waiting: WorkspaceTask[];
   /** Выборка неполная (есть next_cursor) → счётчик «N+». */
   more: boolean;
 }
 
-/** Группировка выполняемых задач по 12 ролям; значения вне AgentRole («Система») не учитываются. */
+/** Группировка задач по 12 ролям; значения вне AgentRole («Система») не учитываются. */
 export function activityByRole(page: WorkspaceTaskPage | undefined): Map<AgentRole, RoleActivity> | null {
   if (!page) return null;
   const more = page.next_cursor !== null;
-  const out = new Map<AgentRole, RoleActivity>(AGENT_ROLE_ORDER.map((r) => [r, { tasks: [], more }]));
+  const out = new Map<AgentRole, RoleActivity>(AGENT_ROLE_ORDER.map((r) => [r, { tasks: [], waiting: [], more }]));
   for (const task of page.items) {
     if (!isAgentRole(task.agent_role)) continue;
-    if (!(ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)) continue;
-    out.get(task.agent_role)?.tasks.push(task);
+    const bucket = out.get(task.agent_role);
+    if (!bucket) continue;
+    if ((ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)) bucket.tasks.push(task);
+    else if ((WAITING_TASK_STATUSES as readonly string[]).includes(task.status) && !FINISHED_RUN_STATUSES.includes(task.run_status))
+      bucket.waiting.push(task);
   }
   return out;
 }
 
-export type RoleState = 'loading' | 'unknown' | 'active' | 'idle';
+/** Задача, по которой подписывается состояние «ожидает»: блокировка важнее очереди. */
+export function waitingHighlight(activity: RoleActivity | undefined): WorkspaceTask | undefined {
+  return activity?.waiting.find((task) => task.status === 'BLOCKED') ?? activity?.waiting[0];
+}
+
+export type RoleState = 'loading' | 'unknown' | 'active' | 'waiting' | 'idle';
 
 /**
  * Состояние роли только по реальным задачам: нет данных (загрузка/ошибка) ≠ «не активна».
@@ -80,19 +101,22 @@ export function roleState(activity: RoleActivity | undefined, { pending, error }
   if (pending) return 'loading';
   if (error || !activity) return 'unknown';
   if (activity.tasks.length > 0) return 'active';
+  if (activity.waiting.length > 0) return 'waiting';
   return activity.more ? 'unknown' : 'idle';
 }
 
-/** Сколько ролей активно; `more` — нижняя оценка (выборка неполная). */
-export function activeRoleCount(activity: Map<AgentRole, RoleActivity> | null): { count: number; more: boolean } | null {
+/** Сколько ролей выполняет задачи и сколько ждёт; `more` — нижняя оценка (выборка неполная). */
+export function activeRoleCount(activity: Map<AgentRole, RoleActivity> | null): { count: number; waiting: number; more: boolean } | null {
   if (!activity) return null;
   let count = 0;
+  let waiting = 0;
   let more = false;
   for (const a of activity.values()) {
     if (a.tasks.length > 0) count += 1;
+    else if (a.waiting.length > 0) waiting += 1;
     more = more || a.more;
   }
-  return { count, more };
+  return { count, waiting, more };
 }
 
 /* ── Результаты по роли (analytics.tasks.by_role) ──────────────────────────────────────────── */

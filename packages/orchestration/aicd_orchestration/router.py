@@ -276,6 +276,29 @@ def route(req: RouteRequest, candidates: list[Candidate]) -> RouteDecision:
 
     def decide(pool: list[Candidate], independence: Independence, fallback: Fallback | None) -> RouteDecision:
         free = [c for c in pool if _slot_reason(c) is None]
+        keep = req.previous_provider
+        if (
+            keep is not None
+            and not req.previous_failed_twice_by_provider
+            and any(c.provider == keep for c in pool)
+            and not any(c.provider == keep for c in free)
+        ):
+            # Преемственность (§4.2): задачу уже вёл провайдер `keep`, он пригоден и всего лишь занят. Отдать её
+            # сейчас другому провайдеру значило бы заставить того заново проделать ту же работу, поэтому задача
+            # ждёт слот своего провайдера. Смена происходит, только когда прежний исключён фильтрами
+            # (авторизация, лимит, недоступность) или дважды подряд упал сам.
+            breakdown["review_independence"] = independence
+            breakdown["continuity"] = {"provider": keep, "action": "wait"}
+            return RouteDecision(
+                "WAIT",
+                None,
+                None,
+                independence,
+                fallback,
+                None,
+                f"задачу ведёт {keep}: ждём его слот, чтобы другой провайдер не повторял ту же работу",
+                breakdown,
+            )
         if not free:
             for c in pool:
                 excluded.append(

@@ -91,8 +91,12 @@ async def _candidates(conn: AsyncConnection, now: datetime) -> list[router.Candi
 
 
 async def _authors(conn: AsyncConnection, task_id: uuid.UUID) -> tuple[frozenset[str], int]:
-    """Провайдеры успешных попыток предков задачи, создавших коммиты (проверяемое изменение, §5), и
-    максимальная сложность этих задач (порог независимости — по уровню проверяемого изменения)."""
+    """Провайдеры попыток предков задачи, создавших коммиты (проверяемое изменение, §5), и максимальная
+    сложность этих задач (порог независимости — по уровню проверяемого изменения).
+
+    Автор — не только провайдер успешной попытки: следующая попытка продолжает коммит предыдущей
+    (`coordination.resume_point`), поэтому в принятом изменении есть и работа провайдера неуспешной попытки,
+    оставившей коммит. Не считать его автором значило бы отдать ему «независимое» ревью собственного кода."""
     rows = (
         await conn.execute(
             text(
@@ -100,9 +104,13 @@ async def _authors(conn: AsyncConnection, task_id: uuid.UUID) -> tuple[frozenset
                 " UNION SELECT d.depends_on_task_id FROM task_dependencies d JOIN anc ON d.task_id = anc.id)"
                 " SELECT a.provider, t.complexity FROM task_attempts a JOIN anc ON anc.id = a.task_id"
                 " JOIN tasks t ON t.id = a.task_id"
-                " WHERE a.status = 'SUCCEEDED' AND t.agent_role = ANY(:writers)"
-                " AND EXISTS (SELECT 1 FROM worktrees w WHERE w.task_id = a.task_id"
-                "   AND w.head_commit_sha IS NOT NULL AND w.head_commit_sha <> w.base_commit_sha)"
+                " WHERE t.agent_role = ANY(:writers) AND a.provider IS NOT NULL"
+                " AND EXISTS (SELECT 1 FROM task_attempts ok WHERE ok.task_id = a.task_id AND ok.status = 'SUCCEEDED')"
+                " AND ((a.status = 'SUCCEEDED' AND EXISTS (SELECT 1 FROM worktrees w WHERE w.task_id = a.task_id"
+                "     AND w.head_commit_sha IS NOT NULL AND w.head_commit_sha <> w.base_commit_sha))"
+                "   OR EXISTS (SELECT 1 FROM cli_executions e JOIN worktrees w ON w.path_ref = e.worktree_ref"
+                "     WHERE e.task_attempt_id = a.id AND w.task_id = a.task_id"
+                "     AND w.head_commit_sha IS NOT NULL AND w.head_commit_sha <> w.base_commit_sha))"
             ),
             {"t": task_id, "writers": sorted(WRITING_ROLES)},
         )

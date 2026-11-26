@@ -39,6 +39,7 @@ from aicd_verification.gates import (
     StackInfo,
     Verdict,
     apply_test_policy,
+    finding_list,
     interpret_pytest,
     pytest_counts,
 )
@@ -127,7 +128,10 @@ def mypy_config(facts: RepoFacts) -> str | None:
 
 def _mypy_has_files_setting(facts: RepoFacts) -> bool:
     texts = [facts.root_texts.get(n, "") for n in ("pyproject.toml", "mypy.ini", ".mypy.ini", "setup.cfg")]
-    return any(re.search(r"(?m)^\s*files\s*=", t) for t in texts)
+    # Цели проверки в конфигурации mypy задают `files`, `packages` и `modules`: с любой из них mypy запускается
+    # без аргумента-пути. Иначе `mypy .` проверял бы всё дерево (tests/, скрипты) вопреки объявленному проектом
+    # охвату и давал бы ошибки в коде, который проект под строгую проверку типов не ставил.
+    return any(re.search(r"(?m)^\s*(files|packages|modules)\s*=", t) for t in texts)
 
 
 def detect(facts: RepoFacts, stack: StackInfo) -> dict[str, Applicability]:
@@ -364,7 +368,9 @@ def evaluate_mypy(code: int, output: str, ctx: GateContext) -> Verdict:
             return Verdict("ERROR", "REPORT_UNPARSABLE", "exit 0 without mypy success summary")
         return Verdict("PASS")
     if code == 1 and (findings or summary_fail):
-        return Verdict("FAIL", message=f"{len(findings)} mypy error(s)", findings=tuple(findings))
+        return Verdict(
+            "FAIL", message=f"{len(findings)} mypy error(s){finding_list(findings)}", findings=tuple(findings)
+        )
     return Verdict("ERROR", "INFRA", f"mypy crashed or usage error (exit {code})", findings=tuple(findings))
 
 
@@ -716,6 +722,7 @@ SPECS: tuple[GateSpec, ...] = (
         _mypy_argv,
         _unused,
         evaluate=evaluate_mypy,
+        needs_deps="python",
     ),
     GateSpec(
         "pyright",
@@ -764,6 +771,7 @@ SPECS: tuple[GateSpec, ...] = (
         _PY_BUILD[1],
         _unused,
         evaluate=evaluate_build,
+        needs_deps="python",
     ),
     GateSpec(
         "vitest",
@@ -801,6 +809,7 @@ SPECS: tuple[GateSpec, ...] = (
         _coverage_display,
         _unused,
         evaluate=evaluate_coverage,
+        needs_deps="python",
     ),
 )
 

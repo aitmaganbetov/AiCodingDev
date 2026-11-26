@@ -639,6 +639,41 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: project:update
       x-audit-action: project.update
+  /repository-roots:
+    get:
+      operationId: listRepositoryRoots
+      summary: Разрешённые корни локальных репозиториев и репозитории в них (FR-PRJ-02) [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Что разрешено привязать как локальный каталог: allowlist корней установки (AICD_REPOSITORY_ROOTS) и
+        найденные в них Git-репозитории. Форма привязки показывает это вместо подсказки «внутри разрешённых корней»:
+        оператор выбирает каталог, а не угадывает путь. Подсказка не заменяет проверку — attachRepository заново
+        разрешает путь в корнях и проверяет, что это корень Git-репозитория. Обход ограничен по глубине и числу
+        каталогов (truncated — показаны не все); нечитаемые каталоги пропускаются. Корни не настроены ⇒ items: [].'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RepositoryRootList'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: repository:attach
+      x-audit-action: none
+      x-tz-addition: true
   /projects/{project_id}/repositories:
     get:
       operationId: listRepositories
@@ -676,7 +711,8 @@ paths:
       tags: [projects]
       description: 'Валидирует путь/URL, регистрирует репозиторий и ставит indexing_job (асинхронно). provider=local ⇒ 201 Repository.
         provider=github ⇒ 202 GitHubVerification: локальная копия проверяется сразу (422), доступ установки GitHub App к репозиторию
-        проверяет воркер (OQ-47 (2): ключ App — только у воркера), он же регистрирует репозиторий (result_id) — статус getGitHubVerification.'
+        проверяет воркер (OQ-47 (2): ключ App — только у воркера), он же при create_local_copy клонирует рабочую копию и регистрирует
+        репозиторий (result_id) — статус getGitHubVerification.'
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       - {$ref: '#/components/parameters/ProjectId'}
@@ -720,6 +756,39 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: repository:attach
       x-audit-action: repository.attach
+  /projects/{project_id}/repositories/{repository_id}:
+    delete:
+      operationId: detachRepository
+      summary: Отвязать репозиторий от проекта [дополнение к ТЗ]
+      tags: [projects]
+      description: 'Статус DETACHED: строка сохраняется (на неё ссылаются прогоны, worktrees, PR, треды ревью и снимки индекса —
+        история остаётся читаемой), но проект репозиторий больше не показывает, а каталог и GitHub-репозиторий освобождаются —
+        их можно привязать заново. Файлы рабочей копии на диске не удаляются. Повторный вызов — тоже 204; незавершённые прогоны
+        репозитория ⇒ 409.'
+      parameters:
+      - {$ref: '#/components/parameters/ProjectId'}
+      - {$ref: '#/components/parameters/RepositoryId'}
+      responses:
+        '204':
+          description: Отвязан
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: repository:attach
+      x-audit-action: repository.detach
+      x-tz-addition: true
   /projects/{project_id}/repositories/{repository_id}/tree:
     get:
       operationId: listRepositoryTree
@@ -1909,6 +1978,47 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: run:control
       x-audit-action: run.cancel_requested
+  /runs/{run_id}/fix:
+    post:
+      operationId: createFixRun
+      summary: Передать ИИ на исправление [дополнение к ТЗ]
+      tags: [runs]
+      description: 'Создаёт run режима DEVELOP в проекте исходного run. Цель составляет платформа: исходная цель, проваленные
+        обязательные gates и открытые находки исходного run; сбои инфраструктуры проверок перечисляются как справка. Исходный
+        run должен быть в статусе FAILED и иметь проваленные gates или открытые находки, иначе 409 invalid_state_transition.'
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/RunId'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FixRunRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunCreated'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Location: {$ref: '#/components/headers/Location'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: run:create
+      x-audit-action: run.create
+      x-tz-addition: true
   /runs/{run_id}/events:
     get:
       operationId: streamRunEvents
@@ -3325,6 +3435,39 @@ paths:
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
       x-required-permission: provider:probe
       x-audit-action: provider.probe_requested
+  /providers/{provider_id}/limits/refresh:
+    post:
+      operationId: refreshProviderLimits
+      summary: Обновить лимиты подписки CLI [дополнение к ТЗ]
+      tags: [providers]
+      description: 'Проверка установки на worker-exec плюс чтение лимитов у самого CLI: Claude Code — одним минимальным запросом (расходует подписку), Codex — через app-server без запроса к модели. Лимит 12/час на workspace и провайдера. Итог — ProviderInstallation.subscription_limits в listProviders.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProbeAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      x-required-permission: provider:probe
+      x-audit-action: provider.probe_requested
+      x-tz-addition: true
   /providers/{provider_id}/probes/{probe_request_id}:
     get:
       operationId: getProviderProbe
@@ -3361,6 +3504,171 @@ paths:
       - cookieAuth: []
       x-required-permission: provider:read
       x-audit-action: none
+      x-tz-addition: true
+  /providers/{provider_id}/login:
+    post:
+      operationId: loginProvider
+      summary: Начать интерактивный вход CLI по подписке [дополнение к ТЗ]
+      tags: [providers]
+      description: 'Device-code вход официального CLI (SECURITY_ARCHITECTURE §6.2, cli-auth.md). worker-exec запускает официальную
+        команду входа CLI в PTY на хосте исполнения; API **не** принимает и не хранит токены и не проксирует OAuth (ТЗ §1, ADR-0003).
+        Наружу выходит только публичная часть потока — `verification_url` и `user_code`, которые оператор вводит сам на сайте
+        провайдера. Owner + step-up re-auth: вход привязывает подписку к хосту исполнения (OQ-01/OQ-24). Одна активная сессия на
+        провайдера в workspace ⇒ иначе 409. Лимит 10/час на workspace+провайдера.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoginAccepted'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: provider:login
+      x-audit-action: provider.login_requested
+      x-tz-addition: true
+  /providers/{provider_id}/logins/{login_session_id}:
+    get:
+      operationId: getProviderLogin
+      summary: Состояние сессии входа CLI [дополнение к ТЗ]
+      tags: [providers]
+      description: '`LoginAccepted.status_url`. `PENDING` — сессия создана, worker-exec ещё не запустил CLI; `CHALLENGE` — CLI напечатал
+        ссылку и код устройства (`verification_url`, `user_code`), оператор подтверждает вход на сайте провайдера; `AUTHENTICATED` —
+        CLI сообщил об успешном входе; `FAILED`/`CANCELLED`/`EXPIRED` — итог с `error_category`. `output_tail` — последние строки
+        вывода CLI после удаления токеноподобных фрагментов. Сессия другого workspace или другого провайдера ⇒ 404.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      - name: login_session_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProviderLoginStatus'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: provider:login
+      x-audit-action: none
+      x-tz-addition: true
+  /providers/{provider_id}/logins/{login_session_id}/code:
+    post:
+      operationId: submitProviderLoginCode
+      summary: Передать CLI код авторизации из браузера [дополнение к ТЗ]
+      tags: [providers]
+      description: 'Часть официальных CLI завершает вход вводом кода, который провайдер показывает оператору в браузере (Claude Code:
+        `Paste code here if prompted >`); на хосте исполнения браузера нет, поэтому код вводит оператор в UI. Платформа передаёт его
+        в stdin процесса CLI через pub/sub и **нигде не сохраняет**: ни в БД, ни в audit, ни в логах, ни в ответе (ТЗ §1, ADR-0003).
+        Сам код бесполезен без CLI: это одноразовый authorization code потока OAuth/PKCE, а `code_verifier` не покидает CLI.
+        Показывать поле ввода следует, когда `ProviderLoginStatus.awaiting_code = true`. Сессия не активна ⇒ 409. Лимит 20/час на
+        сессию. Ответ — текущее состояние сессии.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      - name: login_session_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProviderLoginCodeRequest'}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProviderLoginStatus'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: provider:login
+      x-audit-action: provider.login_code_submitted
+      x-tz-addition: true
+  /providers/{provider_id}/logins/{login_session_id}/cancel:
+    post:
+      operationId: cancelProviderLogin
+      summary: Отменить сессию входа CLI [дополнение к ТЗ]
+      tags: [providers]
+      description: 'Активная сессия переходит в `CANCELLED`; worker-exec снимает процесс CLI при очередном опросе. Уже завершённая
+        сессия — 202 с её текущим состоянием (идемпотентно).'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ProviderId'}
+      - name: login_session_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProviderLoginStatus'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+            Idempotency-Replayed: {$ref: '#/components/headers/IdempotencyReplayed'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: provider:login
+      x-audit-action: provider.login_cancelled
       x-tz-addition: true
   /providers/{provider_id}/settings:
     patch:
@@ -3935,6 +4243,76 @@ paths:
       x-required-permission: github:manage
       x-audit-action: github.installation.disconnect
       x-tz-addition: true
+  /integrations/github/installations/{github_installation_id}/repositories:
+    get:
+      operationId: listGitHubInstallationRepositories
+      summary: Репозитории, доступные установке GitHub App (FR-PRJ-03) [дополнение к ТЗ]
+      tags: [github]
+      description: 'Выбор для формы привязки репозитория вместо ручного ввода URL. Источник — кэш, который наполняет воркер
+        (ключ App есть только у него, OQ-47 (2)): synced_at — когда список прочитан у GitHub, stale — пора обновить,
+        items: [] при synced_at: null — кэша ещё нет (вызвать refreshGitHubInstallationRepositories). Список ничего не
+        разрешает: доступ к выбранному репозиторию проверяется заново при привязке (attachRepository ⇒ GitHubVerification).'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/GitHubInstallationRef'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubRepositoryOptionList'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: github:read
+      x-audit-action: none
+      x-tz-addition: true
+  /integrations/github/installations/{github_installation_id}/repositories/refresh:
+    post:
+      operationId: refreshGitHubInstallationRepositories
+      summary: Перечитать состав установки GitHub App [дополнение к ТЗ]
+      tags: [github]
+      description: 'Ставит воркеру задание прочитать /installation/repositories (installation token операции list,
+        права metadata: read). queued: false — та же установка обновлялась только что (пауза бережёт лимит GitHub API).
+        Готовность — повторным listGitHubInstallationRepositories (synced_at изменится). Установка не ACTIVE ⇒ 409.'
+      parameters:
+      - {$ref: '#/components/parameters/WorkspaceHeader'}
+      - {$ref: '#/components/parameters/GitHubInstallationRef'}
+      responses:
+        '202':
+          description: Обновление поставлено в очередь (или погашено паузой)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubRepositoryRefresh'}
+          headers:
+            RateLimit-Limit: {$ref: '#/components/headers/RateLimitLimit'}
+            RateLimit-Remaining: {$ref: '#/components/headers/RateLimitRemaining'}
+            RateLimit-Reset: {$ref: '#/components/headers/RateLimitReset'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500': {$ref: '#/components/responses/InternalError'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+      security:
+      - cookieAuth: []
+      x-required-permission: github:read
+      x-audit-action: github.repositories.refresh_requested
+      x-tz-addition: true
   /integrations/github/verifications/{verification_id}:
     get:
       operationId: getGitHubVerification
@@ -4426,6 +4804,71 @@ components:
           type: [string, 'null']
           format: date-time
       required: [id, kind, status, project_id, result_id, error, created_at, updated_at, completed_at]
+    RepositoryRootEntry:
+      type: object
+      description: Git-репозиторий, найденный в разрешённом корне. ref — значение local_path для attachRepository.
+      properties:
+        ref: {type: string, description: '`<имя корня>/<относительный путь>` (сам корень — просто имя корня)'}
+        path: {type: string, description: Абсолютный путь на сервере}
+        name: {type: string, description: Относительный путь внутри корня — подпись в списке}
+        attached: {type: boolean, description: Каталог уже привязан к репозиторию этого workspace — повторная
+            привязка вернула бы conflict}
+      required: [ref, path, name, attached]
+    RepositoryRoot:
+      type: object
+      properties:
+        name: {type: string, description: Имя корня из AICD_REPOSITORY_ROOTS}
+        path: {type: string, description: Абсолютный путь корня на сервере}
+        repositories:
+          type: array
+          items: {$ref: '#/components/schemas/RepositoryRootEntry'}
+        truncated: {type: boolean, description: Обход прерван потолком — найдены не все репозитории корня}
+      required: [name, path, repositories, truncated]
+    RepositoryRootList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RepositoryRoot'}
+      required: [items]
+    GitHubRepositoryOption:
+      type: object
+      description: Репозиторий, доступный установке GitHub App. remote_url — ровно то значение, которое принимает attachRepository.
+      properties:
+        github_repo_id: {type: integer, minimum: 1}
+        full_name: {type: string, description: 'owner/name'}
+        owner: {type: string}
+        name: {type: string}
+        private: {type: boolean}
+        archived: {type: boolean, description: Архивный репозиторий — привязка возможна, но push и PR в нём запрещены GitHub
+        }
+        default_branch:
+          type: [string, 'null']
+        remote_url: {type: string, description: 'https://<github_web_url>/<owner>/<name>'}
+        attached: {type: boolean, description: Репозиторий уже привязан в этом workspace — повторная привязка
+            вернула бы conflict}
+      required: [github_repo_id, full_name, owner, name, private, archived, default_branch, remote_url, attached]
+    GitHubRepositoryOptionList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/GitHubRepositoryOption'}
+        total: {type: integer, minimum: 0, description: Сколько репозиториев доступно установке по данным GitHub (может быть
+            больше, чем items)}
+        truncated: {type: boolean, description: Список обрезан потолком — показаны не все доступные репозитории}
+        synced_at:
+          type: [string, 'null']
+          format: date-time
+          description: Когда список прочитан у GitHub; null — кэша нет (items пуст)
+        stale: {type: boolean, description: Список устарел или отсутствует — стоит вызвать refreshGitHubInstallationRepositories}
+        repository_selection: {type: string, enum: [all, selected], description: Выбор репозиториев в установке (из github_installations)}
+      required: [items, total, truncated, synced_at, stale, repository_selection]
+    GitHubRepositoryRefresh:
+      type: object
+      properties:
+        queued: {type: boolean, description: 'false — обновление погашено паузой: прежний список ещё свежий'}
+      required: [queued]
     GitHubInstallationList:
       type: object
       properties:
@@ -4971,6 +5414,12 @@ components:
       type: object
       additionalProperties: {type: string}
       description: Ссылки на связанные ресурсы (относительные URI)
+    FixRunRequest:
+      type: object
+      properties:
+        note: {type: string, maxLength: 2000, description: Уточнение пользователя к цели run-исправления}
+      additionalProperties: false
+      description: Необязательное тело createFixRun.
     CommandBody:
       type: object
       properties:
@@ -5705,12 +6154,19 @@ components:
       properties:
         provider: {$ref: '#/components/schemas/RepositoryProvider'}
         remote_url: {type: string, maxLength: 2048, description: 'Для github: https://github.com/<owner>/<repo>'}
-        local_path: {type: string, maxLength: 4096, description: 'Для local: путь внутри разрешённых корней (allowlist); иначе 422'}
+        local_path: {type: string, maxLength: 4096, description: 'Для local: путь внутри разрешённых корней (allowlist); иначе 422.
+          Для github: та же ссылка на каталог — существующая рабочая копия либо (create_local_copy: true) каталог, который создаст платформа'}
         default_branch: {type: string, maxLength: 255}
+        create_local_copy:
+          type: boolean
+          description: 'Только github, по умолчанию false: рабочей копии ещё нет — воркер клонирует репозиторий в local_path (каталог отсутствует или пуст,
+            внутри разрешённых корней; иначе 422). Клонирует воркер installation-токеном: ключ App есть только у него (OQ-47 (2)),
+            и токен не сохраняется ни в .git/config, ни где-либо ещё.'
       required: [provider]
       additionalProperties: false
       description: 'provider=local требует local_path; provider=github (P8-02, FR-PRJ-03) требует remote_url, local_path (локальная рабочая
-        копия в allowlist-корнях) и активную установку GitHub App workspace с доступом к репозиторию (проверяется через GitHub API).'
+        копия в allowlist-корнях — существующая или создаваемая клонированием при create_local_copy) и активную установку GitHub App
+        workspace с доступом к репозиторию (проверяется через GitHub API).'
     Technology:
       type: object
       properties:
@@ -6916,6 +7372,11 @@ components:
         auth_status: {$ref: '#/components/schemas/AuthStatus'}
         availability: {$ref: '#/components/schemas/ProviderAvailability'}
         capabilities: {type: object, additionalProperties: true, description: Результат feature detection (probe)}
+        subscription_limits:
+          oneOf:
+          - {$ref: '#/components/schemas/SubscriptionLimits'}
+          - {type: 'null'}
+          description: Лимиты подписки, как их сообщил сам CLI; null — CLI не сообщает или наблюдений ещё не было
         last_error_category:
           oneOf:
           - {$ref: '#/components/schemas/CliErrorCode'}
@@ -6925,6 +7386,42 @@ components:
           format: date-time
       required: [installation_id, host, compatibility, auth_status, availability, capabilities]
       description: Никаких credentials, путей к credential store, токенов, cookies, env.
+    SubscriptionLimitWindow:
+      type: object
+      properties:
+        kind: {type: string, pattern: '^[a-z0-9_]{1,40}$', description: 'Окно лимита в терминах CLI: five_hour, seven_day, seven_day_<модель>…'}
+        used: {type: number, minimum: 0, maximum: 1, description: Доля израсходованного окна (0…1)}
+        resets_at:
+          type: [string, 'null']
+          format: date-time
+          description: Когда окно сбросится; null — CLI не сообщил
+        status:
+          type: [string, 'null']
+          description: Статус окна по данным CLI (allowed, allowed_warning, rejected…)
+      required: [kind, used, resets_at, status]
+    SubscriptionLimits:
+      type: object
+      properties:
+        provider: {type: string}
+        observed_at: {type: string, format: date-time, description: Когда CLI сообщил эти значения}
+        windows:
+          type: array
+          maxItems: 8
+          items: {$ref: '#/components/schemas/SubscriptionLimitWindow'}
+        credits:
+          oneOf:
+          - type: object
+            properties:
+              balance:
+                type: [string, 'null']
+                pattern: '^\d{1,12}(\.\d{1,4})?$'
+                description: Баланс кредитов по данным CLI; null — CLI не сообщил число
+              unlimited: {type: boolean}
+            required: [balance, unlimited]
+          - {type: 'null'}
+          description: Кредиты сверх подписки, если CLI их сообщает (Codex); иначе null
+      required: [provider, observed_at, windows, credits]
+      description: Наблюдение, а не гарантия — подписка расходуется и вне платформы. Только числа и время; данных аккаунта нет.
     ProviderSettings:
       type: object
       properties:
@@ -6935,8 +7432,13 @@ components:
           type: array
           items: {$ref: '#/components/schemas/AgentRole'}
           uniqueItems: true
+        model:
+          type: [string, 'null']
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,99}$'
+          description: Модель CLI для задач провайдера в этом workspace (claude --model / codex --model) — псевдоним или полное
+            имя; null — модель по умолчанию самого CLI
         settings_version: {type: integer, format: int64, minimum: 0, description: Optimistic locking version; ETag = "v<version>"}
-      required: [enabled, max_parallel_sessions, default_timeout_seconds, allowed_roles, settings_version]
+      required: [enabled, max_parallel_sessions, default_timeout_seconds, allowed_roles, model, settings_version]
       description: Workspace-scoped настройки использования провайдера (хранятся в policies, policy_type=provider_settings).
     Provider:
       type: object
@@ -7284,6 +7786,11 @@ components:
           type: array
           items: {$ref: '#/components/schemas/AgentRole'}
           uniqueItems: true
+        model:
+          type: [string, 'null']
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,99}$'
+          description: Модель CLI; null сбрасывает выбор (модель по умолчанию CLI). Значение уходит в argv CLI, поэтому формат
+            жёсткий — произвольный текст и флаги отклоняются (422)
       additionalProperties: false
       description: Любые иные поля (binary_path, credentials, env, token...) ⇒ 422.
       minProperties: 1
@@ -7319,6 +7826,65 @@ components:
           - {$ref: '#/components/schemas/CliErrorCode'}
           - {type: 'null'}
       required: [probe_request_id, provider_id, status, requested_at, completed_at, installation, error_category]
+    LoginAccepted:
+      type: object
+      properties:
+        provider_id: {type: string, format: uuid}
+        login_session_id: {type: string, format: uuid}
+        accepted_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        status_url: {type: string, description: 'URL состояния сессии: /api/v1/providers/{provider_id}/logins/{login_session_id} (getProviderLogin)'}
+      required: [provider_id, login_session_id, accepted_at, status_url]
+      description: 'Сессия входа принята. Учётных данных ни в запросе, ни в ответе нет (ТЗ §1).'
+    ProviderLoginCodeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 'Код, который провайдер показал оператору в браузере. Платформа его не хранит и не интерпретирует: он уходит
+            одной строкой в stdin процесса CLI. Управляющие символы запрещены.'
+      required: [code]
+      description: 'Ввод оператора для процесса входа CLI. Это не токен и не API-ключ: обменять код может только CLI (PKCE).'
+    ProviderLoginStatus:
+      type: object
+      properties:
+        login_session_id: {type: string, format: uuid}
+        provider_id: {type: string, format: uuid}
+        state:
+          type: string
+          enum: [PENDING, CHALLENGE, AUTHENTICATED, FAILED, CANCELLED, EXPIRED]
+          x-proposed-enum: true
+          description: Предлагаемое дополнение к каноническим перечислениям (API_DESIGN.md, §19 «Предлагаемые дополнения»); требует утверждения.
+        verification_url:
+          type: [string, 'null']
+          maxLength: 2048
+          description: Страница провайдера, которую открывает оператор (публичная часть device-code потока)
+        user_code:
+          type: [string, 'null']
+          maxLength: 64
+          description: Код устройства, который оператор вводит на странице провайдера; без входа владельца подписки бесполезен
+        output_tail:
+          type: string
+          maxLength: 8192
+          description: Последние строки вывода CLI после удаления токеноподобных фрагментов (login.scrub); не содержит учётных данных
+        awaiting_code:
+          type: boolean
+          description: 'CLI ждёт код авторизации из браузера оператора (по его же выводу): UI показывает поле ввода и отправляет
+            код в submitProviderLoginCode. Платформа код не хранит.'
+        error_category:
+          oneOf:
+          - {$ref: '#/components/schemas/CliErrorCode'}
+          - {type: 'null'}
+        host:
+          type: [string, 'null']
+          description: Хост исполнения, на котором запущен CLI
+        created_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        updated_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+        expires_at: {type: string, format: date-time, description: 'UTC, ISO 8601 с Z'}
+      required: [login_session_id, provider_id, state, verification_url, user_code, output_tail, awaiting_code,
+        error_category, host, created_at, updated_at, expires_at]
     Approval:
       type: object
       properties:

@@ -693,30 +693,33 @@ class Orchestrator:
             await store.transition_task(conn, task_id, "RUNNING", reason="execution_started")
             # Поручения, адресованные задаче, уходят агенту с этой попыткой (EVENT_SCHEMAS §4 «Доставлено»).
             await directives.mark_delivered(conn, task_id)
+        # Аренда продлевается до конца попытки, включая проверку гейтами в `_finish_attempt`: гейты (тесты,
+        # покрытие) идут дольше TTL аренды. Иначе reaper объявляет попытку LEASE_LOST посреди проверки, а так
+        # как LEASE_LOST не расходует бюджет попыток, задача перезапускается бесконечно.
         heartbeat = asyncio.create_task(self._heartbeat(lease, ws))
-        watcher = asyncio.create_task(self._watch_cancel(task_id, ws))
-        started = utcnow()
         try:
-            outcome = await self.executor.execute(
-                task=dict(task),
-                run=dict(run),
-                attempt_id=attempt_id,
-                provider=provider,
-                installation_id=installation_id,
-                register_cancel=lambda hook: self._cancel_hooks.__setitem__(task_id, hook),
-            )
-        except Exception as exc:
-            log.exception("executor failure")
-            outcome = TaskExecution("failed", "WORKER_CRASH", None, provider, None, None, uuid.uuid4())
-            del exc
+            watcher = asyncio.create_task(self._watch_cancel(task_id, ws))
+            started = utcnow()
+            try:
+                outcome = await self.executor.execute(
+                    task=dict(task),
+                    run=dict(run),
+                    attempt_id=attempt_id,
+                    provider=provider,
+                    installation_id=installation_id,
+                    register_cancel=lambda hook: self._cancel_hooks.__setitem__(task_id, hook),
+                )
+            except Exception as exc:
+                log.exception("executor failure")
+                outcome = TaskExecution("failed", "WORKER_CRASH", None, provider, None, None, uuid.uuid4())
+                del exc
+            finally:
+                await _stop(watcher)
+                self._cancel_hooks.pop(task_id, None)
+            spent = int((utcnow() - started).total_seconds())
+            await self._finish_attempt(task_id, ws, lease, attempt_id, outcome, spent, run)
         finally:
-            for background in (heartbeat, watcher):
-                background.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await background
-            self._cancel_hooks.pop(task_id, None)
-        spent = int((utcnow() - started).total_seconds())
-        await self._finish_attempt(task_id, ws, lease, attempt_id, outcome, spent, run)
+            await _stop(heartbeat)
         await self.tick(task["run_id"], ws)
 
     async def _watch_cancel(self, task_id: uuid.UUID, ws: uuid.UUID) -> None:
@@ -738,9 +741,15 @@ class Orchestrator:
     async def _heartbeat(self, lease: leases.Lease, ws: uuid.UUID) -> None:
         while True:
             await asyncio.sleep(self.lease_ttl_seconds / 3)
-            async with transaction(self.engine, self._ctx(ws)) as conn:
-                if not await leases.heartbeat(conn, lease, self.lease_ttl_seconds):
-                    return
+            try:
+                async with transaction(self.engine, self._ctx(ws)) as conn:
+                    if not await leases.heartbeat(conn, lease, self.lease_ttl_seconds):
+                        return
+            except Exception:
+                # Разовый сбой БД не должен останавливать продление: иначе аренда истечёт при живом CLI,
+                # reaper объявит попытку LEASE_LOST, и ту же задачу параллельно начнёт вторая попытка —
+                # возможно, у другого провайдера. До истечения аренды остаётся ещё два продления.
+                log.warning("lease heartbeat failed", exc_info=True, extra={"task_id": str(lease.resource_id)})
 
     async def _finish_attempt(
         self,
@@ -891,6 +900,12 @@ class Orchestrator:
         async with transaction(self.engine, self._ctx(ws)) as conn:
             final = await store.load_run(conn, run_id)
         return final.status if final else "UNKNOWN"
+
+
+async def _stop(background: asyncio.Task[None]) -> None:
+    background.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await background
 
 
 _RISK = ["low", "medium", "high", "critical"]

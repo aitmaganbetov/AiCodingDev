@@ -10,13 +10,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { directiveKeys, directivesApi, directiveTypesFor, type DirectiveCreateRequest, type DirectiveType } from '../../api/directives';
+import {
+  DIRECTIVE_TARGETS,
+  allowedTarget,
+  directiveKeys,
+  directivesApi,
+  directiveTypesFor,
+  type DirectiveCreateRequest,
+  type DirectiveType,
+} from '../../api/directives';
 import type { AgentRole, Run, TaskSummary } from '../../api/runs';
 import { useStepUp } from '../../auth/StepUp';
 import { FormAlert } from '../../components/form';
-import { RUN_PAUSABLE } from '../../components/StatusBadge';
+import { RUN_PAUSABLE, RUN_TERMINAL } from '../../components/StatusBadge';
 import { Dialog, DialogClose, DialogContent, Icon, LoadingState, Toolbar, cx, type IconName } from '../../components/ui';
 import { can } from '../../lib/permissions';
+import { isApiError } from '../../api/client';
 import { problemMessage } from '../../lib/problem';
 import { AGENT_ROLES } from '../chat/chatModel';
 import { DirectiveTrackContent, useCreateDirective } from '../directives/DirectiveDialog';
@@ -92,6 +101,8 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
   const [trackOpen, setTrackOpen] = useState(false);
   const stepUp = useStepUp();
   const needsApproval = type === 'APPROVE' || type === 'REJECT';
+  // Завершённый запуск поручений не принимает (сервер ответил бы 409): говорим об этом до заполнения формы.
+  const runFinished = RUN_TERMINAL.includes(run.status);
   const titles = new Map(tasks.map((x) => [x.id, x.title]));
   const taskTitle = (taskId: string) => titles.get(taskId);
 
@@ -130,6 +141,7 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
     setAction(a);
     setType(def.type);
     setTarget(def.target);
+    create.reset();
     if (def.target === 'task') setTargetTask(selectedTask?.id ?? targetTask);
     setErrors({});
     requestAnimationFrame(() => document.getElementById(`${id}-message`)?.focus());
@@ -144,9 +156,16 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
     return false;
   };
 
+  /** Смена типа команды: цель, недопустимая для нового типа, заменяется первой допустимой. */
+  const changeType = (next: DirectiveType) => {
+    setType(next);
+    setTarget((current) => allowedTarget(next, current));
+    create.reset(); // ответ сервера относился к прежнему поручению
+  };
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (create.isPending) return;
+    if (create.isPending || runFinished) return;
     const next: Record<string, string> = {};
     if (!message.trim()) next.message = t('directives.form.messageRequired');
     if (needsApproval && !approvalId) next.approval = t('directives.form.approvalRequired');
@@ -172,6 +191,13 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
     };
     if (needsPreConfirm(type, preview)) setPending(body);
     else create.mutate(body);
+  };
+
+  /** Причина отказа сервера по существу: сообщения по полям, а без них — общее сообщение ошибки. */
+  const serverMessages = (error: unknown): string[] => {
+    const details = isApiError(error) ? error.errors.map((fe) => fe.message).filter((m): m is string => Boolean(m)) : [];
+    if (isApiError(error) && error.code === 'invalid_state_transition') return [t('missionControl.command.runFinished')];
+    return details.length > 0 ? details : [problemMessage(t, error)];
   };
 
   const field = (name: string) => ({
@@ -235,7 +261,7 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
               value={type}
               aria-describedby={`${id}-type-hint`}
               onChange={(e) => {
-                setType(e.target.value as DirectiveType);
+                changeType(e.target.value as DirectiveType);
                 setAction(null);
               }}
             >
@@ -280,7 +306,9 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
                         name={`${id}-target`}
                         className="h-4 w-4 accent-[rgb(var(--color-accent))]"
                         checked={target === tt}
+                        disabled={!DIRECTIVE_TARGETS[type].includes(tt)}
                         onChange={() => {
+                          create.reset();
                           setTarget(tt);
                           if (tt === 'task' && !targetTask && selectedTask) setTargetTask(selectedTask.id);
                         }}
@@ -365,12 +393,17 @@ export function CommandCenter({ run, role, workspaceId, tasks, selectedTask, tas
             </div>
           </div>
           {/* Не disabled во время отправки: фокус остаётся на кнопке и вернётся на неё после диалога хода. */}
-          <button type="submit" className="btn-primary" aria-disabled={create.isPending}>
+          <button type="submit" className="btn-primary" aria-disabled={create.isPending || runFinished}>
             <Icon name="enter" className="h-4 w-4" />
             {create.isPending ? t('directives.form.submitting') : t('directives.form.submit')}
           </button>
         </div>
-        {create.isError ? <FormAlert messages={[problemMessage(t, create.error)]} /> : null}
+        {runFinished ? (
+          <p className="text-sm text-fg-muted" data-testid="command-run-finished">
+            {t('missionControl.command.runFinished')}
+          </p>
+        ) : null}
+        {create.isError ? <FormAlert messages={serverMessages(create.error)} /> : null}
         <p role="status" className="text-xs text-fg-muted">
           {create.isPending ? t('directives.sending') : ''}
         </p>

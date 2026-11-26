@@ -18,13 +18,14 @@ from typing import Any, Literal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from aicd_cli_adapters import registry
+from aicd_cli_adapters import limits as cli_limits
+from aicd_cli_adapters import login, login_registry, registry
 from aicd_collaboration import acp
 from aicd_platform import consumer, context
 from aicd_platform.db import DbContext, apply_context, transaction
 from aicd_platform.ids import uuid7
 from aicd_platform.telemetry import current_traceparent
-from aicd_worker.runtime import Runtime
+from aicd_worker.runtime import CodeInput, Runtime
 
 log = logging.getLogger("aicd.worker")
 
@@ -33,6 +34,9 @@ EXEC_CONSUMER = "exec.execute_task"
 PROBE_CONSUMER = "exec.probe_provider"
 # Запрос перепроверки установки CLI (POST /providers/{id}/probe): очередь exec, обработчик `probe_provider`.
 PROBE_EVENT_TYPES = frozenset({registry.PROBE_REQUESTED})
+LOGIN_CONSUMER = "exec.login_provider"
+# Запрос интерактивного входа CLI (POST /providers/{id}/login): очередь exec, обработчик `login_provider`.
+LOGIN_EVENT_TYPES = frozenset({login_registry.LOGIN_REQUESTED})
 
 # Типы, которые диспетчер outbox направляет в очередь оркестратора (остальные — только SSE/прочие потребители).
 ORCHESTRATOR_EVENT_TYPES = frozenset(
@@ -64,6 +68,7 @@ Outcome = Literal[
     "execute_task",
     "directive_processed",
     "provider_probed",
+    "provider_login_finished",
     "tick",
 ]
 
@@ -123,13 +128,22 @@ async def probe_provider(rt: Runtime, event: dict[str, Any]) -> Outcome:
         error = "PROCESS_FAILED"
     duration_ms = int((time.monotonic() - started) * 1000)
     installation_id: uuid.UUID | None = None
-    async with transaction(rt.engine, DbContext(workspace_id=ws, actor_type="system")) as conn:
-        if probe is not None:
+    if probe is not None:
+        async with transaction(rt.engine, DbContext(workspace_id=ws, actor_type="system")) as conn:
             if probe.installed and probe.binary_path is not None:
                 installation_id = await registry.record_probe(
                     conn, host_id=rt.worker_host_id, probe=probe, duration_ms=duration_ms
                 )
-            error = registry.availability_of(probe)[1]
+        error = registry.availability_of(probe)[1]
+        # Лимиты читаются до записи итога: когда UI увидит «проверка завершена», наблюдение уже сохранено.
+        # У Codex чтение лимитов бесплатно (без запроса к модели) — обновляем при каждой проверке;
+        # у Claude Code оно расходует подписку, поэтому только по явной просьбе оператора.
+        wants_limits = payload.get("limits") is True or str(provider) not in cli_limits.COSTLY
+        if wants_limits and installation_id is not None:
+            await _refresh_limits(
+                rt, str(provider), installation_id, authenticated=probe.auth_status == "AUTHENTICATED"
+            )
+    async with transaction(rt.engine, DbContext(workspace_id=ws, actor_type="system")) as conn:
         await registry.record_probe_outcome(
             conn,
             workspace_id=ws,
@@ -139,6 +153,110 @@ async def probe_provider(rt: Runtime, event: dict[str, Any]) -> Outcome:
             error_category=error,
         )
     return "provider_probed"
+
+
+async def _refresh_limits(rt: Runtime, provider: str, installation_id: uuid.UUID, *, authenticated: bool) -> None:
+    """Лимиты подписки по запросу оператора: один минимальный запрос CLI. Сбой — не ошибка проверки."""
+    if rt.limits_reader is None or rt.limits_sink is None or not authenticated:
+        return
+    try:
+        observed = await rt.limits_reader(provider)
+        if observed:
+            await rt.limits_sink(installation_id, observed)
+    except Exception:
+        log.exception("subscription limits refresh failed", extra={"provider": provider})
+
+
+async def login_provider(rt: Runtime, event: dict[str, Any]) -> Outcome:
+    """Интерактивный вход CLI по подписке на этом хосте (worker-exec) по запросу оператора из UI.
+
+    Запускает официальную команду входа CLI в PTY (`login.run_login`), записывает в сессию найденную пару
+    «ссылка + код устройства» и итог. Учётные данные платформа не получает: токен пишет сам CLI в свой
+    credential store (ADR-0003, cli-auth.md §0). Вывод CLI проходит `login.scrub()` до любой записи.
+
+    После успешного входа сразу выполняется probe: установка получает актуальный `auth_status`, и задачи,
+    стоявшие `BLOCKED (AUTH_REQUIRED)`, видят доступного провайдера.
+    """
+    event_id = _uuid(event.get("event_id"))
+    ws = _uuid(event.get("workspace_id"))
+    payload = event.get("payload") or {}
+    provider_id = _uuid(payload.get("provider_id")) or _uuid(event.get("aggregate_id"))
+    session_id = _uuid(payload.get(login_registry.PAYLOAD_ID_KEY))
+    provider = payload.get("provider")
+    if (
+        event_id is None
+        or ws is None
+        or provider_id is None
+        or session_id is None
+        or provider not in ("codex", "claude")
+    ):
+        return "ignored"
+    if rt.provider_login is None or rt.worker_host_id is None:
+        raise RuntimeError("вход провайдера выполняет только воркер exec")
+    async with claimed(rt.engine, LOGIN_CONSUMER, event_id) as first:
+        pass
+    if not first:
+        return "duplicate"
+    context.bind(workspace_id=ws)
+    db = DbContext(workspace_id=ws, actor_type="system")
+    async with transaction(rt.engine, db) as conn:
+        if not await login_registry.claim_session(
+            conn, session_id=session_id, provider_id=provider_id, host_id=rt.worker_host_id
+        ):
+            return "ignored"  # отменена или просрочена до старта
+
+    async def cancelled() -> bool:
+        async with transaction(rt.engine, db) as conn:
+            current = await login_registry.session_state(conn, session_id=session_id)
+        return current not in login_registry.ACTIVE_STATES
+
+    lines: list[str] = []
+    outcome = login.LoginFinished(state="FAILED", error_category="PROCESS_FAILED")
+    # Коды авторизации оператора идут в stdin CLI через pub/sub и нигде не сохраняются (`login_input`).
+    async with _code_inbox(rt, session_id) as code_input:
+        async for item in rt.provider_login(str(provider), cancelled, code_input):
+            if isinstance(item, login.LoginLine):
+                lines.append(item.text)
+                del lines[: max(0, len(lines) - login.MAX_LINES)]
+                async with transaction(rt.engine, db) as conn:
+                    await login_registry.record_output(conn, session_id=session_id, output_tail="\n".join(lines))
+            elif isinstance(item, login.DeviceChallenge):
+                async with transaction(rt.engine, db) as conn:
+                    await login_registry.record_challenge(
+                        conn, session_id=session_id, challenge=item, output_tail="\n".join(lines)
+                    )
+            else:
+                outcome = item
+    async with transaction(rt.engine, db) as conn:
+        await login_registry.finish_session(
+            conn,
+            workspace_id=ws,
+            provider_id=provider_id,
+            session_id=session_id,
+            state=outcome.state,
+            error_category=outcome.error_category,
+            output_tail="\n".join(lines),
+        )
+    if outcome.state == "AUTHENTICATED" and rt.provider_prober is not None:
+        try:
+            probe = await rt.provider_prober(str(provider))
+        except Exception:
+            log.exception("probe после входа не выполнен", extra={"provider": provider})
+        else:
+            if probe.installed and probe.binary_path is not None:
+                async with transaction(rt.engine, db) as conn:
+                    await registry.record_probe(conn, host_id=rt.worker_host_id, probe=probe)
+    return "provider_login_finished"
+
+
+@asynccontextmanager
+async def _code_inbox(rt: Runtime, session_id: uuid.UUID) -> AsyncIterator[CodeInput | None]:
+    """Подписка на коды авторизации сессии; без канала вход идёт как раньше, без ввода."""
+    if rt.login_code_inbox is None:
+        yield None
+        return
+    async with rt.login_code_inbox(session_id) as receive:
+        yield receive
 
 
 async def handle_event(rt: Runtime, event: dict[str, Any]) -> Outcome:

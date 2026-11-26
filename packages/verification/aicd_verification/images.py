@@ -30,6 +30,10 @@ DEFAULT_GATE_IMAGES: Mapping[str, str] = {
     "eslint": "pipelinecomponents/eslint@sha256:7dbb5afec3be359fa1024a4cc76efc243fb6ce1333a9c5ab216b2d5a9039203a",
     # node 22 + npm: tsc/vitest/playwright/npm build из node_modules репозитория (только в контейнере).
     "node": "node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202",
+    # uv 0.9.x на базе python:3.12-slim-bookworm — шаг `prepare` (QUALITY_GATES §4.3): единственный
+    # контейнер верификации с egress. Путь интерпретатора `/usr/local/bin/python3.12` совпадает с
+    # gate-образом `python`, поэтому venv из кэша зависимостей работает и в gate-контейнере.
+    "prepare-python": "ghcr.io/astral-sh/uv:python3.12-bookworm-slim@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58",
     # Эфемерная PostgreSQL для MIGRATION (P6-05): initdb/pg_ctl/psql, сеть none, данные в tmpfs.
     "postgres": "postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac",
 }

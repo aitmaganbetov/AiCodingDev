@@ -11,6 +11,8 @@ import {
   type DirectiveCreateRequest,
   type DirectiveTargetType,
   type DirectiveType,
+  DIRECTIVE_TARGETS,
+  allowedTarget,
 } from '../../api/directives';
 import { runKeys, type AgentRole, type Run, type TaskSummary } from '../../api/runs';
 import { FormAlert } from '../../components/form';
@@ -142,7 +144,12 @@ export function DirectiveDialogContent({ run, role, workspaceId, tasks, taskHref
             className="input min-h-touch"
             value={type}
             aria-describedby={`${id}-type-hint`}
-            onChange={(e) => setType(e.target.value as DirectiveType)}
+            onChange={(e) => {
+              const next = e.target.value as DirectiveType;
+              setType(next);
+              // Цель, недопустимая для нового типа команды, заменяется первой допустимой.
+              setTargetType((current) => allowedTarget(next, current));
+            }}
           >
             {types.map((x) => (
               <option key={x} value={x}>
@@ -187,6 +194,7 @@ export function DirectiveDialogContent({ run, role, workspaceId, tasks, taskHref
                   name={`${id}-target`}
                   className="h-4 w-4 accent-[rgb(var(--color-accent))]"
                   checked={targetType === tt}
+                  disabled={!DIRECTIVE_TARGETS[type].includes(tt)}
                   onChange={() => setTargetType(tt)}
                 />
                 <label htmlFor={`${id}-target-${tt}`} className="text-sm">

@@ -38,12 +38,13 @@ import platform
 import re
 import shlex
 import shutil
+import tarfile
 import tempfile
 import time
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, get_args
 
@@ -57,9 +58,10 @@ from aicd_platform.db import DbContext, transaction
 from aicd_platform.ids import uuid7
 from aicd_platform.redaction import redact_text
 from aicd_security.docker_runner import DockerError, DockerSandboxRunner
-from aicd_security.git import GitRepositoryError, run_git
+from aicd_security.git import GitRepositoryError, run_git, run_git_bytes
 from aicd_security.sandbox import ContainerSpec, Mount, ResourceLimits, SandboxProcess, SandboxRunner
-from aicd_verification.findings import Finding, dedupe, severity_counts
+from aicd_verification import prepare as prepare_step
+from aicd_verification.findings import Finding, at_or_above, dedupe, severity_counts
 from aicd_verification.gates import (
     CONTAINER_INPUT_DIR,
     CONTAINER_WORKDIR,
@@ -78,7 +80,13 @@ from aicd_verification.images import image_key_for
 from aicd_verification.migrations import APPROVAL_ACTION, ApprovalsPort, approval_state
 from aicd_verification.profiles import GateRow, plan_gates, tool_missing_effect
 from aicd_verification.registry import GATE_SPECS, detect_all
-from aicd_verification.security_gates import SECURITY_GATES
+from aicd_verification.security_gates import (
+    CONTAINER_DB_DIR,
+    SECURITY_GATES,
+    osv_db_status,
+    security_threshold,
+    trivy_db_status,
+)
 
 log = logging.getLogger("aicd.verification")
 
@@ -87,6 +95,21 @@ PROBE_TIMEOUT_SECONDS = 60
 TERMINAL = frozenset({"PASS", "FAIL", "ERROR", "SKIPPED", "NOT_APPLICABLE"})
 REUSABLE = frozenset({"PASS", "FAIL", "NOT_APPLICABLE"})  # детерминированный результат на том же SHA
 OK_FOR_COMPLETION = frozenset({"PASS", "NOT_APPLICABLE"})
+# Типы gates, у которых порог severity считается по **новым** находкам относительно base_commit (§2.2).
+# SECRETS сюда не входит: любая находка секрета блокирует (матрица §2.2).
+BASELINE_GATE_TYPES = frozenset({"SAST", "SCA", "IAC", "POLICY"})
+_BASELINE_CACHE_SIZE = 256
+_BASELINE_TREE_MAX_BYTES = 1024 * 1024 * 1024
+
+
+def _export_tree(repo: Path, commit: str, target: Path) -> None:
+    """Содержимое commit (без `.git`) в каталог `target` — вход сканера для baseline."""
+    data = run_git_bytes(repo, "archive", "--format=tar", commit, max_output_bytes=_BASELINE_TREE_MAX_BYTES)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+        archive.extractall(target, filter="data")
+    target.chmod(0o755)  # контейнер gate работает не от root
+
+
 # Коды, допустимые CHECK gate_executions.error_code (0008); остальные — только в error_message.
 # Коды ошибок gate = CHECK ck_gate_executions_error_code (0008); единый источник — gates.ErrorCode.
 DB_ERROR_CODES = frozenset(get_args(ErrorCode))
@@ -174,6 +197,8 @@ class _TaskContext:
     profile: str = "strict"
     stack: StackInfo = field(default_factory=StackInfo)
     extra: dict[str, Any] = field(default_factory=dict)
+    # Результат шага prepare по toolchain (пусто — шаг не настроен; см. QUALITY_GATES §4.3).
+    deps: dict[str, prepare_step.PrepareResult] = field(default_factory=dict)
 
 
 class VerificationEngine:
@@ -194,6 +219,12 @@ class VerificationEngine:
         max_output_bytes: int = 8 * 1024 * 1024,
         limits: ResourceLimits | None = None,
         approvals: ApprovalsPort | None = None,
+        prepare_root: Path | None = None,
+        prepare_network: str | None = None,
+        prepare_proxy_url: str | None = None,
+        prepare_user: str | None = None,
+        prepare_timeout_seconds: int | None = None,
+        vulndb_root: Path | None = None,
     ) -> None:
         self._engine = engine
         self._store = store
@@ -208,6 +239,18 @@ class VerificationEngine:
         self._max_output = max_output_bytes
         self._limits = limits or ResourceLimits(cpus=2.0, memory_mb=2048, pids=256, timeout_seconds=600)
         self._approvals = approvals
+        # Шаг prepare (QUALITY_GATES §4.3). Пока не задан каталог кэша и сеть egress, шаг не
+        # выполняется и поведение gates не меняется: нет инструмента → ERROR(TOOL_UNAVAILABLE).
+        self._prepare_root = prepare_root
+        self._prepare_network = prepare_network or None
+        self._prepare_proxy_url = prepare_proxy_url or None
+        self._prepare_user = prepare_user or f"{os.getuid()}:{os.getgid()}"
+        self._prepare_timeout = prepare_timeout_seconds
+        # Корень офлайн-БД уязвимостей (`<root>/osv`, `<root>/trivy`; наполняет утверждённый шаг обновления,
+        # runbook vulndb-update.md). Gates SCA получают свою БД только для чтения в `/aicd-db`.
+        self._vulndb_root = vulndb_root
+        # Отпечатки находок сканера на base_commit: (workspace, project, base, gate, profile) → множество.
+        self._baselines: dict[tuple[Any, ...], frozenset[str]] = {}
 
     @staticmethod
     def _ctx(ws: uuid.UUID) -> DbContext:
@@ -319,6 +362,8 @@ class VerificationEngine:
             for gate in gates:
                 await self._open_execution(task, gate)
             pending = [g for g in gates if not g.reused]
+            # Зависимости проекта ставятся до gates, последовательно и один раз на toolchain.
+            await self._prepare_dependencies(task, pending)
             await asyncio.gather(*(self._run_gate(task, g) for g in pending))
         finally:
             if task.staging is not None:
@@ -419,12 +464,33 @@ class VerificationEngine:
                 },
             )
 
-    async def _set_running(self, task: _TaskContext, gate: _GateRun) -> None:
+    async def _set_running(self, task: _TaskContext, gate: _GateRun) -> bool:
+        """Перевод строки в RUNNING. False — строку уже завершила параллельная верификация задачи.
+
+        Пока gate ждёт семафор (долгий gate соседа — полный набор тестов проекта идёт минутами),
+        повторная верификация той же задачи помечает его строку `ERROR`/`superseded_at` и создаёт
+        новую. Без условия `finished_at IS NULL` такой UPDATE нарушал CHECK
+        `ck_gate_executions_finished` (`status IN (терминальные) = (finished_at IS NOT NULL)`) и
+        падал IntegrityError — gate получал ERROR(INFRA), задача уходила на повтор, и цикл повторялся.
+        """
         async with transaction(self._engine, self._ctx(task.workspace_id)) as conn:
-            await conn.execute(
-                text("UPDATE gate_executions SET status = 'RUNNING', started_at = now() WHERE id = :id"),
+            updated = await conn.execute(
+                text(
+                    "UPDATE gate_executions SET status = 'RUNNING', started_at = now()"
+                    " WHERE id = :id AND finished_at IS NULL AND superseded_at IS NULL"
+                ),
                 {"id": gate.execution_id},
             )
+            if updated.rowcount:
+                return True
+            row = (
+                await conn.execute(text("SELECT status FROM gate_executions WHERE id = :id"), {"id": gate.execution_id})
+            ).first()
+        # Результат этой строки принадлежит другой верификации: здесь её не перезаписываем.
+        gate.status = str(row[0]) if row is not None else "ERROR"
+        gate.detail = "execution superseded by a concurrent verification of the same task"
+        log.warning("gate %s execution %s superseded before start", gate.name, gate.execution_id)
+        return False
 
     async def _finish(
         self,
@@ -704,26 +770,37 @@ class VerificationEngine:
             return
 
         async with self._semaphore:
-            await self._set_running(task, gate)
+            if not await self._set_running(task, gate):
+                return
             ctx = self._gate_context(task, gate)
             security = SECURITY_GATES.get(spec.name)
             if security is not None:
                 if security.db is not None:
-                    # Офлайн-БД уязвимостей подключается отдельным утверждённым и аудируемым шагом обновления;
-                    # пока она не смонтирована, gate не может дать честный вердикт (ERROR ≠ PASS).
-                    await self._finish(
-                        task,
-                        gate,
-                        status="ERROR",
-                        error=f"TOOL_UNAVAILABLE: offline {security.db} vulnerability DB is not configured",
-                    )
-                    return
+                    # Офлайн-БД уязвимостей наполняет отдельный утверждённый и аудируемый шаг обновления;
+                    # без свежей БД gate не может дать честный вердикт (ERROR ≠ PASS).
+                    problem = await self._vulndb_problem(security.db)
+                    if problem is not None:
+                        await self._finish(
+                            task, gate, status="ERROR", error=f"TOOL_UNAVAILABLE: offline {security.db} {problem}"
+                        )
+                        return
                 if task.staging is not None:  # файлы платформы (правила/конфиги) для /aicd-input (ro)
                     for name, content in security.input_files(ctx).items():
                         target = task.staging / name
                         target.parent.mkdir(parents=True, exist_ok=True)
                         target.write_bytes(content)
                         target.chmod(0o644)
+            deps = self._deps_for(task, spec)
+            if deps is not None and not deps.ok:
+                # Отказ prepare: зависимые gates не запускаются и не получают PASS (§4.3, §5.1).
+                await self._finish(
+                    task,
+                    gate,
+                    status="ERROR",
+                    error=f"DEPENDENCIES_UNAVAILABLE: prepare ({deps.toolchain}) failed —"
+                    f" {deps.error_code}: {deps.message}",
+                )
+                return
             probe = await self._execute(task, spec, spec.probe(ctx), PROBE_TIMEOUT_SECONDS, gate)
             if probe.exit_code != 0 or probe.timed_out:
                 effect = tool_missing_effect(task.profile, gate.gate_type)
@@ -768,9 +845,10 @@ class VerificationEngine:
             verdict = Verdict("ERROR", "REPORT_UNPARSABLE", "gate output exceeded the capture limit")
         if verdict.approval is not None and verdict.status == "PASS":
             verdict = await self._approval_verdict(task, gate, verdict)
+        verdict = await self._baseline_verdict(task, gate, spec, verdict)
 
         display = shlex.join(spec.display_argv(ctx))
-        environment = self._environment(spec, tool_version, result)
+        environment = self._environment(spec, tool_version, result, task)
         stored = await self._store_output(task, gate, display, result, environment)
         evidence_status = stored["verification_status"]
         status = verdict.status
@@ -787,6 +865,90 @@ class VerificationEngine:
             verdict=verdict,
             duration_ms=duration_ms,
         )
+
+    async def _baseline_verdict(self, task: _TaskContext, gate: _GateRun, spec: GateSpec, verdict: Verdict) -> Verdict:
+        """Порог severity — по новым находкам относительно `base_commit` (QUALITY_GATES §2.2).
+
+        Находки, которые тот же сканер с теми же правилами даёт на base commit, показываются, но не блокируют
+        (в профиле `critical` существующие находки severity `critical` блокируют). Baseline не получен —
+        вердикт не смягчается: все находки считаются новыми.
+        """
+        if (
+            verdict.status != "FAIL"
+            or verdict.error_code != "THRESHOLD"
+            or spec.name not in SECURITY_GATES
+            or gate.gate_type not in BASELINE_GATE_TYPES
+            or task.base_sha is None
+            or task.base_sha == task.commit_sha
+        ):
+            return verdict
+        threshold = security_threshold(gate.gate_type, task.profile)
+        blocking = [f for f in verdict.findings if at_or_above(f.severity, threshold)]
+        if not blocking:
+            return verdict
+        known = await self._baseline_fingerprints(task, gate, spec)
+        if known is None:
+            return replace(verdict, message=f"{verdict.message}; baseline at base commit is unavailable")
+        new = [f for f in blocking if f.fingerprint not in known]
+        existing = len(blocking) - len(new)
+        if task.profile == "critical":
+            new += [f for f in blocking if f.fingerprint in known and f.severity == "critical"]
+        base = task.base_sha[:12]
+        if new:
+            top = "; ".join(f"{f.rule_id} {f.file_path or ''}:{f.line or ''}".rstrip(":") for f in new[:5])
+            return replace(
+                verdict,
+                message=f"{len(new)} blocking finding(s) at or above '{threshold}' (profile {task.profile};"
+                f" {existing} more already present at base {base}): {top}",
+            )
+        return replace(
+            verdict,
+            status="PASS",
+            error_code=None,
+            message=f"no new findings at or above '{threshold}' relative to base {base};"
+            f" {existing} existing finding(s) are reported but do not block (profile {task.profile})",
+        )
+
+    async def _baseline_fingerprints(self, task: _TaskContext, gate: _GateRun, spec: GateSpec) -> frozenset[str] | None:
+        """Отпечатки находок gate на base commit; None — baseline получить не удалось."""
+        assert task.base_sha is not None  # noqa: S101 — проверено вызывающим
+        key = (
+            task.workspace_id,
+            task.project_id,
+            task.base_sha,
+            spec.name,
+            task.profile,
+            json.dumps(dict(gate.config), sort_keys=True, default=str),
+        )
+        cached = self._baselines.get(key)
+        if cached is not None:
+            return cached
+        base_dir: Path | None = None
+        try:
+            if self._staging_root is not None:
+                self._staging_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            base_dir = Path(tempfile.mkdtemp(prefix="aicd-verify-base-", dir=self._staging_root))
+            await asyncio.to_thread(_export_tree, task.worktree, task.base_sha, base_dir)
+            base_task = replace(task, worktree=base_dir, commit_sha=task.base_sha, facts=None, deps={})
+            ctx = self._gate_context(base_task, gate)
+            async with self._semaphore:
+                result = await self._execute(base_task, spec, spec.build_argv(ctx), gate.timeout_seconds, gate)
+            if result.exit_code is None or result.exit_code < 0 or result.timed_out or result.truncated:
+                return None
+            base_verdict = spec.run_evaluate(result.exit_code, result.stdout.decode("utf-8", "replace"), ctx)
+        except Exception as exc:  # noqa: BLE001 — нет baseline → вердикт не смягчается
+            log.warning("baseline for %s unavailable: %s", spec.name, type(exc).__name__)
+            return None
+        finally:
+            if base_dir is not None:
+                await asyncio.to_thread(shutil.rmtree, base_dir, True)
+        if base_verdict.status == "ERROR":
+            return None
+        fingerprints = frozenset(f.fingerprint for f in base_verdict.findings)
+        if len(self._baselines) >= _BASELINE_CACHE_SIZE:
+            self._baselines.pop(next(iter(self._baselines)))
+        self._baselines[key] = fingerprints
+        return fingerprints
 
     async def _approval_verdict(self, task: _TaskContext, gate: _GateRun, verdict: Verdict) -> Verdict:
         """PASS gate с предметом approval (деструктивная миграция) — только при APPROVED решении."""
@@ -827,15 +989,219 @@ class VerificationEngine:
             verdict, status="FAIL", message=f"APPROVAL_REQUIRED: {APPROVAL_ACTION} pending (approval {approval_id})"
         )
 
+    # ---------------------------------------------------------------- шаг prepare (§4.3)
+    async def _prepare_dependencies(self, task: _TaskContext, gates: Sequence[_GateRun]) -> None:
+        """Зависимости проекта для gates, которым они нужны (`GateSpec.needs_deps`).
+
+        Шаг выполняется только в docker-режиме и только когда оператор задал каталог кэша и сеть
+        egress: иначе ничего не меняется и gate без инструмента даёт `ERROR(TOOL_UNAVAILABLE)`.
+        """
+        if not self._is_docker or self._prepare_root is None or self._prepare_network is None:
+            return
+        needed = [
+            g.spec.needs_deps
+            for g in gates
+            if g.spec is not None and g.spec.needs_deps and g.applicability is not None and g.applicability.applicable
+        ]
+        for toolchain in dict.fromkeys(needed):
+            if toolchain in task.deps:
+                continue
+            task.deps[toolchain] = await self._run_prepare(task, toolchain)
+
+    async def _run_prepare(self, task: _TaskContext, toolchain: str) -> prepare_step.PrepareResult:
+        assert self._prepare_root is not None  # noqa: S101 — проверено вызывающим
+        spec = prepare_step.spec_for(toolchain)
+        if spec is None:
+            return prepare_step.PrepareResult(
+                toolchain, False, "", "PREPARE_UNSUPPORTED", f"no prepare recipe for toolchain {toolchain!r}"
+            )
+        image = self._images.get(spec.image_key)
+        if not image:
+            return prepare_step.PrepareResult(
+                toolchain, False, "", "PREPARE_IMAGE_UNAVAILABLE", f"image {spec.image_key!r} is not configured"
+            )
+        lockfile = await asyncio.to_thread(prepare_step.find_lockfile, task.worktree, spec)
+        if lockfile is None:
+            bare = prepare_step.bare_spec(spec)
+            declared = await asyncio.to_thread(prepare_step.declares_dependencies, task.worktree, spec)
+            if bare is None or declared:
+                # Установка без lock-файла недетерминирована и запрещена (§4.3): результат gate не был бы
+                # воспроизводим на том же commit.
+                return prepare_step.PrepareResult(
+                    toolchain,
+                    False,
+                    "",
+                    "PREPARE_NO_LOCKFILE",
+                    f"the repository declares dependencies but none of {list(spec.lockfiles)} is present in its root"
+                    if declared
+                    else f"none of {list(spec.lockfiles)} is present in the repository root",
+                )
+            # Зависимостей проект не объявляет: окружение только с инструментами платформы.
+            spec = bare
+        files = (*((lockfile,) if lockfile else ()), *spec.manifests)
+        key, digests = await asyncio.to_thread(
+            prepare_step.cache_key,
+            workspace_id=str(task.workspace_id),
+            spec=spec,
+            image=image,
+            repo=task.worktree,
+            files=files,
+        )
+        cache_dir = self._prepare_root / key
+        roots = await asyncio.to_thread(prepare_step.source_roots, task.worktree)
+        gate_env = prepare_step.gate_env(toolchain, CONTAINER_WORKDIR, roots)
+        record: dict[str, Any] = {
+            "toolchain": toolchain,
+            "image": image,
+            "cache_key": key,
+            "lockfile": lockfile,
+            "mode": "locked" if lockfile else "tools-only",
+            "file_sha256": digests,
+            "source_roots": list(roots),
+            "command": shlex.join(spec.argv),
+            "network": self._prepare_network,
+            "user": self._prepare_user,
+        }
+        marker = cache_dir / prepare_step.MARKER_NAME
+        try:
+            hit = await asyncio.to_thread(marker.is_file)
+        except OSError:
+            hit = False
+        if hit:  # кэш по содержимому: тот же lock + образ + workspace → тот же каталог зависимостей
+            record["cache"] = "hit"
+            return prepare_step.PrepareResult(
+                toolchain, True, key, record=record, gate_env=gate_env, cache_dir=cache_dir
+            )
+        try:
+            await asyncio.to_thread(self._make_cache_dir, cache_dir, spec)
+        except OSError as exc:
+            return prepare_step.PrepareResult(
+                toolchain, False, key, "PREPARE_LIMIT", f"cache directory is not writable: {type(exc).__name__}"
+            )
+        timeout = self._prepare_timeout or spec.timeout_seconds
+        env = {
+            "CI": "true",
+            "TZ": "UTC",
+            "LANG": "C.UTF-8",
+            "HOME": "/home/prepare",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            **dict(spec.env),
+        }
+        if self._prepare_proxy_url:  # egress только через proxy с allowlist реестров (§4.3)
+            env.update(
+                {
+                    "HTTP_PROXY": self._prepare_proxy_url,
+                    "HTTPS_PROXY": self._prepare_proxy_url,
+                    "NO_PROXY": "localhost,127.0.0.1",
+                }
+            )
+            record["proxy"] = True
+        container = ContainerSpec(
+            image=image,
+            argv=spec.argv,
+            workdir=CONTAINER_WORKDIR,
+            env=env,
+            mounts=(
+                Mount(task.worktree, CONTAINER_WORKDIR, read_only=True),
+                Mount(cache_dir, prepare_step.DEPS_DIR, read_only=False),
+            ),
+            limits=ResourceLimits(
+                cpus=self._limits.cpus,
+                memory_mb=self._limits.memory_mb,
+                pids=self._limits.pids,
+                timeout_seconds=timeout + 30,
+                max_output_bytes=self._max_output,
+            ),
+            network=self._prepare_network or "none",
+            user=self._prepare_user,
+            labels={
+                "aicd.execution_id": f"prepare-{task.task_id}-{toolchain}",
+                "aicd.kind": prepare_step.PREPARE_KIND,
+                "aicd.gate": "prepare",
+            },
+        )
+        started = time.monotonic()
+        probe = await self._spawn(replace(container, argv=spec.probe, mounts=()), PROBE_TIMEOUT_SECONDS)
+        if probe.exit_code != 0 or probe.timed_out:
+            return prepare_step.PrepareResult(
+                toolchain,
+                False,
+                key,
+                "PREPARE_TOOL_UNAVAILABLE",
+                f"'{spec.argv[0]}' is not available in the prepare image"
+                f" ({probe.start_error or f'probe exit {probe.exit_code}'})",
+                record=record,
+            )
+        result = await self._spawn(container, timeout)
+        if result.exit_code == 0 and not result.timed_out and spec.extra_argv:
+            # Инструменты платформы (build frontend/backends): версии фиксированы в коде, попадают в
+            # evidence вместе с основной командой.
+            extra_commands = list(spec.extra_argv)
+            if toolchain == "python" and roots:
+                extra_commands.append(prepare_step.src_pth_argv(CONTAINER_WORKDIR, roots))
+                record["extra_commands"] = [shlex.join(a) for a in spec.extra_argv] + [
+                    shlex.join(prepare_step.src_pth_display(CONTAINER_WORKDIR, roots))
+                ]
+            else:
+                record["extra_commands"] = [shlex.join(a) for a in spec.extra_argv]
+            for extra in extra_commands:
+                result = await self._spawn(replace(container, argv=tuple(extra)), timeout)
+                if result.exit_code != 0 or result.timed_out:
+                    break
+        record["duration_ms"] = int((time.monotonic() - started) * 1000)
+        record["exit_code"] = result.exit_code
+        record["image_id"] = result.image_id
+        if result.exit_code != 0 or result.timed_out:
+            tail = redact_text((result.stderr or result.stdout).decode("utf-8", "replace"))[-1200:].strip()
+            code = "PREPARE_TIMEOUT" if result.timed_out else "PREPARE_FAILED"
+            record["cache"] = "miss"
+            detail = tail or result.start_error or f"exit {result.exit_code}"
+            return prepare_step.PrepareResult(toolchain, False, key, code, detail, record=record)
+        record["cache"] = "miss"
+        try:
+            await asyncio.to_thread(
+                marker.write_text, json.dumps(record, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+            )
+        except OSError as exc:  # кэш не переиспользуется, но зависимости установлены — шаг успешен
+            log.warning("prepare marker not written: %s", type(exc).__name__)
+        return prepare_step.PrepareResult(toolchain, True, key, record=record, gate_env=gate_env, cache_dir=cache_dir)
+
+    def _make_cache_dir(self, cache_dir: Path, spec: prepare_step.PrepareSpec) -> None:
+        """Каталог кэша на хосте. Владелец — пользователь воркера, он же uid контейнера prepare."""
+        self._prepare_root.mkdir(mode=0o700, parents=True, exist_ok=True)  # type: ignore[union-attr]
+        cache_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+        cache_dir.chmod(0o755)
+        for name in spec.scratch_dirs:
+            (cache_dir / name).mkdir(mode=0o755, parents=True, exist_ok=True)
+
+    def _vulndb_dir(self, kind: str) -> Path | None:
+        return self._vulndb_root / kind if self._vulndb_root is not None and self._is_docker else None
+
+    async def _vulndb_problem(self, kind: str) -> str | None:
+        """None — БД вида `kind` на месте и свежая; иначе причина для `ERROR(TOOL_UNAVAILABLE)`."""
+        db_dir = self._vulndb_dir(kind)
+        if db_dir is None:
+            return "vulnerability DB is not configured"
+        check = trivy_db_status if kind == "trivy" else osv_db_status
+        status = await asyncio.to_thread(check, db_dir, now=datetime.now(UTC))
+        return None if status.ready else f"vulnerability DB is unavailable — {status.reason}"
+
+    def _deps_for(self, task: _TaskContext, spec: GateSpec | None) -> prepare_step.PrepareResult | None:
+        if spec is None or not spec.needs_deps:
+            return None
+        return task.deps.get(spec.needs_deps)
+
     def _gate_context(self, task: _TaskContext, gate: _GateRun | None = None) -> GateContext:
         changed = changed_python_files(task.facts) if task.facts is not None else ()
         changed_all = task.facts.changed_paths if task.facts is not None else ()
+        deps = self._deps_for(task, gate.spec if gate is not None else None)
         common: dict[str, Any] = {
             "profile": task.profile,
             "config": dict(gate.config) if gate is not None else {},
             "facts": task.facts,
             "changed_files": changed_all,
             "nonce": uuid.uuid4().hex,
+            "deps_dir": prepare_step.DEPS_DIR if deps is not None and deps.ok else None,
         }
         if self._is_docker:
             return GateContext(CONTAINER_WORKDIR, CONTAINER_INPUT_DIR, changed, **common)
@@ -865,6 +1231,15 @@ class VerificationEngine:
             mounts = [Mount(task.worktree, CONTAINER_WORKDIR, read_only=True)]
             if (spec.needs_scope_input or spec.needs_input_dir) and task.staging is not None:
                 mounts.append(Mount(task.staging, CONTAINER_INPUT_DIR, read_only=True))
+            security = SECURITY_GATES.get(spec.name)
+            db_dir = self._vulndb_dir(security.db) if security is not None and security.db is not None else None
+            if db_dir is not None:
+                mounts.append(Mount(db_dir, CONTAINER_DB_DIR, read_only=True))
+            deps = self._deps_for(task, spec)
+            # Кэш зависимостей — только для чтения: gate не может его изменить (политика контейнеров
+            # запрещает rw на /deps вне контейнера prepare).
+            if deps is not None and deps.ok and deps.cache_dir is not None:
+                mounts.append(Mount(deps.cache_dir, prepare_step.DEPS_DIR, read_only=True))
             env = {
                 "CI": "true",
                 "TZ": "UTC",
@@ -876,6 +1251,8 @@ class VerificationEngine:
                 "npm_config_update_notifier": "false",
                 **declared_gate_env(spec),  # офлайн-флаги инструмента (semgrep без проверки версии и т. п.)
             }
+            if deps is not None and deps.ok:
+                env.update(deps.gate_env)  # PATH venv зависимостей + PYTHONPATH корней исходников
             spec_kwargs: dict[str, Any] = {"user": spec.container_user} if spec.container_user else {}
             return ContainerSpec(
                 image=image,
@@ -912,7 +1289,9 @@ class VerificationEngine:
     async def _execute(
         self, task: _TaskContext, spec: GateSpec, argv: Sequence[str], limit_seconds: int, gate: _GateRun
     ) -> ProcessResult:
-        container = self._spec_for(task, spec, argv, limit_seconds, gate)
+        return await self._spawn(self._spec_for(task, spec, argv, limit_seconds, gate), limit_seconds)
+
+    async def _spawn(self, container: ContainerSpec, limit_seconds: int) -> ProcessResult:
         started_at = utcnow()
         try:
             proc = await self._runner.start(container)
@@ -964,7 +1343,9 @@ class VerificationEngine:
         except Exception:  # noqa: BLE001 — процесс уже убит; код не важен, вердикт ERROR(TIMEOUT)
             return -9
 
-    def _environment(self, spec: GateSpec, tool_version: str, result: ProcessResult) -> dict[str, Any]:
+    def _environment(
+        self, spec: GateSpec, tool_version: str, result: ProcessResult, task: _TaskContext | None = None
+    ) -> dict[str, Any]:
         env: dict[str, Any] = {
             "runner": "docker" if self._is_docker else "local",
             "tool_versions": {spec.tool: tool_version},
@@ -985,6 +1366,12 @@ class VerificationEngine:
             env.update({"image": None, "network": "host", "workdir": "worktree", "workspace_mount": "host"})
         if result.truncated:
             env["output_truncated"] = True
+        deps = self._deps_for(task, spec) if task is not None else None
+        if deps is not None:
+            # Evidence шага prepare связывается с evidence зависимого gate (§4.3): команда, код
+            # выхода, образ, sha256 lock-файлов, ключ кэша и корни исходников в PYTHONPATH.
+            env["prepare"] = {**dict(deps.record), "ok": deps.ok, "error_code": deps.error_code}
+            env["deps_mount"] = f"{prepare_step.DEPS_DIR}:ro" if deps.ok else None
         return env
 
     async def _store_output(

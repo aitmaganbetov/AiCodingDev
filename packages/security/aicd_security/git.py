@@ -242,3 +242,81 @@ def push_ref(
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").replace(token, "***").strip()[-500:]
         raise GitRepositoryError("git push завершился с ошибкой", detail=detail)
+
+
+def _remote_https(remote_url: str) -> str:
+    """Схема удалённого репозитория для allowlist протоколов; URL с учётными данными не принимается."""
+    scheme = remote_url.split("://", 1)[0] if "://" in remote_url else ""
+    if scheme not in ("https", "http") or "@" in remote_url or any(c.isspace() for c in remote_url):
+        raise GitRepositoryError("remote_url должен быть https-URL без учётных данных")
+    return scheme
+
+
+def clone_repository(
+    *,
+    remote_url: str,
+    destination: Path,
+    token: str,
+    branch: str | None = None,
+    proxy_url: str | None = None,
+    timeout: float = 900.0,
+) -> GitRepoInfo:
+    """Создать локальную рабочую копию удалённого репозитория в `destination` (FR-PRJ-03).
+
+    Каталог назначения проверяет вызывающий (allowlist-корни, `resolve_in_roots`); здесь — только то, что
+    он пуст или отсутствует: клонирование не перезаписывает чужие данные. Меры те же, что у `push_ref`:
+
+    * токен не попадает ни в argv, ни в URL, ни в `.git/config`: git получает его одноразовым
+      GIT_ASKPASS-хелпером, значение — в окружении только дочернего процесса. В `remote.origin.url`
+      клона остаётся чистый https-URL, поэтому токен не остаётся на диске после клонирования;
+    * протоколы — только схема самого `remote_url` (https; http — лишь тестовый стенд), редиректы
+      запрещены, хелперы учётных данных отключены, терминальный запрос пароля выключен;
+    * шаблоны git не применяются (`--template=`): хуки из шаблонов не попадают в новый репозиторий;
+    * при неуспехе каталог, созданный этим вызовом, удаляется — полуклона не остаётся;
+    * сообщение об ошибке не содержит токена.
+    """
+    scheme = _remote_https(remote_url)
+    if branch is not None:
+        validate_branch_name(branch)
+    destination = Path(destination)
+    if destination.exists():
+        if not destination.is_dir():
+            raise GitRepositoryError("путь назначения занят файлом")
+        if any(destination.iterdir()):
+            raise GitRepositoryError("каталог назначения не пуст")
+    if not destination.parent.is_dir():
+        raise GitRepositoryError("родительский каталог назначения не существует")
+    created = not destination.exists()
+    workdir = tempfile.mkdtemp(prefix="aicd-askpass-")
+    try:
+        os.chmod(workdir, 0o700)
+        helper = Path(workdir) / "askpass.sh"
+        fd = os.open(helper, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(_ASKPASS_SCRIPT)
+        argv, env = _argv_env(destination.parent, ())
+        options = [
+            "-c", "credential.helper=",
+            "-c", "protocol.allow=never",
+            "-c", f"protocol.{scheme}.allow=always",
+            "-c", "http.followRedirects=false",
+            "-c", f"http.proxy={proxy_url or ''}",
+        ]  # fmt: skip
+        branch_args = ["--branch", branch] if branch is not None else []
+        argv = [argv[0], *options, *argv[1:], "clone", "--template=", *branch_args, remote_url, str(destination)]
+        env.update({"GIT_ASKPASS": str(helper), "AICD_GIT_ASKPASS_TOKEN": token, "GIT_TERMINAL_PROMPT": "0"})
+        proc = subprocess.run(  # noqa: S603 — argv-массив, без shell
+            argv, capture_output=True, text=True, timeout=timeout, env=env, check=False
+        )
+    except BaseException:
+        if created:
+            shutil.rmtree(destination, ignore_errors=True)
+        raise
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    if proc.returncode != 0:
+        if created:
+            shutil.rmtree(destination, ignore_errors=True)
+        detail = (proc.stderr or proc.stdout or "").replace(token, "***").strip()[-500:]
+        raise GitRepositoryError("git clone завершился с ошибкой", detail=detail)
+    return inspect_repository(destination)

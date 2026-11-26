@@ -127,6 +127,85 @@ async def test_attach_local_repository(user: UserSession, repo_root: Path) -> No
     assert again.status_code == 409
 
 
+async def test_detach_repository_frees_the_directory_and_keeps_history(user: UserSession, repo_root: Path) -> None:
+    """Отвязка (FR-PRJ-02): проект репозиторий больше не показывает, каталог снова свободен, история цела.
+
+    Привязанный по ошибке репозиторий раньше оставался в проекте навсегда — а проект с двумя репозиториями
+    вдобавок не принимает новые прогоны (`repository_required`, OQ-22).
+    """
+    ws = await user.create_workspace()
+    project = await user.create_project(ws["id"])
+    repo_dir = repo_root / f"detach-{secrets.token_hex(3)}"
+    init_git_repo(repo_dir)
+    url = f"/api/v1/projects/{project['id']}/repositories"
+    attached = await user.client.post(
+        url, json={"provider": "local", "local_path": f"main/{repo_dir.name}"}, headers=user.headers(idem=True)
+    )
+    assert attached.status_code == 201, attached.text
+    repository_id = attached.json()["id"]
+
+    detached = await user.client.delete(f"{url}/{repository_id}", headers=user.headers(ws["id"]))
+    validate_response("detachRepository", detached)
+    assert detached.status_code == 204, detached.text
+    assert (await user.client.delete(f"{url}/{repository_id}", headers=user.headers(ws["id"]))).status_code == 204
+
+    listed = await user.client.get(url)
+    assert listed.json()["items"] == [], "отвязанный репозиторий проекту больше не принадлежит"
+    roots = await user.client.get("/api/v1/repository-roots", headers={"X-Workspace-Id": ws["id"]})
+    freed = {e["ref"]: e["attached"] for e in roots.json()["items"][0]["repositories"]}
+    assert freed.get(f"main/{repo_dir.name}") is False, "каталог снова можно выбрать"
+
+    # Тот же каталог привязывается заново — это новый репозиторий, прежняя строка осталась в истории.
+    again = await user.client.post(
+        url, json={"provider": "local", "local_path": f"main/{repo_dir.name}"}, headers=user.headers(idem=True)
+    )
+    assert again.status_code == 201, again.text
+    assert again.json()["id"] != repository_id
+
+    audit = await user.client.get(
+        "/api/v1/audit-events", headers={"X-Workspace-Id": ws["id"]}, params={"action": "repository.detach"}
+    )
+    assert [e["resource_id"] for e in audit.json()["items"]] == [repository_id]
+
+    # Чужой проект/рабочее пространство репозитория не видит — 404, а не 403/204.
+    other = await user.create_project(ws["id"])
+    missing = await user.client.delete(
+        f"/api/v1/projects/{other['id']}/repositories/{repository_id}", headers=user.headers(ws["id"])
+    )
+    assert missing.status_code == 404, missing.text
+
+
+async def test_detach_is_refused_while_a_run_is_unfinished(user: UserSession, repo_root: Path) -> None:
+    """Прогон работает с репозиторием: отвязать его на полпути нельзя (409), после отмены — можно."""
+    ws = await user.create_workspace()
+    project = await user.create_project(ws["id"])
+    repo_dir = repo_root / f"busy-{secrets.token_hex(3)}"
+    init_git_repo(repo_dir)
+    url = f"/api/v1/projects/{project['id']}/repositories"
+    attached = await user.client.post(
+        url, json={"provider": "local", "local_path": f"main/{repo_dir.name}"}, headers=user.headers(idem=True)
+    )
+    assert attached.status_code == 201, attached.text
+    repository_id = attached.json()["id"]
+    run = await user.client.post(
+        "/api/v1/runs",
+        json={"project_id": project["id"], "mode": "DEVELOP", "objective": "проверка отвязки"},
+        headers=user.headers(ws["id"], idem=True),
+    )
+    assert run.status_code == 201, run.text
+
+    busy = await user.client.delete(f"{url}/{repository_id}", headers=user.headers(ws["id"]))
+    assert busy.status_code == 409, busy.text
+    assert "незавершённых прогонов" in busy.json()["detail"]
+    assert [x["id"] for x in (await user.client.get(url)).json()["items"]] == [repository_id]
+
+    cancelled = await user.client.post(
+        f"/api/v1/runs/{run.json()['run_id']}/cancel", headers=user.headers(ws["id"], idem=True)
+    )
+    assert cancelled.status_code == 202, cancelled.text
+    assert (await user.client.delete(f"{url}/{repository_id}", headers=user.headers(ws["id"]))).status_code == 204
+
+
 @pytest.mark.parametrize("case", ["traversal", "outside", "symlink", "not_git", "nested", "github"])
 async def test_attach_rejects_unsafe_paths(user: UserSession, repo_root: Path, tmp_path: Path, case: str) -> None:
     ws = await user.create_workspace()
@@ -158,6 +237,59 @@ async def test_attach_rejects_unsafe_paths(user: UserSession, repo_root: Path, t
     validate_response("attachRepository", r)
     assert r.status_code == 422, r.text
     assert str(tmp_path) not in r.text
+
+
+async def test_repository_roots_show_what_can_be_attached(
+    app: FastAPI, app_engine: AsyncEngine, user: UserSession, repo_root: Path
+) -> None:
+    """Форма привязки берёт список каталогов отсюда: `ref` каждого из них должен приниматься `attachRepository`."""
+    ws = await user.create_workspace()
+    project = await user.create_project(ws["id"])
+    repo_dir = repo_root / f"roots-{secrets.token_hex(3)}"
+    init_git_repo(repo_dir)
+    (repo_root / f"plain-{secrets.token_hex(3)}").mkdir()
+
+    r = await user.client.get("/api/v1/repository-roots", headers={"X-Workspace-Id": ws["id"]})
+    validate_response("listRepositoryRoots", r)
+    assert r.status_code == 200, r.text
+    [root] = r.json()["items"]
+    assert root["name"] == "main" and root["path"] == str(repo_root)
+    offered = {entry["ref"] for entry in root["repositories"]}
+    assert f"main/{repo_dir.name}" in offered
+    assert not any(entry["ref"].startswith("main/plain-") for entry in root["repositories"]), "не Git — не предлагаем"
+
+    assert all(entry["attached"] is False for entry in root["repositories"]), "ничего ещё не привязано"
+
+    attached = await user.client.post(
+        f"/api/v1/projects/{project['id']}/repositories",
+        json={"provider": "local", "local_path": f"main/{repo_dir.name}"},
+        headers=user.headers(idem=True),
+    )
+    validate_response("attachRepository", attached)
+    assert attached.status_code == 201, attached.text
+
+    # Каталог занят: он остаётся в списке, но помечен — форма не даст выбрать его второй раз.
+    r = await user.client.get("/api/v1/repository-roots", headers={"X-Workspace-Id": ws["id"]})
+    validate_response("listRepositoryRoots", r)
+    taken = {e["ref"]: e["attached"] for e in r.json()["items"][0]["repositories"]}
+    assert taken[f"main/{repo_dir.name}"] is True, taken
+
+
+async def test_repository_roots_require_the_attach_permission(
+    app: FastAPI, app_engine: AsyncEngine, user: UserSession
+) -> None:
+    """Список каталогов хоста — только тем, кто и так может привязывать репозитории."""
+    ws = await user.create_workspace()
+    viewer = await login(app, app_engine)
+    added = await user.client.post(
+        f"/api/v1/workspaces/{ws['id']}/members",
+        json={"email": viewer.email, "role": "viewer"},
+        headers=user.headers(idem=True),
+    )
+    assert added.status_code == 201, added.text
+    r = await viewer.client.get("/api/v1/repository-roots", headers={"X-Workspace-Id": ws["id"]})
+    assert r.status_code == 403, r.text
+    await viewer.client.aclose()
 
 
 async def test_audit_trail_records_actions(user: UserSession) -> None:

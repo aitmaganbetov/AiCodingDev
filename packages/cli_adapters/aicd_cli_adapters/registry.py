@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -18,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from aicd_cli_adapters.models import ProbeResult
 from aicd_platform import audit, metrics, outbox
-from aicd_platform.errors import ProblemError
+from aicd_platform.errors import FieldError, ProblemError
 from aicd_platform.ids import uuid7
 from aicd_platform.redaction import redact_text
 
@@ -42,8 +44,12 @@ DEFAULT_WORKSPACE_SETTINGS: dict[str, Any] = {
     "max_parallel_sessions": 1,
     "default_timeout_seconds": 1800,
     "allowed_roles": ALL_ROLES,
+    "model": None,
     "settings_version": 0,
 }
+#: Идентификатор модели CLI (`claude --model`, `codex --model`): псевдоним (`opus`, `sonnet`) или полное имя.
+#: Значение уходит в argv, поэтому формат жёсткий: без пробелов и не с дефиса — иначе это был бы флаг.
+MODEL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,99}$"
 
 
 async def register_host(conn: AsyncConnection, kind: str = "exec", hostname: str | None = None) -> uuid.UUID:
@@ -85,7 +91,8 @@ async def record_probe(
                 " FROM cli_providers p WHERE p.code = :prov"
                 " ON CONFLICT ON CONSTRAINT uq_cli_installations_host_binary DO UPDATE SET"
                 " detected_version = EXCLUDED.detected_version, compatibility = EXCLUDED.compatibility,"
-                " auth_status = EXCLUDED.auth_status, capabilities = EXCLUDED.capabilities, checked_at = now()"
+                " auth_status = EXCLUDED.auth_status, capabilities = EXCLUDED.capabilities, checked_at = now(),"
+                " enabled = true"
                 " RETURNING id"
             ),
             {
@@ -100,6 +107,18 @@ async def record_probe(
             },
         )
     ).scalar_one()
+    # У провайдера на хосте одна действующая установка — та, которую только что нашёл probe (бинарь задаёт
+    # конфигурация хоста, §5.2 п. 1). Строки с другим бинарём — прежняя конфигурация (например, Fake CLI до
+    # перехода на официальный): оставить их включёнными значит дать Router выбирать установку, которой уже
+    # нет, удваивать слоты провайдера и показывать оператору её версию. Строка не удаляется — на неё
+    # ссылается история исполнений; повторный probe того же бинаря включает её обратно.
+    await conn.execute(
+        text(
+            "UPDATE cli_installations SET enabled = false WHERE host_id = :host AND id <> :id AND enabled"
+            " AND provider_id = (SELECT provider_id FROM cli_installations WHERE id = :id)"
+        ),
+        {"host": host_id, "id": installation_id},
+    )
     availability, error = availability_of(probe)
     metrics.PROVIDER_PROBES.labels(metrics.label(probe.provider, metrics.PROVIDERS), availability).inc()
     detail = "; ".join(e.message for e in probe.errors or [])
@@ -140,7 +159,10 @@ async def sample_availability(conn: AsyncConnection) -> dict[str, bool]:
     return result
 
 
-async def list_providers(conn: AsyncConnection) -> list[dict[str, Any]]:
+async def list_providers(
+    conn: AsyncConnection, *, limits_of: Callable[[uuid.UUID], Awaitable[dict[str, Any] | None]] | None = None
+) -> list[dict[str, Any]]:
+    """`limits_of` — последнее наблюдение лимитов подписки установки (Redis, `limits.load`); None — не показывать."""
     providers = (
         (await conn.execute(text("SELECT id, code, display_name, enabled FROM cli_providers ORDER BY code")))
         .mappings()
@@ -150,6 +172,10 @@ async def list_providers(conn: AsyncConnection) -> list[dict[str, Any]]:
         (await conn.execute(text(_INSTALLATION_SELECT + " WHERE i.enabled ORDER BY h.hostname, i.id"))).mappings().all()
     )
     settings = await workspace_settings_by_code(conn)
+    observed: dict[Any, dict[str, Any] | None] = {}
+    if limits_of is not None:
+        for i in installs:
+            observed[i["id"]] = await limits_of(i["id"])
     result = []
     for p in providers:
         result.append(
@@ -158,7 +184,11 @@ async def list_providers(conn: AsyncConnection) -> list[dict[str, Any]]:
                 "code": p["code"],
                 "display_name": p["display_name"],
                 "enabled_globally": p["enabled"],
-                "installations": [_installation_view(i) for i in installs if i["provider_id"] == p["id"]],
+                "installations": [
+                    {**_installation_view(i), "subscription_limits": observed.get(i["id"])}
+                    for i in installs
+                    if i["provider_id"] == p["id"]
+                ],
                 "workspace_settings": settings.get(p["code"], dict(DEFAULT_WORKSPACE_SETTINGS)),
             }
         )
@@ -192,9 +222,19 @@ async def provider_code(conn: AsyncConnection, provider_id: uuid.UUID) -> str | 
 
 
 async def request_probe(
-    conn: AsyncConnection, *, workspace_id: uuid.UUID, provider_id: uuid.UUID, provider: str, actor_id: uuid.UUID
+    conn: AsyncConnection,
+    *,
+    workspace_id: uuid.UUID,
+    provider_id: uuid.UUID,
+    provider: str,
+    actor_id: uuid.UUID,
+    with_limits: bool = False,
 ) -> tuple[uuid.UUID, datetime]:
-    """Запрос проверки (API, RLS workspace): outbox для worker-exec и audit в одной транзакции."""
+    """Запрос проверки (API, RLS workspace): outbox для worker-exec и audit в одной транзакции.
+
+    `with_limits` — оператор просит заодно обновить лимиты подписки: воркер после проверки задаст CLI один
+    минимальный запрос (`limits.read_limits`). Обычная проверка запросов к модели не делает.
+    """
     probe_request_id = uuid7()
     await outbox.emit(
         conn,
@@ -202,7 +242,12 @@ async def request_probe(
         aggregate_type="cli_provider",
         aggregate_id=provider_id,
         workspace_id=workspace_id,
-        payload={"probe_request_id": str(probe_request_id), "provider_id": str(provider_id), "provider": provider},
+        payload={
+            "probe_request_id": str(probe_request_id),
+            "provider_id": str(provider_id),
+            "provider": provider,
+            **({"limits": True} if with_limits else {}),
+        },
     )
     await audit.record(
         conn,
@@ -212,7 +257,7 @@ async def request_probe(
         actor_type="user",
         actor_id=actor_id,
         workspace_id=workspace_id,
-        metadata={"probe_request_id": str(probe_request_id), "provider": provider},
+        metadata={"probe_request_id": str(probe_request_id), "provider": provider, "limits": with_limits},
     )
     accepted_at = (await conn.execute(text("SELECT now()"))).scalar_one()
     return probe_request_id, accepted_at
@@ -346,7 +391,7 @@ async def probe_status(
 # 0 — строки нет, действуют значения по умолчанию (`DEFAULT_WORKSPACE_SETTINGS`).
 
 PROVIDER_SETTINGS_POLICY = "provider_settings"
-SETTINGS_FIELDS = ("enabled", "max_parallel_sessions", "default_timeout_seconds", "allowed_roles")
+SETTINGS_FIELDS = ("enabled", "max_parallel_sessions", "default_timeout_seconds", "allowed_roles", "model")
 
 
 def _settings_view(definition: dict[str, Any] | None, version: int) -> dict[str, Any]:
@@ -421,6 +466,10 @@ async def update_workspace_settings(
     diff = [{"field": k, "from": current[k], "to": v} for k, v in changes.items() if current[k] != v]
     if not diff:
         return current
+    model = changes.get("model")
+    if model is not None and not re.fullmatch(MODEL_PATTERN, str(model)):
+        # Повтор проверки схемы API: значение попадёт в argv CLI, и доверять одному слою нельзя.
+        raise ProblemError("validation_error", errors=[FieldError("/model", "invalid", "недопустимое имя модели")])
     definition = {k: current[k] for k in SETTINGS_FIELDS} | dict(changes)
     try:
         async with conn.begin_nested():

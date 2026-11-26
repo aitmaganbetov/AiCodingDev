@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import uuid
@@ -30,6 +31,9 @@ from aicd_platform.ids import uuid7
 from aicd_platform.telemetry import span
 
 EventSink = Callable[[NormalizedCliEvent], Awaitable[None]]
+
+# Префикс ссылки контейнерного runner'а (`SandboxProcess.ref`); совпадает с docker_runner.REF_PREFIX.
+_CONTAINER_REF_PREFIX = "docker:"
 
 
 class ConcurrencyLimitReachedError(RuntimeError):
@@ -124,13 +128,23 @@ class ExecutionGateway:
             metrics.CLI_EXECUTIONS_ACTIVE.labels(provider).inc()
             try:
                 handle = await adapter.execute(request)
-                ref = await adapter.wait_started(request.execution_id)
-                if ref is not None:
-                    await self._transition(request, token, "STARTING", extra="pid_ref = :ref", params={"ref": ref})
-                    await self._transition(request, token, "RUNNING", extra="started_at = now()")
-                async for event in adapter.stream_events(handle.execution_id):
-                    if on_event is not None:
-                        await on_event(event)
+                try:
+                    ref = await adapter.wait_started(request.execution_id)
+                    if ref is not None:
+                        # Контейнер runner'а — в container_ref, процесс хоста — в pid_ref (`host:pid[:pgid]`):
+                        # у колонок разные форматы, а reconciler читает обе.
+                        column = "container_ref" if ref.startswith(_CONTAINER_REF_PREFIX) else "pid_ref"
+                        await self._transition(
+                            request, token, "STARTING", extra=f"{column} = :ref", params={"ref": ref}
+                        )
+                        await self._transition(request, token, "RUNNING", extra="started_at = now()")
+                    async for event in adapter.stream_events(handle.execution_id):
+                        if on_event is not None:
+                            await on_event(event)
+                except BaseException:
+                    # Сбой учёта или обработчика событий не должен оставлять CLI работать без владельца.
+                    await asyncio.shield(adapter.cancel(request.execution_id, reason="lease_lost"))
+                    raise
                 result = await adapter.collect_result(request.execution_id)
                 result = await self._attach_diff(request, result)
                 await self._complete(request, token, result, started=ref is not None)

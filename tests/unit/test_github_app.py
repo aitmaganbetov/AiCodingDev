@@ -110,6 +110,7 @@ async def test_installation_token_is_repo_scoped_and_minimal(
         assert not set(request["permissions"]) & permissions.FORBIDDEN_PERMISSIONS
     writes = {op: {k for k, v in scope.items() if v == "write"} for op, scope in permissions.TOKEN_SCOPES.items()}
     assert writes == {
+        "list": set(),
         "read": set(),
         "push": {"contents"},
         "pr_create": {"pull_requests"},
@@ -117,11 +118,42 @@ async def test_installation_token_is_repo_scoped_and_minimal(
         "status": {"statuses"},
         "merge": {"contents"},
     }
+    # Единственная операция без ограничения репозиториев — чтение состава установки, и она только читает
+    # метаданные: исключение из SC-GH-04 не даёт доступа ни к содержимому, ни к PR, ни к статусам.
+    assert set(permissions.UNSCOPED_OPERATIONS) == {"list"}
+    assert permissions.TOKEN_SCOPES["list"] == {"metadata": "read"}
     # Кэш: повторный запрос той же операции не обращается к GitHub.
     await client.installation_token(77, "push", repository_ids=[1001])
     assert len(gh.token_requests) == 5
     with pytest.raises(ValueError, match="конкретных репозиториев"):
         await client.installation_token(77, "read")
+
+
+async def test_installation_repositories_lists_what_is_allowed(
+    double: tuple[GitHubDouble, str, Path], client: GitHubClient
+) -> None:
+    """Состав установки читается token'ом без ограничения репозиториев и только с `metadata: read`."""
+    gh, _, _ = double
+    gh.token_requests.clear()
+    token = await client.installation_token(77, "list")
+    repos = await client.installation_repositories(token)
+    assert {r.full_name for r in repos.items} == {gh.repos[i].full_name for i in gh.installations[77].repository_ids}
+    assert repos.total == len(repos.items) and not repos.truncated
+    assert all(r.default_branch and r.html_url.startswith("https://") for r in repos.items)
+    request = gh.token_requests[-1]
+    assert request["permissions"] == {"metadata": "read"}
+    assert "repository_ids" not in request and "repositories" not in request, "token на весь состав установки"
+
+
+async def test_installation_repositories_needs_a_token_of_that_installation(
+    double: tuple[GitHubDouble, str, Path], client: GitHubClient
+) -> None:
+    """Token, ограниченный одним репозиторием, не показывает остальных: список не обходит SC-GH-04."""
+    gh, _, _ = double
+    one = sorted(gh.installations[77].repository_ids)[0]
+    token = await client.installation_token(77, "read", repository_ids=[one])
+    repos = await client.installation_repositories(token)
+    assert [r.id for r in repos.items] == [one]
 
 
 async def test_token_of_one_installation_cannot_reach_other_repo(
@@ -352,3 +384,74 @@ async def test_force_push_over_foreign_history_is_rejected(
         git_guard.push_ref(b, remote_url=f"{url}/acme/app.git", sha=git(b, "rev-parse", "HEAD"), branch="aicd/ff/1",
                            token=token.value())  # fmt: skip
     assert gh.branch_sha(gh.repos[1001], "aicd/ff/1") == git(a, "rev-parse", "HEAD")
+
+
+# --- git clone: локальная рабочая копия создаётся платформой (FR-PRJ-03) ----------------------------------
+
+
+def test_clone_rejects_unsafe_targets_and_urls(tmp_path: Path) -> None:
+    dest = tmp_path / "dest"
+    for kwargs, reason in (
+        ({"remote_url": "ssh://github.com/a/b.git"}, "ssh"),
+        ({"remote_url": "https://x-access-token:t@github.com/a/b.git"}, "URL с учётными данными"),
+        ({"branch": "main..x"}, "имя ветки"),
+    ):
+        args: dict[str, Any] = {"remote_url": "https://github.com/a/b.git", "destination": dest, **kwargs}
+        with pytest.raises(git_guard.GitRepositoryError):
+            git_guard.clone_repository(token="t", **args)
+        assert not dest.exists(), f"каталог не создаётся при отказе ({reason})"
+
+
+def test_clone_does_not_overwrite_a_non_empty_directory(tmp_path: Path) -> None:
+    dest = tmp_path / "busy"
+    dest.mkdir()
+    (dest / "keep.txt").write_text("мои данные\n")
+    with pytest.raises(git_guard.GitRepositoryError, match="не пуст"):
+        git_guard.clone_repository(remote_url="https://github.com/a/b.git", destination=dest, token="t")
+    assert _read(dest / "keep.txt") == "мои данные\n"
+
+
+async def test_clone_uses_askpass_and_leaves_no_token(
+    double: tuple[GitHubDouble, str, Path], client: GitHubClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Клонирование идёт installation-токеном `contents:read`; на диске токена не остаётся (SC-GH-04)."""
+    _, url, src = double
+    token = await client.installation_token(77, "read", repository_ids=[1001])
+    seen: list[tuple[list[str], dict[str, str]]] = []
+    real_run = subprocess.run
+
+    def spy(argv: list[str], **kwargs: Any) -> Any:
+        seen.append((list(argv), dict(kwargs.get("env") or {})))
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy)
+    dest = tmp_path / "copy"
+    info = await asyncio.to_thread(
+        git_guard.clone_repository, remote_url=f"{url}/acme/app.git", destination=dest, token=token.value()
+    )
+    monkeypatch.undo()
+    assert info.head_sha == git(src, "rev-parse", "HEAD") and not info.is_bare
+    assert git(dest, "rev-parse", "HEAD") == info.head_sha
+    argv, env = next((a, e) for a, e in seen if "clone" in a)
+    assert token.value() not in " ".join(argv), "токен не в argv"
+    assert all("@" not in a for a in argv if a.startswith("http")), "URL без учётных данных"
+    assert env["AICD_GIT_ASKPASS_TOKEN"] == token.value() and "credential.helper=" in argv
+    assert not _exists(env["GIT_ASKPASS"]), "одноразовый askpass удалён"
+    config = _read(dest / ".git" / "config")
+    assert token.value() not in config, "токен не остаётся в .git/config"
+    assert f"{url}/acme/app.git" in config, "origin — чистый URL без учётных данных"
+
+
+async def test_clone_without_access_fails_without_leaking_the_token(
+    double: tuple[GitHubDouble, str, Path], client: GitHubClient, tmp_path: Path
+) -> None:
+    """Репозиторий другой установки: GitHub отвечает 401, каталог после неуспеха не остаётся."""
+    _, url, _ = double
+    token = await client.installation_token(77, "read", repository_ids=[1001])
+    dest = tmp_path / "forbidden"
+    with pytest.raises(git_guard.GitRepositoryError) as err:
+        await asyncio.to_thread(
+            git_guard.clone_repository, remote_url=f"{url}/other/secret.git", destination=dest, token=token.value()
+        )
+    assert token.value() not in err.value.detail
+    assert not dest.exists(), "полуклона не остаётся"

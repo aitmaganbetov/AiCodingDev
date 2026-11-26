@@ -35,12 +35,13 @@ class Actors:
     execute_task: dramatiq.Actor[[dict[str, Any]], None]
     import_documentation: dramatiq.Actor[[dict[str, Any]], None]
     probe_provider: dramatiq.Actor[[dict[str, Any]], None]
+    login_provider: dramatiq.Actor[[dict[str, Any]], None]
     github_event: dramatiq.Actor[[dict[str, Any]], None] | None = None
     notify: dramatiq.Actor[[dict[str, Any]], None] | None = None
 
     async def publish(self, event: dict[str, Any]) -> None:
         """Публикация outbox-события (для `dispatch_batch`): события run нужных типов — в очередь оркестратора,
-        запросы загрузки документации (без run) — в очередь docs, перепроверка провайдера — в очередь exec."""
+        запросы загрузки документации (без run) — в очередь docs, перепроверка и вход провайдера — в очередь exec."""
         if self.github_event is not None and github.is_github_event(event):
             await asyncio.to_thread(self.github_event.send, event)  # approval.decided(MERGE) — и в оркестратор
         if self.notify is not None and notifications.is_notification_source(event):
@@ -49,6 +50,8 @@ class Actors:
             await asyncio.to_thread(self.import_documentation.send, event)
         elif event.get("event_type") in handlers.PROBE_EVENT_TYPES:
             await asyncio.to_thread(self.probe_provider.send, event)
+        elif event.get("event_type") in handlers.LOGIN_EVENT_TYPES:
+            await asyncio.to_thread(self.login_provider.send, event)
         elif event.get("run_id") and event.get("event_type") in handlers.ORCHESTRATOR_EVENT_TYPES:
             await asyncio.to_thread(self.handle_event.send, event)
 
@@ -70,6 +73,10 @@ def _import_documentation(event: dict[str, Any]) -> None:
 
 def _probe_provider(event: dict[str, Any]) -> None:
     runtime.submit(lambda rt: runtime.traced(handlers.PROBE_CONSUMER, event, handlers.probe_provider(rt, event)))
+
+
+def _login_provider(event: dict[str, Any]) -> None:
+    runtime.submit(lambda rt: runtime.traced(handlers.LOGIN_CONSUMER, event, handlers.login_provider(rt, event)))
 
 
 def _github_event(event: dict[str, Any]) -> None:
@@ -119,6 +126,15 @@ def register_actors(broker: dramatiq.Broker, *, exec_time_limit_seconds: int = 5
         max_backoff=60_000,
         time_limit=5 * 60_000,
     )(_probe_provider)
+    # Вход идёт, пока оператор подтверждает его в браузере: предел времени — чуть больше login.LOGIN_TIMEOUT,
+    # повторы не нужны (сессия одноразовая, повтор создаст новую по запросу оператора).
+    login_provider: dramatiq.Actor[[dict[str, Any]], None] = dramatiq.actor(
+        actor_name=handlers.LOGIN_CONSUMER,
+        queue_name=EXEC_QUEUE,
+        broker=broker,
+        max_retries=0,
+        time_limit=12 * 60_000,
+    )(_login_provider)
     github_event: dramatiq.Actor[[dict[str, Any]], None] = dramatiq.actor(
         actor_name=github.GITHUB_CONSUMER,
         queue_name=GITHUB_QUEUE,
@@ -137,4 +153,13 @@ def register_actors(broker: dramatiq.Broker, *, exec_time_limit_seconds: int = 5
         max_backoff=120_000,
         time_limit=2 * 60_000,
     )(_notify)
-    return Actors(broker, handle_event, execute_task, import_documentation, probe_provider, github_event, notify)
+    return Actors(
+        broker,
+        handle_event,
+        execute_task,
+        import_documentation,
+        probe_provider,
+        login_provider,
+        github_event,
+        notify,
+    )

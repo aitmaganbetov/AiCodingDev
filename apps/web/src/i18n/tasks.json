@@ -38,6 +38,14 @@
       "executions": "Запуски CLI",
       "exitCode": "код {{code}}",
       "output": "вывод",
+      "outputTitle": "Вывод запуска CLI",
+      "outputExcerpt": "Фрагмент вывода CLI",
+      "outputEnvelope": "Технические данные запуска (JSON)",
+      "outputLoading": "Загрузка вывода…",
+      "outputError": "Не удалось загрузить вывод",
+      "outputEmpty": "Вывод пуст.",
+      "outputDownload": "Скачать файлом",
+      "outputClose": "Закрыть",
       "routing": "Причина маршрутизации"
     },
     "events": {

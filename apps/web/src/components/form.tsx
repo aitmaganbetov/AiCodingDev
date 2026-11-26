@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
 interface FieldShellProps {
   id: string;
@@ -58,6 +58,34 @@ export function TextAreaField({ id, label, hint, error, ...textarea }: TextAreaF
   return (
     <FieldShell id={id} label={label} hint={hint} error={error}>
       {(aria) => <textarea id={id} className="input min-h-[96px]" {...aria} {...textarea} />}
+    </FieldShell>
+  );
+}
+
+type SelectFieldProps = Omit<SelectHTMLAttributes<HTMLSelectElement>, 'id'> & {
+  id: string;
+  label: string;
+  hint?: string | undefined;
+  error?: string | undefined;
+  /** Пустое значение в начале списка (ничего не выбрано). Без него первый пункт выбран по умолчанию. */
+  placeholder?: string | undefined;
+  options: readonly { value: string; label: string; disabled?: boolean }[];
+};
+
+/** Выбор из известного набора значений. Нативный `select`: доступность и поиск по набору — от платформы. */
+export function SelectField({ id, label, hint, error, placeholder, options, ...select }: SelectFieldProps) {
+  return (
+    <FieldShell id={id} label={label} hint={hint} error={error}>
+      {(aria) => (
+        <select id={id} className="input" {...aria} {...select}>
+          {placeholder !== undefined ? <option value="">{placeholder}</option> : null}
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value} disabled={opt.disabled}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      )}
     </FieldShell>
   );
 }

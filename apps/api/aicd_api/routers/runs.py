@@ -26,6 +26,7 @@ from aicd_api.responses import etag, json_response, parse_if_match
 from aicd_api.routers import op
 from aicd_identity import api as identity
 from aicd_identity.rbac import Role
+from aicd_orchestration import fix_run as fix_run_service
 from aicd_orchestration import runs as runs_service
 from aicd_platform import metrics
 from aicd_platform.clock import utcnow
@@ -121,6 +122,8 @@ async def create_run(
             if body.routing and body.routing.allowed_providers
             else None,
             routing_strategy=body.routing.strategy if body.routing else "adaptive",
+            # База run — HEAD рабочей копии на момент запуска, а не на момент привязки репозитория.
+            repository_roots=app_state(request).settings.repository_roots,
         )
         run_id = created["run_id"]
         return CommandResult(
@@ -392,6 +395,41 @@ async def cancel_run(
     principal: identity.Principal = Depends(current_principal),
 ) -> Response:
     return await _run_command(request, run_id, principal, "cancel", body)
+
+
+class FixRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    note: Annotated[str, Field(max_length=2000)] | None = None
+
+
+@router.post("/runs/{run_id}/fix", status_code=201, **op("createFixRun", "run:create"))
+async def create_fix_run(
+    request: Request,
+    run_id: Annotated[uuid.UUID, Path()],
+    body: FixRunRequest | None = None,
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    """«Передать ИИ на исправление»: run DEVELOP с целью из проваленных gates и открытых находок исходного run."""
+    access = await resolve_resource(request, principal, "sys_resolve_run_workspace", run_id)
+    await authorize(request, access, "run:create")
+    payload = body or FixRunRequest()
+
+    async def command(conn: AsyncConnection) -> CommandResult:
+        created = await fix_run_service.create_fix_run(
+            conn,
+            run_id=run_id,
+            requested_by=principal.user_id,
+            note=payload.note,
+            repository_roots=app_state(request).settings.repository_roots,
+        )
+        new_id = created["run_id"]
+        return CommandResult(
+            201,
+            {"run_id": new_id, "status": "CREATED", "event_stream": f"/api/v1/runs/{new_id}/events"},
+            {"Location": f"/api/v1/runs/{new_id}", "ETag": etag(0)},
+        )
+
+    return await run_idempotent(request, access.db(), payload.model_dump(mode="json"), command)
 
 
 @router.get("/tasks/{task_id}", **op("getTask", "run:read"))

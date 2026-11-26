@@ -6,7 +6,9 @@
 * `approval.decided` со статусом APPROVED для `MERGE` предмета `scope=github` → `GitHubWorkflow.merge`;
 * `github.webhook.received` (API вебхука после проверки HMAC) → `GitHubWorkflow.process_webhook`;
 * `github.verification.requested` (API подключения установки / привязки GitHub-репозитория) →
-  `GitHubVerifier.verify`: закрытый ключ App есть только у воркера (OQ-47 (2), SECURITY_ARCHITECTURE §6.1).
+  `GitHubVerifier.verify`: закрытый ключ App есть только у воркера (OQ-47 (2), SECURITY_ARCHITECTURE §6.1);
+* `github.repositories.sync` (API «обновить список», подключение установки, вебхук `installation_repositories`)
+  → `GitHubRepositorySync.sync`: состав установки для формы привязки (кэш Redis, не БД).
 
 Отметка `processed_events(github.handle_event, event_id)` фиксируется только после успешной обработки
 (сбой ⇒ откат ⇒ повтор Dramatiq). Повтор после краха между вызовом GitHub и `CONFIRMED` безопасен:
@@ -23,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_integrations_github.api import GitHubClient, build_client
 from aicd_orchestration.github_flow import PR_REQUESTED_EVENT, WEBHOOK_EVENT, GitHubWorkflow
+from aicd_orchestration.github_repositories import SYNC_EVENT, GitHubRepositorySync
 from aicd_orchestration.github_verification import VERIFICATION_EVENT, GitHubVerifier
 from aicd_platform import context
 from aicd_worker.handlers import claimed
@@ -30,7 +33,7 @@ from aicd_worker.runtime import Runtime
 from aicd_worker.settings import WorkerSettings
 
 GITHUB_CONSUMER: Final = "github.handle_event"
-GITHUB_EVENT_TYPES: Final = frozenset({PR_REQUESTED_EVENT, WEBHOOK_EVENT, VERIFICATION_EVENT})
+GITHUB_EVENT_TYPES: Final = frozenset({PR_REQUESTED_EVENT, WEBHOOK_EVENT, VERIFICATION_EVENT, SYNC_EVENT})
 
 
 def is_github_event(event: Mapping[str, Any]) -> bool:
@@ -65,6 +68,15 @@ def build_workflow(
     )
 
 
+def build_repository_sync(
+    settings: WorkerSettings, workflow: GitHubWorkflow | None, redis: Any
+) -> GitHubRepositorySync | None:
+    """Чтение состава установки. Нужны и GitHub App, и Redis (кэш списка): иначе UI обойдётся ручным вводом."""
+    if workflow is None or redis is None:
+        return None
+    return GitHubRepositorySync(workflow.engine, workflow.client, redis, environment=settings.environment)
+
+
 def _uuid(value: Any) -> uuid.UUID | None:
     try:
         return uuid.UUID(str(value)) if value is not None else None
@@ -93,11 +105,23 @@ async def handle_event(rt: Runtime, event: dict[str, Any]) -> str:
             return "ignored"
         if etype == PR_REQUESTED_EVENT:
             return await workflow.open_pull_request(ws, payload)
+        if etype == SYNC_EVENT:
+            sync = rt.github_repositories
+            installation_row_id = _uuid(payload.get("installation_row_id")) or _uuid(event.get("aggregate_id"))
+            if sync is None or installation_row_id is None:
+                return "ignored"  # Redis не настроен: список останется прежним, привязка по URL работает
+            return await sync.sync(ws, installation_row_id)
         if etype == VERIFICATION_EVENT:
             verification_id = _uuid(payload.get("verification_id")) or _uuid(event.get("aggregate_id"))
             if verification_id is None:
                 return "ignored"
-            verifier = GitHubVerifier(workflow.engine, workflow.client, repository_roots=workflow.repository_roots)
+            verifier = GitHubVerifier(
+                workflow.engine,
+                workflow.client,
+                repository_roots=workflow.repository_roots,
+                git_url=workflow.git_url,  # клонирование рабочей копии (create_local_copy) идёт на тот же хост
+                proxy_url=workflow.proxy_url,
+            )
             return await verifier.verify(ws, verification_id)
         approval_id = _uuid(payload.get("approval_id")) or _uuid(event.get("aggregate_id"))
         if approval_id is None:

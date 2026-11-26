@@ -273,6 +273,11 @@ export function AgentsPage() {
               ? t('agents.summary.activeMore', { count: activeCount.count })
               : t('agents.summary.active', { count: activeCount.count })
             : null}
+          {activeCount && activeCount.waiting > 0 ? (
+            <span className="ml-2 font-normal text-fg-muted" data-testid="agents-waiting-summary">
+              {t('agents.summary.waiting', { count: activeCount.waiting })}
+            </span>
+          ) : null}
         </p>
         <p className="text-xs text-fg-subtle">
           {t('agents.summary.source', {

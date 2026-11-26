@@ -65,9 +65,15 @@ class WorktreeManager:
         run_id: uuid.UUID,
         task_id: uuid.UUID | None,
         base_commit_sha: str,
+        start_commit_sha: str | None = None,
     ) -> WorktreeInfo:
+        """`start_commit_sha` — коммит предыдущей попытки задачи: дерево создаётся от него, чтобы следующая
+        попытка продолжила сделанное. База (`base_commit_sha`) при этом не меняется — diff и проверки
+        по-прежнему охватывают всё изменение задачи. Коммит обязан быть потомком базы."""
         if not _SHA.fullmatch(base_commit_sha):
             raise WorktreeError("base_commit_sha должен быть полным SHA коммита")
+        if start_commit_sha is not None and not _SHA.fullmatch(start_commit_sha):
+            raise WorktreeError("start_commit_sha должен быть полным SHA коммита")
         repo_real = Path(os.path.realpath(repo))
         if self._root.is_relative_to(repo_real):
             raise WorktreeError("корень worktree не может находиться внутри репозитория")
@@ -77,12 +83,19 @@ class WorktreeManager:
             raise WorktreeError("базовый коммит не найден в репозитории") from exc
         if resolved != base_commit_sha:
             raise WorktreeError("базовый коммит разрешился в другой объект")
+        start = base_commit_sha
+        if start_commit_sha is not None and start_commit_sha != base_commit_sha:
+            try:
+                run_git(repo_real, "merge-base", "--is-ancestor", base_commit_sha, start_commit_sha)
+            except GitRepositoryError as exc:
+                raise WorktreeError("коммит продолжения не является потомком базового коммита") from exc
+            start = start_commit_sha
         path = self.path_for(worktree_id)
         if path.exists():
             raise WorktreeError("каталог worktree уже существует")
         branch = branch_for(run_id, task_id, worktree_id)
         try:
-            run_git(repo_real, "worktree", "add", "--quiet", "-b", branch, str(path), base_commit_sha)
+            run_git(repo_real, "worktree", "add", "--quiet", "-b", branch, str(path), start)
         except GitRepositoryError as exc:
             raise WorktreeError(f"не удалось создать worktree: {exc.detail}") from exc
         return WorktreeInfo(worktree_id, path, str(worktree_id), branch, base_commit_sha)

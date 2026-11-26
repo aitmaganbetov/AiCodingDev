@@ -961,7 +961,10 @@ SECURITY_GATES: Final[dict[str, SecurityGateDef]] = {
                 (SYFT_BINARY, "version"),
                 syft_argv,
                 evaluate_syft,
-                evidence_kind="sbom",
+                # `evidence.kind` — канонический перечень (DATABASE_DESIGN §307); `sbom` в нём нет, и
+                # вставка падала с CheckViolation (evidence_kind_check) на каждом прогоне. Сам SBOM
+                # хранится артефактом с `artifact_kind="sbom"` — вид evidence на это не влияет.
+                evidence_kind="scan_report",
                 artifact_kind="sbom",
             ),
             images.SYFT,
@@ -979,7 +982,10 @@ SECURITY_GATES: Final[dict[str, SecurityGateDef]] = {
                 (COSIGN_BINARY, "version"),
                 cosign_argv,
                 evaluate_cosign,
-                evidence_kind="signature",
+                # Как и у syft-sbom: `signature` вне канонического перечня `evidence.kind`. Гейт сохраняет
+                # текстовый вывод `cosign verify` — это результат команды; подпись как таковая остаётся
+                # артефактом с `artifact_kind="signature"`.
+                evidence_kind="command_result",
                 artifact_kind="signature",
             ),
             images.COSIGN,

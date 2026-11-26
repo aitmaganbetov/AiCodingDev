@@ -44,7 +44,7 @@ from aicd_integrations_github.api import (
     RepoRef,
     store,
 )
-from aicd_orchestration import external_actions
+from aicd_orchestration import external_actions, github_repositories
 from aicd_orchestration.approvals import Approvals, subject_hash
 from aicd_platform import audit, leases, outbox
 from aicd_platform.db import DbContext, transaction
@@ -752,6 +752,17 @@ class GitHubWorkflow:
                 # Отключённую пользователем установку (REVOKED) вебхук не реактивирует.
                 if inst["status"] != status and inst["status"] != "REVOKED":
                     await store.set_installation_status(conn, inst["id"], status)
+                # Состав установки мог измениться вместе с её состоянием — перечитать (сам список
+                # обновит `GitHubRepositorySync`; неактивная установка просто потеряет кэш).
+                await github_repositories.request_sync(conn, workspace_id=ws, installation_row_id=inst["id"])
+            return "processed"
+        if event == "installation_repositories":
+            # Владелец добавил/убрал репозитории установки: список «что разрешено» в UI больше не верен.
+            async with transaction(self.engine, ctx) as conn:
+                inst = await store.installation_by_github_id(conn, installation_id)
+                if inst is None:
+                    return "ignored"
+                await github_repositories.request_sync(conn, workspace_id=ws, installation_row_id=inst["id"])
             return "processed"
         if event in ("pull_request", "pull_request_review"):
             repo_id, number = hint.get("repository_id"), hint.get("pr_number")

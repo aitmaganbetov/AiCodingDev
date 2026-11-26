@@ -30,6 +30,12 @@ DEFAULT_ALLOWED_VOLUME_PREFIXES: tuple[str, ...] = ("aicd-cred-", "aicd-scratch-
 RW_VOLUME_PREFIXES: tuple[str, ...] = ("aicd-cred-",)
 """Единственные тома, которые могут монтироваться rw (CLI обновляет токены, ADR-0010 п.3)."""
 
+PREPARE_KIND = "verification-prepare"
+"""`aicd.kind` контейнера шага prepare (QUALITY_GATES §4.3): единственный, кому разрешён rw-bind кэша."""
+
+DEPS_TARGET = "/deps"
+"""Точка монтирования кэша зависимостей: rw — только в prepare, в gate-контейнерах всегда ro."""
+
 FORBIDDEN_NETWORK_MODES = frozenset({"host", "bridge", "default"})
 HOST_NAMESPACE_KEYS = ("PidMode", "IpcMode", "UTSMode", "UsernsMode", "CgroupnsMode")
 WEAKENING_SECURITY_OPTS = ("seccomp=unconfined", "seccomp:unconfined", "apparmor=unconfined", "apparmor:unconfined")
@@ -172,7 +178,10 @@ def build_host_config(spec: ContainerSpec) -> dict[str, Any]:
         "AttachStderr": True,
         "StopSignal": "SIGTERM",
         "StopTimeout": STOP_TIMEOUT_SECONDS,
-        "NetworkDisabled": spec.network == "none",
+        # Изоляцию сети даёт `NetworkMode: none` (в контейнере только loopback). `NetworkDisabled: true` поверх
+        # него оставляет `/etc/hosts` пустым: `localhost` перестаёт разрешаться, и тесты проверяемого проекта,
+        # поднимающие сервер-заглушку на `http://localhost:<порт>`, ложно падают в gate.
+        "NetworkDisabled": False,
         "HostConfig": host_config,
     }
 
@@ -192,6 +201,7 @@ def _lint_mounts(
     mounts: Any,
     allowed_bind_roots: tuple[str, ...],
     allowed_volume_prefixes: tuple[str, ...],
+    kind: str = "",
 ) -> list[str]:
     errors: list[str] = []
     if mounts is None:
@@ -218,6 +228,12 @@ def _lint_mounts(
         if target in targets:
             errors.append(f"{where}: duplicate target")
         targets.add(target)
+        if target.rstrip("/") == DEPS_TARGET and not read_only and kind != PREPARE_KIND:
+            # Кэш зависимостей пишет только шаг prepare; gate-контейнер его не может отравить.
+            errors.append(f"{where}: {DEPS_TARGET} may be read-write only in a {PREPARE_KIND} container")
+        if kind == PREPARE_KIND and (source.startswith(RW_VOLUME_PREFIXES) or "aicd-cred-" in source):
+            # SC-CLI-03: учётные данные CLI не попадают ни в verification, ни в prepare.
+            errors.append(f"{where}: credential volumes must never be mounted into {PREPARE_KIND}")
         if mtype == "bind":
             if not _under_root(source, allowed_bind_roots):
                 errors.append(f"{where}: bind source outside allowed roots {list(allowed_bind_roots)}")
@@ -349,7 +365,8 @@ def lint_container_config(
         if "noexec" not in tmp_opts:
             errors.append("tmpfs /tmp must be noexec")
 
-    errors.extend(_lint_mounts(hc.get("Mounts"), roots, prefixes))
+    kind = str(labels.get("aicd.kind") or "") if isinstance(labels, Mapping) else ""
+    errors.extend(_lint_mounts(hc.get("Mounts"), roots, prefixes, kind))
     return errors
 
 

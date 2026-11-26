@@ -44,6 +44,55 @@ def test_create_diff_commit_remove(tmp_path: Path) -> None:
     assert not info.path.exists()
 
 
+def test_next_attempt_continues_the_previous_one_and_diff_still_covers_the_whole_task(tmp_path: Path) -> None:
+    """Дерево следующей попытки создаётся от коммита предыдущей; база для diff и проверок — прежняя."""
+    repo = tmp_path / "repo"
+    init_git_repo(repo)
+    base = _head(repo)
+    mgr = WorktreeManager(tmp_path / "worktrees")
+    run_id, task_id = uuid7(), uuid7()
+    first = mgr.create(repo, worktree_id=uuid7(), run_id=run_id, task_id=task_id, base_commit_sha=base)
+    (first.path / "feature.txt").write_text("сделано первой попыткой\n")
+    done = mgr.commit_snapshot(first.path, "attempt 1")
+    assert done is not None
+
+    second = mgr.create(
+        repo, worktree_id=uuid7(), run_id=run_id, task_id=task_id, base_commit_sha=base, start_commit_sha=done
+    )
+    assert second.base_commit_sha == base, "база не сдвинулась: проверяется всё изменение задачи"
+    assert (second.path / "feature.txt").read_text() == "сделано первой попыткой\n", (
+        "работа предыдущей попытки на месте"
+    )
+    assert mgr.commit_snapshot(second.path, "nothing new") is None
+    (second.path / "fix.txt").write_text("исправление\n")
+    diff = mgr.diff(second.path, base)
+    assert b"feature.txt" in diff and b"fix.txt" in diff
+    assert _head(repo) == base, "основная ветка не меняется"
+
+
+def test_resume_commit_must_descend_from_the_base(tmp_path: Path) -> None:
+    """Чужой коммит (не потомок базы run) продолжением быть не может: diff от базы потерял бы смысл."""
+    repo = tmp_path / "repo"
+    init_git_repo(repo)
+    base = _head(repo)
+    env = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(repo), "PATH": "/usr/bin:/bin"}
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--orphan", "other"], check=True, env=env)
+    (repo / "x.txt").write_text("x\n")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", "unrelated"],
+        check=True,
+        env=env,
+    )
+    unrelated = _head(repo)
+    mgr = WorktreeManager(tmp_path / "wt")
+    for bad in (unrelated, "deadbeef", "0" * 40):
+        with pytest.raises(WorktreeError):
+            mgr.create(
+                repo, worktree_id=uuid7(), run_id=uuid7(), task_id=None, base_commit_sha=base, start_commit_sha=bad
+            )
+
+
 @pytest.mark.parametrize("base", ["main", "deadbeef", "0" * 40])
 def test_base_commit_must_be_existing_full_sha(tmp_path: Path, base: str) -> None:
     repo = tmp_path / "repo"

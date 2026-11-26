@@ -44,7 +44,7 @@ function provider(code: 'codex' | 'claude', auth: S['AuthStatus']): S['Provider'
         checked_at: '2026-11-08T08:00:00Z',
       },
     ],
-    workspace_settings: { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, allowed_roles: [], settings_version: 1 },
+    workspace_settings: { enabled: true, max_parallel_sessions: 2, default_timeout_seconds: 1800, model: null, allowed_roles: [], settings_version: 1 },
   };
 }
 

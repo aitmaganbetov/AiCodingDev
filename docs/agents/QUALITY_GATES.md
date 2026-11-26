@@ -69,7 +69,7 @@
 | `SIGN` | — | — | R* (выпускаются релизные артефакты/образы) |
 | `SCOPE` | R | R | R |
 
-Уровни L1–L5 добавляют гейты к профилю (ROUTING_POLICY §8): эффективный набор = профиль ∪ уровень. Пороги severity относятся к **новым** находкам относительно `base_commit` (baseline хранится как artifact); существующие находки показываются, но не блокируют в `basic`/`strict`, в `critical` блокируют `critical`-severity и существующие.
+Уровни L1–L5 добавляют гейты к профилю (ROUTING_POLICY §8): эффективный набор = профиль ∪ уровень. Пороги severity относятся к **новым** находкам относительно `base_commit` (baseline хранится как artifact); существующие находки показываются, но не блокируют в `basic`/`strict`, в `critical` блокируют `critical`-severity и существующие. Реализация (`VerificationEngine._baseline_verdict`): для gates типов SAST, SCA, IAC, POLICY при `FAIL(THRESHOLD)` тот же сканер с теми же правилами запускается на содержимом `base_commit` (экспорт дерева без `.git`, `network none`, только чтение); находки с отпечатком из baseline (gate + правило + путь + фрагмент, без номера строки) не блокируют. Baseline получить не удалось — вердикт не смягчается. `SECRETS` в правило не входит: любая находка секрета блокирует. Baseline кэшируется в памяти воркера по `(workspace, project, base_commit, gate, profile, config)`; хранение artifact-ом — не реализовано.
 
 Профили хранятся в `quality_profiles` (`code`, `version`, `definition jsonb`) — глобальные (`workspace_id NULL`) и переопределения workspace (могут только ужесточать); строки `quality_gates` (`profile_id`, `gate_type`, `required`, `config`, `timeout_seconds`) материализуют определение. Версия профиля фиксируется в `runs.policy_snapshot.quality`.
 
@@ -168,27 +168,49 @@ flowchart LR
 
 `evidence.verification_status`: `VERIFIED` — процесс выполнен Verification Engine, результат разобран, артефакты сохранены и хеши совпадают при повторном чтении; `REJECTED` — несоответствие (SHA, хеш, отчёт противоречит коду выхода); `UNVERIFIED` — evidence агента или человека без прогона; `PENDING` — прогон идёт.
 
-### 4.3 Шаг `prepare` — зависимости проекта для gates (OQ-43 (b), дизайн Phase 9, не реализован)
+### 4.3 Шаг `prepare` — зависимости проекта для gates (OQ-43 (b); Python — реализован, Node/PHP — дизайн)
 
 Gates `tsc`/`vitest`/`playwright`/`pytest`/`mypy`/`alembic`/`phpstan` требуют зависимостей **проекта** (`node_modules`,
-виртуальное окружение, `vendor/`), а gate-контейнеры работают с `network none` и read-only checkout. Сейчас такие gates
-находят зависимости только если они уже лежат в checkout, иначе — честный `ERROR`/`FAIL` (не `PASS`). Дизайн шага:
+виртуальное окружение, `vendor/`), а gate-контейнеры работают с `network none` и read-only checkout. Без шага `prepare`
+такие gates находят зависимости только если они уже лежат в checkout, иначе — честный `ERROR`/`FAIL` (не `PASS`).
+Реализация: `aicd_verification.prepare` + `VerificationEngine._prepare_dependencies` (toolchain `python`:
+`uv sync --frozen`); `GateSpec.needs_deps` помечает зависимые gates (`pytest-unit`, `mypy`, `python-build`,
+`pytest-coverage`). Шаг выключен, пока оператор не задал `AICD_VERIFICATION_PREPARE_ROOT` и
+`AICD_VERIFICATION_PREPARE_NETWORK`; выключенный шаг ничего не меняет (gate без инструмента —
+`ERROR(TOOL_UNAVAILABLE)`). Дизайн шага:
 
 | Аспект | Решение |
 |---|---|
 | Где | отдельный эфемерный контейнер **до** gates той же задачи, образ toolchain по digest (`node`, `python`, `migrations-python`, `php`), non-root, cap-drop ALL, read-only rootfs |
-| Вход | checkout задачи **только для чтения** + lock-файлы (`pnpm-lock.yaml`/`package-lock.json`, `uv.lock`/`requirements*.txt` с хэшами, `composer.lock`); без lock-файла — `ERROR(PREPARE_NO_LOCKFILE)` в strict/critical (недетерминированная установка запрещена) |
-| Выход | отдельный том `aicd-prep-<sha256(lock-файлы + образ)>` (кэш по содержимому), монтируется в gate-контейнеры **только для чтения** (`/deps`; `NODE_PATH`, `PYTHONPATH`/venv, `COMPOSER_VENDOR_DIR`) |
+| Вход | checkout задачи **только для чтения** + lock-файлы (`pnpm-lock.yaml`/`package-lock.json`, `uv.lock`/`requirements*.txt` с хэшами, `composer.lock`); без lock-файла — `ERROR(PREPARE_NO_LOCKFILE)` в strict/critical (недетерминированная установка запрещена). Исключение (Python): в корне нет ни lock-файла, ни манифеста зависимостей (`pyproject.toml`, `requirements*.txt`, `setup.py`, `setup.cfg`, `Pipfile`) — зависимостей у проекта нет, prepare создаёт пустое окружение с инструментами платформы фиксированных версий (pytest, pytest-cov, coverage, build); в evidence `prepare.mode = tools-only` |
+| Выход | кэш по содержимому `aicd-prep-<sha256(workspace + образ + команда + lock-файлы + манифест)>`, монтируется в gate-контейнеры **только для чтения** (`/deps`; `PATH` venv, `PYTHONPATH`, `NODE_PATH`, `COMPOSER_VENDOR_DIR`). Реализовано каталогом под `AICD_VERIFICATION_PREPARE_ROOT`, а не именованным томом: Docker создаёт том владельцем `root:root`, а `VolumeOptions.NoCopy = true` (обязателен политикой контейнеров) запрещает инициализацию содержимым образа, поэтому non-root процесс prepare в том писать не может. Владелец каталога — пользователь воркера, он же uid контейнера prepare (как `AICD_CLI_RUNNER_USER` для runner CLI) |
 | Команды (allowlist, argv без shell) | `pnpm install --frozen-lockfile --ignore-scripts --store-dir /deps/.pnpm` / `npm ci --ignore-scripts`; `uv sync --frozen --no-install-project` (или `pip install --require-hashes --no-deps -r …`); `composer install --no-scripts --no-plugins --no-dev` |
 | Скрипты пакетов | **запрещены** (`--ignore-scripts`, `--no-scripts`): install-скрипты — исполнение недоверенного кода с сетью. Пакеты, которым нужна сборка (native), — `ERROR(PREPARE_NEEDS_BUILD)` с указанием пакета; разрешение — политика проекта (admin, audited) |
 | Сеть | только через egress-proxy с allowlist реестров пакетов проекта (registry.npmjs.org, pypi.org/files.pythonhosted.org, repo.packagist.org + dist-хосты) или внутреннего зеркала; без доступа к внутренним сетям и метаданным облака (SSRF-правила `security.ssrf`) |
 | Лимиты | время (по умолчанию 900 с), размер тома (квота), число файлов; превышение — `ERROR(PREPARE_LIMIT)` |
-| Evidence | `gate_executions` записи `prepare` (gate_type `BUILD`, не блокирующая сама по себе): команда, exit code, digest образа, sha256 lock-файлов, ключ кэша, список установленных пакетов (SBOM syft по `/deps`) — связывается с evidence зависимых gates |
-| Безопасность | секреты не передаются; том `aicd-prep-*` никогда не монтируется в runner агента; кэш изолирован по workspace (ключ включает `workspace_id`) — нет отравления кэша между тенантами |
-| Отказ | ошибка prepare → зависимые gates `ERROR(DEPENDENCIES_UNAVAILABLE)`, не запускаются, не `PASS` |
+| Evidence | команда, exit code, digest образа, sha256 lock-файлов и манифеста, ключ кэша, попадание в кэш, корни исходников в `PYTHONPATH`, сеть и uid — в `evidence.environment.prepare` **каждого** зависимого gate. Отдельной строки `quality_gates` у `prepare` нет: `gate_type = BUILD` сделал бы её обязательным BUILD-гейтом плана (`profiles.plan_gates`, матрица §2.2). SBOM по `/deps` — следующая волна |
+| Безопасность | секреты не передаются; кэш `aicd-prep-*` никогда не монтируется в runner агента; в gate-контейнер — только для чтения (линтер контейнеров отклоняет rw-монтирование `/deps` вне контейнера с меткой `aicd.kind = verification-prepare`, а в сам prepare — любой том `aicd-cred-*`, SC-CLI-03); кэш изолирован по workspace (ключ включает `workspace_id`) — нет отравления кэша между тенантами |
+| Отказ | ошибка prepare → зависимые gates `ERROR`, сообщение `DEPENDENCIES_UNAVAILABLE: prepare (<toolchain>) failed — <код>`, инструмент не запускается, `PASS` невозможен. Код `DEPENDENCIES_UNAVAILABLE` пока не входит в `gate_executions.error_code` (CHECK миграции 0008) и живёт в `error_message`; добавление в перечень — отдельная миграция |
 
-Реализация (Verification Engine + `SandboxRunner` с egress-сетью только для prepare + политика контейнеров для тома
-`aicd-prep-*`) — следующая волна; образы toolchain уже собраны платформой (`migrations-python`, `phpstan`, docs/runbooks/release.md §4).
+Инструменты сборки платформы (`build`, `hatchling`, `setuptools`, `wheel`, `poetry-core`, `flit-core`) не входят в
+lock-файл проекта — это инструменты платформы, и их версии закреплены в `prepare.PYTHON_SPEC.extra_argv`; они
+устанавливаются в тот же venv после `uv sync`, иначе `python -m build --no-isolation` не находит build-backend.
+
+`--no-install-project` не ставит проверяемый проект (его build-backend — недоверенный код, в prepare он не
+исполняется), поэтому first-party пакеты импортируются из checkout по `PYTHONPATH`. Корни берутся **только** из
+объявленной конфигурации репозитория, без исполнения его кода: `tool.pytest.ini_options.pythonpath`,
+`tool.mypy.mypy_path`, `tool.hatch.build.targets.wheel.packages` (каталог-родитель) и `src/`; абсолютные пути,
+`..`, глобы и несуществующие каталоги отбрасываются. Те же корни prepare кладёт в `site-packages` venv файлом
+`aicd-prepare-src.pth` (фиксированный скрипт, sha256 в evidence; корни — только аргументы argv): дочерние
+процессы, которые тесты проекта запускают с очищенным окружением, `PYTHONPATH` не наследуют и без `.pth`
+падают с `ModuleNotFoundError`.
+
+Остаётся следующей волной: toolchain `node` (`pnpm install --frozen-lockfile --ignore-scripts`) и `php`
+(`composer install --no-scripts`), квота на размер кэша и число файлов (`PREPARE_LIMIT` пока покрывает только
+недоступность каталога), `PREPARE_NEEDS_BUILD` для пакетов с native-сборкой, SBOM по `/deps`. Образы toolchain
+собраны платформой (`migrations-python`, `phpstan`, docs/runbooks/release.md §4); образ prepare для Python —
+`prepare-python` (uv на базе `python:3.12-slim-bookworm`, тот же путь интерпретатора, что в gate-образе `python`,
+поэтому venv из кэша работает и в gate-контейнере).
 
 ## 5. Правила вердикта
 

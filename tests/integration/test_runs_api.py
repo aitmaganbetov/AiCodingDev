@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
+import os
 import secrets
+import subprocess
+import uuid
+from pathlib import Path
 from typing import Any
 
 import hypothesis
@@ -18,8 +22,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from aicd_platform.db import DbContext, transaction
-from tests.conftest import UserSession, login
+from aicd_platform.ids import uuid7
+from tests.conftest import UserSession, init_git_repo, login
 from tests.support.contract import OPENAPI_PATH, validate_response
+from tests.support.orchestration import connect_admin, drive_run
 from tests.support.phase3 import Slice, create_run, world
 
 __all__ = ["world"]  # фикстура pytest
@@ -27,7 +33,7 @@ __all__ = ["world"]  # фикстура pytest
 pytestmark = pytest.mark.db
 
 RUN_OPERATIONS = ("createRun", "listRuns", "getRun", "getRunTasks", "pauseRun", "resumeRun", "cancelRun", "getTask",
-                  "listTaskAttempts")  # fmt: skip
+                  "listTaskAttempts", "createFixRun")  # fmt: skip
 
 
 async def test_create_run_is_idempotent_and_key_reuse_with_other_body_is_rejected(world: Slice) -> None:
@@ -53,6 +59,95 @@ async def test_create_run_is_idempotent_and_key_reuse_with_other_body_is_rejecte
             )
         ).scalar_one()
     assert count == 1, "повтор запроса не порождает второе событие run.created"
+
+
+def _git_env(repo: Path) -> dict[str, str]:
+    return {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "HOME": str(repo), "PATH": os.environ["PATH"]}
+
+
+def _init_without_commits(repo: Path) -> None:
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, env=_git_env(repo))
+
+
+def _head(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True, env=_git_env(repo)
+    ).stdout.strip()
+
+
+def _commit(repo: Path, message: str) -> str:
+    env = _git_env(repo)
+    (repo / f"{message}.txt").write_text(message)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", message],
+        check=True,
+        env=env,
+    )
+    return _head(repo)
+
+
+async def test_run_starts_from_the_current_head_not_from_the_moment_of_attach(
+    user: UserSession, repo_root: Path
+) -> None:
+    """База run — HEAD рабочей копии сейчас.
+
+    `last_synced_commit_sha` пишется при привязке и ничем не обновляется, поэтому иначе run навсегда
+    стартовал бы со старого коммита, а репозиторий, привязанный пустым (новый проект: `git init` и привязка
+    до первого коммита), остался бы неработоспособным — отвязать его из UI нечем.
+    """
+    ws = await user.create_workspace()
+    project = await user.create_project(ws["id"])
+    repo = repo_root / f"head-{secrets.token_hex(3)}"
+    init_git_repo(repo)
+    attached = await user.client.post(
+        f"/api/v1/projects/{project['id']}/repositories",
+        json={"provider": "local", "local_path": f"main/{repo.name}"},
+        headers=user.headers(idem=True),
+    )
+    assert attached.status_code == 201, attached.text
+    at_attach = _head(repo)
+
+    moved = _commit(repo, "after-attach")
+    assert moved != at_attach
+    created = await user.client.post(
+        "/api/v1/runs",
+        json={"project_id": project["id"], "mode": "DEVELOP", "objective": "Работа с текущего HEAD"},
+        headers=user.headers(idem=True),
+    )
+    validate_response("createRun", created)
+    assert created.status_code == 201, created.text
+    run = await user.client.get(f"/api/v1/runs/{created.json()['run_id']}")
+    validate_response("getRun", run)
+    assert run.json()["base_commit_sha"] == moved, "run взял коммит на момент запуска, а не на момент привязки"
+
+
+async def test_repository_attached_before_the_first_commit_becomes_runnable_after_it(
+    user: UserSession, repo_root: Path
+) -> None:
+    """Новый проект: `git init`, привязка, первый коммит — и run должен стартовать."""
+    ws = await user.create_workspace()
+    project = await user.create_project(ws["id"])
+    repo = repo_root / f"empty-{secrets.token_hex(3)}"
+    _init_without_commits(repo)
+    attached = await user.client.post(
+        f"/api/v1/projects/{project['id']}/repositories",
+        json={"provider": "local", "local_path": f"main/{repo.name}"},
+        headers=user.headers(idem=True),
+    )
+    validate_response("attachRepository", attached)
+    assert attached.status_code == 201, "пустой репозиторий привязывается"
+
+    first = _commit(repo, "first")
+    created = await user.client.post(
+        "/api/v1/runs",
+        json={"project_id": project["id"], "mode": "DEVELOP", "objective": "Первый запуск"},
+        headers=user.headers(idem=True),
+    )
+    assert created.status_code == 201, created.text
+    run = await user.client.get(f"/api/v1/runs/{created.json()['run_id']}")
+    assert run.json()["base_commit_sha"] == first
 
 
 async def test_get_run_etag_and_commands_with_if_match(world: Slice) -> None:
@@ -150,3 +245,53 @@ async def test_contract_fuzz_never_5xx_and_responses_conform(world: Slice, opera
         assert r.status_code < 500, f"{operation_id} {case.formatted_path} {case.body!r}: {r.status_code} {r.text}"
         if r.status_code not in (304,):
             validate_response(operation_id, r)
+
+
+async def test_fix_run_is_created_from_failures_of_a_failed_run(
+    app: FastAPI, app_engine: AsyncEngine, world: Slice, database: Any
+) -> None:
+    """«Передать ИИ на исправление»: только для FAILED run с находками; цель составляет платформа."""
+    run_id = await create_run(world)
+    url = f"/api/v1/runs/{run_id}/fix"
+
+    early = await world.user.client.post(url, json={}, headers=world.user.headers(idem=True))
+    validate_response("createFixRun", early)
+    assert early.status_code == 409, "run ещё не завершился отказом"
+
+    with connect_admin(database) as conn:
+        drive_run(conn, uuid.UUID(run_id), "DISCOVERY", "PLANNED", "RUNNING")
+        conn.execute(
+            "UPDATE runs SET status = 'FAILED', finished_at = now(), version = version + 1 WHERE id = %s", (run_id,)
+        )
+    nothing = await world.user.client.post(url, json={}, headers=world.user.headers(idem=True))
+    assert nothing.status_code == 409, "нет проваленных проверок и находок — исправлять нечего"
+
+    with connect_admin(database) as conn:
+        conn.execute(
+            "INSERT INTO findings (id, workspace_id, run_id, source, severity, rule_id, title, file_path, line,"
+            " fingerprint) VALUES (%s, %s, %s, 'manual', 'high', 'CKV_DOCKER_3', 'Container runs as root',"
+            " 'backend/Dockerfile', 7, %s)",
+            (uuid7(), world.ws, run_id, "a" * 64),
+        )
+    outsider = await login(app, app_engine)
+    hidden = await outsider.client.post(url, json={}, headers=outsider.headers(idem=True))
+    assert hidden.status_code == 404, "чужой run неотличим от несуществующего"
+
+    key = secrets.token_hex(16)
+    created = await world.user.client.post(
+        url, json={"note": "сначала Dockerfile"}, headers=world.user.headers(idem_key=key)
+    )
+    validate_response("createFixRun", created)
+    assert created.status_code == 201, created.text
+    replay = await world.user.client.post(
+        url, json={"note": "сначала Dockerfile"}, headers=world.user.headers(idem_key=key)
+    )
+    assert replay.json() == created.json(), "повтор с тем же ключом не создаёт второй run"
+
+    fix = (await world.user.client.get(f"/api/v1/runs/{created.json()['run_id']}")).json()
+    source = (await world.user.client.get(f"/api/v1/runs/{run_id}")).json()
+    assert fix["mode"] == "DEVELOP" and fix["project_id"] == source["project_id"]
+    assert fix["quality_profile"] == source["quality_profile"]
+    objective = fix["objective"]
+    assert run_id in objective and source["objective"] in objective and "сначала Dockerfile" in objective
+    assert "[high] CKV_DOCKER_3 — Container runs as root (backend/Dockerfile:7)" in objective

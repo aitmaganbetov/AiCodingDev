@@ -60,6 +60,11 @@ export const runsApi = {
     return request({ method: 'GET', path: '/activity', query, workspaceId, signal });
   },
 
+  /** «Передать ИИ на исправление»: run DEVELOP по проваленным проверкам и находкам FAILED run. */
+  fix(runId: string, body: JsonBody<'createFixRun'>, idempotencyKey: string): Promise<JsonResponse<'createFixRun', 201>> {
+    return request({ method: 'POST', path: `/runs/${seg(runId)}/fix`, body, idempotencyKey });
+  },
+
   /** pause | resume | cancel (202: команда принята; переход публикуется событием run.state_changed). */
   command(runId: string, command: RunCommand, idempotencyKey: string, ifMatchVersion?: number): Promise<JsonResponse<'pauseRun', 202>> {
     return request({ method: 'POST', path: `/runs/${seg(runId)}/${command}`, idempotencyKey, ifMatchVersion });

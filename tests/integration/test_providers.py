@@ -57,6 +57,53 @@ async def test_probe_recorded_and_listed(
         assert forbidden not in body
 
 
+async def test_new_probe_retires_the_installation_it_replaces(
+    user: UserSession, database: testdb.TestDatabase, tmp_path: Path
+) -> None:
+    """У провайдера на хосте одна действующая установка — последняя найденная probe.
+
+    Прежняя строка (другой бинарь — например, Fake CLI до перехода на официальный) иначе оставалась бы
+    включённой: Router выбирал бы установку, которой уже нет, а оператор видел бы её версию в предупреждении
+    о совместимости. Строка не удаляется (на неё ссылается история исполнений), а выключается.
+    """
+    ws = await user.create_workspace()
+    worker = create_engine(database.url_for("aicd_worker"))
+    adapter = FakeCLIExecutor(
+        provider="codex",
+        runner=LocalProcessRunner(),
+        artifact_sink=MemorySink(),
+        worktree_path=worktree_resolver(tmp_path),
+    )
+    old = await adapter.probe(installation_id=uuid7())
+    new = old.model_copy(
+        update={"installation_id": uuid7(), "binary_path": "/opt/cli/codex", "detected_version": "9.9.9"}
+    )
+    async with transaction(worker, DbContext(actor_type="system")) as conn:
+        host = await registry.register_host(conn, hostname="exec-retire-host")
+        other_host = await registry.register_host(conn, hostname="exec-other-host")
+        old_id = await registry.record_probe(conn, host_id=host, probe=old)
+        elsewhere = await registry.record_probe(
+            conn, host_id=other_host, probe=old.model_copy(update={"installation_id": uuid7()})
+        )
+        new_id = await registry.record_probe(conn, host_id=host, probe=new)
+        assert new_id != old_id
+
+    async def listed() -> set[str]:
+        r = await user.client.get("/api/v1/providers", headers={"X-Workspace-Id": ws["id"]})
+        codex = next(p for p in r.json()["items"] if p["code"] == "codex")
+        return {i["installation_id"] for i in codex["installations"]}
+
+    shown = await listed()
+    assert str(new_id) in shown and str(old_id) not in shown
+    assert str(elsewhere) in shown, "установка другого хоста не затронута"
+    # Хост вернулся к прежнему бинарю: его строка включается обратно, а заменённая — выключается.
+    async with transaction(worker, DbContext(actor_type="system")) as conn:
+        assert await registry.record_probe(conn, host_id=host, probe=old) == old_id
+    await worker.dispose()
+    shown = await listed()
+    assert str(old_id) in shown and str(new_id) not in shown
+
+
 async def test_providers_require_membership(user: UserSession) -> None:
     r = await user.client.get("/api/v1/providers", headers={"X-Workspace-Id": str(uuid7())})
     assert r.status_code == 404

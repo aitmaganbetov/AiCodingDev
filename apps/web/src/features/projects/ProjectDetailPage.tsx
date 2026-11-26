@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
@@ -12,6 +12,7 @@ import {
   ButtonLink,
   Callout,
   Dialog,
+  DialogClose,
   DialogContent,
   DialogTrigger,
   LoadMore,
@@ -21,9 +22,11 @@ import {
   TabsList,
   TabsTrigger,
   Timestamp,
+  useToast,
   type Column,
 } from '../../components/ui';
 import { can } from '../../lib/permissions';
+import { problemMessage } from '../../lib/problem';
 import { WorkspaceNotFound } from '../../pages/NotFoundPage';
 import { useCurrentWorkspace } from '../../workspace';
 import { PullRequestsPanel } from '../integrations/PullRequestsPanel';
@@ -40,7 +43,69 @@ export type ProjectTab = (typeof PROJECT_TABS)[number];
 export const REPOSITORIES_PAGE_SIZE = 50;
 export const TECHNOLOGIES_PAGE_SIZE = 50;
 
-function RepositoryCard({ projectId, repo }: { projectId: string; repo: Repository }) {
+/**
+ * Отвязать репозиторий от проекта (`detachRepository`). Действие подтверждается: прогоны и история остаются,
+ * но проект репозиторий больше не показывает. Рабочую копию на диске платформа не удаляет — об этом сказано
+ * в диалоге, чтобы «отвязать» не путали с «удалить файлы».
+ */
+function DetachRepository({ projectId, repo }: { projectId: string; repo: Repository }) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const { workspaceId } = useCurrentWorkspace();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const detach = useMutation({
+    mutationFn: () => projectsApi.detachRepository(projectId, repo.id),
+    onSuccess: async () => {
+      setOpen(false);
+      setError(null);
+      toast({ title: t('projects.repo.detached'), tone: 'success' });
+      await queryClient.invalidateQueries({ queryKey: projectKeys.repositories(projectId) });
+      // Каталог и репозиторий GitHub снова свободны — подсказки формы привязки устарели.
+      if (workspaceId) await queryClient.invalidateQueries({ queryKey: projectKeys.repositoryRoots(workspaceId) });
+    },
+    // Сервер объясняет отказ по существу («незавершённых прогонов — N»), и это важнее общего «Конфликт».
+    onError: (e) => setError(isApiError(e) && e.detail ? e.detail : problemMessage(t, e)),
+  });
+  const location = repo.provider === 'github' ? repo.remote_url : repo.local_root_ref;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setError(null);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="secondary" icon="unplug" data-testid={`detach-${repo.id}`}>
+          {t('projects.repo.detach')}
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        title={t('projects.repo.detachTitle')}
+        description={t('projects.repo.detachDescription', { repository: location ?? repo.id })}
+        footer={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="danger" loading={detach.isPending} onClick={() => detach.mutate()} data-testid="detach-confirm">
+              {t('projects.repo.detachConfirm')}
+            </Button>
+            <DialogClose className="btn-secondary">{t('projects.repo.detachCancel')}</DialogClose>
+          </div>
+        }
+      >
+        <p className="text-sm">{t('projects.repo.detachKeepsFiles')}</p>
+        {error ? (
+          <p role="alert" className="mt-2 text-sm font-medium text-danger-text">
+            {error}
+          </p>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RepositoryCard({ projectId, repo, canDetach }: { projectId: string; repo: Repository; canDetach: boolean }) {
   const { t } = useTranslation();
   const [explorerOpen, setExplorerOpen] = useState(false);
   const explorerId = `repo-explorer-${repo.id}`;
@@ -73,19 +138,27 @@ function RepositoryCard({ projectId, repo }: { projectId: string; repo: Reposito
       </dl>
       {repo.local_root_ref ? (
         <div className="flex flex-col gap-3">
-          <div>
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="secondary" icon="folder" aria-expanded={explorerOpen} aria-controls={explorerId} onClick={() => setExplorerOpen((v) => !v)}>
               {explorerOpen ? t('projects.explorer.close') : t('projects.explorer.open')}
             </Button>
+            {canDetach ? <DetachRepository projectId={projectId} repo={repo} /> : null}
           </div>
           <div id={explorerId} hidden={!explorerOpen}>
             {explorerOpen ? <RepositoryExplorer projectId={projectId} repo={repo} /> : null}
           </div>
         </div>
       ) : (
-        <Callout tone="neutral" title={t('projects.explorer.unavailableTitle')}>
-          {t('projects.explorer.unavailable')}
-        </Callout>
+        <div className="flex flex-col gap-3">
+          <Callout tone="neutral" title={t('projects.explorer.unavailableTitle')}>
+            {t('projects.explorer.unavailable')}
+          </Callout>
+          {canDetach ? (
+            <div>
+              <DetachRepository projectId={projectId} repo={repo} />
+            </div>
+          ) : null}
+        </div>
       )}
     </li>
   );
@@ -144,7 +217,7 @@ function RepositoriesPanel({ workspaceId, projectId, canAttach }: { workspaceId:
       <>
         <ul className="flex flex-col gap-3" aria-label={t('projects.repo.listLabel')}>
           {items.map((r) => (
-            <RepositoryCard key={r.id} projectId={projectId} repo={r} />
+            <RepositoryCard key={r.id} projectId={projectId} repo={r} canDetach={canAttach} />
           ))}
         </ul>
         <LoadMore

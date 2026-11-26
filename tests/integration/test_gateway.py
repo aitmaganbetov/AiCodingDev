@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import uuid
@@ -245,3 +246,63 @@ async def test_execution_rows_isolated_by_workspace(env: Env) -> None:
             await conn.execute(text("SELECT count(*) FROM cli_executions WHERE id = :id"), {"id": request.execution_id})
         ).scalar_one()
     assert seen == 0
+
+
+class _ContainerProcess:
+    """Процесс LocalProcessRunner с ref контейнерного runner'а (`docker:<id>`)."""
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    @property
+    def ref(self) -> str:
+        return "docker:" + "a" * 64
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
+class _ContainerRunner:
+    def __init__(self) -> None:
+        self._inner = LocalProcessRunner()
+
+    async def start(self, spec: object) -> object:
+        return _ContainerProcess(await self._inner.start(spec))  # type: ignore[arg-type]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
+def _container_adapter(env: Env, scenario: str) -> FakeCLIExecutor:
+    adapter = _adapter(env, scenario)
+    adapter._runner = _ContainerRunner()  # type: ignore[assignment]
+    return adapter
+
+
+async def test_container_ref_is_stored_in_container_ref(env: Env) -> None:
+    """Регрессия: `docker:<id>` не подходит под формат pid_ref (`host:pid`) — пишется в container_ref."""
+    request = make_request(worktree_id=_worktree(env), workspace_id=env.workspace_id, task_attempt_id=env.attempt_id)
+    await env.gateway.run(request, _container_adapter(env, "success_diff"), installation_id=env.installation_id)
+    row = await _row(env, request.execution_id, env.workspace_id)
+    assert row["status"] == "COLLECTED"
+    assert row["container_ref"] == "docker:" + "a" * 64 and row["pid_ref"] is None
+
+
+async def test_failure_after_start_terminates_process(env: Env) -> None:
+    """Сбой обработчика событий не оставляет CLI без владельца: процесс останавливается."""
+    request = make_request(
+        worktree_id=_worktree(env),
+        workspace_id=env.workspace_id,
+        task_attempt_id=env.attempt_id,
+        small_limits={"timeout_seconds": 60},
+    )
+    adapter = _adapter(env, "timeout")
+    adapter._grace = 0.5
+
+    async def on_event(_: object) -> None:
+        raise RuntimeError("sink failed")
+
+    with pytest.raises(RuntimeError, match="sink failed"):
+        await env.gateway.run(request, adapter, installation_id=env.installation_id, on_event=on_event)
+    execution = adapter._executions[request.execution_id]
+    await asyncio.wait_for(execution.done.wait(), timeout=10)

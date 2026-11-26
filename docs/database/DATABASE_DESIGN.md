@@ -267,7 +267,7 @@ CREATE DOMAIN sse_event_type_persisted_t AS text CHECK (VALUE IN
 | `users.status` | `INVITED`, `ACTIVE`, `DISABLED`, `DELETED` |
 | `workspaces.status`, `projects.status` | `ACTIVE`, `ARCHIVED`, `DELETION_PENDING` |
 | `repositories.provider` | `local`, `github` |
-| `repositories.status` | `ACTIVE`, `UNREACHABLE`, `DETACHED` |
+| `repositories.status` | `ACTIVE`, `UNREACHABLE`, `DETACHED` (отвязан от проекта: строка жива ради истории, каталог и GitHub-репозиторий свободны) |
 | `worktrees.status` | `ACTIVE`, `LOCKED`, `REMOVED`, `ORPHANED` (бриф) |
 | `project_settings.security_profile` | `standard`, `hardened` |
 | `runs.approval_policy`, `project_settings.approval_policy` | `risk_based`, `always`, `critical_only` (синхронизировано с openapi.yaml) |
@@ -605,7 +605,6 @@ CREATE TABLE repositories (
   updated_at              timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT pk_repositories PRIMARY KEY (id),
   CONSTRAINT uq_repositories_ws_id UNIQUE (workspace_id, id),
-  CONSTRAINT uq_repositories_local_root UNIQUE (workspace_id, local_root_ref),
   CONSTRAINT fk_repositories_project FOREIGN KEY (workspace_id, project_id) REFERENCES projects(workspace_id, id) ON DELETE RESTRICT,
   CONSTRAINT fk_repositories_gh_installation FOREIGN KEY (workspace_id, github_installation_id)
       REFERENCES github_installations(workspace_id, id) ON DELETE SET NULL (github_installation_id),
@@ -613,7 +612,12 @@ CREATE TABLE repositories (
   CONSTRAINT ck_repositories_local_root_ref CHECK (local_root_ref !~ '(^/|\.\.)')
 );
 CREATE INDEX ix_repositories_project ON repositories (workspace_id, project_id);
-CREATE UNIQUE INDEX uq_repositories_github_repo ON repositories (workspace_id, github_repo_id) WHERE github_repo_id IS NOT NULL;
+-- Занятость каталога и GitHub-репозитория снимается вместе со статусом (0023): отвязанный (`DETACHED`)
+-- репозиторий остаётся в таблице ради истории прогонов, но тот же каталог/репозиторий можно привязать заново.
+CREATE UNIQUE INDEX uq_repositories_local_root ON repositories (workspace_id, local_root_ref)
+  WHERE status <> 'DETACHED';
+CREATE UNIQUE INDEX uq_repositories_github_repo ON repositories (workspace_id, github_repo_id)
+  WHERE github_repo_id IS NOT NULL AND status <> 'DETACHED';
 ```
 `local_root_ref` — ссылка, разрешаемая `security.paths.safe_join()` относительно настроенного корня хранилища; абсолютные пути и `..` запрещены CHECK (защита от path traversal, ТЗ §20).
 

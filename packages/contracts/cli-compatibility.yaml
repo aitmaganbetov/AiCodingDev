@@ -2,4 +2,50 @@
 # Строки добавляются ТОЛЬКО по результатам probe и real-cli-smoke@1 на реальных установках
 # (P2-01, P2-13) с сохранённым evidence. До этого любая версия считается UNTESTED.
 schema_version: 1
-entries: []
+entries:
+- id: claude-2.1.319
+  provider: claude
+  version_range: ==2.1.319
+  adapter_version: 1.0.0
+  status: SUPPORTED
+  verified_at: '2026-11-11T06:44:32Z'
+  verified_by_suite: real-cli-smoke@1
+  evidence_ref: reports/real-cli/smoke-2026-11-11.json
+  capabilities:
+    auth_status_command: true
+    cancel_signal_safe: true
+    machine_readable_output: jsonl_stream
+    max_prompt_bytes: null
+    model_selection: true
+    noninteractive_mode: true
+    resume_session: true
+    sandbox_modes:
+    - cli_managed_none
+    token_usage_exposed: true
+    tool_events_exposed: true
+  command_profiles:
+  - claude/agent_task@1
+- id: codex-0.167.0
+  provider: codex
+  version_range: ==0.167.0
+  adapter_version: 1.0.0
+  status: SUPPORTED
+  verified_at: '2026-11-11T06:44:32Z'
+  verified_by_suite: real-cli-smoke@1
+  evidence_ref: reports/real-cli/smoke-2026-11-11.json
+  capabilities:
+    auth_status_command: true
+    cancel_signal_safe: true
+    machine_readable_output: jsonl_stream
+    max_prompt_bytes: null
+    model_selection: true
+    noninteractive_mode: true
+    resume_session: true
+    sandbox_modes:
+    - read_only
+    - workspace_write
+    - cli_managed_none
+    token_usage_exposed: true
+    tool_events_exposed: true
+  command_profiles:
+  - codex/agent_task@1

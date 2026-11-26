@@ -12,6 +12,8 @@ import pytest
 
 from aicd_security.container_policy import (
     CONTAINER_TMP,
+    DEPS_TARGET,
+    PREPARE_KIND,
     ContainerPolicyError,
     build_host_config,
     check_container_config,
@@ -89,7 +91,8 @@ def test_build_rejects_invalid_specs() -> None:
 
 def test_network_none_disables_networking() -> None:
     p = build_host_config(make_spec(network="none"))
-    assert p["NetworkDisabled"] is True and p["HostConfig"]["NetworkMode"] == "none"
+    # Сеть отключает NetworkMode none; NetworkDisabled оставил бы /etc/hosts пустым (localhost не резолвится).
+    assert p["NetworkDisabled"] is False and p["HostConfig"]["NetworkMode"] == "none"
     assert lint_container_config(p) == []
 
 
@@ -297,3 +300,68 @@ def test_runner_rejects_unknown_scheme_and_bad_ref() -> None:
         DockerSandboxRunner._container_id("pid:123")
     with pytest.raises(ValueError, match="ref"):
         DockerSandboxRunner._container_id("docker:../../x")
+
+
+# --- кэш зависимостей шага prepare (QUALITY_GATES §4.3) -------------------------------------------
+
+PREPARE_ROOT = "/srv/aicd/deps"
+
+
+def prepare_payload(*, kind: str = PREPARE_KIND, read_only: bool = False) -> dict[str, Any]:
+    spec = ContainerSpec(
+        image="ghcr.io/astral-sh/uv@sha256:" + "b" * 64,
+        argv=("uv", "sync", "--frozen", "--no-install-project"),
+        workdir="/workspace",
+        env={"HOME": "/home/prepare"},
+        mounts=(
+            Mount(Path(f"{ROOT}/ws-1"), "/workspace", read_only=True),
+            Mount(Path(f"{PREPARE_ROOT}/aicd-prep-" + "c" * 32), DEPS_TARGET, read_only=read_only),
+        ),
+        limits=ResourceLimits(cpus=2.0, memory_mb=2048, pids=256, timeout_seconds=900),
+        network="aicd-prep-egress",
+        user="1000:1000",
+        labels={"aicd.execution_id": "prepare-1", "aicd.kind": kind},
+    )
+    return build_host_config(spec)
+
+
+def test_prepare_container_may_write_the_dependency_cache() -> None:
+    """Шаг prepare — единственный, кто пишет кэш `/deps` (§4.3)."""
+    violations = lint_container_config(
+        prepare_payload(), allowed_bind_roots=(ROOT, PREPARE_ROOT), require_image_digest=True
+    )
+    assert violations == []
+
+
+def test_gate_container_must_mount_the_dependency_cache_read_only() -> None:
+    """Без метки prepare rw-монтирование `/deps` отклоняется: gate не может отравить кэш."""
+    violations = lint_container_config(prepare_payload(kind="verification"), allowed_bind_roots=(ROOT, PREPARE_ROOT))
+    assert any(DEPS_TARGET in v and "read-write" in v for v in violations), violations
+    # То же монтирование только для чтения политику не нарушает.
+    assert (
+        lint_container_config(
+            prepare_payload(kind="verification", read_only=True),
+            allowed_bind_roots=(ROOT, PREPARE_ROOT),
+        )
+        == []
+    )
+
+
+def test_prepare_container_never_sees_cli_credentials() -> None:
+    """SC-CLI-03: том учётных данных провайдера не монтируется в prepare ни при каких условиях."""
+    spec = ContainerSpec(
+        image="ghcr.io/astral-sh/uv@sha256:" + "b" * 64,
+        argv=("uv", "sync"),
+        workdir="/workspace",
+        mounts=(Mount(Path("aicd-cred-claude"), "/home/prepare/.claude", read_only=False),),
+        network="aicd-prep-egress",
+        user="1000:1000",
+        labels={"aicd.execution_id": "prepare-1", "aicd.kind": PREPARE_KIND},
+    )
+    violations = lint_container_config(build_host_config(spec), allowed_bind_roots=(ROOT, PREPARE_ROOT))
+    assert any("credential volumes must never be mounted" in v for v in violations), violations
+
+
+def test_prepare_cache_outside_allowed_roots_is_rejected() -> None:
+    violations = lint_container_config(prepare_payload(), allowed_bind_roots=(ROOT,))
+    assert any("outside allowed roots" in v for v in violations), violations

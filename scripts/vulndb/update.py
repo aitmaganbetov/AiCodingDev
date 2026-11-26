@@ -128,6 +128,10 @@ def update_osv(
     return manifest
 
 
+#: Тайм-аут загрузки БД самим trivy (формат Go duration).
+TRIVY_DOWNLOAD_TIMEOUT = "45m"
+
+
 def update_trivy(staging: Path, repository: str, ca_bundle: Path | None, seed: Path | None) -> dict[str, Any]:
     """`trivy image --download-db-only` в закреплённом образе; сеть контейнера — только для этого шага."""
     staging.mkdir(parents=True)
@@ -138,6 +142,10 @@ def update_trivy(staging: Path, repository: str, ca_bundle: Path | None, seed: P
         "docker",
         "run",
         "--rm",
+        # От имени оператора: файлы БД принадлежат ему, а не root — иначе выставление прав при публикации
+        # (`swap`) и удаление предыдущей версии при следующем обновлении падают с EPERM.
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
         "--network",
         "host",
         "--cap-drop",
@@ -151,7 +159,9 @@ def update_trivy(staging: Path, repository: str, ca_bundle: Path | None, seed: P
     if ca_bundle:
         cmd += ["-e", "SSL_CERT_FILE=/aicd-ca.pem", "-v", f"{ca_bundle}:/aicd-ca.pem:ro"]
     cmd += ["-v", f"{staging}:/db", TRIVY.ref, "image", "--download-db-only", "--cache-dir", "/db"]
-    cmd += ["--db-repository", repository, "--quiet"]
+    # БД ~140 МБ: у trivy свой тайм-аут 5 мин, и на медленном канале до реестра загрузка в него не
+    # укладывается («context deadline exceeded»). Общий предел шага — тайм-аут subprocess ниже.
+    cmd += ["--db-repository", repository, "--quiet", "--timeout", TRIVY_DOWNLOAD_TIMEOUT]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, check=False)  # noqa: S603
     if proc.returncode != 0:
         raise UpdateError(f"trivy --download-db-only → {proc.returncode}: {proc.stderr[-800:]}")

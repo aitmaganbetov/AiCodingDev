@@ -41,6 +41,8 @@ from aicd_projects import api as projects
 from aicd_projects import explorer
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+#: Вне префикса `/projects`: корни — настройка установки, а не свойство проекта.
+roots_router = APIRouter(tags=["projects"])
 
 Limit = Annotated[int, Query(ge=1, le=MAX_LIMIT)]
 Cursor = Annotated[str | None, Query(max_length=1024)]
@@ -191,9 +193,16 @@ async def attach_repository(
             local_path=body.local_path,
             default_branch=body.default_branch,
             payload=body.model_dump(),
+            create_local_copy=body.create_local_copy,
         )
     if not body.local_path:
         raise ProblemError("validation_error", errors=[FieldError("/local_path", "required", "обязательно для local")])
+    if body.create_local_copy:
+        # Клонировать нечего: у локального репозитория нет удалённого источника, откуда взять копию.
+        raise ProblemError(
+            "validation_error",
+            errors=[FieldError("/create_local_copy", "unsupported", "создание копии доступно только для github")],
+        )
     state = app_state(request)
     local_path = body.local_path
 
@@ -223,6 +232,63 @@ async def attach_repository(
         )
 
     return await run_idempotent(request, access.db(), body.model_dump(), command)
+
+
+@router.delete(
+    "/{project_id}/repositories/{repository_id}", status_code=204, **op("detachRepository", "repository:attach")
+)
+async def detach_repository(
+    request: Request,
+    project_id: Annotated[uuid.UUID, PathParam()],
+    repository_id: Annotated[uuid.UUID, PathParam()],
+    principal: identity.Principal = Depends(current_principal),
+) -> Response:
+    """Отвязать репозиторий от проекта (FR-PRJ-02): `204`, повторный вызов — тоже `204`.
+
+    Репозиторий получает статус `DETACHED`: строка остаётся ради истории прогонов, но проект её больше не
+    показывает, а каталог и GitHub-репозиторий освобождаются — их можно привязать заново. Файлы рабочей копии
+    на диске не удаляются. Незавершённые прогоны репозитория — `409`.
+    """
+    access = await project_access(request, principal, project_id)
+    await authorize(request, access, "repository:attach")
+    state = app_state(request)
+    async with transaction(state.engine, access.db()) as conn:
+        await projects.detach_repository(
+            conn,
+            project_id=project_id,
+            workspace_id=access.workspace_id,
+            repository_id=repository_id,
+            actor_id=principal.user_id,
+        )
+    return Response(status_code=204)
+
+
+@roots_router.get("/repository-roots", **op("listRepositoryRoots", "repository:attach"))
+async def list_repository_roots(
+    request: Request, principal: identity.Principal = Depends(current_principal)
+) -> Response:
+    """Разрешённые корни локальных репозиториев и найденные в них репозитории (FR-PRJ-02).
+
+    Форма привязки показывает это вместо подсказки «внутри разрешённых корней»: оператор выбирает каталог,
+    а не угадывает путь. Подсказка не заменяет проверку — `attachRepository` заново разрешает путь в корнях
+    (`resolve_in_roots`) и проверяет, что это корень Git-репозитория. Корни не настроены ⇒ пустой список:
+    привязать локальный репозиторий в такой установке нельзя (`policy_denied` при попытке).
+    """
+    access = await workspace_access(request, principal, parse_workspace_header(request))
+    await authorize(request, access, "repository:attach")
+    state = app_state(request)
+    # Каталог, уже привязанный в этом workspace, занят (`uq_repositories_local_root`): пометить его здесь,
+    # иначе выбор из списка закончился бы `conflict` после попытки привязки. RLS ограничивает выборку workspace.
+    async with transaction(state.engine, access.db()) as conn:
+        attached = {
+            r
+            for (r,) in (
+                # Отвязанный репозиторий каталог не занимает (0023): он снова доступен для привязки.
+                await conn.execute(text("SELECT local_root_ref FROM repositories WHERE status <> 'DETACHED'"))
+            ).all()
+        }
+    items = await asyncio.to_thread(projects.scan_repository_roots, state.settings.repository_roots, attached=attached)
+    return json_response({"items": items})
 
 
 # --- Repository Explorer (FR-PRJ-05) ---------------------------------------------------------
